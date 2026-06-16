@@ -1,0 +1,75 @@
+# ---- Secrets / env files ----
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.log
+
+# Virtual environments (local dev)
+venv/
+.venv/
+env/
+.envrc
+
+# ---- Jupyter / notebooks ----
+.ipynb_checkpoints/
+
+# ---- Node (if added later) ----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Docker / compose ----
+**/.docker/
+
+# ---- Databases / local state ----
+*.sqlite
+*.sqlite3
+*.db
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+.idea/
+*.iml
+
+# Cursor local state (if present in repo)
+.cursor/
+
+# ---- Keys / certs (keep out of git) ----
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+

@@ -1,0 +1,89 @@
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.api.v1.ai.router import router as ai_router
+from app.api.v1.analytics.router import router as analytics_router
+from app.api.v1.auth.router import router as auth_router
+from app.api.v1.billing.router import router as billing_router
+from app.api.v1.customers.router import router as customers_router
+from app.api.v1.inventory.router import router as inventory_router
+from app.api.v1.orders.router import router as orders_router
+from app.api.v1.payments.router import router as payments_router
+from app.api.v1.products.router import router as products_router
+from app.api.v1.reports.router import router as reports_router
+from app.api.v1.stores.router import router as stores_router
+from app.api.v1.suppliers.router import router as suppliers_router
+from app.api.v1.users.router import router as users_router
+from app.api.v1.whatsapp.router import router as whatsapp_router
+from app.core.config import get_settings
+from app.core.database import init_db
+from app.core.logger import logger
+from app.core.middleware import TenantMiddleware
+from app.models import *  # noqa: F401, F403
+
+settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        init_db()
+        logger.info("Database connected and tables verified")
+    except Exception as exc:
+        logger.error("Database initialization failed: %s", exc)
+        raise
+    yield
+
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.add_middleware(TenantMiddleware)
+
+API_PREFIX = "/api/v1"
+app.include_router(auth_router, prefix=API_PREFIX)
+app.include_router(users_router, prefix=API_PREFIX)
+app.include_router(stores_router, prefix=API_PREFIX)
+app.include_router(products_router, prefix=API_PREFIX)
+app.include_router(inventory_router, prefix=API_PREFIX)
+app.include_router(suppliers_router, prefix=API_PREFIX)
+app.include_router(orders_router, prefix=API_PREFIX)
+app.include_router(billing_router, prefix=API_PREFIX)
+app.include_router(payments_router, prefix=API_PREFIX)
+app.include_router(customers_router, prefix=API_PREFIX)
+app.include_router(whatsapp_router, prefix=API_PREFIX)
+app.include_router(reports_router, prefix=API_PREFIX)
+app.include_router(analytics_router, prefix=API_PREFIX)
+app.include_router(ai_router, prefix=API_PREFIX)
+
+
+@app.get("/health")
+def health_check():
+    from sqlalchemy import text
+
+    from app.core.database import engine
+
+    db_status = "ok"
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "error"
+
+    return {
+        "status": "ok" if db_status == "ok" else "degraded",
+        "app": settings.APP_NAME,
+        "database": db_status,
+    }
