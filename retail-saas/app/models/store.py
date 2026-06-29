@@ -22,3 +22,8 @@ class Store(Base, TimestampMixin):
 
     tenant: Mapped["Tenant"] = relationship("Tenant", back_populates="stores")
     users: Mapped[list["User"]] = relationship("User", back_populates="store")
+    # ADD THIS FOR INVENTORY CONNECTION
+    inventory_items: Mapped[list["Inventory"]] = relationship(
+        "Inventory",
+        back_populates="store"
+    )

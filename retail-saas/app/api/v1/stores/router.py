@@ -1,10 +1,11 @@
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_permission
 from app.models.user import User
-from app.schemas.user import StoreCreate, StoreResponse, StoreUpdate
+from app.schemas.store import StoreCreate, StoreResponse, StoreUpdate
 from app.services.product_service import StoreService
 
 router = APIRouter(prefix="/stores", tags=["stores"])
@@ -44,3 +45,18 @@ def update_store(
     db: Session = Depends(get_db),
 ):
     return StoreService(db).update_store(user.tenant_id, store_id, data)
+@router.delete("/{store_id}")
+def delete_store(
+    store_id: int,
+    user: User = Depends(require_permission("stores:write")),
+    db: Session = Depends(get_db),
+):
+
+    StoreService(db).delete_store(
+        user.tenant_id,
+        store_id
+    )
+
+    return {
+        "message": "Store deleted successfully"
+    }

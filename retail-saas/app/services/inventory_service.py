@@ -3,10 +3,16 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import NotFoundException
+from app.core.exceptions import AppException, NotFoundException
 from app.models.inventory import Inventory, StockMovement, Supplier
 from app.models.product import Product
-from app.schemas.inventory import StockInRequest, StockOutRequest, StockTransferRequest, SupplierCreate
+from app.models.store import Store
+from app.schemas.inventory import (
+    StockInRequest,
+    StockOutRequest,
+    StockTransferRequest,
+    SupplierCreate,
+)
 from app.utils.constants import StockMovementType
 from app.utils.helpers import cache_delete_pattern
 
@@ -15,8 +21,14 @@ class InventoryService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _get_or_create_inventory(self, tenant_id: int, store_id: int, product_id: int) -> Inventory:
-        inv = (
+    def _get_or_create_inventory(
+        self,
+        tenant_id: int,
+        store_id: int,
+        product_id: int,
+    ) -> Inventory:
+
+        inventory = (
             self.db.query(Inventory)
             .filter(
                 Inventory.tenant_id == tenant_id,
@@ -25,22 +37,77 @@ class InventoryService:
             )
             .first()
         )
-        if not inv:
-            inv = Inventory(tenant_id=tenant_id, store_id=store_id, product_id=product_id, quantity=0)
-            self.db.add(inv)
-            self.db.flush()
-        return inv
 
-    def stock_in(self, tenant_id: int, data: StockInRequest) -> StockMovement:
-        product = self.db.query(Product).filter(Product.id == data.product_id, Product.tenant_id == tenant_id).first()
+        if not inventory:
+            inventory = Inventory(
+                tenant_id=tenant_id,
+                store_id=store_id,
+                product_id=product_id,
+                quantity=0,
+            )
+            self.db.add(inventory)
+            self.db.flush()
+
+        return inventory
+
+    # -------------------------------------------------------
+    # STOCK IN
+    # -------------------------------------------------------
+
+    def stock_in(
+        self,
+        tenant_id: int,
+        data: StockInRequest,
+    ) -> StockMovement:
+
+        product = (
+            self.db.query(Product)
+            .filter(
+                Product.id == data.product_id,
+                Product.tenant_id == tenant_id,
+            )
+            .first()
+        )
+
         if not product:
             raise NotFoundException("Product not found")
-        inv = self._get_or_create_inventory(tenant_id, data.store_id, data.product_id)
-        inv.quantity += data.quantity
-        if data.batch_number:
-            inv.batch_number = data.batch_number
+
+        store = (
+            self.db.query(Store)
+            .filter(
+                Store.id == data.store_id,
+                Store.tenant_id == tenant_id,
+            )
+            .first()
+        )
+
+        if not store:
+            raise NotFoundException("Store not found")
+
+        if data.quantity <= 0:
+            raise AppException("Quantity must be greater than zero")
+
+        if data.unit_cost is not None and data.unit_cost <= Decimal("0"):
+            raise AppException("Unit cost must be greater than zero")
+
+        inventory = self._get_or_create_inventory(
+            tenant_id,
+            data.store_id,
+            data.product_id,
+        )
+
         if data.expiry_date:
-            inv.expiry_date = data.expiry_date
+            if data.expiry_date <= date.today():
+                raise AppException("Expiry date must be in future")
+
+        inventory.quantity += data.quantity
+
+        if data.batch_number:
+            inventory.batch_number = data.batch_number
+
+        if data.expiry_date:
+            inventory.expiry_date = data.expiry_date
+
         movement = StockMovement(
             tenant_id=tenant_id,
             store_id=data.store_id,
@@ -51,18 +118,55 @@ class InventoryService:
             unit_cost=data.unit_cost,
             notes=data.notes,
         )
+
         self.db.add(movement)
         self.db.commit()
         self.db.refresh(movement)
+
         cache_delete_pattern(f"inventory:{tenant_id}:*")
+
         return movement
 
-    def stock_out(self, tenant_id: int, data: StockOutRequest) -> StockMovement:
-        inv = self._get_or_create_inventory(tenant_id, data.store_id, data.product_id)
-        if inv.quantity < data.quantity:
-            from app.core.exceptions import AppException
+    # -------------------------------------------------------
+    # STOCK OUT
+    # -------------------------------------------------------
+
+    def stock_out(
+        self,
+        tenant_id: int,
+        data: StockOutRequest,
+    ) -> StockMovement:
+
+        product = (
+            self.db.query(Product)
+            .filter(
+                Product.id == data.product_id,
+                Product.tenant_id == tenant_id,
+            )
+            .first()
+        )
+
+        if not product:
+            raise NotFoundException("Product not found")
+
+        inventory = (
+            self.db.query(Inventory)
+            .filter(
+                Inventory.tenant_id == tenant_id,
+                Inventory.store_id == data.store_id,
+                Inventory.product_id == data.product_id,
+            )
+            .first()
+        )
+
+        if not inventory:
+            raise NotFoundException("Inventory not found")
+
+        if inventory.quantity < data.quantity:
             raise AppException("Insufficient stock")
-        inv.quantity -= data.quantity
+
+        inventory.quantity -= data.quantity
+
         movement = StockMovement(
             tenant_id=tenant_id,
             store_id=data.store_id,
@@ -71,20 +175,52 @@ class InventoryService:
             quantity=data.quantity,
             notes=data.notes,
         )
+
         self.db.add(movement)
+
         self.db.commit()
+
         self.db.refresh(movement)
+
         cache_delete_pattern(f"inventory:{tenant_id}:*")
+
         return movement
 
-    def transfer_stock(self, tenant_id: int, data: StockTransferRequest) -> StockMovement:
-        from_inv = self._get_or_create_inventory(tenant_id, data.from_store_id, data.product_id)
-        if from_inv.quantity < data.quantity:
-            from app.core.exceptions import AppException
-            raise AppException("Insufficient stock for transfer")
-        from_inv.quantity -= data.quantity
-        to_inv = self._get_or_create_inventory(tenant_id, data.to_store_id, data.product_id)
-        to_inv.quantity += data.quantity
+    # -------------------------------------------------------
+    # TRANSFER STOCK
+    # -------------------------------------------------------
+
+    def transfer_stock(
+        self,
+        tenant_id: int,
+        data: StockTransferRequest,
+    ) -> StockMovement:
+
+        from_inventory = (
+            self.db.query(Inventory)
+            .filter(
+                Inventory.tenant_id == tenant_id,
+                Inventory.store_id == data.from_store_id,
+                Inventory.product_id == data.product_id,
+            )
+            .first()
+        )
+
+        if not from_inventory:
+            raise NotFoundException("Source inventory not found")
+
+        if from_inventory.quantity < data.quantity:
+            raise AppException("Insufficient stock")
+
+        to_inventory = self._get_or_create_inventory(
+            tenant_id,
+            data.to_store_id,
+            data.product_id,
+        )
+
+        from_inventory.quantity -= data.quantity
+        to_inventory.quantity += data.quantity
+
         movement = StockMovement(
             tenant_id=tenant_id,
             store_id=data.from_store_id,
@@ -95,39 +231,114 @@ class InventoryService:
             to_store_id=data.to_store_id,
             notes=data.notes,
         )
+
         self.db.add(movement)
+
         self.db.commit()
+
         self.db.refresh(movement)
+
         cache_delete_pattern(f"inventory:{tenant_id}:*")
+
         return movement
 
-    def get_low_stock(self, tenant_id: int, store_id: int | None = None) -> list[Inventory]:
+    # -------------------------------------------------------
+    # LOW STOCK
+    # -------------------------------------------------------
+
+    def get_low_stock(
+        self,
+        tenant_id: int,
+        store_id: int | None = None,
+    ):
+
         query = self.db.query(Inventory).filter(
             Inventory.tenant_id == tenant_id,
             Inventory.quantity <= Inventory.low_stock_threshold,
         )
+
         if store_id:
-            query = query.filter(Inventory.store_id == store_id)
+            query = query.filter(
+                Inventory.store_id == store_id
+            )
+
         return query.all()
 
-    def list_inventory(self, tenant_id: int, store_id: int | None = None) -> list[Inventory]:
-        query = self.db.query(Inventory).filter(Inventory.tenant_id == tenant_id)
+    # -------------------------------------------------------
+    # INVENTORY LIST
+    # -------------------------------------------------------
+
+    def list_inventory(
+        self,
+        tenant_id: int,
+        store_id: int | None = None,
+    ):
+
+        query = self.db.query(Inventory).filter(
+            Inventory.tenant_id == tenant_id
+        )
+
         if store_id:
-            query = query.filter(Inventory.store_id == store_id)
+            query = query.filter(
+                Inventory.store_id == store_id
+            )
+
         return query.all()
 
-    def create_supplier(self, tenant_id: int, data: SupplierCreate) -> Supplier:
-        supplier = Supplier(tenant_id=tenant_id, **data.model_dump())
+    # -------------------------------------------------------
+    # SUPPLIER
+    # -------------------------------------------------------
+
+    def create_supplier(
+        self,
+        tenant_id: int,
+        data: SupplierCreate,
+    ) -> Supplier:
+
+        supplier = Supplier(
+            tenant_id=tenant_id,
+            **data.model_dump()
+        )
+
         self.db.add(supplier)
         self.db.commit()
         self.db.refresh(supplier)
+
         return supplier
 
-    def list_suppliers(self, tenant_id: int) -> list[Supplier]:
-        return self.db.query(Supplier).filter(Supplier.tenant_id == tenant_id).all()
+    def list_suppliers(self, tenant_id: int):
 
-    def list_movements(self, tenant_id: int, store_id: int | None = None) -> list[StockMovement]:
-        query = self.db.query(StockMovement).filter(StockMovement.tenant_id == tenant_id)
+        return (
+            self.db.query(Supplier)
+            .filter(
+                Supplier.tenant_id == tenant_id
+            )
+            .all()
+        )
+
+    # -------------------------------------------------------
+    # MOVEMENTS
+    # -------------------------------------------------------
+
+    def list_movements(
+        self,
+        tenant_id: int,
+        store_id: int | None = None,
+    ):
+
+        query = self.db.query(StockMovement).filter(
+            StockMovement.tenant_id == tenant_id
+        )
+
         if store_id:
-            query = query.filter(StockMovement.store_id == store_id)
-        return query.order_by(StockMovement.created_at.desc()).limit(100).all()
+            query = query.filter(
+                StockMovement.store_id == store_id
+            )
+
+        return (
+            query.order_by(
+                StockMovement.created_at.desc()
+            )
+            .limit(100)
+            .all()
+        )

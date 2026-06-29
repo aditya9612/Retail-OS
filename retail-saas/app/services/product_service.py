@@ -10,6 +10,7 @@ from app.models.role import Role
 from app.models.store import Store
 from app.models.user import User
 from app.repositories.product_repo import ProductRepository
+from app.repositories.store_repo import StoreRepository
 from app.repositories.user_repo import UserRepository
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.schemas.user import StoreCreate, StoreUpdate, UserCreate, UserUpdate
@@ -57,16 +58,75 @@ class ProductService:
         self.repo.delete(product)
 
 
+from app.repositories.store_repo import StoreRepository
+
+
 class StoreService:
+
     def __init__(self, db: Session):
         self.db = db
+        self.repo = StoreRepository(db)
+
 
     def create_store(self, tenant_id: int, data: StoreCreate) -> Store:
-        store = Store(tenant_id=tenant_id, **data.model_dump())
-        self.db.add(store)
-        self.db.commit()
-        self.db.refresh(store)
+
+        store = Store(
+            tenant_id=tenant_id,
+            **data.model_dump()
+        )
+
+        return self.repo.create(store)
+
+
+
+    def get_store(self, tenant_id: int, store_id: int) -> Store:
+
+        store = self.repo.get_by_id(
+            store_id,
+            tenant_id
+        )
+
+        if not store:
+            raise NotFoundException("Store not found")
+
         return store
+
+
+
+    def list_stores(self, tenant_id: int) -> list[Store]:
+
+        return self.repo.list_stores(
+            tenant_id
+        )
+
+
+
+    def update_store(
+        self,
+        tenant_id: int,
+        store_id: int,
+        data: StoreUpdate
+    ) -> Store:
+
+
+        store = self.get_store(
+            tenant_id,
+            store_id
+        )
+
+
+        for key, value in data.model_dump(
+            exclude_unset=True
+        ).items():
+
+            setattr(
+                store,
+                key,
+                value
+            )
+
+
+        return self.repo.update(store)
 
     def get_store(self, tenant_id: int, store_id: int) -> Store:
         store = self.db.query(Store).filter(Store.id == store_id, Store.tenant_id == tenant_id).first()

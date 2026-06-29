@@ -50,3 +50,7 @@ class StockMovement(Base, TimestampMixin):
     to_store_id: Mapped[int | None] = mapped_column(ForeignKey("stores.id"))
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"))
     unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    store: Mapped["Store"] = relationship(
+    "Store",
+    back_populates="inventory_items"
+)
