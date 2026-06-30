@@ -6,10 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.exceptions import AppException, NotFoundException
+from app.models.credit_note import CreditNote
+from app.models.customer import Customer
 from app.models.invoice import Invoice
 from app.models.order import Order
+from app.models.refund import Refund
 from app.models.tenant import Tenant
-from app.utils.constants import InvoiceStatus, OrderStatus
+from app.utils.constants import InvoiceStatus, OrderStatus, RefundStatus
 from app.utils.pdf_generator import generate_invoice_pdf
 
 settings = get_settings()
@@ -21,6 +24,9 @@ class BillingService:
 
     def _generate_invoice_number(self) -> str:
         return f"INV-{uuid.uuid4().hex[:8].upper()}"
+
+    def _generate_credit_note_number(self) -> str:
+        return f"CN-{uuid.uuid4().hex[:8].upper()}"
 
     def _calculate_gst(self, order: Order, same_state: bool = True) -> dict:
         taxable = order.subtotal - order.discount_amount
@@ -69,6 +75,35 @@ class BillingService:
             raise NotFoundException("Invoice not found")
         return invoice
 
+    def search_invoices(
+        self,
+        tenant_id: int,
+        invoice_number: str | None = None,
+        customer_name: str | None = None,
+        mobile: str | None = None,
+        date_from=None,
+        date_to=None,
+    ) -> list[Invoice]:
+        query = self.db.query(Invoice).filter(Invoice.tenant_id == tenant_id)
+        if invoice_number:
+            query = query.filter(Invoice.invoice_number.ilike(f"%{invoice_number}%"))
+        if date_from:
+            query = query.filter(Invoice.created_at >= date_from)
+        if date_to:
+            query = query.filter(Invoice.created_at <= date_to)
+        if customer_name or mobile:
+            query = query.join(Order, Invoice.order_id == Order.id)
+            query = query.join(Customer, Order.customer_id == Customer.id)
+            if customer_name:
+                query = query.filter(Customer.name.ilike(f"%{customer_name}%"))
+            if mobile:
+                query = query.filter(Customer.phone.ilike(f"%{mobile}%"))
+        return query.order_by(Invoice.created_at.desc()).all()
+
+    def reprint_invoice(self, tenant_id: int, invoice_id: int) -> Invoice:
+        # Reprint reuses the existing invoice record; no new invoice number is generated.
+        return self.get_invoice(tenant_id, invoice_id)
+
     def generate_pdf(self, tenant_id: int, invoice_id: int) -> bytes:
         invoice = self.get_invoice(tenant_id, invoice_id)
         order = self.db.query(Order).filter(Order.id == invoice.order_id).first()
@@ -101,9 +136,108 @@ class BillingService:
         self.db.refresh(order)
         return order
 
-    def process_refund(self, tenant_id: int, order_id: int) -> Order:
-        order = self.process_return(tenant_id, order_id)
-        order.status = OrderStatus.REFUNDED.value
+    def create_refund(
+        self,
+        tenant_id: int,
+        invoice_id: int,
+        refund_amount: Decimal,
+        refund_method: str,
+        reason: str | None,
+    ) -> Refund:
+        invoice = self.get_invoice(tenant_id, invoice_id)
+        if refund_amount <= 0:
+            raise AppException("Refund amount must be greater than zero")
+        if refund_amount > invoice.total_amount:
+            raise AppException("Refund amount cannot exceed invoice total")
+        refund = Refund(
+            tenant_id=tenant_id,
+            invoice_id=invoice_id,
+            refund_amount=refund_amount,
+            refund_method=refund_method,
+            status=RefundStatus.PENDING.value,
+            reason=reason,
+        )
+        self.db.add(refund)
         self.db.commit()
-        self.db.refresh(order)
-        return order
+        self.db.refresh(refund)
+        return refund
+
+    def approve_refund(self, tenant_id: int, refund_id: int, approved_by_user_id: int) -> Refund:
+        refund = (
+            self.db.query(Refund)
+            .filter(Refund.id == refund_id, Refund.tenant_id == tenant_id)
+            .first()
+        )
+        if not refund:
+            raise NotFoundException("Refund not found")
+        if refund.status != RefundStatus.PENDING.value:
+            raise AppException("Only pending refunds can be approved")
+
+        refund.status = RefundStatus.APPROVED.value
+        refund.approved_by = approved_by_user_id
+        self.db.flush()
+
+        credit_note = CreditNote(
+            tenant_id=tenant_id,
+            credit_note_no=self._generate_credit_note_number(),
+            invoice_id=refund.invoice_id,
+            refund_id=refund.id,
+            refund_amount=refund.refund_amount,
+        )
+        self.db.add(credit_note)
+
+        invoice = self.get_invoice(tenant_id, refund.invoice_id)
+        order = self.db.query(Order).filter(Order.id == invoice.order_id).first()
+        if order:
+            order.status = OrderStatus.REFUNDED.value
+
+        self.db.commit()
+        self.db.refresh(refund)
+        return refund
+
+    def reject_refund(self, tenant_id: int, refund_id: int) -> Refund:
+        refund = (
+            self.db.query(Refund)
+            .filter(Refund.id == refund_id, Refund.tenant_id == tenant_id)
+            .first()
+        )
+        if not refund:
+            raise NotFoundException("Refund not found")
+        if refund.status != RefundStatus.PENDING.value:
+            raise AppException("Only pending refunds can be rejected")
+        refund.status = RefundStatus.REJECTED.value
+        self.db.commit()
+        self.db.refresh(refund)
+        return refund
+
+    def get_refund(self, tenant_id: int, refund_id: int) -> Refund:
+        refund = (
+            self.db.query(Refund)
+            .filter(Refund.id == refund_id, Refund.tenant_id == tenant_id)
+            .first()
+        )
+        if not refund:
+            raise NotFoundException("Refund not found")
+        return refund
+
+    def list_refunds(self, tenant_id: int, invoice_id: int | None = None) -> list[Refund]:
+        query = self.db.query(Refund).filter(Refund.tenant_id == tenant_id)
+        if invoice_id:
+            query = query.filter(Refund.invoice_id == invoice_id)
+        return query.order_by(Refund.created_at.desc()).all()
+
+    def list_credit_notes(self, tenant_id: int, invoice_id: int | None = None) -> list[CreditNote]:
+        query = self.db.query(CreditNote).filter(CreditNote.tenant_id == tenant_id)
+        if invoice_id:
+            query = query.filter(CreditNote.invoice_id == invoice_id)
+        return query.order_by(CreditNote.created_at.desc()).all()
+
+    def get_credit_note(self, tenant_id: int, credit_note_id: int) -> CreditNote:
+        credit_note = (
+            self.db.query(CreditNote)
+            .filter(CreditNote.id == credit_note_id, CreditNote.tenant_id == tenant_id)
+            .first()
+        )
+        if not credit_note:
+            raise NotFoundException("Credit note not found")
+        return credit_note

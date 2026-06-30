@@ -24,3 +24,5 @@ class Invoice(Base, TimestampMixin):
     pdf_url: Mapped[str | None] = mapped_column(String(500))
 
     order: Mapped["Order"] = relationship("Order", back_populates="invoice")
+    refunds: Mapped[list["Refund"]] = relationship("Refund", back_populates="invoice")
+    credit_notes: Mapped[list["CreditNote"]] = relationship("CreditNote", back_populates="invoice")

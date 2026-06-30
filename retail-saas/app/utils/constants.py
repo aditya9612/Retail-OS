@@ -52,6 +52,18 @@ class InvoiceStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class RefundMethod(str, Enum):
+    CASH = "cash"
+    UPI = "upi"
+    STORE_CREDIT = "store_credit"
+
+
+class RefundStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 DEFAULT_ROLE_PERMISSIONS = {
     UserRole.ADMIN: ["*"],
     UserRole.OWNER: [
@@ -60,7 +72,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "products:read", "products:write",
         "inventory:read", "inventory:write",
         "orders:read", "orders:write",
-        "billing:read", "billing:write",
+        "billing:read", "billing:write", "billing:refund",
         "payments:read", "payments:write",
         "customers:read", "customers:write",
         "reports:read", "analytics:read",
