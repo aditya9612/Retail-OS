@@ -23,6 +23,10 @@ from app.core.logger import logger
 from app.core.middleware import TenantMiddleware
 from app.models import *  # noqa: F401, F403
 
+from app.whatsapp import router as whatsapp_router
+
+app.include_router(whatsapp_router)
+
 settings = get_settings()
 
 
