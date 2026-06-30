@@ -25,3 +25,12 @@ def create_supplier(
     db: Session = Depends(get_db),
 ):
     return InventoryService(db).create_supplier(user.tenant_id, data)
+
+
+@router.get("/{supplier_id}", response_model=SupplierResponse)
+def get_supplier(
+    supplier_id: int,
+    user: User = Depends(require_permission("inventory:read")),
+    db: Session = Depends(get_db),
+):
+    return InventoryService(db).get_supplier(user.tenant_id, supplier_id)

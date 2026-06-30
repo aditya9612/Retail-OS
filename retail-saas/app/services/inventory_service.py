@@ -125,6 +125,21 @@ class InventoryService:
 
     def list_suppliers(self, tenant_id: int) -> list[Supplier]:
         return self.db.query(Supplier).filter(Supplier.tenant_id == tenant_id).all()
+    
+    def get_supplier(self, tenant_id: int, supplier_id: int) -> Supplier:
+        supplier = (
+            self.db.query(Supplier)
+             .filter(
+                Supplier.tenant_id == tenant_id,
+                Supplier.id == supplier_id,
+             )
+             .first()
+        )
+
+        if not supplier:
+           raise NotFoundException("Supplier not found")
+        
+        return supplier
 
     def list_movements(self, tenant_id: int, store_id: int | None = None) -> list[StockMovement]:
         query = self.db.query(StockMovement).filter(StockMovement.tenant_id == tenant_id)
