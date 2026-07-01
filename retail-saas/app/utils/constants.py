@@ -4,8 +4,6 @@ from enum import Enum
 class UserRole(str, Enum):
     ADMIN = "admin"
     OWNER = "owner"
-    MANAGER = "manager"
-    CASHIER = "cashier"
     STAFF = "staff"
 
 
@@ -29,8 +27,6 @@ class PaymentMethod(str, Enum):
     CASH = "cash"
     UPI = "upi"
     CARD = "card"
-    CREDIT_CARD = "credit_card"
-    DEBIT_CARD = "debit_card"
     WALLET = "wallet"
     QR = "qr"
 
@@ -80,22 +76,6 @@ DEFAULT_ROLE_PERMISSIONS = {
         "payments:read", "payments:write",
         "customers:read", "customers:write",
         "reports:read", "analytics:read",
-    ],
-    UserRole.MANAGER: [
-        "products:read",
-        "inventory:read",
-        "orders:read", "orders:write",
-        "billing:read", "billing:write",
-        "payments:read", "payments:write",
-        "customers:read",
-        "reports:read",
-    ],
-    UserRole.CASHIER: [
-        "products:read",
-        "orders:read", "orders:write",
-        "billing:read", "billing:write",
-        "payments:read", "payments:write",
-        "customers:read",
     ],
     UserRole.STAFF: [
         "products:read",
