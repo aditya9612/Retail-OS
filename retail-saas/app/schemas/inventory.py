@@ -18,6 +18,15 @@ class SupplierCreate(SupplierBase):
     pass
 
 
+class SupplierUpdate(BaseModel):
+    name: Optional[str] = None
+    contact_person: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    gstin: Optional[str] = None
+    
+
 class SupplierResponse(SupplierBase):
     id: int
     tenant_id: int

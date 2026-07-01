@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import require_permission
 from app.models.user import User
-from app.schemas.inventory import SupplierCreate, SupplierResponse
+from app.schemas.inventory import SupplierCreate, SupplierUpdate, SupplierResponse
 from app.services.inventory_service import InventoryService
 
 router = APIRouter(prefix="/suppliers", tags=["suppliers"])
@@ -34,3 +34,23 @@ def get_supplier(
     db: Session = Depends(get_db),
 ):
     return InventoryService(db).get_supplier(user.tenant_id, supplier_id)
+
+
+@router.patch("/{supplier_id}", response_model=SupplierResponse)
+def update_supplier(
+    supplier_id: int,
+    data: SupplierUpdate,
+    user: User = Depends(require_permission("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    return InventoryService(db).update_supplier(user.tenant_id, supplier_id, data)
+
+
+@router.delete("/{supplier_id}")
+def delete_supplier(
+    supplier_id: int,
+    user: User = Depends(require_permission("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    return InventoryService(db).delete_supplier(user.tenant_id, supplier_id)
+    
