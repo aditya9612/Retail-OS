@@ -36,3 +36,36 @@ class CreditNoteResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CreditNoteCreate(BaseModel):
+    invoice_id: int
+    refund_amount: Decimal = Field(gt=0)
+    reason: Optional[str] = None
+
+
+class InvoiceCreate(BaseModel):
+    store_id: int
+    customer_id: Optional[int] = None
+    same_state: bool = True
+    payments: list["PaymentSplit"] = []
+
+
+class PaymentSplit(BaseModel):
+    payment_mode: str
+    amount: Decimal = Field(gt=0)
+    transaction_reference: Optional[str] = None
+
+
+class ReturnItemRequest(BaseModel):
+    invoice_id: int
+    product_id: int
+    return_quantity: Decimal = Field(gt=0)
+    reason: Optional[str] = None
+
+
+class ThermalPrintResponse(BaseModel):
+    printer_type: str
+    encoding: str
+    payload: str
+    byte_payload: str

@@ -8,8 +8,10 @@ from app.models.audit_log import AuditLog
 from app.models.invoice import Invoice
 from app.models.order import Order
 from app.models.order_item import OrderItem
+from app.models.payment import Payment
 from app.models.product import Product
-from app.utils.constants import OrderStatus
+from app.models.refund import Refund
+from app.utils.constants import OrderStatus, PaymentStatus, RefundStatus
 
 
 class ReportService:
@@ -95,6 +97,87 @@ class ReportService:
             "total_sgst": float(sum((i.sgst_amount for i in invoices), Decimal("0"))),
             "total_igst": float(sum((i.igst_amount for i in invoices), Decimal("0"))),
             "total_amount": float(sum((i.total_amount for i in invoices), Decimal("0"))),
+        }
+
+    def daily_billing_closure(self, tenant_id: int, target_date: date | None = None) -> dict:
+        target_date = target_date or date.today()
+        start = datetime.combine(target_date, datetime.min.time())
+        end = start + timedelta(days=1)
+
+        invoices = (
+            self.db.query(Invoice)
+            .filter(
+                Invoice.tenant_id == tenant_id,
+                Invoice.created_at >= start,
+                Invoice.created_at < end,
+            )
+            .all()
+        )
+        total_sales = sum((i.total_amount for i in invoices), Decimal("0"))
+
+        payments = (
+            self.db.query(Payment)
+            .join(Order, Payment.order_id == Order.id)
+            .filter(
+                Payment.tenant_id == tenant_id,
+                Payment.created_at >= start,
+                Payment.created_at < end,
+                Payment.status == PaymentStatus.COMPLETED.value,
+            )
+            .all()
+        )
+        cash_sales = sum(
+            (p.amount for p in payments if p.payment_method == "cash"),
+            Decimal("0"),
+        )
+        upi_sales = sum(
+            (p.amount for p in payments if p.payment_method in ("upi", "qr")),
+            Decimal("0"),
+        )
+
+        refunds = (
+            self.db.query(Refund)
+            .filter(
+                Refund.tenant_id == tenant_id,
+                Refund.status == RefundStatus.APPROVED.value,
+                Refund.created_at >= start,
+                Refund.created_at < end,
+            )
+            .all()
+        )
+        refund_amount = sum((r.refund_amount for r in refunds), Decimal("0"))
+        net_collection = total_sales - refund_amount
+
+        return {
+            "date": str(target_date),
+            "invoice_count": len(invoices),
+            "total_sales": float(total_sales),
+            "cash_sales": float(cash_sales),
+            "upi_sales": float(upi_sales),
+            "refund_amount": float(refund_amount),
+            "net_collection": float(net_collection),
+        }
+
+    def payment_summary(self, tenant_id: int, start_date: date, end_date: date) -> dict:
+        payments = (
+            self.db.query(Payment.payment_method, func.sum(Payment.amount), func.count(Payment.id))
+            .join(Order, Payment.order_id == Order.id)
+            .filter(
+                Payment.tenant_id == tenant_id,
+                Payment.status == PaymentStatus.COMPLETED.value,
+                Payment.created_at >= datetime.combine(start_date, datetime.min.time()),
+                Payment.created_at <= datetime.combine(end_date, datetime.max.time()),
+            )
+            .group_by(Payment.payment_method)
+            .all()
+        )
+        breakdown = {row[0]: {"total_amount": float(row[1]), "transaction_count": row[2]} for row in payments}
+        grand_total = sum((v["total_amount"] for v in breakdown.values()), 0.0)
+        return {
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "payment_breakdown": breakdown,
+            "grand_total": grand_total,
         }
 
     def product_performance(self, tenant_id: int, limit: int = 10) -> list[dict]:
