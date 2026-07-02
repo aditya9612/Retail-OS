@@ -97,6 +97,8 @@ class UserService:
         role = self.db.query(Role).filter(Role.id == data.role_id, Role.tenant_id == tenant_id).first()
         if not role:
             raise NotFoundException("Role not found")
+        if data.store_id is not None:
+            StoreService(self.db).get_store(tenant_id, data.store_id)
         user = User(
             tenant_id=tenant_id,
             email=data.email,
@@ -123,6 +125,8 @@ class UserService:
         update_data = data.model_dump(exclude_unset=True)
         if "password" in update_data:
             user.hashed_password = get_password_hash(update_data.pop("password"))
+        if "store_id" in update_data and update_data["store_id"] is not None:
+            StoreService(self.db).get_store(tenant_id, update_data["store_id"])
         for key, value in update_data.items():
             setattr(user, key, value)
         return self.repo.update(user)
