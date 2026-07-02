@@ -124,7 +124,9 @@ class UserService:
         user = self.get_user(tenant_id, user_id)
         update_data = data.model_dump(exclude_unset=True)
         if "password" in update_data:
-            user.hashed_password = get_password_hash(update_data.pop("password"))
+            password = update_data.pop("password")
+            if password is not None:
+                user.hashed_password = get_password_hash(password)
         if "store_id" in update_data and update_data["store_id"] is not None:
             StoreService(self.db).get_store(tenant_id, update_data["store_id"])
         for key, value in update_data.items():

@@ -1,28 +1,76 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
 class UserBase(BaseModel):
     email: EmailStr
-    full_name: str
-    phone: Optional[str] = None
+    full_name: str = Field(min_length=1, max_length=255)
+    phone: Optional[str] = Field(default=None, min_length=10, max_length=10, pattern=r"^[6-9]\d{9}$")
     store_id: Optional[int] = None
     role_id: int
 
 
 class UserCreate(UserBase):
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=6, max_length=128)
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("full_name cannot be empty")
+        return value
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def validate_phone(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        value = value.strip()
+        if not value:
+            raise ValueError("phone cannot be empty")
+        return value
 
 
 class UserUpdate(BaseModel):
-    full_name: Optional[str] = None
-    phone: Optional[str] = None
+    full_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    phone: Optional[str] = Field(default=None, min_length=10, max_length=10, pattern=r"^[6-9]\d{9}$")
     store_id: Optional[int] = None
     role_id: Optional[int] = None
     is_active: Optional[bool] = None
-    password: Optional[str] = Field(default=None, min_length=6)
+    password: Optional[str] = Field(default=None, min_length=6, max_length=128)
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_update_full_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        value = value.strip()
+        if not value:
+            raise ValueError("full_name cannot be empty")
+        return value
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def validate_update_phone(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        value = value.strip()
+        if not value:
+            raise ValueError("phone cannot be empty")
+        return value
+
+    @model_validator(mode="after")
+    def validate_nullable_updates(self):
+        if "full_name" in self.model_fields_set and self.full_name is None:
+            raise ValueError("full_name cannot be null")
+        if "phone" in self.model_fields_set and self.phone is None:
+            raise ValueError("phone cannot be null")
+        if "password" in self.model_fields_set and self.password is None:
+            raise ValueError("password cannot be null")
+        return self
 
 
 class RoleResponse(BaseModel):
