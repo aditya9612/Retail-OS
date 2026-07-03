@@ -50,10 +50,6 @@ class InventoryService:
 
         return inventory
 
-    # -------------------------------------------------------
-    # STOCK IN
-    # -------------------------------------------------------
-
     def stock_in(
         self,
         tenant_id: int,
@@ -127,10 +123,6 @@ class InventoryService:
 
         return movement
 
-    # -------------------------------------------------------
-    # STOCK OUT
-    # -------------------------------------------------------
-
     def stock_out(
         self,
         tenant_id: int,
@@ -185,11 +177,6 @@ class InventoryService:
         cache_delete_pattern(f"inventory:{tenant_id}:*")
 
         return movement
-
-    # -------------------------------------------------------
-    # TRANSFER STOCK
-    # -------------------------------------------------------
-
     def transfer_stock(
         self,
         tenant_id: int,
@@ -241,11 +228,6 @@ class InventoryService:
         cache_delete_pattern(f"inventory:{tenant_id}:*")
 
         return movement
-
-    # -------------------------------------------------------
-    # LOW STOCK
-    # -------------------------------------------------------
-
     def get_low_stock(
         self,
         tenant_id: int,
@@ -263,11 +245,6 @@ class InventoryService:
             )
 
         return query.all()
-
-    # -------------------------------------------------------
-    # INVENTORY LIST
-    # -------------------------------------------------------
-
     def list_inventory(
         self,
         tenant_id: int,
@@ -284,11 +261,6 @@ class InventoryService:
             )
 
         return query.all()
-
-    # -------------------------------------------------------
-    # SUPPLIER
-    # -------------------------------------------------------
-
     def create_supplier(
         self,
         tenant_id: int,
@@ -315,10 +287,6 @@ class InventoryService:
             )
             .all()
         )
-
-    # -------------------------------------------------------
-    # MOVEMENTS
-    # -------------------------------------------------------
 
     def list_movements(
         self,

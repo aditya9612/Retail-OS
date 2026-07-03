@@ -32,7 +32,15 @@ class Inventory(Base, TimestampMixin):
     batch_number: Mapped[str | None] = mapped_column(String(100))
     expiry_date: Mapped[date | None] = mapped_column(Date)
 
-    product: Mapped["Product"] = relationship("Product", back_populates="inventory_items")
+    product: Mapped["Product"] = relationship(
+        "Product",
+        back_populates="inventory_items",
+    )
+
+    store: Mapped["Store"] = relationship(
+        "Store",
+        back_populates="inventory_items",
+    )
 
 
 class StockMovement(Base, TimestampMixin):
@@ -42,15 +50,36 @@ class StockMovement(Base, TimestampMixin):
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+
     movement_type: Mapped[str] = mapped_column(String(50), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+
     reference: Mapped[str | None] = mapped_column(String(100))
     notes: Mapped[str | None] = mapped_column(String(500))
+
     from_store_id: Mapped[int | None] = mapped_column(ForeignKey("stores.id"))
     to_store_id: Mapped[int | None] = mapped_column(ForeignKey("stores.id"))
+
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"))
+
     unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+
     store: Mapped["Store"] = relationship(
-    "Store",
-    back_populates="inventory_items"
-)
+        "Store",
+        foreign_keys=[store_id],
+        back_populates="stock_movements",
+    )
+
+    from_store: Mapped["Store"] = relationship(
+        "Store",
+        foreign_keys=[from_store_id],
+    )
+
+    to_store: Mapped["Store"] = relationship(
+        "Store",
+        foreign_keys=[to_store_id],
+    )
+
+    supplier: Mapped["Supplier"] = relationship("Supplier")
+
+    product: Mapped["Product"] = relationship("Product")

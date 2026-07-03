@@ -8,7 +8,11 @@ class Store(Base, TimestampMixin):
     __tablename__ = "stores"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     code: Mapped[str] = mapped_column(String(50), nullable=False)
     address: Mapped[str | None] = mapped_column(String(500))
@@ -20,10 +24,24 @@ class Store(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_warehouse: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    tenant: Mapped["Tenant"] = relationship("Tenant", back_populates="stores")
-    users: Mapped[list["User"]] = relationship("User", back_populates="store")
-    # ADD THIS FOR INVENTORY CONNECTION
+    # Relationships
+    tenant: Mapped["Tenant"] = relationship(
+        "Tenant",
+        back_populates="stores"
+    )
+
+    users: Mapped[list["User"]] = relationship(
+        "User",
+        back_populates="store"
+    )
+
     inventory_items: Mapped[list["Inventory"]] = relationship(
         "Inventory",
+        back_populates="store"
+    )
+
+    stock_movements: Mapped[list["StockMovement"]] = relationship(
+        "StockMovement",
+        foreign_keys="StockMovement.store_id",
         back_populates="store"
     )
