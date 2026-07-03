@@ -9,27 +9,56 @@ class StoreRepository:
     def __init__(self, db: Session):
         self.db = db
 
+    # -------------------------
+    # GET BY ID (tenant-safe + active only)
+    # -------------------------
     def get_by_id(self, store_id: int, tenant_id: int) -> Optional[Store]:
+
         return (
             self.db.query(Store)
             .filter(
                 Store.id == store_id,
-                Store.tenant_id == tenant_id
+                Store.tenant_id == tenant_id,
+                Store.is_active.is_(True)
             )
             .first()
         )
 
+    # -------------------------
+    # GET BY NAME (unique check)
+    # -------------------------
     def get_by_name(self, name: str, tenant_id: int) -> Optional[Store]:
+
         return (
             self.db.query(Store)
             .filter(
                 Store.name == name,
-                Store.tenant_id == tenant_id
+                Store.tenant_id == tenant_id,
+                Store.is_active.is_(True)
             )
             .first()
         )
 
+    # -------------------------
+    # GET BY CODE (unique check)
+    # -------------------------
+    def get_by_code(self, code: str, tenant_id: int) -> Optional[Store]:
+
+        return (
+            self.db.query(Store)
+            .filter(
+                Store.code == code,
+                Store.tenant_id == tenant_id,
+                Store.is_active.is_(True)
+            )
+            .first()
+        )
+
+    # -------------------------
+    # LIST STORES (only active stores)
+    # -------------------------
     def list_stores(self, tenant_id: int) -> List[Store]:
+
         return (
             self.db.query(Store)
             .filter(
@@ -39,19 +68,37 @@ class StoreRepository:
             .all()
         )
 
+    # -------------------------
+    # CREATE STORE
+    # -------------------------
     def create(self, store: Store) -> Store:
+
         self.db.add(store)
         self.db.commit()
         self.db.refresh(store)
         return store
 
+    # -------------------------
+    # UPDATE STORE
+    # -------------------------
     def update(self, store: Store) -> Store:
+
         self.db.commit()
         self.db.refresh(store)
         return store
 
-    def soft_delete(self, store: Store) -> Store:
+    # -------------------------
+    # SOFT DELETE STORE (SAFETY ADDED)
+    # -------------------------
+    def soft_delete(self, store: Store, tenant_id: int) -> Store:
+
+        # Safety check (prevents cross-tenant bugs)
+        if store.tenant_id != tenant_id:
+            raise ValueError("Tenant mismatch error")
+
         store.is_active = False
+
         self.db.commit()
         self.db.refresh(store)
+
         return store
