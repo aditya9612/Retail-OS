@@ -6,31 +6,70 @@ from pydantic import BaseModel, Field, EmailStr
 
 
 class SupplierBase(BaseModel):
-    name: str
-    contact_person: Optional[str] = None
+    name: str = Field(
+        min_length=2,
+        max_length=100,
+        pattern=r"^[A-Za-z ]+$"
+    )
+    
+    contact_person: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=100,
+        pattern=r"^[A-Za-z ]+$"
+    )
+    
     email: EmailStr | None = None
     phone: str | None = Field(
          default=None,
          pattern=r"^(\+91)?[6-9]\d{9}$"
     )
-    address: Optional[str] = None
-    gstin: Optional[str] = None
-
+    
+    address: str | None = Field(
+        default=None,
+        min_length=5,
+        max_length=500
+    )
+    gstin: str | None = Field(
+        default=None,
+        pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$"
+    )
 
 class SupplierCreate(SupplierBase):
     pass
 
 
 class SupplierUpdate(BaseModel):
-    name: Optional[str] = None
-    contact_person: Optional[str] = None
+    name: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=100,
+        pattern=r"^[A-Za-z ]+$"
+    )
+
+    contact_person: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=100,
+        pattern=r"^[A-Za-z ]+$"
+    )
+     
     email: EmailStr | None = None
     phone: str | None = Field(
          default=None,
          pattern=r"^(\+91)?[6-9]\d{9}$"
     )
-    address: Optional[str] = None
-    gstin: Optional[str] = None
+    
+    address: str | None = Field(
+        default=None,
+        min_length=5,
+        max_length=500
+    )
+
+    gstin: str | None = Field(
+        default=None,
+        pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$"
+    )
     
 
 class SupplierResponse(SupplierBase):
