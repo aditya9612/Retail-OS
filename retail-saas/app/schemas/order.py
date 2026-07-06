@@ -2,15 +2,23 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+VALID_ORDER_TYPES = ["pos", "ecommerce"]
+VALID_ORDER_STATUSES = [
+    "draft", "confirmed", "processing",
+    "shipped", "delivered", "cancelled",
+    "returned", "refunded"
+]
+VALID_PAYMENT_METHODS = ["cash", "upi", "card", "credit_card", "debit_card", "wallet", "qr"]
 
 
 class OrderItemCreate(BaseModel):
-    product_id: int
-    quantity: int = Field(gt=0)
-    unit_price: Optional[Decimal] = None
-    discount: Decimal = Field(default=Decimal("0.00"))
-    variant: Optional[str] = None
+    product_id: int = Field(gt=0, description="Product ID must be positive")
+    quantity: int = Field(gt=0, le=10000, description="Quantity must be between 1 and 10000")
+    unit_price: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("999999.99"))
+    discount: Decimal = Field(default=Decimal("0.00"), ge=0, le=Decimal("999999.99"))
+    variant: Optional[str] = Field(default=None, max_length=100)
 
 
 class OrderItemResponse(BaseModel):
@@ -30,23 +38,45 @@ class OrderItemResponse(BaseModel):
 
 
 class OrderCreate(BaseModel):
-    store_id: int
-    customer_id: Optional[int] = None
-    order_type: str = "pos"
-    coupon_code: Optional[str] = None
-    discount_amount: Decimal = Field(default=Decimal("0.00"))
-    delivery_address: Optional[str] = None
-    notes: Optional[str] = None
-    items: List[OrderItemCreate] = []
+    store_id: int = Field(gt=0, description="Store ID must be positive")
+    customer_id: Optional[int] = Field(default=None, gt=0)
+    order_type: str = Field(default="pos")
+    coupon_code: Optional[str] = Field(default=None, min_length=3, max_length=50)
+    discount_amount: Decimal = Field(default=Decimal("0.00"), ge=0, le=Decimal("999999.99"))
+    delivery_address: Optional[str] = Field(default=None, max_length=500)
+    notes: Optional[str] = Field(default=None, max_length=1000)
+    items: List[OrderItemCreate] = Field(min_length=1, max_length=100, description="Order must have 1 to 100 items")
+
+    @field_validator("order_type")
+    @classmethod
+    def validate_order_type(cls, v):
+        if v not in VALID_ORDER_TYPES:
+            raise ValueError(f"order_type must be one of {VALID_ORDER_TYPES}")
+        return v
+
+    @field_validator("items")
+    @classmethod
+    def validate_items(cls, v):
+        product_ids = [item.product_id for item in v]
+        if len(product_ids) != len(set(product_ids)):
+            raise ValueError("Order cannot have duplicate products")
+        return v
 
 
 class OrderUpdate(BaseModel):
-    customer_id: Optional[int] = None
-    coupon_code: Optional[str] = None
-    discount_amount: Optional[Decimal] = None
-    delivery_address: Optional[str] = None
-    notes: Optional[str] = None
+    customer_id: Optional[int] = Field(default=None, gt=0)
+    coupon_code: Optional[str] = Field(default=None, min_length=3, max_length=50)
+    discount_amount: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("999999.99"))
+    delivery_address: Optional[str] = Field(default=None, max_length=500)
+    notes: Optional[str] = Field(default=None, max_length=1000)
     status: Optional[str] = None
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v):
+        if v is not None and v not in VALID_ORDER_STATUSES:
+            raise ValueError(f"status must be one of {VALID_ORDER_STATUSES}")
+        return v
 
 
 class OrderResponse(BaseModel):
@@ -90,10 +120,17 @@ class InvoiceResponse(BaseModel):
 
 
 class PaymentCreate(BaseModel):
-    order_id: int
-    payment_method: str
-    amount: Decimal
-    transaction_id: Optional[str] = None
+    order_id: int = Field(gt=0, description="Order ID must be positive")
+    payment_method: str = Field(description="Must be a valid payment method")
+    amount: Decimal = Field(gt=0, le=Decimal("999999.99"), description="Amount must be greater than 0")
+    transaction_id: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("payment_method")
+    @classmethod
+    def validate_payment_method(cls, v):
+        if v not in VALID_PAYMENT_METHODS:
+            raise ValueError(f"payment_method must be one of {VALID_PAYMENT_METHODS}")
+        return v
 
 
 class PaymentResponse(BaseModel):

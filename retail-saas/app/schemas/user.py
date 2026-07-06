@@ -1,28 +1,58 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class UserBase(BaseModel):
-    email: EmailStr
-    full_name: str
-    phone: Optional[str] = None
-    store_id: Optional[int] = None
-    role_id: int
+    email: EmailStr = Field(description="Must be a valid email address")
+    full_name: str = Field(min_length=2, max_length=255, description="Full name must be 2 to 255 characters")
+    phone: Optional[str] = Field(default=None, min_length=10, max_length=15)
+    store_id: Optional[int] = Field(default=None, gt=0)
+    role_id: int = Field(gt=0, description="Role ID must be positive")
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        if v is not None and not v.isdigit():
+            raise ValueError("Phone must contain digits only")
+        return v
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, v):
+        if not v.strip():
+            raise ValueError("Full name cannot be empty or whitespace")
+        return v.strip()
 
 
 class UserCreate(UserBase):
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=6, max_length=100, description="Password must be at least 6 characters")
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v):
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain at least one number")
+        return v
 
 
 class UserUpdate(BaseModel):
-    full_name: Optional[str] = None
-    phone: Optional[str] = None
-    store_id: Optional[int] = None
-    role_id: Optional[int] = None
+    full_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
+    phone: Optional[str] = Field(default=None, min_length=10, max_length=15)
+    store_id: Optional[int] = Field(default=None, gt=0)
+    role_id: Optional[int] = Field(default=None, gt=0)
     is_active: Optional[bool] = None
-    password: Optional[str] = Field(default=None, min_length=6)
+    password: Optional[str] = Field(default=None, min_length=6, max_length=100)
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        if v is not None and not v.isdigit():
+            raise ValueError("Phone must contain digits only")
+        return v
 
 
 class RoleResponse(BaseModel):
@@ -49,15 +79,36 @@ class UserResponse(BaseModel):
 
 
 class StoreBase(BaseModel):
-    name: str
-    code: str
-    address: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    pincode: Optional[str] = None
-    phone: Optional[str] = None
-    gstin: Optional[str] = None
+    name: str = Field(min_length=2, max_length=255)
+    code: str = Field(min_length=1, max_length=20)
+    address: Optional[str] = Field(default=None, max_length=500)
+    city: Optional[str] = Field(default=None, max_length=100)
+    state: Optional[str] = Field(default=None, max_length=100)
+    pincode: Optional[str] = Field(default=None, min_length=6, max_length=6, description="Pincode must be exactly 6 digits")
+    phone: Optional[str] = Field(default=None, min_length=10, max_length=15)
+    gstin: Optional[str] = Field(default=None, min_length=15, max_length=15, description="GSTIN must be exactly 15 characters")
     is_warehouse: bool = False
+
+    @field_validator("pincode")
+    @classmethod
+    def validate_pincode(cls, v):
+        if v is not None and not v.isdigit():
+            raise ValueError("Pincode must contain digits only")
+        return v
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        if v is not None and not v.isdigit():
+            raise ValueError("Phone must contain digits only")
+        return v
+
+    @field_validator("gstin")
+    @classmethod
+    def validate_gstin(cls, v):
+        if v is not None and len(v) != 15:
+            raise ValueError("GSTIN must be exactly 15 characters")
+        return v.upper() if v else v
 
 
 class StoreCreate(StoreBase):
@@ -65,13 +116,13 @@ class StoreCreate(StoreBase):
 
 
 class StoreUpdate(BaseModel):
-    name: Optional[str] = None
-    address: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    pincode: Optional[str] = None
-    phone: Optional[str] = None
-    gstin: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=2, max_length=255)
+    address: Optional[str] = Field(default=None, max_length=500)
+    city: Optional[str] = Field(default=None, max_length=100)
+    state: Optional[str] = Field(default=None, max_length=100)
+    pincode: Optional[str] = Field(default=None, min_length=6, max_length=6)
+    phone: Optional[str] = Field(default=None, min_length=10, max_length=15)
+    gstin: Optional[str] = Field(default=None, min_length=15, max_length=15)
     is_active: Optional[bool] = None
     is_warehouse: Optional[bool] = None
 

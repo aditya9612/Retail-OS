@@ -2,16 +2,30 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SupplierBase(BaseModel):
-    name: str
-    contact_person: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    address: Optional[str] = None
-    gstin: Optional[str] = None
+    name: str = Field(min_length=2, max_length=255)
+    contact_person: Optional[str] = Field(default=None, max_length=255)
+    email: Optional[str] = Field(default=None, max_length=255)
+    phone: Optional[str] = Field(default=None, min_length=10, max_length=15)
+    address: Optional[str] = Field(default=None, max_length=500)
+    gstin: Optional[str] = Field(default=None, min_length=15, max_length=15, description="GSTIN must be exactly 15 characters")
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        if v is not None and not v.isdigit():
+            raise ValueError("Phone must contain digits only")
+        return v
+
+    @field_validator("gstin")
+    @classmethod
+    def validate_gstin(cls, v):
+        if v is not None and len(v) != 15:
+            raise ValueError("GSTIN must be exactly 15 characters")
+        return v.upper() if v else v
 
 
 class SupplierCreate(SupplierBase):
@@ -41,29 +55,43 @@ class InventoryResponse(BaseModel):
 
 
 class StockInRequest(BaseModel):
-    store_id: int
-    product_id: int
-    quantity: int = Field(gt=0)
-    supplier_id: Optional[int] = None
-    batch_number: Optional[str] = None
+    store_id: int = Field(gt=0, description="Store ID must be positive")
+    product_id: int = Field(gt=0, description="Product ID must be positive")
+    quantity: int = Field(gt=0, le=100000, description="Quantity must be between 1 and 100000")
+    supplier_id: Optional[int] = Field(default=None, gt=0)
+    batch_number: Optional[str] = Field(default=None, max_length=100)
     expiry_date: Optional[date] = None
-    unit_cost: Optional[Decimal] = None
-    notes: Optional[str] = None
+    unit_cost: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("999999.99"))
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("expiry_date")
+    @classmethod
+    def validate_expiry_date(cls, v):
+        if v is not None and v < date.today():
+            raise ValueError("Expiry date cannot be in the past")
+        return v
 
 
 class StockOutRequest(BaseModel):
-    store_id: int
-    product_id: int
-    quantity: int = Field(gt=0)
-    notes: Optional[str] = None
+    store_id: int = Field(gt=0, description="Store ID must be positive")
+    product_id: int = Field(gt=0, description="Product ID must be positive")
+    quantity: int = Field(gt=0, le=100000, description="Quantity must be between 1 and 100000")
+    notes: Optional[str] = Field(default=None, max_length=500)
 
 
 class StockTransferRequest(BaseModel):
-    product_id: int
-    from_store_id: int
-    to_store_id: int
-    quantity: int = Field(gt=0)
-    notes: Optional[str] = None
+    product_id: int = Field(gt=0, description="Product ID must be positive")
+    from_store_id: int = Field(gt=0, description="From Store ID must be positive")
+    to_store_id: int = Field(gt=0, description="To Store ID must be positive")
+    quantity: int = Field(gt=0, le=100000, description="Quantity must be between 1 and 100000")
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("to_store_id")
+    @classmethod
+    def validate_different_stores(cls, v, info):
+        if "from_store_id" in info.data and v == info.data["from_store_id"]:
+            raise ValueError("From store and To store cannot be the same")
+        return v
 
 
 class StockMovementResponse(BaseModel):
