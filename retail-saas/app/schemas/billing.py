@@ -16,7 +16,7 @@ class RefundCreate(BaseModel):
 
     @field_validator("refund_method")
     @classmethod
-    def validate_refund_method(cls, v):
+    def validate_refund_method(cls, v: str) -> str:
         if v not in VALID_REFUND_METHODS:
             raise ValueError(f"refund_method must be one of {VALID_REFUND_METHODS}")
         return v
@@ -61,7 +61,7 @@ class PaymentSplit(BaseModel):
 
     @field_validator("payment_mode")
     @classmethod
-    def validate_payment_mode(cls, v):
+    def validate_payment_mode(cls, v: str) -> str:
         if v not in VALID_PAYMENT_MODES:
             raise ValueError(f"payment_mode must be one of {VALID_PAYMENT_MODES}")
         return v

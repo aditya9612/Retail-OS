@@ -1,7 +1,6 @@
 from datetime import datetime
-from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field
 
 
 class LoginRequest(BaseModel):

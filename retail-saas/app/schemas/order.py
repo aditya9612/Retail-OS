@@ -49,14 +49,14 @@ class OrderCreate(BaseModel):
 
     @field_validator("order_type")
     @classmethod
-    def validate_order_type(cls, v):
+    def validate_order_type(cls, v: str) -> str:
         if v not in VALID_ORDER_TYPES:
             raise ValueError(f"order_type must be one of {VALID_ORDER_TYPES}")
         return v
 
     @field_validator("items")
     @classmethod
-    def validate_items(cls, v):
+    def validate_items(cls, v: List[OrderItemCreate]) -> List[OrderItemCreate]:
         product_ids = [item.product_id for item in v]
         if len(product_ids) != len(set(product_ids)):
             raise ValueError("Order cannot have duplicate products")
@@ -73,7 +73,7 @@ class OrderUpdate(BaseModel):
 
     @field_validator("status")
     @classmethod
-    def validate_status(cls, v):
+    def validate_status(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and v not in VALID_ORDER_STATUSES:
             raise ValueError(f"status must be one of {VALID_ORDER_STATUSES}")
         return v
@@ -127,7 +127,7 @@ class PaymentCreate(BaseModel):
 
     @field_validator("payment_method")
     @classmethod
-    def validate_payment_method(cls, v):
+    def validate_payment_method(cls, v: str) -> str:
         if v not in VALID_PAYMENT_METHODS:
             raise ValueError(f"payment_method must be one of {VALID_PAYMENT_METHODS}")
         return v

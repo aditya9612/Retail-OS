@@ -42,28 +42,28 @@ class ProductBase(BaseModel):
 
     @field_validator("sku")
     @classmethod
-    def validate_sku(cls, v):
+    def validate_sku(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("SKU cannot be empty or whitespace")
         return v.strip().upper()
 
     @field_validator("hsn_code")
     @classmethod
-    def validate_hsn_code(cls, v):
+    def validate_hsn_code(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not v.isdigit():
             raise ValueError("HSN code must contain digits only")
         return v
 
     @field_validator("gst_rate")
     @classmethod
-    def validate_gst_rate(cls, v):
+    def validate_gst_rate(cls, v: Decimal) -> Decimal:
         if v not in VALID_GST_SLABS:
             raise ValueError(f"GST rate must be one of {[str(s) for s in VALID_GST_SLABS]}")
         return v
 
     @field_validator("cost_price")
     @classmethod
-    def validate_cost_price(cls, v):
+    def validate_cost_price(cls, v: Decimal) -> Decimal:
         if v < 0:
             raise ValueError("Cost price cannot be negative")
         return v
@@ -90,7 +90,7 @@ class ProductUpdate(BaseModel):
 
     @field_validator("gst_rate")
     @classmethod
-    def validate_gst_rate(cls, v):
+    def validate_gst_rate(cls, v: Optional[Decimal]) -> Optional[Decimal]:
         if v is not None and v not in VALID_GST_SLABS:
             raise ValueError(f"GST rate must be one of {[str(s) for s in VALID_GST_SLABS]}")
         return v

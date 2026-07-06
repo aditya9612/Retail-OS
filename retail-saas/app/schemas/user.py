@@ -13,14 +13,14 @@ class UserBase(BaseModel):
 
     @field_validator("phone")
     @classmethod
-    def validate_phone(cls, v):
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not v.isdigit():
             raise ValueError("Phone must contain digits only")
         return v
 
     @field_validator("full_name")
     @classmethod
-    def validate_full_name(cls, v):
+    def validate_full_name(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("Full name cannot be empty or whitespace")
         return v.strip()
@@ -31,7 +31,7 @@ class UserCreate(UserBase):
 
     @field_validator("password")
     @classmethod
-    def validate_password(cls, v):
+    def validate_password(cls, v: str) -> str:
         if len(v) < 6:
             raise ValueError("Password must be at least 6 characters")
         if not any(c.isdigit() for c in v):
@@ -49,7 +49,7 @@ class UserUpdate(BaseModel):
 
     @field_validator("phone")
     @classmethod
-    def validate_phone(cls, v):
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not v.isdigit():
             raise ValueError("Phone must contain digits only")
         return v
@@ -58,7 +58,7 @@ class UserUpdate(BaseModel):
 class RoleResponse(BaseModel):
     id: int
     name: str
-    permissions: list
+    permissions: list[str]
 
     model_config = {"from_attributes": True}
 
@@ -91,21 +91,21 @@ class StoreBase(BaseModel):
 
     @field_validator("pincode")
     @classmethod
-    def validate_pincode(cls, v):
+    def validate_pincode(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not v.isdigit():
             raise ValueError("Pincode must contain digits only")
         return v
 
     @field_validator("phone")
     @classmethod
-    def validate_phone(cls, v):
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not v.isdigit():
             raise ValueError("Phone must contain digits only")
         return v
 
     @field_validator("gstin")
     @classmethod
-    def validate_gstin(cls, v):
+    def validate_gstin(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and len(v) != 15:
             raise ValueError("GSTIN must be exactly 15 characters")
         return v.upper() if v else v

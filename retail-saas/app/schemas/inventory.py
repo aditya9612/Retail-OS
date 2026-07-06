@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 
 class SupplierBase(BaseModel):
@@ -15,14 +15,14 @@ class SupplierBase(BaseModel):
 
     @field_validator("phone")
     @classmethod
-    def validate_phone(cls, v):
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not v.isdigit():
             raise ValueError("Phone must contain digits only")
         return v
 
     @field_validator("gstin")
     @classmethod
-    def validate_gstin(cls, v):
+    def validate_gstin(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and len(v) != 15:
             raise ValueError("GSTIN must be exactly 15 characters")
         return v.upper() if v else v
@@ -66,7 +66,7 @@ class StockInRequest(BaseModel):
 
     @field_validator("expiry_date")
     @classmethod
-    def validate_expiry_date(cls, v):
+    def validate_expiry_date(cls, v: Optional[date]) -> Optional[date]:
         if v is not None and v < date.today():
             raise ValueError("Expiry date cannot be in the past")
         return v
@@ -88,7 +88,7 @@ class StockTransferRequest(BaseModel):
 
     @field_validator("to_store_id")
     @classmethod
-    def validate_different_stores(cls, v, info):
+    def validate_different_stores(cls, v: int, info: ValidationInfo) -> int:
         if "from_store_id" in info.data and v == info.data["from_store_id"]:
             raise ValueError("From store and To store cannot be the same")
         return v

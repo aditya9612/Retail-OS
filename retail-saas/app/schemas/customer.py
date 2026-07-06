@@ -15,7 +15,7 @@ class CustomerBase(BaseModel):
 
     @field_validator("phone")
     @classmethod
-    def validate_phone(cls, v):
+    def validate_phone(cls, v: str) -> str:
         if not v.isdigit():
             raise ValueError("Phone must contain digits only")
         if len(v) < 10 or len(v) > 15:
@@ -24,7 +24,7 @@ class CustomerBase(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, v):
+    def validate_name(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("Name cannot be empty or whitespace")
         return v.strip()
@@ -45,7 +45,7 @@ class CustomerUpdate(BaseModel):
 
     @field_validator("phone")
     @classmethod
-    def validate_phone(cls, v):
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not v.isdigit():
             raise ValueError("Phone must contain digits only")
         return v

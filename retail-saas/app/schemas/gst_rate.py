@@ -13,14 +13,14 @@ class GstRateCreate(BaseModel):
 
     @field_validator("hsn_code")
     @classmethod
-    def validate_hsn_code(cls, v):
+    def validate_hsn_code(cls, v: str) -> str:
         if not v.isdigit():
             raise ValueError("HSN code must contain digits only")
         return v
 
     @field_validator("gst_rate")
     @classmethod
-    def validate_gst_slab(cls, v):
+    def validate_gst_slab(cls, v: Decimal) -> Decimal:
         if v not in VALID_GST_SLABS:
             raise ValueError(f"GST rate must be one of {[str(s) for s in VALID_GST_SLABS]}")
         return v
@@ -32,7 +32,7 @@ class GstRateUpdate(BaseModel):
 
     @field_validator("gst_rate")
     @classmethod
-    def validate_gst_slab(cls, v):
+    def validate_gst_slab(cls, v: Optional[Decimal]) -> Optional[Decimal]:
         if v is not None and v not in VALID_GST_SLABS:
             raise ValueError(f"GST rate must be one of {[str(s) for s in VALID_GST_SLABS]}")
         return v
