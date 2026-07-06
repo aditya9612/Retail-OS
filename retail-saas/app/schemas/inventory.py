@@ -2,14 +2,17 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 
 
 class SupplierBase(BaseModel):
     name: str
     contact_person: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
+    email: EmailStr | None = None
+    phone: str | None = Field(
+         default=None,
+         pattern=r"^(\+91)?[6-9]\d{9}$"
+    )
     address: Optional[str] = None
     gstin: Optional[str] = None
 
@@ -21,8 +24,11 @@ class SupplierCreate(SupplierBase):
 class SupplierUpdate(BaseModel):
     name: Optional[str] = None
     contact_person: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
+    email: EmailStr | None = None
+    phone: str | None = Field(
+         default=None,
+         pattern=r"^(\+91)?[6-9]\d{9}$"
+    )
     address: Optional[str] = None
     gstin: Optional[str] = None
     
