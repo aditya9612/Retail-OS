@@ -12,7 +12,7 @@ def auth_headers():
     client.post(
         "/api/v1/auth/register",
         params={
-            "tenant_name": "Product Test",
+            "tenant_name": "productsTest",
             "slug": "prodtest",
             "email": "prod@test.com",
             "admin_name": "Prod Admin",
@@ -39,7 +39,7 @@ def test_create_and_list_products(auth_headers):
         headers=auth_headers,
     )
     assert create_resp.status_code == 201
-    product = create_resp.json()
+    products= create_resp.json()
     assert product["sku"] == "TEST-001"
 
     list_resp = client.get("/api/v1/products", headers=auth_headers)

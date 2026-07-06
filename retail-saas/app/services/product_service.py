@@ -25,21 +25,21 @@ class ProductService:
     def create_product(self, tenant_id: int, data: ProductCreate) -> Product:
         if self.repo.get_by_sku(data.sku, tenant_id):
             raise ConflictException("SKU already exists")
-        product = Product(tenant_id=tenant_id, **data.model_dump())
+        products= Product(tenant_id=tenant_id, **data.model_dump())
         if not product.barcode:
             product.barcode = generate_barcode(product.sku)
         return self.repo.create(product)
 
     def get_product(self, tenant_id: int, product_id: int) -> Product:
-        product = self.repo.get_by_id(product_id, tenant_id)
+        products= self.repo.get_by_id(product_id, tenant_id)
         if not product:
-            raise NotFoundException("Product not found")
+            raise NotFoundException("productsnot found")
         return product
 
     def get_by_barcode(self, tenant_id: int, barcode: str) -> Product:
-        product = self.repo.get_by_barcode(barcode, tenant_id)
+        products= self.repo.get_by_barcode(barcode, tenant_id)
         if not product:
-            raise NotFoundException("Product not found for barcode")
+            raise NotFoundException("productsnot found for barcode")
         return product
 
     def list_products(self, tenant_id: int, page: int = 1, page_size: int = 20):
@@ -48,13 +48,13 @@ class ProductService:
         return items
 
     def update_product(self, tenant_id: int, product_id: int, data: ProductUpdate) -> Product:
-        product = self.get_product(tenant_id, product_id)
+        products= self.get_product(tenant_id, product_id)
         for key, value in data.model_dump(exclude_unset=True).items():
             setattr(product, key, value)
         return self.repo.update(product)
 
     def delete_product(self, tenant_id: int, product_id: int) -> None:
-        product = self.get_product(tenant_id, product_id)
+        products= self.get_product(tenant_id, product_id)
         self.repo.delete(product)
 
 
@@ -62,7 +62,7 @@ from app.repositories.store_repo import StoreRepository
 
 
 class StoreService:
-
+    
     def __init__(self, db: Session):
         self.db = db
         self.repo = StoreRepository(db)

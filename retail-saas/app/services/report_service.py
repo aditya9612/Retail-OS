@@ -8,7 +8,7 @@ from app.models.audit_log import AuditLog
 from app.models.invoice import Invoice
 from app.models.order import Order
 from app.models.order_item import OrderItem
-from app.models.product import Product
+from app.models.product   import Product
 from app.utils.constants import OrderStatus
 
 
@@ -68,7 +68,7 @@ class ReportService:
         cost = Decimal("0")
         for order in orders:
             for item in order.items:
-                product = self.db.query(Product).filter(Product.id == item.product_id).first()
+                products= self.db.query(Product).filter(Product.id == item.product_id).first()
                 if product:
                     cost += product.cost_price * item.quantity
         return {

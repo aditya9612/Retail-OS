@@ -30,7 +30,7 @@ def setup_order_flow():
         headers=headers,
     ).json()
 
-    product = client.post(
+    products= client.post(
         "/api/v1/products",
         json={"name": "Order Product", "sku": "ORD-001", "price": "100.00"},
         headers=headers,
@@ -46,7 +46,7 @@ def setup_order_flow():
 
 
 def test_create_and_confirm_order(setup_order_flow):
-    headers, store, product = setup_order_flow
+    headers, store, products= setup_order_flow
 
     order_resp = client.post(
         "/api/v1/orders",

@@ -9,7 +9,7 @@ from app.core.exceptions import AppException, NotFoundException
 from app.models.customer import Customer
 from app.models.order import Order
 from app.models.order_item import OrderItem
-from app.models.product import Product
+from app.models.product   import Product
 from app.repositories.order_repo import OrderRepository
 from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate
 from app.services.inventory_service import InventoryService
@@ -66,9 +66,9 @@ class OrderService:
             notes=data.notes,
         )
         for item_data in data.items:
-            product = self.db.query(Product).filter(Product.id == item_data.product_id, Product.tenant_id == tenant_id).first()
+            products= self.db.query(Product).filter(Product.id == item_data.product_id, Product.tenant_id == tenant_id).first()
             if not product:
-                raise NotFoundException(f"Product {item_data.product_id} not found")
+                raise NotFoundException(f"products{item_data.product_id} not found")
             order.items.append(self._calculate_item_totals(product, item_data))
         self._recalculate_order(order)
         return self.repo.create(order)

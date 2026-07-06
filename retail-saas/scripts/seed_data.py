@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from app.core.database import SessionLocal
 from app.models.category import Category
-from app.models.product import Product
+from app.models.product  import Product
 from app.models.store import Store
 from app.models.tenant import Tenant
 from app.services.auth_service import AuthService
@@ -45,7 +45,7 @@ def seed():
             Product(
                 tenant_id=user.tenant_id,
                 category_id=category.id,
-                name="Sample Product A",
+                name="Sample productsA",
                 sku="SKU-001",
                 barcode="8901234567890",
                 price=Decimal("199.00"),
@@ -56,7 +56,7 @@ def seed():
             Product(
                 tenant_id=user.tenant_id,
                 category_id=category.id,
-                name="Sample Product B",
+                name="Sample productsB",
                 sku="SKU-002",
                 barcode="8901234567891",
                 price=Decimal("499.00"),

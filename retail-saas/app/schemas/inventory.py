@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, conint
 
 
 class SupplierBase(BaseModel):
@@ -16,7 +16,6 @@ class SupplierBase(BaseModel):
 
 class SupplierCreate(SupplierBase):
     pass
-
 
 class SupplierResponse(SupplierBase):
     id: int
@@ -39,32 +38,29 @@ class InventoryResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
-
 class StockInRequest(BaseModel):
-    store_id: int
-    product_id: int
-    quantity: int = Field(gt=0)
+    store_id: conint(gt=0)
+    product_id: conint(gt=0)
+    quantity: conint(gt=0)
+
     supplier_id: Optional[int] = None
     batch_number: Optional[str] = None
     expiry_date: Optional[date] = None
-    unit_cost: Optional[Decimal] = None
+    unit_cost: Optional[Decimal] = Field(default=None, gt=0)
     notes: Optional[str] = None
-
 
 class StockOutRequest(BaseModel):
-    store_id: int
-    product_id: int
-    quantity: int = Field(gt=0)
+    store_id: conint(gt=0)
+    product_id: conint(gt=0)
+    quantity: conint(gt=0)
     notes: Optional[str] = None
-
 
 class StockTransferRequest(BaseModel):
-    product_id: int
-    from_store_id: int
-    to_store_id: int
-    quantity: int = Field(gt=0)
+    product_id: conint(gt=0)
+    from_store_id: conint(gt=0)
+    to_store_id: conint(gt=0)
+    quantity: conint(gt=0)
     notes: Optional[str] = None
-
 
 class StockMovementResponse(BaseModel):
     id: int

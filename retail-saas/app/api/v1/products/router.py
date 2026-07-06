@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import get_current_user, require_permission
 from app.models.user import User
-from app.schemas.product import CategoryCreate, CategoryResponse, ProductCreate, ProductResponse, ProductUpdate
+from app.schemas.product import (CategoryCreate,CategoryResponse,ProductCreate,ProductResponse,ProductUpdate,)
 from app.models.category import Category
 from app.services.product_service import ProductService
 
