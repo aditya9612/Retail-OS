@@ -6,7 +6,13 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import NotFoundException
 from app.models.inventory import Inventory, StockMovement, Supplier
 from app.models.product import Product
-from app.schemas.inventory import StockInRequest, StockOutRequest, StockTransferRequest, SupplierCreate
+from app.schemas.inventory import ( 
+    StockInRequest, 
+    StockOutRequest, 
+    StockTransferRequest, 
+    SupplierCreate,
+    SupplierUpdate,
+)
 from app.utils.constants import StockMovementType
 from app.utils.helpers import cache_delete_pattern
 
@@ -125,6 +131,55 @@ class InventoryService:
 
     def list_suppliers(self, tenant_id: int) -> list[Supplier]:
         return self.db.query(Supplier).filter(Supplier.tenant_id == tenant_id).all()
+    
+    def get_supplier(self, tenant_id: int, supplier_id: int) -> Supplier:
+        supplier = (
+            self.db.query(Supplier)
+             .filter(
+                Supplier.tenant_id == tenant_id,
+                Supplier.id == supplier_id,
+             )
+             .first()
+        )
+
+        if not supplier:
+           raise NotFoundException("Supplier not found")
+        
+        return supplier
+
+
+    def update_supplier(
+        self,
+        tenant_id: int,
+        supplier_id: int,
+        data: SupplierUpdate,
+    ) -> Supplier:
+
+         supplier = self.get_supplier(tenant_id, supplier_id)
+
+         update_data = data.model_dump(exclude_unset=True)
+
+         for key, value in update_data.items():
+             setattr(supplier, key, value)
+
+         self.db.commit()
+         self.db.refresh(supplier)
+
+         return supplier
+
+
+    def delete_supplier(
+         self,
+         tenant_id: int,
+         supplier_id: int,
+    ):
+
+         supplier = self.get_supplier(tenant_id, supplier_id)
+
+         self.db.delete(supplier)
+         self.db.commit()
+
+         return {"message": "Supplier deleted successfully"}
 
     def list_movements(self, tenant_id: int, store_id: int | None = None) -> list[StockMovement]:
         query = self.db.query(StockMovement).filter(StockMovement.tenant_id == tenant_id)
