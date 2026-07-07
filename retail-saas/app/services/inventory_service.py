@@ -6,17 +6,12 @@ from app.core.exceptions import AppException, NotFoundException
 from app.models.inventory import Inventory, StockMovement, Supplier
 from app.models.product import Product
 from app.models.store import Store
-from app.schemas.inventory import ( 
-    (
-    StockInRequest, 
-   
-    StockOutRequest, 
-   
-    StockTransferRequest, 
-   
+from app.schemas.inventory import (
+    StockInRequest,
+    StockOutRequest,
+    StockTransferRequest,
     SupplierCreate,
     SupplierUpdate,
-),
 )
 from app.utils.constants import StockMovementType
 from app.utils.helpers import cache_delete_pattern
@@ -294,7 +289,8 @@ class InventoryService:
             self.db.query(Supplier)
             .filter(Supplier.tenant_id == tenant_id)
             .all()
-    
+        )
+
     def get_supplier(self, tenant_id: int, supplier_id: int) -> Supplier:
         supplier = (
             self.db.query(Supplier)
@@ -343,7 +339,6 @@ class InventoryService:
          self.db.commit()
 
          return {"message": "Supplier deleted successfully"}
-        )
 
     def list_movements(self, tenant_id: int, store_id: int | None = None):
 
