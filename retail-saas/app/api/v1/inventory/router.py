@@ -68,3 +68,5 @@ def list_movements(
     db: Session = Depends(get_db),
 ):
     return InventoryService(db).list_movements(user.tenant_id, store_id)
+
+
