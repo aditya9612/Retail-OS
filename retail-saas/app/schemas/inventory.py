@@ -6,18 +6,9 @@ from pydantic import BaseModel, Field, EmailStr
 
 
 class SupplierBase(BaseModel):
-    name: str = Field(
-        min_length=2,
-        max_length=100,
-        pattern=r"^[A-Za-z ]+$"
-    )
+    name: Optional[str] = Field(None, min_length=2, max_length=100)
     
-    contact_person: str | None = Field(
-        default=None,
-        min_length=2,
-        max_length=100,
-        pattern=r"^[A-Za-z ]+$"
-    )
+    contact_person: Optional[str] = Field(None, min_length=2, max_length=100)
     
     email: EmailStr | None = None
     phone: str | None = Field(
@@ -25,34 +16,19 @@ class SupplierBase(BaseModel):
          pattern=r"^(\+91)?[6-9]\d{9}$"
     )
     
-    address: str | None = Field(
-        default=None,
-        min_length=5,
-        max_length=500
-    )
-    gstin: str | None = Field(
-        default=None,
-        pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$"
-    )
+    address: Optional[str] = None
+
+    gstin: Optional[str] = None
+    
 
 class SupplierCreate(SupplierBase):
     pass
 
 
 class SupplierUpdate(BaseModel):
-    name: str | None = Field(
-        default=None,
-        min_length=2,
-        max_length=100,
-        pattern=r"^[A-Za-z ]+$"
-    )
-
-    contact_person: str | None = Field(
-        default=None,
-        min_length=2,
-        max_length=100,
-        pattern=r"^[A-Za-z ]+$"
-    )
+    name: Optional[str] = Field(None, min_length=2, max_length=100)
+    
+    contact_person: Optional[str] = Field(None, min_length=2, max_length=100)
      
     email: EmailStr | None = None
     phone: str | None = Field(
@@ -60,16 +36,9 @@ class SupplierUpdate(BaseModel):
          pattern=r"^(\+91)?[6-9]\d{9}$"
     )
     
-    address: str | None = Field(
-        default=None,
-        min_length=5,
-        max_length=500
-    )
+    address: Optional[str] = None
 
-    gstin: str | None = Field(
-        default=None,
-        pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$"
-    )
+    gstin: Optional[str] = None
     
 
 class SupplierResponse(SupplierBase):
