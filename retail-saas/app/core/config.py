@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: List[str] = [
         "https://testing.myretailos.com",
+        "https://retail-os.netlify.app",
         "http://localhost:3000",
     ]
 
