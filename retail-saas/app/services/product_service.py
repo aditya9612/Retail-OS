@@ -1,3 +1,6 @@
+from datetime import date
+from decimal import Decimal
+
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictException, NotFoundException
@@ -11,7 +14,7 @@ from app.repositories.store_repo import StoreRepository
 from app.repositories.user_repo import UserRepository
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.schemas.user import StoreCreate, StoreUpdate, UserCreate, UserUpdate
-from app.utils.barcode import generate_barcode
+from app.utils.barcode import generate_barcode, generate_barcode_image
 
 
 class ProductService:
@@ -39,19 +42,62 @@ class ProductService:
             raise NotFoundException("Product not found for barcode")
         return product
 
-    def list_products(self, tenant_id: int, page: int = 1, page_size: int = 20):
+    def search_products(
+        self,
+        tenant_id: int,
+        query: str,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> list[Product]:
         skip = (page - 1) * page_size
-        return self.repo.list_products(tenant_id, skip, page_size)
+        if not query or len(query.strip()) < 1:
+            raise ConflictException("Search query cannot be empty")
+        return self.repo.search_products(tenant_id, query.strip(), skip, page_size)
 
-    def update_product(self, tenant_id: int, product_id: int, data: ProductUpdate) -> Product:
+    def list_products(
+        self,
+        tenant_id: int,
+        page: int = 1,
+        page_size: int = 20,
+        include_inactive: bool = False,
+    ) -> list[Product]:
+        skip = (page - 1) * page_size
+        return self.repo.list_products(tenant_id, skip, page_size, include_inactive)
+
+    def update_product(
+        self, tenant_id: int, product_id: int, data: ProductUpdate
+    ) -> Product:
         product = self.get_product(tenant_id, product_id)
         for key, value in data.model_dump(exclude_unset=True).items():
             setattr(product, key, value)
         return self.repo.update(product)
 
+    def toggle_status(self, tenant_id: int, product_id: int) -> Product:
+        product = self.repo.get_by_id(product_id, tenant_id)
+        if not product:
+            raise NotFoundException("Product not found")
+        product.is_active = not product.is_active
+        return self.repo.update(product)
+
     def delete_product(self, tenant_id: int, product_id: int) -> None:
         product = self.get_product(tenant_id, product_id)
         self.repo.delete(product)
+
+    def get_barcode_image(self, tenant_id: int, product_id: int) -> bytes:
+        product = self.get_product(tenant_id, product_id)
+        if not product.barcode:
+            raise NotFoundException("Product has no barcode")
+        return generate_barcode_image(product.barcode, product.name)
+
+    def list_low_stock(
+        self, tenant_id: int, store_id: int, threshold: int = 10
+    ) -> list[Product]:
+        return self.repo.list_low_stock(tenant_id, store_id, threshold)
+
+    def list_expiring_soon(
+        self, tenant_id: int, store_id: int, days: int = 30
+    ) -> list[Product]:
+        return self.repo.list_expiring_soon(tenant_id, store_id, days)
 
 
 class StoreService:
@@ -120,7 +166,9 @@ class UserService:
             raise NotFoundException("User not found")
         return user
 
-    def list_users(self, tenant_id: int, page: int = 1, page_size: int = 20) -> list[User]:
+    def list_users(
+        self, tenant_id: int, page: int = 1, page_size: int = 20
+    ) -> list[User]:
         skip = (page - 1) * page_size
         return self.repo.list_users(tenant_id, skip, page_size)
 
