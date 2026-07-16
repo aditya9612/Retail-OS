@@ -35,6 +35,8 @@ class Settings(BaseSettings):
         "https://testing.myretailos.com",
         "https://retail-os.netlify.app",
         "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:5174",
     ]
 
     @field_validator("CORS_ORIGINS", mode="before")
