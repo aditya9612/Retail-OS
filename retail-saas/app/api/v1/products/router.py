@@ -125,9 +125,6 @@ def toggle_product_status(
     )
 
 
-# ----------------------------
-# Preview Barcode
-# ----------------------------
 @router.get("/{product_id}/barcode-image")
 def barcode_image(
     product_id: int,
@@ -145,9 +142,6 @@ def barcode_image(
     )
 
 
-# ----------------------------
-# Download Barcode
-# ----------------------------
 @router.get("/{product_id}/barcode-download")
 def download_barcode(
     product_id: int,
