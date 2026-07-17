@@ -1,5 +1,4 @@
 from datetime import datetime
-from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -56,8 +55,15 @@ def download_invoice_pdf(
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
+    invoice = BillingService(db).get_invoice(user.tenant_id, invoice_id)
     pdf_bytes = BillingService(db).generate_pdf(user.tenant_id, invoice_id)
-    return Response(content=pdf_bytes, media_type="application/pdf")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={invoice.invoice_number}.pdf"
+        }
+    )
 
 
 @router.post("/{invoice_id}/reprint")
@@ -68,7 +74,9 @@ def reprint_invoice(
     db: Session = Depends(get_db),
 ):
     result = BillingService(db).reprint_invoice(user.tenant_id, invoice_id)
-    thermal = BillingService(db).get_thermal_payload(user.tenant_id, invoice_id, printer_type)
+    thermal = BillingService(db).get_thermal_payload(
+        user.tenant_id, invoice_id, printer_type
+    )
     return {
         "invoice": InvoiceResponse.model_validate(result["invoice"]),
         "print_payload": thermal,

@@ -6,12 +6,14 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import require_permission
+from app.models.order import Order
 from app.models.user import User
 from app.schemas.billing import ReturnItemRequest
 from app.schemas.cart import CartDiscountApply, CartItemCreate, CartItemUpdate, CartSummaryResponse
 from app.schemas.order import InvoiceResponse
 from app.services.billing_service import BillingService
 from app.services.cart_service import CartService
+from app.utils.constants import OrderStatus
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -136,8 +138,15 @@ def download_invoice_pdf_legacy(
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
+    invoice = BillingService(db).get_invoice(user.tenant_id, invoice_id)
     pdf_bytes = BillingService(db).generate_pdf(user.tenant_id, invoice_id)
-    return Response(content=pdf_bytes, media_type="application/pdf")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={invoice.invoice_number}.pdf"
+        }
+    )
 
 
 @router.post("/orders/{order_id}/return")
@@ -146,12 +155,12 @@ def process_return_legacy(
     user: User = Depends(require_permission("billing:write")),
     db: Session = Depends(get_db),
 ):
-    from app.models.order import Order
-    from app.utils.constants import OrderStatus
-
-    order = db.query(Order).filter(Order.id == order_id, Order.tenant_id == user.tenant_id).first()
+    from app.core.exceptions import NotFoundException
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.tenant_id == user.tenant_id
+    ).first()
     if not order:
-        from app.core.exceptions import NotFoundException
         raise NotFoundException("Order not found")
     order.status = OrderStatus.RETURNED.value
     db.commit()

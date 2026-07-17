@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
+import io
 
 from app.core.database import get_db
 from app.core.security import require_permission
@@ -39,7 +40,9 @@ def search_products(
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    return ProductService(db).search_products(user.tenant_id, q, page, page_size)
+    return ProductService(db).search_products(
+        user.tenant_id, q, page, page_size
+    )
 
 
 @router.get("/low-stock", response_model=list[ProductResponse])
@@ -49,7 +52,9 @@ def list_low_stock(
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    return ProductService(db).list_low_stock(user.tenant_id, store_id, threshold)
+    return ProductService(db).list_low_stock(
+        user.tenant_id, store_id, threshold
+    )
 
 
 @router.get("/expiring-soon", response_model=list[ProductResponse])
@@ -59,7 +64,9 @@ def list_expiring_soon(
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    return ProductService(db).list_expiring_soon(user.tenant_id, store_id, days)
+    return ProductService(db).list_expiring_soon(
+        user.tenant_id, store_id, days
+    )
 
 
 @router.get("/barcode/{barcode}", response_model=ProductResponse)
@@ -68,7 +75,9 @@ def lookup_barcode(
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    return ProductService(db).get_by_barcode(user.tenant_id, barcode)
+    return ProductService(db).get_by_barcode(
+        user.tenant_id, barcode
+    )
 
 
 @router.post("", response_model=ProductResponse, status_code=201)
@@ -77,7 +86,9 @@ def create_product(
     user: User = Depends(require_permission("products:write")),
     db: Session = Depends(get_db),
 ):
-    return ProductService(db).create_product(user.tenant_id, data)
+    return ProductService(db).create_product(
+        user.tenant_id, data
+    )
 
 
 @router.get("/{product_id}", response_model=ProductResponse)
@@ -86,7 +97,9 @@ def get_product(
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    return ProductService(db).get_product(user.tenant_id, product_id)
+    return ProductService(db).get_product(
+        user.tenant_id, product_id
+    )
 
 
 @router.patch("/{product_id}", response_model=ProductResponse)
@@ -96,7 +109,9 @@ def update_product(
     user: User = Depends(require_permission("products:write")),
     db: Session = Depends(get_db),
 ):
-    return ProductService(db).update_product(user.tenant_id, product_id, data)
+    return ProductService(db).update_product(
+        user.tenant_id, product_id, data
+    )
 
 
 @router.patch("/{product_id}/toggle-status", response_model=ProductResponse)
@@ -105,17 +120,52 @@ def toggle_product_status(
     user: User = Depends(require_permission("products:write")),
     db: Session = Depends(get_db),
 ):
-    return ProductService(db).toggle_status(user.tenant_id, product_id)
+    return ProductService(db).toggle_status(
+        user.tenant_id, product_id
+    )
 
 
+# ----------------------------
+# Preview Barcode
+# ----------------------------
 @router.get("/{product_id}/barcode-image")
-def download_barcode_image(
+def barcode_image(
     product_id: int,
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    image_bytes = ProductService(db).get_barcode_image(user.tenant_id, product_id)
-    return Response(content=image_bytes, media_type="image/png")
+    image_bytes = ProductService(db).get_barcode_image(
+        user.tenant_id,
+        product_id
+    )
+
+    return Response(
+        content=image_bytes,
+        media_type="image/png"
+    )
+
+
+# ----------------------------
+# Download Barcode
+# ----------------------------
+@router.get("/{product_id}/barcode-download")
+def download_barcode(
+    product_id: int,
+    user: User = Depends(require_permission("products:read")),
+    db: Session = Depends(get_db),
+):
+    image_bytes = ProductService(db).get_barcode_image(
+        user.tenant_id,
+        product_id
+    )
+
+    return StreamingResponse(
+        io.BytesIO(image_bytes),
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f'attachment; filename="barcode_{product_id}.png"'
+        },
+    )
 
 
 @router.delete("/{product_id}", status_code=204)
@@ -124,7 +174,10 @@ def delete_product(
     user: User = Depends(require_permission("products:write")),
     db: Session = Depends(get_db),
 ):
-    ProductService(db).delete_product(user.tenant_id, product_id)
+    ProductService(db).delete_product(
+        user.tenant_id,
+        product_id
+    )
 
 
 @router.post("/categories", response_model=CategoryResponse, status_code=201)
@@ -133,10 +186,15 @@ def create_category(
     user: User = Depends(require_permission("products:write")),
     db: Session = Depends(get_db),
 ):
-    category = Category(tenant_id=user.tenant_id, **data.model_dump())
+    category = Category(
+        tenant_id=user.tenant_id,
+        **data.model_dump()
+    )
+
     db.add(category)
     db.commit()
     db.refresh(category)
+
     return category
 
 
@@ -145,4 +203,8 @@ def list_categories(
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    return db.query(Category).filter(Category.tenant_id == user.tenant_id).all()
+    return (
+        db.query(Category)
+        .filter(Category.tenant_id == user.tenant_id)
+        .all()
+    )
