@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
@@ -50,18 +50,25 @@ def get_invoice(
 
 
 @router.get("/{invoice_id}/pdf")
-def download_invoice_pdf(
+def invoice_pdf(
     invoice_id: int,
+    mode: str = Query(default="download", description="download or preview"),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
+    """
+    PDF endpoint with two modes:
+    - mode=download → saves PDF file to computer
+    - mode=preview  → opens PDF in browser tab
+    """
     invoice = BillingService(db).get_invoice(user.tenant_id, invoice_id)
     pdf_bytes = BillingService(db).generate_pdf(user.tenant_id, invoice_id)
+    disposition = "inline" if mode == "preview" else "attachment"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"attachment; filename={invoice.invoice_number}.pdf"
+            "Content-Disposition": f"{disposition}; filename={invoice.invoice_number}.pdf"
         }
     )
 
