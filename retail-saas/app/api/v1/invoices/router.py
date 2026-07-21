@@ -56,11 +56,7 @@ def invoice_pdf(
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
-    """
-    PDF endpoint with two modes:
-    - mode=download → saves PDF file to computer
-    - mode=preview  → opens PDF in browser tab
-    """
+    
     invoice = BillingService(db).get_invoice(user.tenant_id, invoice_id)
     pdf_bytes = BillingService(db).generate_pdf(user.tenant_id, invoice_id)
     disposition = "inline" if mode == "preview" else "attachment"

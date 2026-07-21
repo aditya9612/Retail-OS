@@ -115,11 +115,7 @@ def barcode_image(
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    """
-    Barcode image endpoint with two modes:
-    - mode=download → saves PNG file to computer
-    - mode=preview  → opens PNG in browser tab
-    """
+   
     product = ProductService(db).get_product(user.tenant_id, product_id)
     image_bytes = ProductService(db).get_barcode_image(user.tenant_id, product_id)
     disposition = "inline" if mode == "preview" else "attachment"
