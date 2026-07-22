@@ -11,6 +11,8 @@ from app.schemas.coupon import (
     ApplyCouponRequest,
     ApplyCouponResponse,
     CouponStatsResponse,
+    ValidateCouponRequest,
+    ValidateCouponResponse,
 )
 from app.services.coupon_service import CouponService
 
@@ -117,12 +119,21 @@ def delete_coupon(
         user.tenant_id,
         coupon_id,
     )
+ 
+ 
+@router.post("/validate",response_model=ValidateCouponResponse,)
+def validate_coupon(
+    data: ValidateCouponRequest,
+    user: User = Depends(require_permission("orders:write")),
+    db: Session = Depends(get_db),
+):
+    return CouponService(db).validate_coupon(
+        tenant_id=user.tenant_id,
+        coupon_code=data.coupon_code,
+        order_amount=data.order_amount,
+    )   
     
-    
-@router.post(
-    "/apply",
-    response_model=ApplyCouponResponse,
-)
+@router.post("/apply", response_model=ApplyCouponResponse,)
 def apply_coupon(
     data: ApplyCouponRequest,
     user: User = Depends(require_permission("orders:write")),

@@ -199,7 +199,12 @@ class CouponService:
             tenant_id,
             coupon_id,
         )
-
+        
+        if coupon.is_active:
+            raise AppException(
+                "Coupon is already active"
+            )
+        
         coupon.is_active = True
 
         return self.repo.update(coupon)
@@ -215,26 +220,15 @@ class CouponService:
             coupon_id,
         )
 
+        if not coupon.is_active:
+            raise AppException(
+                "Coupon is already inactive"
+            )
         coupon.is_active = False
 
         return self.repo.update(coupon)
 
-    def get_active_coupons(
-        self,
-        tenant_id: int,
-    ):
-
-        today = date.today()
-
-        coupons = self.repo.list_coupons(tenant_id)
-
-        return [
-            coupon
-            for coupon in coupons
-            if coupon.is_active
-            and coupon.start_date <= today <= coupon.end_date
-        ]
-        
+    
     def validate_coupon(
         self,
         tenant_id: int,
