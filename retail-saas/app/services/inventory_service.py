@@ -327,19 +327,67 @@ class InventoryService:
          return supplier
 
 
-    def delete_supplier(
+    def update_supplier_status(
          self,
          tenant_id: int,
          supplier_id: int,
+         is_active: bool,
+    ):    
+
+         supplier = self.get_supplier(
+         tenant_id,
+         supplier_id,
+        )
+
+         supplier.is_active = is_active
+
+         self.db.commit()
+         self.db.refresh(supplier)
+
+         return supplier
+
+    
+    def search_suppliers(
+         self,
+         tenant_id: int,
+         search: str,
     ):
 
-         supplier = self.get_supplier(tenant_id, supplier_id)
+         return (
+             self.db.query(Supplier)
+             .filter(
+                 Supplier.tenant_id == tenant_id,
+                 Supplier.name.ilike(f"%{search}%"),
+            )
+            .all()
+    )
+         
+    def supplier_stats(
+         self,
+         tenant_id: int,
+    ):
 
-         self.db.delete(supplier)
-         self.db.commit()
+         suppliers = (
+            self.db.query(Supplier)
+            .filter(
+                Supplier.tenant_id == tenant_id
+            )
+            .all()
+    )
 
-         return {"message": "Supplier deleted successfully"}
-
+         return {
+            "total_suppliers": len(suppliers),
+            "active_suppliers": sum(
+                1 for supplier in suppliers
+                if supplier.is_active
+            ),
+            "inactive_suppliers": sum(
+                1 for supplier in suppliers
+                if not supplier.is_active
+            ),
+        }
+    
+        
     def list_movements(self, tenant_id: int, store_id: int | None = None):
 
         query = self.db.query(StockMovement).filter(
