@@ -31,7 +31,13 @@ class Settings(BaseSettings):
     WHATSAPP_API_TOKEN: str = ""
     WHATSAPP_PHONE_NUMBER_ID: str = ""
 
-    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+    CORS_ORIGINS: List[str] = [
+        "https://testing.myretailos.com",
+        "https://retail-os.netlify.app",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:5174",
+    ]
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

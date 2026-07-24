@@ -2,7 +2,9 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.models.customer import Customer
-
+from sqlalchemy import func
+from datetime import datetime
+from app.models.order import Order
 
 def get_filtered_customers(db, tenant_id, name=None, mobile=None, segment=None):
     query = db.query(Customer).filter(Customer.tenant_id == tenant_id)
@@ -48,3 +50,55 @@ def delete_customer(db, tenant_id: int, customer_id: int):
     db.refresh(customer)
 
     return customer
+
+def get_customer_stats(db: Session, tenant_id: int):
+    total_customers = (
+        db.query(func.count(Customer.id))
+        .filter(Customer.tenant_id == tenant_id)
+        .scalar()
+    )
+
+    active_customers = (
+        db.query(func.count(Customer.id))
+        .filter(
+            Customer.tenant_id == tenant_id,
+            Customer.status == "active"
+        )
+        .scalar()
+    )
+
+    current_month = datetime.now().month
+    current_year = datetime.now().year
+
+    vip_customers = (
+    db.query(Customer)
+    .filter(
+        Customer.tenant_id == tenant_id,
+        Customer.total_spend > 50000
+    )
+    .count()
+)
+
+    new_this_month = (
+        db.query(func.count(Customer.id))
+        .filter(
+            Customer.tenant_id == tenant_id,
+            func.extract("month", Customer.created_at) == current_month,
+            func.extract("year", Customer.created_at) == current_year,
+        )
+        .scalar()
+    )
+
+    total_revenue = (
+        db.query(func.coalesce(func.sum(Order.total_amount), 0))
+        .filter(Order.tenant_id == tenant_id)
+        .scalar()
+    )
+
+    return {
+        "total_customers": total_customers,
+        "active_customers": active_customers,
+        "total_revenue": int(total_revenue),
+        "new_this_month": new_this_month,
+        "vip_customers": vip_customers
+    }
