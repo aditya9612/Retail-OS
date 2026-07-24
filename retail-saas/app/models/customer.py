@@ -16,6 +16,7 @@ class Customer(Base, TimestampMixin):
     email: Mapped[str | None] = mapped_column(String(255), index=True)
     phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     address: Mapped[str | None] = mapped_column(String(500))
+    gstin: Mapped[str | None] = mapped_column(String(20), index=True)
     birthday: Mapped[date | None] = mapped_column(Date)
     loyalty_points: Mapped[int] = mapped_column(Integer, default=0)
     whatsapp_opt_in: Mapped[bool] = mapped_column(Boolean, default=True)

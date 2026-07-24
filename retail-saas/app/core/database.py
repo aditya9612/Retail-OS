@@ -9,6 +9,13 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
+
+def _connect_args(database_url: str) -> dict:
+    if database_url.startswith("sqlite"):
+        return {}
+    return {"charset": "utf8mb4"}
+
+
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
@@ -16,7 +23,7 @@ engine = create_engine(
     pool_size=10,
     max_overflow=20,
     echo=settings.DEBUG,
-    connect_args={"charset": "utf8mb4"},
+    connect_args=_connect_args(settings.DATABASE_URL),
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -81,5 +88,6 @@ def init_db() -> None:
     """Ensure database exists and all tables are created."""
     import app.models  # noqa: F401 — register all models with Base.metadata
 
-    ensure_database_exists()
+    if not settings.DATABASE_URL.startswith("sqlite"):
+        ensure_database_exists()
     Base.metadata.create_all(bind=engine)

@@ -1,4 +1,4 @@
-import uuid
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -14,7 +14,7 @@ from app.repositories.store_repo import StoreRepository
 from app.repositories.user_repo import UserRepository
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.schemas.user import StoreCreate, StoreUpdate, UserCreate, UserUpdate
-from app.utils.barcode import generate_barcode
+from app.utils.barcode import generate_barcode, generate_barcode_image
 
 
 class ProductService:
@@ -25,117 +25,104 @@ class ProductService:
     def create_product(self, tenant_id: int, data: ProductCreate) -> Product:
         if self.repo.get_by_sku(data.sku, tenant_id):
             raise ConflictException("SKU already exists")
-        products= Product(tenant_id=tenant_id, **data.model_dump())
+        product = Product(tenant_id=tenant_id, **data.model_dump())
         if not product.barcode:
             product.barcode = generate_barcode(product.sku)
         return self.repo.create(product)
 
     def get_product(self, tenant_id: int, product_id: int) -> Product:
-        products= self.repo.get_by_id(product_id, tenant_id)
+        product = self.repo.get_by_id(product_id, tenant_id)
         if not product:
-            raise NotFoundException("productsnot found")
+            raise NotFoundException("Product not found")
         return product
 
     def get_by_barcode(self, tenant_id: int, barcode: str) -> Product:
-        products= self.repo.get_by_barcode(barcode, tenant_id)
+        product = self.repo.get_by_barcode(barcode, tenant_id)
         if not product:
-            raise NotFoundException("productsnot found for barcode")
+            raise NotFoundException("Product not found for barcode")
         return product
 
-    def list_products(self, tenant_id: int, page: int = 1, page_size: int = 20):
+    def search_products(
+        self,
+        tenant_id: int,
+        query: str,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> list[Product]:
         skip = (page - 1) * page_size
-        items = self.repo.list_products(tenant_id, skip, page_size)
-        return items
+        if not query or len(query.strip()) < 1:
+            raise ConflictException("Search query cannot be empty")
+        return self.repo.search_products(tenant_id, query.strip(), skip, page_size)
 
-    def update_product(self, tenant_id: int, product_id: int, data: ProductUpdate) -> Product:
-        products= self.get_product(tenant_id, product_id)
+    def list_products(
+        self,
+        tenant_id: int,
+        page: int = 1,
+        page_size: int = 20,
+        include_inactive: bool = False,
+    ) -> list[Product]:
+        skip = (page - 1) * page_size
+        return self.repo.list_products(tenant_id, skip, page_size, include_inactive)
+
+    def update_product(
+        self, tenant_id: int, product_id: int, data: ProductUpdate
+    ) -> Product:
+        product = self.get_product(tenant_id, product_id)
         for key, value in data.model_dump(exclude_unset=True).items():
             setattr(product, key, value)
         return self.repo.update(product)
 
+    def toggle_status(self, tenant_id: int, product_id: int) -> Product:
+        product = self.repo.get_by_id(product_id, tenant_id)
+        if not product:
+            raise NotFoundException("Product not found")
+        product.is_active = not product.is_active
+        return self.repo.update(product)
+
     def delete_product(self, tenant_id: int, product_id: int) -> None:
-        products= self.get_product(tenant_id, product_id)
+        product = self.get_product(tenant_id, product_id)
         self.repo.delete(product)
 
+    def get_barcode_image(self, tenant_id: int, product_id: int) -> bytes:
+        product = self.get_product(tenant_id, product_id)
+        if not product.barcode:
+            raise NotFoundException("Product has no barcode")
+        return generate_barcode_image(product.barcode, product.name)
 
-from app.repositories.store_repo import StoreRepository
+    def list_low_stock(
+        self, tenant_id: int, store_id: int, threshold: int = 10
+    ) -> list[Product]:
+        return self.repo.list_low_stock(tenant_id, store_id, threshold)
+
+    def list_expiring_soon(
+        self, tenant_id: int, store_id: int, days: int = 30
+    ) -> list[Product]:
+        return self.repo.list_expiring_soon(tenant_id, store_id, days)
 
 
 class StoreService:
-    
     def __init__(self, db: Session):
         self.db = db
         self.repo = StoreRepository(db)
 
-
     def create_store(self, tenant_id: int, data: StoreCreate) -> Store:
-
-        store = Store(
-            tenant_id=tenant_id,
-            **data.model_dump()
-        )
-
+        store = Store(tenant_id=tenant_id, **data.model_dump())
         return self.repo.create(store)
 
-
-
     def get_store(self, tenant_id: int, store_id: int) -> Store:
-
-        store = self.repo.get_by_id(
-            store_id,
-            tenant_id
-        )
-
-        if not store:
-            raise NotFoundException("Store not found")
-
-        return store
-
-
-
-    def list_stores(self, tenant_id: int) -> list[Store]:
-
-        return self.repo.list_stores(
-            tenant_id
-        )
-
-
-
-    def update_store(
-        self,
-        tenant_id: int,
-        store_id: int,
-        data: StoreUpdate
-    ) -> Store:
-
-
-        store = self.get_store(
-            tenant_id,
-            store_id
-        )
-
-
-        for key, value in data.model_dump(
-            exclude_unset=True
-        ).items():
-
-            setattr(
-                store,
-                key,
-                value
-            )
-
-
-        return self.repo.update(store)
-
-    def get_store(self, tenant_id: int, store_id: int) -> Store:
-        store = self.db.query(Store).filter(Store.id == store_id, Store.tenant_id == tenant_id).first()
+        store = self.db.query(Store).filter(
+            Store.id == store_id,
+            Store.tenant_id == tenant_id
+        ).first()
         if not store:
             raise NotFoundException("Store not found")
         return store
 
     def list_stores(self, tenant_id: int) -> list[Store]:
-        return self.db.query(Store).filter(Store.tenant_id == tenant_id, Store.is_active.is_(True)).all()
+        return self.db.query(Store).filter(
+            Store.tenant_id == tenant_id,
+            Store.is_active.is_(True)
+        ).all()
 
     def update_store(self, tenant_id: int, store_id: int, data: StoreUpdate) -> Store:
         store = self.get_store(tenant_id, store_id)
@@ -154,7 +141,10 @@ class UserService:
     def create_user(self, tenant_id: int, data: UserCreate) -> User:
         if self.repo.get_by_email(data.email, tenant_id):
             raise ConflictException("Email already registered")
-        role = self.db.query(Role).filter(Role.id == data.role_id, Role.tenant_id == tenant_id).first()
+        role = self.db.query(Role).filter(
+            Role.id == data.role_id,
+            Role.tenant_id == tenant_id
+        ).first()
         if not role:
             raise NotFoundException("Role not found")
         if data.store_id is not None:
@@ -176,7 +166,9 @@ class UserService:
             raise NotFoundException("User not found")
         return user
 
-    def list_users(self, tenant_id: int, page: int = 1, page_size: int = 20) -> list[User]:
+    def list_users(
+        self, tenant_id: int, page: int = 1, page_size: int = 20
+    ) -> list[User]:
         skip = (page - 1) * page_size
         return self.repo.list_users(tenant_id, skip, page_size)
 

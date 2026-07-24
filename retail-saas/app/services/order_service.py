@@ -66,9 +66,9 @@ class OrderService:
             notes=data.notes,
         )
         for item_data in data.items:
-            products= self.db.query(Product).filter(Product.id == item_data.product_id, Product.tenant_id == tenant_id).first()
+            product = self.db.query(Product).filter(Product.id == item_data.product_id, Product.tenant_id == tenant_id).first()
             if not product:
-                raise NotFoundException(f"products{item_data.product_id} not found")
+                raise NotFoundException(f"Product {item_data.product_id} not found")
             order.items.append(self._calculate_item_totals(product, item_data))
         self._recalculate_order(order)
         return self.repo.create(order)
