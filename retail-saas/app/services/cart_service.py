@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import AppException, NotFoundException
 from app.core.redis_client import get_redis
 from app.models.product import Product
+from app.services.audit_service import AuditService
 from app.utils.gst_engine import aggregate_taxes, calculate_line_tax, resolve_gst_rate
 
 CART_TTL_SECONDS = 3600
@@ -117,6 +118,19 @@ class CartService:
             if unit_price is not None:
                 existing["unit_price"] = str(unit_price)
             existing["discount"] = str(Decimal(str(existing.get("discount", "0"))) + discount)
+            product = (
+                self.db.query(Product)
+                .filter(Product.id == product_id, Product.tenant_id == tenant_id)
+                .first()
+            )
+            if product:
+                self._log_price_or_item_discount(
+                    tenant_id,
+                    user_id,
+                    product,
+                    unit_price,
+                    discount,
+                )
         else:
             cart["items"].append(
                 {
@@ -125,6 +139,15 @@ class CartService:
                     "unit_price": str(unit_price) if unit_price is not None else None,
                     "discount": str(discount),
                 }
+            )
+        product = (
+            self.db.query(Product)
+            .filter(Product.id == product_id, Product.tenant_id == tenant_id)
+            .first()
+        )
+        if product:
+            self._log_price_or_item_discount(
+                tenant_id, user_id, product, unit_price, discount
             )
         self._save_cart(tenant_id, user_id, cart)
         return self.get_cart(tenant_id, user_id)
@@ -149,6 +172,19 @@ class CartService:
             item["unit_price"] = str(unit_price)
         if discount is not None:
             item["discount"] = str(discount)
+        product = (
+            self.db.query(Product)
+            .filter(Product.id == product_id, Product.tenant_id == tenant_id)
+            .first()
+        )
+        if product:
+            self._log_price_or_item_discount(
+                tenant_id,
+                user_id,
+                product,
+                unit_price,
+                Decimal(str(item.get("discount", "0"))),
+            )
         self._save_cart(tenant_id, user_id, cart)
         return self.get_cart(tenant_id, user_id)
 
@@ -182,7 +218,54 @@ class CartService:
         if coupon_code:
             cart["coupon_code"] = coupon_code
         self._save_cart(tenant_id, user_id, cart)
+        AuditService(self.db).log(
+            tenant_id,
+            user_id,
+            "cart_discount_applied",
+            "cart",
+            details={
+                "discount_type": discount_type,
+                "value": str(value),
+                "discount_amount": cart["discount_amount"],
+                "coupon_code": coupon_code,
+            },
+        )
         return self.get_cart(tenant_id, user_id)
+
+    def _log_price_or_item_discount(
+        self,
+        tenant_id: int,
+        user_id: int,
+        product: Product,
+        unit_price: Decimal | None,
+        discount: Decimal,
+    ) -> None:
+        audit = AuditService(self.db)
+        if unit_price is not None and unit_price != product.price:
+            audit.log(
+                tenant_id,
+                user_id,
+                "price_override",
+                "product",
+                product.id,
+                {
+                    "product_name": product.name,
+                    "catalog_price": str(product.price),
+                    "override_price": str(unit_price),
+                },
+            )
+        if discount > 0:
+            audit.log(
+                tenant_id,
+                user_id,
+                "item_discount_applied",
+                "product",
+                product.id,
+                {
+                    "product_name": product.name,
+                    "discount": str(discount),
+                },
+            )
 
     def get_cart(self, tenant_id: int, user_id: int) -> dict:
         cart = self._load_cart(tenant_id, user_id)

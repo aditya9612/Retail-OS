@@ -30,13 +30,22 @@ def search_invoices(
     invoice_number: Optional[str] = Query(default=None),
     customer_name: Optional[str] = Query(default=None),
     mobile: Optional[str] = Query(default=None),
+    gstin: Optional[str] = Query(default=None),
+    payment_status: Optional[str] = Query(default=None),
     date_from: Optional[datetime] = Query(default=None),
     date_to: Optional[datetime] = Query(default=None),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
     return BillingService(db).search_invoices(
-        user.tenant_id, invoice_number, customer_name, mobile, date_from, date_to
+        user.tenant_id,
+        invoice_number,
+        customer_name,
+        mobile,
+        gstin,
+        payment_status,
+        date_from,
+        date_to,
     )
 
 

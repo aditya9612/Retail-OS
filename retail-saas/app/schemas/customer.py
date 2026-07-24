@@ -9,6 +9,7 @@ class CustomerBase(BaseModel):
     email: Optional[EmailStr] = None
     phone: str = Field(min_length=10, max_length=15, description="Phone must be 10 to 15 digits")
     address: Optional[str] = Field(default=None, max_length=500)
+    gstin: Optional[str] = Field(default=None, min_length=15, max_length=15)
     birthday: Optional[date] = None
     whatsapp_opt_in: bool = True
     sms_opt_in: bool = True
@@ -31,6 +32,13 @@ class CustomerBase(BaseModel):
             raise ValueError("Name cannot be empty or whitespace")
         return v.strip()
 
+    @field_validator("gstin")
+    @classmethod
+    def validate_gstin(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) != 15:
+            raise ValueError("GSTIN must be exactly 15 characters")
+        return v.upper() if v else v
+
 
 class CustomerCreate(CustomerBase):
     pass
@@ -41,6 +49,7 @@ class CustomerUpdate(BaseModel):
     email: Optional[EmailStr] = None
     phone: Optional[str] = Field(default=None, min_length=10, max_length=15)
     address: Optional[str] = Field(default=None, max_length=500)
+    gstin: Optional[str] = Field(default=None, min_length=15, max_length=15)
     birthday: Optional[date] = None
     whatsapp_opt_in: Optional[bool] = None
     sms_opt_in: Optional[bool] = None

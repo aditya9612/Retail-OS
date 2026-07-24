@@ -4,6 +4,7 @@ from enum import Enum
 class UserRole(str, Enum):
     ADMIN = "admin"
     OWNER = "owner"
+    MANAGER = "manager"
     STAFF = "staff"
 
 
@@ -73,10 +74,19 @@ DEFAULT_ROLE_PERMISSIONS = {
         "inventory:read", "inventory:write",
         "orders:read", "orders:write",
         "billing:read", "billing:write", 
-        "billing:refund", "billing:gst_config",
+        "billing:refund", "billing:gst_config", "billing:price_override",
         "payments:read", "payments:write",
         "customers:read", "customers:write",
         "reports:read", "analytics:read",
+    ],
+    UserRole.MANAGER: [
+        "products:read",
+        "inventory:read",
+        "orders:read", "orders:write",
+        "billing:read", "billing:write",
+        "payments:read",
+        "customers:read",
+        "reports:read",
     ],
     UserRole.STAFF: [
         "products:read",

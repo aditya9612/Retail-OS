@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.core.exceptions import AppException, NotFoundException
 from app.models.credit_note import CreditNote
 from app.models.customer import Customer
+from app.models.document_sequence import DocumentSequence
 from app.models.invoice import Invoice
 from app.models.invoice_item import InvoiceItem
 from app.models.order import Order
@@ -21,7 +22,9 @@ from app.models.store import Store
 from app.models.tenant import Tenant
 from app.schemas.billing import InvoiceCreate
 from app.schemas.order import OrderCreate, OrderItemCreate
+from app.services.audit_service import AuditService
 from app.services.cart_service import CartService
+from app.services.inventory_service import InventoryService
 from app.services.order_service import OrderService
 from app.utils.constants import InvoiceStatus, OrderStatus, PaymentStatus, RefundStatus
 from app.utils.gst_engine import calculate_line_tax, resolve_gst_rate
@@ -36,27 +39,79 @@ class BillingService:
         self.db = db
 
     # ------------------------------------------------------------------ helpers
-    def _generate_invoice_number(self, tenant_id: int) -> str:
-        max_num = (
-            self.db.query(func.max(Invoice.id))
-            .filter(Invoice.tenant_id == tenant_id)
-            .scalar()
-        ) or 0
+    def _next_document_number(self, tenant_id: int, doc_type: str, prefix: str) -> str:
         year = datetime.utcnow().year
-        return f"INV-{year}-{max_num + 1:06d}"
+        row = (
+            self.db.query(DocumentSequence)
+            .filter(
+                DocumentSequence.tenant_id == tenant_id,
+                DocumentSequence.doc_type == doc_type,
+                DocumentSequence.year == year,
+            )
+            .with_for_update()
+            .first()
+        )
+        if not row:
+            row = DocumentSequence(
+                tenant_id=tenant_id,
+                doc_type=doc_type,
+                year=year,
+                last_number=0,
+            )
+            self.db.add(row)
+            self.db.flush()
+
+        row.last_number += 1
+        self.db.flush()
+        return f"{prefix}-{year}-{row.last_number:06d}"
+
+    def _generate_invoice_number(self, tenant_id: int) -> str:
+        return self._next_document_number(tenant_id, "invoice", "INV")
 
     def _generate_credit_note_number(self, tenant_id: int) -> str:
-        count = (
-            self.db.query(func.count(CreditNote.id))
-            .filter(CreditNote.tenant_id == tenant_id)
-            .scalar()
-        ) or 0
-        year = datetime.utcnow().year
-        return f"CN-{year}-{count + 1:06d}"
+        return self._next_document_number(tenant_id, "credit_note", "CN")
+
+    def _credit_note_gst_breakdown(
+        self, invoice: Invoice, refund_amount: Decimal
+    ) -> dict[str, Decimal]:
+        if invoice.total_amount <= 0:
+            return {
+                "cgst_amount": Decimal("0.00"),
+                "sgst_amount": Decimal("0.00"),
+                "igst_amount": Decimal("0.00"),
+            }
+        ratio = refund_amount / invoice.total_amount
+        return {
+            "cgst_amount": (invoice.cgst_amount * ratio).quantize(Decimal("0.01")),
+            "sgst_amount": (invoice.sgst_amount * ratio).quantize(Decimal("0.01")),
+            "igst_amount": (invoice.igst_amount * ratio).quantize(Decimal("0.01")),
+        }
 
     def _gst_dict_serializable(self, gst: dict) -> dict:
         """Convert Decimal values to str so JSON column doesn't crash."""
         return {k: str(v) for k, v in gst.items()}
+
+    def _invoice_pdf_items(self, invoice: Invoice) -> list[dict]:
+        items = []
+        for item in invoice.items or []:
+            product = (
+                self.db.query(Product)
+                .filter(Product.id == item.product_id)
+                .first()
+            )
+            items.append(
+                {
+                    "product_name": product.name if product else "Item",
+                    "hsn_code": product.hsn_code if product else "",
+                    "quantity": item.quantity,
+                    "unit_price": item.unit_price,
+                    "discount_amount": item.discount_amount,
+                    "gst_rate": item.gst_rate,
+                    "gst_amount": item.gst_amount,
+                    "total_amount": item.total_amount,
+                }
+            )
+        return items
 
     # ---------------------------------------------------------- invoice items
     def _create_invoice_items_from_order(
@@ -204,6 +259,18 @@ class BillingService:
             self.db.flush()
 
         invoice = self.create_invoice(tenant_id, order.id, data.same_state)
+        AuditService(self.db).log(
+            tenant_id,
+            user_id,
+            "invoice_created",
+            "invoice",
+            invoice.id,
+            {
+                "invoice_number": invoice.invoice_number,
+                "order_id": order.id,
+                "total_amount": str(invoice.total_amount),
+            },
+        )
         cart_svc.clear_cart(tenant_id, user_id)
         return invoice
 
@@ -225,6 +292,8 @@ class BillingService:
         invoice_number: str | None = None,
         customer_name: str | None = None,
         mobile: str | None = None,
+        gstin: str | None = None,
+        payment_status: str | None = None,
         date_from=None,
         date_to=None,
     ) -> list[Invoice]:
@@ -237,16 +306,27 @@ class BillingService:
             query = query.filter(Invoice.created_at >= date_from)
         if date_to:
             query = query.filter(Invoice.created_at <= date_to)
-        if customer_name or mobile:
+
+        needs_order = customer_name or mobile or gstin or payment_status
+        if needs_order:
             query = query.join(Order, Invoice.order_id == Order.id)
-            query = query.join(Customer, Order.customer_id == Customer.id)
+
+        if customer_name or mobile or gstin:
+            query = query.outerjoin(Customer, Order.customer_id == Customer.id)
             if customer_name:
-                query = query.filter(
-                    Customer.name.ilike(f"%{customer_name}%")
-                )
+                query = query.filter(Customer.name.ilike(f"%{customer_name}%"))
             if mobile:
                 query = query.filter(Customer.phone.ilike(f"%{mobile}%"))
-        return query.order_by(Invoice.created_at.desc()).all()
+            if gstin:
+                query = query.filter(Customer.gstin.ilike(f"%{gstin}%"))
+
+        if payment_status:
+            if not needs_order:
+                query = query.join(Order, Invoice.order_id == Order.id)
+            query = query.join(Payment, Payment.order_id == Order.id)
+            query = query.filter(Payment.status == payment_status)
+
+        return query.distinct().order_by(Invoice.created_at.desc()).all()
 
     # --------------------------------------------------------- reprint invoice
     def reprint_invoice(self, tenant_id: int, invoice_id: int) -> dict:
@@ -334,8 +414,31 @@ class BillingService:
         tenant = (
             self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
         )
+        store = (
+            self.db.query(Store).filter(Store.id == order.store_id).first()
+            if order
+            else None
+        )
+        customer = (
+            self.db.query(Customer)
+            .filter(Customer.id == order.customer_id)
+            .first()
+            if order and order.customer_id
+            else None
+        )
+        payments = (
+            self.db.query(Payment)
+            .filter(Payment.order_id == invoice.order_id)
+            .all()
+        )
         pdf_bytes = generate_invoice_pdf(
-            order, invoice, tenant.name if tenant else "Store"
+            order,
+            invoice,
+            tenant,
+            store=store,
+            customer=customer,
+            items=self._invoice_pdf_items(invoice),
+            payments=payments,
         )
         if settings.AWS_S3_BUCKET and settings.AWS_ACCESS_KEY_ID:
             self._upload_to_s3(invoice, pdf_bytes)
@@ -382,6 +485,19 @@ class BillingService:
             raise NotFoundException("Product not found on invoice")
         if return_quantity > invoice_item.quantity:
             raise AppException("Return quantity exceeds invoiced quantity")
+
+        from app.schemas.inventory import StockInRequest
+
+        InventoryService(self.db).stock_in(
+            tenant_id,
+            StockInRequest(
+                store_id=order.store_id,
+                product_id=product_id,
+                quantity=int(return_quantity),
+                notes=reason or f"Return for invoice {invoice.invoice_number}",
+            ),
+        )
+
         order_item = next(
             (i for i in order.items if i.product_id == product_id), None
         )
@@ -455,16 +571,32 @@ class BillingService:
         refund.approved_by = approved_by_user_id
         self.db.flush()
 
+        invoice = self.get_invoice(tenant_id, refund.invoice_id)
+        AuditService(self.db).log(
+            tenant_id,
+            approved_by_user_id,
+            "refund_approved",
+            "refund",
+            refund.id,
+            {
+                "invoice_id": refund.invoice_id,
+                "refund_amount": str(refund.refund_amount),
+                "refund_method": refund.refund_method,
+            },
+        )
+        gst = self._credit_note_gst_breakdown(invoice, refund.refund_amount)
         credit_note = CreditNote(
             tenant_id=tenant_id,
             credit_note_no=self._generate_credit_note_number(tenant_id),
             invoice_id=refund.invoice_id,
             refund_id=refund.id,
             refund_amount=refund.refund_amount,
+            cgst_amount=gst["cgst_amount"],
+            sgst_amount=gst["sgst_amount"],
+            igst_amount=gst["igst_amount"],
         )
         self.db.add(credit_note)
 
-        invoice = self.get_invoice(tenant_id, refund.invoice_id)
         order = (
             self.db.query(Order).filter(Order.id == invoice.order_id).first()
         )

@@ -12,13 +12,14 @@ def test_health_check():
     assert response.json()["status"] == "ok"
 
 
-def test_register_and_login():
+def test_register_and_login(unique_slug):
+    email = f"owner-{unique_slug}@testcorp.com"
     register_resp = client.post(
         "/api/v1/auth/register",
         params={
             "tenant_name": "Test Corp",
-            "slug": "testcorp",
-            "email": "owner@testcorp.com",
+            "slug": unique_slug,
+            "email": email,
             "admin_name": "Test Owner",
             "password": "testpass123",
         },
@@ -27,7 +28,7 @@ def test_register_and_login():
 
     login_resp = client.post(
         "/api/v1/auth/login",
-        json={"email": "owner@testcorp.com", "password": "testpass123"},
+        json={"email": email, "password": "testpass123"},
     )
     assert login_resp.status_code == 200
     data = login_resp.json()

@@ -70,7 +70,7 @@ class ReportService:
         cost = Decimal("0")
         for order in orders:
             for item in order.items:
-                products= self.db.query(Product).filter(Product.id == item.product_id).first()
+                product = self.db.query(Product).filter(Product.id == item.product_id).first()
                 if product:
                     cost += product.cost_price * item.quantity
         return {
@@ -114,6 +114,7 @@ class ReportService:
             .all()
         )
         total_sales = sum((i.total_amount for i in invoices), Decimal("0"))
+        discount_total = sum((i.discount_amount for i in invoices), Decimal("0"))
 
         payments = (
             self.db.query(Payment)
@@ -132,6 +133,18 @@ class ReportService:
         )
         upi_sales = sum(
             (p.amount for p in payments if p.payment_method in ("upi", "qr")),
+            Decimal("0"),
+        )
+        card_sales = sum(
+            (
+                p.amount
+                for p in payments
+                if p.payment_method in ("card", "credit_card", "debit_card")
+            ),
+            Decimal("0"),
+        )
+        wallet_sales = sum(
+            (p.amount for p in payments if p.payment_method == "wallet"),
             Decimal("0"),
         )
 
@@ -153,7 +166,10 @@ class ReportService:
             "invoice_count": len(invoices),
             "total_sales": float(total_sales),
             "cash_sales": float(cash_sales),
+            "card_sales": float(card_sales),
             "upi_sales": float(upi_sales),
+            "wallet_sales": float(wallet_sales),
+            "discount_amount": float(discount_total),
             "refund_amount": float(refund_amount),
             "net_collection": float(net_collection),
         }

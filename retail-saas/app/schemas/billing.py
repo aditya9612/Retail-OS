@@ -43,6 +43,9 @@ class CreditNoteResponse(BaseModel):
     invoice_id: int
     refund_id: int
     refund_amount: Decimal
+    cgst_amount: Decimal
+    sgst_amount: Decimal
+    igst_amount: Decimal
     created_at: datetime
 
     model_config = {"from_attributes": True}
