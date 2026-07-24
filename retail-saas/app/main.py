@@ -9,6 +9,7 @@ from app.api.v1.auth.router import router as auth_router
 from app.api.v1.billing.router import router as billing_router
 from app.api.v1.credit_notes.router import router as credit_notes_router
 from app.api.v1.customers.router import router as customers_router
+from app.api.v1.coupons.router import router as coupons_router
 from app.api.v1.gst_rates.router import router as gst_rates_router
 from app.api.v1.inventory.router import router as inventory_router
 from app.api.v1.invoices.router import router as invoices_router
@@ -63,6 +64,7 @@ app.include_router(stores_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
 app.include_router(inventory_router, prefix=API_PREFIX)
 app.include_router(suppliers_router, prefix=API_PREFIX)
+app.include_router(coupons_router, prefix=API_PREFIX)
 app.include_router(orders_router, prefix=API_PREFIX)
 app.include_router(billing_router, prefix=API_PREFIX)
 app.include_router(invoices_router, prefix=API_PREFIX)

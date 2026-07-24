@@ -48,29 +48,18 @@ class SupplierUpdate(BaseModel):
     gstin: Optional[str] = None
     
 
-class SupplierUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=2, max_length=100)
-    
-    contact_person: Optional[str] = Field(None, min_length=2, max_length=100)
-     
-    email: EmailStr | None = None
-    phone: str | None = Field(
-         default=None,
-         pattern=r"^(\+91)?[6-9]\d{9}$"
-    )
-    
-    address: Optional[str] = None
-
-    gstin: Optional[str] = None
-    
-
 class SupplierResponse(SupplierBase):
     id: int
     tenant_id: int
+    is_active: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}
 
+class SupplierStatsResponse(BaseModel):
+    total_suppliers: int
+    active_suppliers: int
+    inactive_suppliers: int
 
 class InventoryResponse(BaseModel):
     id: int
@@ -134,3 +123,12 @@ class StockMovementResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+class SupplierStatusUpdate(BaseModel):
+    is_active: bool
+
+
+class SupplierStatsResponse(BaseModel):
+    total_suppliers: int
+    active_suppliers: int
+    inactive_suppliers: int
