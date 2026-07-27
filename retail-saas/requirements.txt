@@ -19,5 +19,5 @@ email-validator>=2.0.0
 qrcode>=7.4.0
 pillow>=10.0.0
 pytest-asyncio>=0.23.0
-barcode>=1.0.4
-
+python-barcode
+setuptools>=68.0.0
