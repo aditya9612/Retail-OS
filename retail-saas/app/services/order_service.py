@@ -7,14 +7,13 @@ from sqlalchemy import extract
 
 from app.core.exceptions import AppException, NotFoundException
 from app.models.customer import Customer ,CustomerFeedback,CustomerWallet, WalletTransaction ,LoyaltyPoint,CustomerCommunication,CustomerReferral,CustomerNote
-from app.models.order import Order
+from app.models.order import Order,OrderTracking 
 from app.models.order_item import OrderItem
 from app.models.product   import Product
 from app.repositories.order_repo import OrderRepository
 from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate
 from app.services.inventory_service import InventoryService
 from app.utils.constants import OrderStatus, OrderType, StockMovementType
-
 
 class OrderService:
     def __init__(self, db: Session):
@@ -103,12 +102,82 @@ class OrderService:
                 StockOutRequest(store_id=order.store_id, product_id=item.product_id, quantity=item.quantity),
             )
         order.status = OrderStatus.CONFIRMED.value
+
+        tracking = OrderTracking(
+          order_id=order.id,
+          status=OrderStatus.CONFIRMED.value,
+          remarks="Order confirmed",
+        )
+
+        self.db.add(tracking)
+
         return self.repo.update(order)
 
     def cancel_order(self, tenant_id: int, order_id: int) -> Order:
         order = self.get_order(tenant_id, order_id)
+
         order.status = OrderStatus.CANCELLED.value
+
+        tracking = OrderTracking(
+          order_id=order.id,
+          status=OrderStatus.CANCELLED.value,
+          remarks="Order cancelled",
+        )
+
+        self.db.add(tracking)
+
         return self.repo.update(order)
+    
+    def update_order_status(
+        self,
+        tenant_id: int,
+        order_id: int,
+        status: str,
+        remarks: str | None = None,
+    ):
+        order = self.get_order(tenant_id, order_id)
+
+        order.status = status
+
+        tracking = OrderTracking(
+           order_id=order.id,
+           status=status,
+           remarks=remarks,
+        )
+
+        self.db.add(tracking)
+
+        return self.repo.update(order)
+    
+    def return_order(
+        self,
+        tenant_id: int,
+        order_id: int,
+        remarks: str | None = None,
+    ):
+        order = self.get_order(tenant_id, order_id)
+
+        order.status = OrderStatus.RETURNED.value
+
+        tracking = OrderTracking(
+            order_id=order.id,
+            status=OrderStatus.RETURNED.value,
+            remarks=remarks,
+        )
+
+        self.db.add(tracking)
+
+        return self.repo.update(order)
+    
+    def get_order_tracking(self, tenant_id: int, order_id: int):
+        order = self.get_order(tenant_id, order_id)
+        
+        return (
+            self.db.query(OrderTracking)
+            .filter(OrderTracking.order_id == order.id)
+            .order_by(OrderTracking.updated_at.desc())
+            .all()
+        )
 
     def get_customer_history(self, tenant_id: int, customer_id: int) -> list[Order]:
         return (
@@ -544,9 +613,3 @@ class CustomerService:
             })
 
         return result             
-
-
-
-     
-
-

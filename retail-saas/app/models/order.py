@@ -5,7 +5,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
 
-
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from app.models.customer import Customer
+    from app.models.order_item import OrderItem
+    from app.models.invoice import Invoice
+    from app.models.payment import Payment
+    
 class Order(Base, TimestampMixin):
     __tablename__ = "orders"
 
@@ -30,3 +36,25 @@ class Order(Base, TimestampMixin):
     items: Mapped[list["OrderItem"]] = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     invoice: Mapped["Invoice | None"] = relationship("Invoice", back_populates="order", uselist=False)
     payments: Mapped[list["Payment"]] = relationship("Payment", back_populates="order")
+    tracking: Mapped[list["OrderTracking"]] = relationship("OrderTracking", back_populates="order", cascade="all, delete-orphan",)
+    
+    
+class OrderTracking(Base, TimestampMixin):
+    __tablename__ = "order_tracking"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id"),
+        nullable=False,
+        index=True,
+    )
+
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    remarks: Mapped[str | None] = mapped_column(Text)
+
+    order: Mapped["Order"] = relationship(
+        "Order",
+        back_populates="tracking",
+    )

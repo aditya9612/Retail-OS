@@ -74,6 +74,9 @@ class InventoryResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+class InventoryValuationResponse(BaseModel):
+    total_inventory_value: Decimal
+
 class StockInRequest(BaseModel):
     store_id: int = Field(gt=0, description="Store ID must be positive")
     product_id: int = Field(gt=0, description="Product ID must be positive")

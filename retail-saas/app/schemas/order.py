@@ -144,3 +144,35 @@ class PaymentResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+    
+
+class OrderTrackingResponse(BaseModel):
+    id: int
+    order_id: int
+    status: str
+    remarks: str | None
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+    
+    
+class OrderStatusUpdateRequest(BaseModel):
+    status: str
+    remarks: str | None = None
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        if v not in VALID_ORDER_STATUSES:
+            raise ValueError(f"status must be one of {VALID_ORDER_STATUSES}")
+        return v
+    
+    
+from pydantic import BaseModel, Field
+
+class OrderReturnRequest(BaseModel):
+    remarks: str = Field(
+        min_length=5,
+        max_length=500,
+        description="Return reason is required"
+    )

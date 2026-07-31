@@ -266,6 +266,63 @@ class InventoryService:
             query = query.filter(Inventory.store_id == store_id)
 
         return query.all()
+    
+    def get_inventory_by_product(
+         self,
+         tenant_id: int,
+         product_id: int,
+    ):
+         inventory = (
+             self.db.query(Inventory)
+             .filter(
+                  Inventory.tenant_id == tenant_id,
+                  Inventory.product_id == product_id,
+            )
+            .first()
+        )
+
+         if not inventory:
+            raise NotFoundException("Inventory not found")
+
+         return inventory
+     
+    def inventory_valuation(
+         self,
+         tenant_id: int,
+    ):
+         inventories = (
+             self.db.query(Inventory)
+             .filter(
+                 Inventory.tenant_id == tenant_id
+            )
+            .all()
+        )
+
+         total_value = Decimal("0.00")
+
+         for inventory in inventories:
+             total_value += (
+                 inventory.quantity *
+                 inventory.product.cost_price
+            )
+
+         return {
+             "total_inventory_value": total_value
+        }
+
+    def expiry_inventory(
+         self,
+         tenant_id: int,
+    ):
+         return (
+             self.db.query(Inventory)
+             .filter(
+                 Inventory.tenant_id == tenant_id,
+                 Inventory.expiry_date.is_not(None),
+            )
+            .order_by(Inventory.expiry_date.asc())
+            .all()
+        )
 
     def create_supplier(self, tenant_id: int, data: SupplierCreate):
 
