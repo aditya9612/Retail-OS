@@ -127,11 +127,24 @@ class StockMovementResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+class InventoryAdjustmentRequest(BaseModel):
+    store_id: int
+    product_id: int
+    quantity: int
+    adjustment_type: str = Field(
+        pattern="^(increase|decrease)$"
+    )
+    reason: str
+
+class InventoryDashboardResponse(BaseModel):
+    total_products: int
+    total_stock: int
+    total_stock_value: Decimal
+    low_stock_items: int
+    expired_products: int
+    pending_transfers: int
+    pending_purchase_orders: int
+
 class SupplierStatusUpdate(BaseModel):
     is_active: bool
 
-
-class SupplierStatsResponse(BaseModel):
-    total_suppliers: int
-    active_suppliers: int
-    inactive_suppliers: int

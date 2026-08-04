@@ -11,6 +11,8 @@ from app.schemas.inventory import (
     StockOutRequest,
     StockTransferRequest,
     InventoryValuationResponse,
+    InventoryAdjustmentRequest,
+    InventoryDashboardResponse,
 )
 from app.services.inventory_service import InventoryService
 
@@ -91,6 +93,26 @@ def list_movements(
     return InventoryService(db).list_movements(user.tenant_id, store_id)
 
 
+@router.post("/adjustment", response_model=StockMovementResponse, status_code=201,)
+def adjust_inventory(
+    data: InventoryAdjustmentRequest,
+    user: User = Depends(require_permission("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    return InventoryService(db).adjust_inventory(
+        user.tenant_id,
+        data,
+    )
+    
+@router.get("/dashboard", response_model=InventoryDashboardResponse,)
+def inventory_dashboard(
+    user: User = Depends(require_permission("inventory:read")),
+    db: Session = Depends(get_db),
+):
+    return InventoryService(db).get_dashboard(
+        user.tenant_id,
+    )
+    
 @router.get("/{product_id}", response_model=InventoryResponse)
 def get_inventory(
     product_id: int,
@@ -101,4 +123,3 @@ def get_inventory(
         user.tenant_id,
         product_id,
     )
-
