@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.ai.router import router as ai_router
 from app.api.v1.analytics.router import router as analytics_router
@@ -22,11 +24,14 @@ from app.api.v1.stores.router import router as stores_router
 from app.api.v1.suppliers.router import router as suppliers_router
 from app.api.v1.users.router import router as users_router
 from app.api.v1.whatsapp.router import router as whatsapp_router
+
 from app.core.config import get_settings
 from app.core.database import init_db
 from app.core.logger import logger
 from app.core.middleware import TenantMiddleware
+
 from app.models import *  # noqa: F401, F403
+
 
 settings = get_settings()
 
@@ -39,6 +44,7 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("Database initialization failed: %s", exc)
         raise
+
     yield
 
 
@@ -48,6 +54,30 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+# ---------------------------------------------------------
+# Static file configuration
+# ---------------------------------------------------------
+
+UPLOAD_DIR = Path("uploads")
+PRODUCT_UPLOAD_DIR = UPLOAD_DIR / "products"
+
+PRODUCT_UPLOAD_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+app.mount(
+    "/uploads",
+    StaticFiles(directory=str(UPLOAD_DIR)),
+    name="uploads",
+)
+
+
+# ---------------------------------------------------------
+# Middleware
+# ---------------------------------------------------------
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -55,9 +85,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 app.add_middleware(TenantMiddleware)
 
+
+# ---------------------------------------------------------
+# API Routers
+# ---------------------------------------------------------
+
 API_PREFIX = "/api/v1"
+
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(users_router, prefix=API_PREFIX)
 app.include_router(stores_router, prefix=API_PREFIX)
@@ -79,6 +116,10 @@ app.include_router(analytics_router, prefix=API_PREFIX)
 app.include_router(ai_router, prefix=API_PREFIX)
 
 
+# ---------------------------------------------------------
+# Health Check
+# ---------------------------------------------------------
+
 @app.get("/health")
 def health_check():
     from sqlalchemy import text
@@ -86,6 +127,7 @@ def health_check():
     from app.core.database import engine
 
     db_status = "ok"
+
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
