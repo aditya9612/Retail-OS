@@ -124,13 +124,54 @@ class CustomerService:
         self.db = db
 
     def create_customer(self, tenant_id: int, data) -> Customer:
-         customer = Customer(tenant_id=tenant_id,
-         total_spend=0, 
-         **data.model_dump())
-         self.db.add(customer)
-         self.db.commit()
-         self.db.refresh(customer)
-         return customer
+         
+        if data.email:
+            existing_email = (
+                self.db.query(Customer)
+                .filter(
+                    Customer.email == data.email,
+                    Customer.tenant_id == tenant_id
+                )
+                .first()
+            )
+
+            if existing_email:
+                raise AppException("Email already exists")
+
+        existing_phone = (
+            self.db.query(Customer)
+            .filter(
+                Customer.phone == data.phone,
+                Customer.tenant_id == tenant_id
+            )
+            .first()
+        )
+
+        if existing_phone:
+            raise AppException("Phone number already exists")
+
+        if data.gstin:
+            existing_gstin = (
+                self.db.query(Customer)
+                .filter(
+                    Customer.gstin == data.gstin,
+                    Customer.tenant_id == tenant_id
+                )
+                .first()
+            )
+
+            if existing_gstin:
+                raise AppException("GSTIN already exists")
+        customer = Customer(
+            tenant_id=tenant_id,
+            total_spend=0, 
+            **data.model_dump()
+        )
+        self.db.add(customer)
+        self.db.commit()
+        self.db.refresh(customer)
+        
+        return customer
 
     def get_customer(self, tenant_id: int, customer_id: int) -> Customer:
         customer = self.db.query(Customer).filter(Customer.id == customer_id, Customer.tenant_id == tenant_id).first()
@@ -149,17 +190,36 @@ class CustomerService:
         self.db.refresh(customer)
         return customer
 
-    def delete_customer(self, tenant_id: int, customer_id: int):
-        customer = self.get_customer(tenant_id, customer_id)
+    def update_customer_status(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        status: str
+    ):
 
-        customer.status = "inactive"
+        customer = self.get_customer(
+            tenant_id,
+            customer_id
+        )
+
+        customer.status = status
 
         self.db.commit()
         self.db.refresh(customer)
 
-        return {
-            "message": "Customer deleted successfully"
-        }    
+        return customer
+
+    # def delete_customer(self, tenant_id: int, customer_id: int):
+    #     customer = self.get_customer(tenant_id, customer_id)
+
+    #     customer.status = "inactive"
+
+    #     self.db.commit()
+    #     self.db.refresh(customer)
+
+    #     return {
+    #         "message": "Customer deleted successfully"
+    #     }    
 
     def add_loyalty_points(self, tenant_id: int, customer_id: int, points: int) -> Customer:
         customer = self.get_customer(tenant_id, customer_id)
@@ -344,7 +404,6 @@ class CustomerService:
         )
 
     def send_communication(self, tenant_id: int, data):
-    # Customer exists ka check kara
         self.get_customer(tenant_id, data.customer_id)
 
         communication = CustomerCommunication(
