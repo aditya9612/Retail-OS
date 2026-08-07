@@ -10,6 +10,8 @@ from app.models.invoice_item import InvoiceItem
 from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.payment import Payment
+from app.models.purchase_order import (PurchaseOrder, PurchaseOrderItem,)
+from app.models.delivery import Delivery
 from app.models.product   import Product
 from app.models.refund import Refund
 from app.models.role import Role
@@ -31,6 +33,9 @@ __all__ = [
     "Order",
     "OrderItem",
     "Payment",
+    "PurchaseOrder",
+    "PurchaseOrderItem",
+    "Delivery",
     "Product",
     "Refund",
     "Role",

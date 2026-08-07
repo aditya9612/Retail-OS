@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.models.order_item import OrderItem
     from app.models.invoice import Invoice
     from app.models.payment import Payment
+    from app.models.delivery import Delivery
     
 class Order(Base, TimestampMixin):
     __tablename__ = "orders"
@@ -36,6 +37,7 @@ class Order(Base, TimestampMixin):
     items: Mapped[list["OrderItem"]] = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     invoice: Mapped["Invoice | None"] = relationship("Invoice", back_populates="order", uselist=False)
     payments: Mapped[list["Payment"]] = relationship("Payment", back_populates="order")
+    delivery: Mapped["Delivery | None"] = relationship("Delivery", back_populates="order", uselist=False)
     tracking: Mapped[list["OrderTracking"]] = relationship("OrderTracking", back_populates="order", cascade="all, delete-orphan",)
     
     

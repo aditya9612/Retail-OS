@@ -10,6 +10,7 @@ from app.models.customer import Customer ,CustomerFeedback,CustomerWallet, Walle
 from app.models.order import Order,OrderTracking 
 from app.models.order_item import OrderItem
 from app.models.product   import Product
+from app.models.delivery import Delivery
 from app.repositories.order_repo import OrderRepository
 from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate
 from app.services.inventory_service import InventoryService
@@ -102,6 +103,14 @@ class OrderService:
                 StockOutRequest(store_id=order.store_id, product_id=item.product_id, quantity=item.quantity),
             )
         order.status = OrderStatus.CONFIRMED.value
+        
+        delivery = Delivery(
+          tenant_id=tenant_id,
+          order_id=order.id,
+          status="pending",
+        )
+
+        self.db.add(delivery)
 
         tracking = OrderTracking(
           order_id=order.id,

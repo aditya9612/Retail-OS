@@ -16,6 +16,7 @@ from app.schemas.inventory import (
 )
 from app.utils.constants import StockMovementType
 from app.utils.helpers import cache_delete_pattern
+from app.models.purchase_order import PurchaseOrder
 
 class InventoryService:
     def __init__(self, db: Session):
@@ -547,3 +548,23 @@ class InventoryService:
            "pending_transfers": 0,
            "pending_purchase_orders": 0,
 }
+        
+    def get_purchase_history(
+        self,
+        tenant_id: int,
+        supplier_id: int,
+    ):
+        self.get_supplier(
+           tenant_id,
+           supplier_id,
+        )
+
+        return (
+            self.db.query(PurchaseOrder)
+            .filter(
+              PurchaseOrder.tenant_id == tenant_id,
+              PurchaseOrder.supplier_id == supplier_id,
+            )
+            .order_by(PurchaseOrder.created_at.desc())
+            .all()
+        )

@@ -44,7 +44,7 @@ class CouponRepository:
             .all()
         )
 
-    def update(self, coupon: Coupon) -> Coupon:
+    def update_status(self, coupon: Coupon) -> Coupon:
         self.db.commit()
         self.db.refresh(coupon)
         return coupon

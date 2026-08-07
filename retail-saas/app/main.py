@@ -10,12 +10,14 @@ from app.api.v1.billing.router import router as billing_router
 from app.api.v1.credit_notes.router import router as credit_notes_router
 from app.api.v1.customers.router import router as customers_router
 from app.api.v1.coupons.router import router as coupons_router
+from app.api.v1.delivery.router import router as delivery_router
 from app.api.v1.gst_rates.router import router as gst_rates_router
 from app.api.v1.inventory.router import router as inventory_router
 from app.api.v1.invoices.router import router as invoices_router
 from app.api.v1.orders.router import router as orders_router
 from app.api.v1.payments.router import router as payments_router
 from app.api.v1.products.router import router as products_router
+from app.api.v1.purchase_orders.router import router as purchase_orders_router
 from app.api.v1.refunds.router import router as refunds_router
 from app.api.v1.reports.router import router as reports_router
 from app.api.v1.stores.router import router as stores_router
@@ -62,6 +64,8 @@ app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(users_router, prefix=API_PREFIX)
 app.include_router(stores_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
+app.include_router(purchase_orders_router, prefix=API_PREFIX)
+app.include_router(delivery_router, prefix=API_PREFIX)
 app.include_router(inventory_router, prefix=API_PREFIX)
 app.include_router(suppliers_router, prefix=API_PREFIX)
 app.include_router(coupons_router, prefix=API_PREFIX)

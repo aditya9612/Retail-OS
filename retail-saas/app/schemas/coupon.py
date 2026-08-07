@@ -86,6 +86,10 @@ class CouponUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class CouponStatusUpdate(BaseModel):
+    is_active: bool
+
+
 class CouponResponse(CouponBase):
 
     id: int
