@@ -1,12 +1,32 @@
 import uuid
 from decimal import Decimal
+from datetime import datetime
 
 from sqlalchemy.orm import Session
-
+from fastapi import HTTPException
+from app.repositories.payment_repo import (
+    create_gateway,
+    get_gateway,
+    list_gateways,
+    update_gateway,
+    delete_gateway,
+    verify_payment,
+    
+)
 from app.core.exceptions import AppException, NotFoundException
 from app.models.order import Order
-from app.models.payment import Payment
+from app.models.payment import Payment,PaymentGateway, PaymentSplit,Settlement,PaymentWebhookLog
 from app.schemas.order import PaymentCreate
+from app.schemas.payment import (
+    PaymentGatewayCreate,
+    PaymentGatewayUpdate,
+    PaymentGatewayResponse,
+    PaymentVerify,
+    PaymentSplitCreate,
+    SettlementCreate,
+    PaymentWebhookLogCreate,
+    PaymentWebhookLogResponse,
+)
 from app.utils.constants import PaymentMethod, PaymentStatus
 
 
@@ -62,3 +82,223 @@ class PaymentService:
 
     def webhook_handler(self, payload: dict) -> dict:
         return {"status": "received", "payload": payload}
+
+    def verify_payment_service(self, payment_id, verify_data):
+        payment = verify_payment(self.db, payment_id, verify_data)
+
+        if not payment:
+            raise HTTPException(
+                status_code=404,
+                detail="Payment not found"
+            )
+
+        return payment
+
+    def payment_history(
+        self,
+        tenant_id: int,
+        status: str = None,
+        payment_method: str = None,
+    ):
+        query = self.db.query(Payment).filter(
+            Payment.tenant_id == tenant_id
+        )
+
+        if status:
+            query = query.filter(Payment.status == status)
+
+        if payment_method:
+            query = query.filter(
+                Payment.payment_method == payment_method
+            )
+
+        return query.order_by(
+            Payment.created_at.desc()
+        ).all()   
+
+    def create_payment_split(
+        self,
+        tenant_id: int,
+        data: PaymentSplitCreate,
+    ):
+        split = PaymentSplit(
+            transaction_id=data.transaction_id,
+            payment_method=data.payment_method,
+            amount=data.amount,
+        )
+
+        self.db.add(split)
+        self.db.commit()
+        self.db.refresh(split)
+
+        return split
+
+    def list_payment_splits(self):
+        return self.db.query(PaymentSplit).all()
+
+    def get_payment_split(self, split_id: int):
+        split = (
+            self.db.query(PaymentSplit)
+            .filter(PaymentSplit.id == split_id)
+            .first()
+        )
+
+        if not split:
+            raise NotFoundException("Payment Split not found")
+
+        return split 
+
+    def create_settlement(
+        self,
+        tenant_id: int,
+        data: SettlementCreate,
+    ):
+        settlement = Settlement(
+           tenant_id=tenant_id,
+           gateway_id=data.gateway_id,
+           settlement_date=data.settlement_date,
+           total_amount=data.total_amount,
+           status=data.status,
+           reference_no=data.reference_no,
+        )
+
+        self.db.add(settlement)
+        self.db.commit()
+        self.db.refresh(settlement)
+
+        return settlement
+
+
+    def list_settlements(self):
+        return self.db.query(Settlement).all()
+
+
+    def get_settlement(self, settlement_id: int):
+        settlement = (
+            self.db.query(Settlement)
+            .filter(Settlement.id == settlement_id)
+            .first()
+        )
+
+        if not settlement:
+            raise NotFoundException("Settlement not found")
+
+        return settlement
+
+    def create_webhook_log(
+        self,
+        tenant_id: int,
+        data: PaymentWebhookLogCreate,
+    ):
+        log = PaymentWebhookLog(
+            tenant_id=tenant_id,
+            event_type=data.event_type,
+            transaction_id=data.transaction_id,
+            payload=data.payload,
+            status=data.status,
+        )
+
+        self.db.add(log)
+        self.db.commit()
+        self.db.refresh(log)
+
+        return log
+
+
+    def list_webhook_logs(self):
+        return (
+            self.db.query(PaymentWebhookLog)
+            .order_by(PaymentWebhookLog.created_at.desc())
+            .all()
+        )
+
+
+    def get_webhook_log(self, webhook_id: int):
+        log = (
+            self.db.query(PaymentWebhookLog)
+            .filter(PaymentWebhookLog.id == webhook_id)
+            .first()
+        )
+
+        if not log:
+            raise NotFoundException("Webhook Log not found")
+
+        return log 
+
+    def create_payment_gateway(
+        self,
+        tenant_id: int,
+        data: PaymentGatewayCreate,
+    ):
+        return create_gateway(
+            self.db,
+            tenant_id,
+            data,
+        )
+
+    def list_payment_gateways(
+        self,
+        tenant_id: int,
+    ):
+        return list_gateways(
+            self.db,
+            tenant_id,
+        )
+
+    def get_payment_gateway(
+        self,
+        tenant_id: int,
+        gateway_id: int,
+    ):
+        gateway = get_gateway(
+            self.db,
+            tenant_id,
+            gateway_id,
+        )
+
+        if not gateway:
+            raise NotFoundException("Payment Gateway not found")
+
+        return gateway
+
+    def update_payment_gateway(
+        self,
+        tenant_id: int,
+        gateway_id: int,
+        data: PaymentGatewayUpdate,
+    ):
+        gateway = get_gateway(
+            self.db,
+            tenant_id,
+            gateway_id,
+        )
+
+        if not gateway:
+            raise NotFoundException("Payment Gateway not found")
+
+        return update_gateway(
+            self.db,
+            gateway,
+            data,
+        )
+
+    def delete_payment_gateway(
+        self,
+        tenant_id: int,
+        gateway_id: int,
+    ):
+        gateway = get_gateway(
+            self.db,
+            tenant_id,
+            gateway_id,
+        )
+
+        if not gateway:
+            raise NotFoundException("Payment Gateway not found")
+
+        delete_gateway(
+            self.db,
+            gateway,
+        )
+
+        return True       

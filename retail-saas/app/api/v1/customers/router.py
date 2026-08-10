@@ -42,6 +42,7 @@ from app.schemas.customer import (
     RetentionResponse,
     LifetimeValueResponse,
     LoyaltyReportResponse,
+    CustomerStatusUpdate,
 )
 
 router = APIRouter(prefix="/customers", tags=["customers"])
@@ -253,7 +254,7 @@ def get_customer(
     return CustomerService(db).get_customer(user.tenant_id, customer_id)
 
 
-@router.patch("/{customer_id}", response_model=CustomerResponse)
+@router.put("/{customer_id}", response_model=CustomerResponse)
 def update_customer(
     customer_id: int,
     data: CustomerUpdate,
@@ -337,18 +338,32 @@ def get_loyalty_history(
         customer_id,
     )
 
-
-
-@router.delete("/{customer_id}", response_model=MessageResponse)
-def delete_customer(
+@router.patch(
+    "/{customer_id}/status",
+    response_model=CustomerResponse,
+)
+def update_customer_status(
     customer_id: int,
+    data: CustomerStatusUpdate,
     user: User = Depends(require_permission("customers:write")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).delete_customer(
+    return CustomerService(db).update_customer_status(
         user.tenant_id,
-        customer_id
-    )
+        customer_id,
+        data.status
+    )   
+
+# @router.delete("/{customer_id}", response_model=MessageResponse)
+# def delete_customer(
+#     customer_id: int,
+#     user: User = Depends(require_permission("customers:write")),
+#     db: Session = Depends(get_db),
+# ):
+#     return CustomerService(db).delete_customer(
+#         user.tenant_id,
+#         customer_id
+#     )
 
 @router.post(
     "/notifications/sms",

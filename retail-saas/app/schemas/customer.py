@@ -1,4 +1,5 @@
 from datetime import date, datetime
+import re
 from typing import Optional, Literal
 from decimal import Decimal
 
@@ -36,10 +37,17 @@ class CustomerBase(BaseModel):
     @field_validator("gstin")
     @classmethod
     def validate_gstin(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and len(v) != 15:
-            raise ValueError("GSTIN must be exactly 15 characters")
-        return v.upper() if v else v
+        if v is None:
+            return v
 
+        v = v.strip().upper()
+
+        pattern = r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$"
+
+        if not re.fullmatch(pattern, v):
+            raise ValueError("Invalid GSTIN format")
+
+        return v
 
 class CustomerCreate(CustomerBase):
     pass
@@ -60,6 +68,21 @@ class CustomerUpdate(BaseModel):
     def validate_phone(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not v.isdigit():
             raise ValueError("Phone must contain digits only")
+        return v
+
+    @field_validator("gstin")
+    @classmethod
+    def validate_gstin(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+
+        v = v.strip().upper()
+
+        pattern = r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$"
+
+        if not re.fullmatch(pattern, v):
+            raise ValueError("Invalid GSTIN format")
+
         return v
 
 
@@ -286,3 +309,6 @@ class LoyaltyReportResponse(BaseModel):
 
     class Config:
         from_attributes = True                                   
+
+class CustomerStatusUpdate(BaseModel):
+    status: Literal["active", "inactive", "blocked"]
