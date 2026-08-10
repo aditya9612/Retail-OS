@@ -95,3 +95,9 @@ def health_check():
         "app": settings.APP_NAME,
         "database": db_status,
     }
+    
+    app.include_router(
+    stores_router,
+    prefix="/api/v1"
+)
+

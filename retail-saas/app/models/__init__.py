@@ -15,6 +15,7 @@ from app.models.role import Role
 from app.models.store import Store
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.models.employee import Employee
 
 __all__ = [
     "AuditLog",
