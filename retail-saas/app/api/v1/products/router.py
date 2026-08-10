@@ -1,4 +1,3 @@
-```python
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -311,4 +310,3 @@ def list_categories(
         .filter(Category.tenant_id == user.tenant_id)
         .all()
     )
-```

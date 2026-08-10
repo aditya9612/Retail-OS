@@ -1,4 +1,3 @@
-```python
 from datetime import date
 from decimal import Decimal
 
@@ -326,4 +325,3 @@ class UserService:
             setattr(user, key, value)
 
         return self.repo.update(user)
-```
