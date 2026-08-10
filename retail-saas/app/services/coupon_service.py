@@ -188,47 +188,30 @@ class CouponService:
             "final_amount": final_amount,
             "message": "Coupon applied successfully",
         }
-  
-    def activate_coupon(
+
+
+    def update_coupon_status(
         self,
         tenant_id: int,
         coupon_id: int,
+        is_active: bool,
     ):
 
         coupon = self.get_coupon(
-            tenant_id,
-            coupon_id,
+          tenant_id,
+          coupon_id,
         )
-        
-        if coupon.is_active:
-            raise AppException(
-                "Coupon is already active"
+ 
+        if coupon.is_active == is_active:
+           raise AppException(
+               f"Coupon is already {'active' if is_active else 'inactive'}"
             )
-        
-        coupon.is_active = True
 
-        return self.repo.update(coupon)
+        coupon.is_active = is_active
 
-    def deactivate_coupon(
-        self,
-        tenant_id: int,
-        coupon_id: int,
-    ):
+        return self.repo.update_status(coupon)
 
-        coupon = self.get_coupon(
-            tenant_id,
-            coupon_id,
-        )
 
-        if not coupon.is_active:
-            raise AppException(
-                "Coupon is already inactive"
-            )
-        coupon.is_active = False
-
-        return self.repo.update(coupon)
-
-    
     def validate_coupon(
         self,
         tenant_id: int,

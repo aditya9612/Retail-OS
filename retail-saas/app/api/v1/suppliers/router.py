@@ -6,6 +6,7 @@ from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.inventory import SupplierCreate, SupplierUpdate, SupplierResponse, SupplierStatusUpdate, SupplierStatsResponse
 from app.services.inventory_service import InventoryService
+from app.schemas.purchase_order import PurchaseOrderResponse
 
 router = APIRouter(prefix="/suppliers", tags=["suppliers"])
 
@@ -78,4 +79,15 @@ def update_supplier_status(
         user.tenant_id,
         supplier_id,
         data.is_active,
-    )   
+    ) 
+    
+@router.get("/{supplier_id}/purchase-history", response_model=list[PurchaseOrderResponse],)
+def get_supplier_purchase_history(
+    supplier_id: int,
+    user: User = Depends(require_permission("inventory:read")),
+    db: Session = Depends(get_db),
+):
+    return InventoryService(db).get_purchase_history(
+        tenant_id=user.tenant_id,
+        supplier_id=supplier_id,
+    )  

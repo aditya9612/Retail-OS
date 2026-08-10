@@ -13,6 +13,7 @@ from app.schemas.coupon import (
     CouponStatsResponse,
     ValidateCouponRequest,
     ValidateCouponResponse,
+    CouponStatusUpdate,
 )
 from app.services.coupon_service import CouponService
 
@@ -61,30 +62,6 @@ def get_coupon_stats(
 ):
     return CouponService(db).get_coupon_stats(tenant_id=user.tenant_id,)
     
-     
-@router.patch("/{coupon_id}/activate", response_model=CouponResponse,)
-def activate_coupon(
-    coupon_id: int,
-    user: User = Depends(require_permission("products:write")),
-    db: Session = Depends(get_db),
-):
-    return CouponService(db).activate_coupon(
-        tenant_id=user.tenant_id,
-        coupon_id=coupon_id,
-    )
-  
-    
-@router.patch("/{coupon_id}/deactivate", response_model=CouponResponse,)
-def deactivate_coupon(
-    coupon_id: int,
-    user: User = Depends(require_permission("products:write")),
-    db: Session = Depends(get_db),
-):
-    return CouponService(db).deactivate_coupon(
-        tenant_id=user.tenant_id,
-        coupon_id=coupon_id,
-    )
-    
                    
 @router.get("/{coupon_id}", response_model=CouponResponse)
 def get_coupon(
@@ -93,6 +70,22 @@ def get_coupon(
     db: Session = Depends(get_db),
 ):
     return CouponService(db).get_coupon(user.tenant_id, coupon_id)
+
+
+@router.patch("/{coupon_id}/status", response_model=CouponResponse,)
+def update_coupon_status(
+    coupon_id: int,
+    data: CouponStatusUpdate,
+    user: User = Depends(
+        require_permission("products:write")
+    ),
+    db: Session = Depends(get_db),
+):
+    return CouponService(db).update_coupon_status(
+        tenant_id=user.tenant_id,
+        coupon_id=coupon_id,
+        is_active=data.is_active,
+    )
 
 
 @router.patch("/{coupon_id}", response_model=CouponResponse)

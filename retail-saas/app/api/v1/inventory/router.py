@@ -10,6 +10,9 @@ from app.schemas.inventory import (
     StockMovementResponse,
     StockOutRequest,
     StockTransferRequest,
+    InventoryValuationResponse,
+    InventoryAdjustmentRequest,
+    InventoryDashboardResponse,
 )
 from app.services.inventory_service import InventoryService
 
@@ -61,6 +64,26 @@ def transfer_stock(
     return InventoryService(db).transfer_stock(user.tenant_id, data)
 
 
+@router.get("/valuation", response_model=InventoryValuationResponse,)
+def inventory_valuation(
+    user: User = Depends(require_permission("inventory:read")),
+    db: Session = Depends(get_db),
+):
+    return InventoryService(db).inventory_valuation(
+        user.tenant_id,
+    )
+
+
+@router.get("/expiry", response_model=list[InventoryResponse])
+def expiry_inventory(
+    user: User = Depends(require_permission("inventory:read")),
+    db: Session = Depends(get_db),
+):
+    return InventoryService(db).expiry_inventory(
+        user.tenant_id,
+    )
+    
+    
 @router.get("/movements", response_model=list[StockMovementResponse])
 def list_movements(
     store_id: int | None = None,
@@ -70,3 +93,33 @@ def list_movements(
     return InventoryService(db).list_movements(user.tenant_id, store_id)
 
 
+@router.post("/adjustment", response_model=StockMovementResponse, status_code=201,)
+def adjust_inventory(
+    data: InventoryAdjustmentRequest,
+    user: User = Depends(require_permission("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    return InventoryService(db).adjust_inventory(
+        user.tenant_id,
+        data,
+    )
+    
+@router.get("/dashboard", response_model=InventoryDashboardResponse,)
+def inventory_dashboard(
+    user: User = Depends(require_permission("inventory:read")),
+    db: Session = Depends(get_db),
+):
+    return InventoryService(db).get_dashboard(
+        user.tenant_id,
+    )
+    
+@router.get("/{product_id}", response_model=InventoryResponse)
+def get_inventory(
+    product_id: int,
+    user: User = Depends(require_permission("inventory:read")),
+    db: Session = Depends(get_db),
+):
+    return InventoryService(db).get_inventory_by_product(
+        user.tenant_id,
+        product_id,
+    )
