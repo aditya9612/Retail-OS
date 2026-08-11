@@ -10,11 +10,13 @@ from app.schemas.inventory import (
     StockInRequest,
     StockOutRequest,
     StockTransferRequest,
+    InventoryAdjustmentRequest,
     SupplierCreate,
     SupplierUpdate,
 )
 from app.utils.constants import StockMovementType
 from app.utils.helpers import cache_delete_pattern
+from app.models.purchase_order import PurchaseOrder
 
 class InventoryService:
     def __init__(self, db: Session):
@@ -266,6 +268,63 @@ class InventoryService:
             query = query.filter(Inventory.store_id == store_id)
 
         return query.all()
+    
+    def get_inventory_by_product(
+         self,
+         tenant_id: int,
+         product_id: int,
+    ):
+         inventory = (
+             self.db.query(Inventory)
+             .filter(
+                  Inventory.tenant_id == tenant_id,
+                  Inventory.product_id == product_id,
+            )
+            .first()
+        )
+
+         if not inventory:
+            raise NotFoundException("Inventory not found")
+
+         return inventory
+     
+    def inventory_valuation(
+         self,
+         tenant_id: int,
+    ):
+         inventories = (
+             self.db.query(Inventory)
+             .filter(
+                 Inventory.tenant_id == tenant_id
+            )
+            .all()
+        )
+
+         total_value = Decimal("0.00")
+
+         for inventory in inventories:
+             total_value += (
+                 inventory.quantity *
+                 inventory.product.cost_price
+            )
+
+         return {
+             "total_inventory_value": total_value
+        }
+
+    def expiry_inventory(
+         self,
+         tenant_id: int,
+    ):
+         return (
+             self.db.query(Inventory)
+             .filter(
+                 Inventory.tenant_id == tenant_id,
+                 Inventory.expiry_date.is_not(None),
+            )
+            .order_by(Inventory.expiry_date.asc())
+            .all()
+        )
 
     def create_supplier(self, tenant_id: int, data: SupplierCreate):
 
@@ -327,19 +386,67 @@ class InventoryService:
          return supplier
 
 
-    def delete_supplier(
+    def update_supplier_status(
          self,
          tenant_id: int,
          supplier_id: int,
+         is_active: bool,
+    ):    
+
+         supplier = self.get_supplier(
+         tenant_id,
+         supplier_id,
+        )
+
+         supplier.is_active = is_active
+
+         self.db.commit()
+         self.db.refresh(supplier)
+
+         return supplier
+
+    
+    def search_suppliers(
+         self,
+         tenant_id: int,
+         search: str,
     ):
 
-         supplier = self.get_supplier(tenant_id, supplier_id)
+         return (
+             self.db.query(Supplier)
+             .filter(
+                 Supplier.tenant_id == tenant_id,
+                 Supplier.name.ilike(f"%{search}%"),
+            )
+            .all()
+    )
+         
+    def supplier_stats(
+         self,
+         tenant_id: int,
+    ):
 
-         self.db.delete(supplier)
-         self.db.commit()
+         suppliers = (
+            self.db.query(Supplier)
+            .filter(
+                Supplier.tenant_id == tenant_id
+            )
+            .all()
+    )
 
-         return {"message": "Supplier deleted successfully"}
-
+         return {
+            "total_suppliers": len(suppliers),
+            "active_suppliers": sum(
+                1 for supplier in suppliers
+                if supplier.is_active
+            ),
+            "inactive_suppliers": sum(
+                1 for supplier in suppliers
+                if not supplier.is_active
+            ),
+        }
+    
+        
     def list_movements(self, tenant_id: int, store_id: int | None = None):
 
         query = self.db.query(StockMovement).filter(
@@ -352,5 +459,112 @@ class InventoryService:
         return (
             query.order_by(StockMovement.created_at.desc())
             .limit(100)
+            .all()
+        )
+    
+    def adjust_inventory(
+        self,
+        tenant_id: int,
+        data: InventoryAdjustmentRequest,
+    ):
+        self._get_product(tenant_id, data.product_id)
+        self._get_store(tenant_id, data.store_id)
+
+        inventory = self._get_or_create_inventory(
+            tenant_id,
+            data.store_id,
+            data.product_id,
+        )
+
+        if data.adjustment_type == "increase":
+            inventory.quantity += data.quantity
+
+        elif data.adjustment_type == "decrease":
+            if inventory.quantity < data.quantity:
+                raise AppException("Insufficient stock")
+            inventory.quantity -= data.quantity
+
+        else:
+            raise AppException(
+                "Adjustment type must be increase or decrease"
+            )
+
+        movement = StockMovement(
+            tenant_id=tenant_id,
+            store_id=data.store_id,
+            product_id=data.product_id,
+            movement_type="adjustment",
+            quantity=data.quantity,
+            notes=data.reason,
+        )
+             
+        self.db.add(movement)     
+        self.db.commit()
+        self.db.refresh(movement)
+
+        cache_delete_pattern(f"inventory:{tenant_id}:*")
+
+        return movement
+    
+
+    def get_dashboard(
+        self,
+        tenant_id: int,
+    ):
+
+        inventories = (
+            self.db.query(Inventory)
+            .filter(Inventory.tenant_id == tenant_id)
+            .all()
+        )
+
+        total_products = len(inventories)
+
+        total_stock = sum(
+            inventory.quantity
+            for inventory in inventories
+        )
+
+        low_stock = sum(
+            1
+            for inventory in inventories
+            if inventory.quantity <= inventory.low_stock_threshold
+        )
+
+        inventory_value = Decimal("0.00")
+
+        for inventory in inventories:
+            inventory_value += (
+                inventory.quantity *
+                inventory.product.cost_price
+            )
+
+        return {
+           "total_products": total_products,
+           "total_stock": total_stock,
+           "total_stock_value": inventory_value,
+           "low_stock_items": low_stock,
+           "expired_products": 0,
+           "pending_transfers": 0,
+           "pending_purchase_orders": 0,
+}
+        
+    def get_purchase_history(
+        self,
+        tenant_id: int,
+        supplier_id: int,
+    ):
+        self.get_supplier(
+           tenant_id,
+           supplier_id,
+        )
+
+        return (
+            self.db.query(PurchaseOrder)
+            .filter(
+              PurchaseOrder.tenant_id == tenant_id,
+              PurchaseOrder.supplier_id == supplier_id,
+            )
+            .order_by(PurchaseOrder.created_at.desc())
             .all()
         )

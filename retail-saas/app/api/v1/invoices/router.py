@@ -1,6 +1,5 @@
 from datetime import datetime
-from decimal import Decimal
-from typing import Optional
+from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
@@ -31,13 +30,22 @@ def search_invoices(
     invoice_number: Optional[str] = Query(default=None),
     customer_name: Optional[str] = Query(default=None),
     mobile: Optional[str] = Query(default=None),
+    gstin: Optional[str] = Query(default=None),
+    payment_status: Optional[str] = Query(default=None),
     date_from: Optional[datetime] = Query(default=None),
     date_to: Optional[datetime] = Query(default=None),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
     return BillingService(db).search_invoices(
-        user.tenant_id, invoice_number, customer_name, mobile, date_from, date_to
+        user.tenant_id,
+        invoice_number,
+        customer_name,
+        mobile,
+        gstin,
+        payment_status,
+        date_from,
+        date_to,
     )
 
 
@@ -51,13 +59,23 @@ def get_invoice(
 
 
 @router.get("/{invoice_id}/pdf")
-def download_invoice_pdf(
+def invoice_pdf(
     invoice_id: int,
+    mode: str = Query(default="download", description="download or preview"),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
+    
+    invoice = BillingService(db).get_invoice(user.tenant_id, invoice_id)
     pdf_bytes = BillingService(db).generate_pdf(user.tenant_id, invoice_id)
-    return Response(content=pdf_bytes, media_type="application/pdf")
+    disposition = "inline" if mode == "preview" else "attachment"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"{disposition}; filename={invoice.invoice_number}.pdf"
+        }
+    )
 
 
 @router.post("/{invoice_id}/reprint")
@@ -68,7 +86,9 @@ def reprint_invoice(
     db: Session = Depends(get_db),
 ):
     result = BillingService(db).reprint_invoice(user.tenant_id, invoice_id)
-    thermal = BillingService(db).get_thermal_payload(user.tenant_id, invoice_id, printer_type)
+    thermal = BillingService(db).get_thermal_payload(
+        user.tenant_id, invoice_id, printer_type
+    )
     return {
         "invoice": InvoiceResponse.model_validate(result["invoice"]),
         "print_payload": thermal,

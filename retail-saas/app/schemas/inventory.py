@@ -48,29 +48,18 @@ class SupplierUpdate(BaseModel):
     gstin: Optional[str] = None
     
 
-class SupplierUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=2, max_length=100)
-    
-    contact_person: Optional[str] = Field(None, min_length=2, max_length=100)
-     
-    email: EmailStr | None = None
-    phone: str | None = Field(
-         default=None,
-         pattern=r"^(\+91)?[6-9]\d{9}$"
-    )
-    
-    address: Optional[str] = None
-
-    gstin: Optional[str] = None
-    
-
 class SupplierResponse(SupplierBase):
     id: int
     tenant_id: int
+    is_active: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}
 
+class SupplierStatsResponse(BaseModel):
+    total_suppliers: int
+    active_suppliers: int
+    inactive_suppliers: int
 
 class InventoryResponse(BaseModel):
     id: int
@@ -84,6 +73,9 @@ class InventoryResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+class InventoryValuationResponse(BaseModel):
+    total_inventory_value: Decimal
 
 class StockInRequest(BaseModel):
     store_id: int = Field(gt=0, description="Store ID must be positive")
@@ -134,3 +126,25 @@ class StockMovementResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+class InventoryAdjustmentRequest(BaseModel):
+    store_id: int
+    product_id: int
+    quantity: int
+    adjustment_type: str = Field(
+        pattern="^(increase|decrease)$"
+    )
+    reason: str
+
+class InventoryDashboardResponse(BaseModel):
+    total_products: int
+    total_stock: int
+    total_stock_value: Decimal
+    low_stock_items: int
+    expired_products: int
+    pending_transfers: int
+    pending_purchase_orders: int
+
+class SupplierStatusUpdate(BaseModel):
+    is_active: bool
+

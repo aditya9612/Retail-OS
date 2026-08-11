@@ -1,15 +1,15 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.exceptions import ForbiddenException
 from app.core.security import require_permission
+from app.models.product import Product
 from app.models.user import User
 from app.schemas.billing import ReturnItemRequest
 from app.schemas.cart import CartDiscountApply, CartItemCreate, CartItemUpdate, CartSummaryResponse
-from app.schemas.order import InvoiceResponse
 from app.services.billing_service import BillingService
 from app.services.cart_service import CartService
 
@@ -47,6 +47,26 @@ def _to_cart_response(cart: dict) -> CartSummaryResponse:
     )
 
 
+def _ensure_price_override_allowed(
+    user: User,
+    db: Session,
+    tenant_id: int,
+    product_id: int,
+    unit_price: Decimal | None,
+) -> None:
+    if unit_price is None:
+        return
+    product = (
+        db.query(Product)
+        .filter(Product.id == product_id, Product.tenant_id == tenant_id)
+        .first()
+    )
+    if product and unit_price != product.price:
+        perms = user.role.permissions if user.role else []
+        if "*" not in perms and "billing:price_override" not in perms:
+            raise ForbiddenException("Price override not allowed for your role")
+
+
 @router.post("/cart/add-item", response_model=CartSummaryResponse)
 def cart_add_item(
     payload: CartItemCreate,
@@ -55,6 +75,9 @@ def cart_add_item(
     user: User = Depends(require_permission("billing:write")),
     db: Session = Depends(get_db),
 ):
+    _ensure_price_override_allowed(
+        user, db, user.tenant_id, payload.product_id, payload.unit_price
+    )
     cart = CartService(db).add_item(
         user.tenant_id,
         user.id,
@@ -74,6 +97,9 @@ def cart_update_item(
     user: User = Depends(require_permission("billing:write")),
     db: Session = Depends(get_db),
 ):
+    _ensure_price_override_allowed(
+        user, db, user.tenant_id, payload.product_id, payload.unit_price
+    )
     cart = CartService(db).update_item(
         user.tenant_id,
         user.id,
@@ -118,45 +144,6 @@ def cart_apply_discount(
         payload.coupon_code,
     )
     return _to_cart_response(cart)
-
-
-@router.post("/invoices/{order_id}", response_model=InvoiceResponse, status_code=201)
-def create_invoice_from_order(
-    order_id: int,
-    same_state: bool = True,
-    user: User = Depends(require_permission("billing:write")),
-    db: Session = Depends(get_db),
-):
-    return BillingService(db).create_invoice(user.tenant_id, order_id, same_state)
-
-
-@router.get("/invoices/{invoice_id}/pdf")
-def download_invoice_pdf_legacy(
-    invoice_id: int,
-    user: User = Depends(require_permission("billing:read")),
-    db: Session = Depends(get_db),
-):
-    pdf_bytes = BillingService(db).generate_pdf(user.tenant_id, invoice_id)
-    return Response(content=pdf_bytes, media_type="application/pdf")
-
-
-@router.post("/orders/{order_id}/return")
-def process_return_legacy(
-    order_id: int,
-    user: User = Depends(require_permission("billing:write")),
-    db: Session = Depends(get_db),
-):
-    from app.models.order import Order
-    from app.utils.constants import OrderStatus
-
-    order = db.query(Order).filter(Order.id == order_id, Order.tenant_id == user.tenant_id).first()
-    if not order:
-        from app.core.exceptions import NotFoundException
-        raise NotFoundException("Order not found")
-    order.status = OrderStatus.RETURNED.value
-    db.commit()
-    db.refresh(order)
-    return order
 
 
 @router.post("/returns", response_model=dict)
