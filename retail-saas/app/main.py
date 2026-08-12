@@ -10,6 +10,7 @@ from app.api.v1.billing.router import router as billing_router
 from app.api.v1.credit_notes.router import router as credit_notes_router
 from app.api.v1.customers.router import router as customers_router
 from app.api.v1.dashboard.router import router as dashboard_router
+from app.api.v1.coupons.router import router as coupons_router
 from app.api.v1.delivery.router import router as delivery_router
 from app.api.v1.gst_rates.router import router as gst_rates_router
 from app.api.v1.inventory.router import router as inventory_router
