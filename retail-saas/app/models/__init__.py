@@ -18,6 +18,7 @@ from app.models.role import Role
 from app.models.store import Store
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.models.warehouse import Warehouse
 from .coupon import Coupon
 
 __all__ = [
@@ -45,5 +46,6 @@ __all__ = [
     "Supplier",
     "Tenant",
     "User",
+    "Warehouse",
     "Coupon",
 ]

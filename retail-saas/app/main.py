@@ -26,6 +26,7 @@ from app.api.v1.reports.router import router as reports_router
 from app.api.v1.stores.router import router as stores_router
 from app.api.v1.suppliers.router import router as suppliers_router
 from app.api.v1.users.router import router as users_router
+from app.api.v1.warehouses.router import router as warehouses_router
 from app.api.v1.whatsapp.router import router as whatsapp_router
 
 from app.core.config import get_settings
@@ -106,6 +107,7 @@ app.include_router(purchase_orders_router, prefix=API_PREFIX)
 app.include_router(delivery_router, prefix=API_PREFIX)
 app.include_router(inventory_router, prefix=API_PREFIX)
 app.include_router(suppliers_router, prefix=API_PREFIX)
+app.include_router(warehouses_router, prefix=API_PREFIX)
 app.include_router(coupons_router, prefix=API_PREFIX)
 app.include_router(orders_router, prefix=API_PREFIX)
 app.include_router(billing_router, prefix=API_PREFIX)
