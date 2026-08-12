@@ -1,9 +1,7 @@
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.ai.router import router as ai_router
 from app.api.v1.analytics.router import router as analytics_router
@@ -12,7 +10,6 @@ from app.api.v1.billing.router import router as billing_router
 from app.api.v1.credit_notes.router import router as credit_notes_router
 from app.api.v1.customers.router import router as customers_router
 from app.api.v1.dashboard.router import router as dashboard_router
-from app.api.v1.coupons.router import router as coupons_router
 from app.api.v1.delivery.router import router as delivery_router
 from app.api.v1.gst_rates.router import router as gst_rates_router
 from app.api.v1.inventory.router import router as inventory_router
@@ -28,14 +25,11 @@ from app.api.v1.suppliers.router import router as suppliers_router
 from app.api.v1.users.router import router as users_router
 from app.api.v1.warehouses.router import router as warehouses_router
 from app.api.v1.whatsapp.router import router as whatsapp_router
-
 from app.core.config import get_settings
 from app.core.database import init_db
 from app.core.logger import logger
 from app.core.middleware import TenantMiddleware
-
 from app.models import *  # noqa: F401, F403
-
 
 settings = get_settings()
 
@@ -48,7 +42,6 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("Database initialization failed: %s", exc)
         raise
-
     yield
 
 
@@ -58,30 +51,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-
-# ---------------------------------------------------------
-# Static file configuration
-# ---------------------------------------------------------
-
-UPLOAD_DIR = Path("uploads")
-PRODUCT_UPLOAD_DIR = UPLOAD_DIR / "products"
-
-PRODUCT_UPLOAD_DIR.mkdir(
-    parents=True,
-    exist_ok=True,
-)
-
-app.mount(
-    "/uploads",
-    StaticFiles(directory=str(UPLOAD_DIR)),
-    name="uploads",
-)
-
-
-# ---------------------------------------------------------
-# Middleware
-# ---------------------------------------------------------
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -89,20 +58,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 app.add_middleware(TenantMiddleware)
 
-
-# ---------------------------------------------------------
-# API Routers
-# ---------------------------------------------------------
-
 API_PREFIX = "/api/v1"
-
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(users_router, prefix=API_PREFIX)
 app.include_router(stores_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
+app.include_router(inventory_router, prefix=API_PREFIX)
+app.include_router(suppliers_router, prefix=API_PREFIX)
 app.include_router(purchase_orders_router, prefix=API_PREFIX)
 app.include_router(delivery_router, prefix=API_PREFIX)
 app.include_router(inventory_router, prefix=API_PREFIX)
@@ -117,16 +81,12 @@ app.include_router(refunds_router, prefix=API_PREFIX)
 app.include_router(credit_notes_router, prefix=API_PREFIX)
 app.include_router(payments_router, prefix=API_PREFIX)
 app.include_router(customers_router, prefix=API_PREFIX)
-app.include_router(dashboard_router, prefix=API_PREFIX)
 app.include_router(whatsapp_router, prefix=API_PREFIX)
 app.include_router(reports_router, prefix=API_PREFIX)
+app.include_router(dashboard_router, prefix=API_PREFIX)
 app.include_router(analytics_router, prefix=API_PREFIX)
 app.include_router(ai_router, prefix=API_PREFIX)
 
-
-# ---------------------------------------------------------
-# Health Check
-# ---------------------------------------------------------
 
 @app.get("/health")
 def health_check():
@@ -135,7 +95,6 @@ def health_check():
     from app.core.database import engine
 
     db_status = "ok"
-
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
@@ -147,3 +106,9 @@ def health_check():
         "app": settings.APP_NAME,
         "database": db_status,
     }
+    
+    app.include_router(
+    stores_router,
+    prefix="/api/v1"
+)
+
