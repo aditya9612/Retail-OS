@@ -37,7 +37,7 @@ def list_products(
 
 @router.get("/search", response_model=list[ProductResponse])
 def search_products(
-    q: str = Query(
+    search: str = Query(
         min_length=1,
         description="Search by name, SKU or barcode",
     ),
@@ -48,7 +48,7 @@ def search_products(
 ):
     return ProductService(db).search_products(
         user.tenant_id,
-        q,
+        search,
         page,
         page_size,
     )
