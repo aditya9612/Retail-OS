@@ -12,15 +12,14 @@ from app.models.order_item import OrderItem
 from app.models.payment import Payment
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
 from app.models.delivery import Delivery
+from app.models.password_reset_token import PasswordResetToken
 from app.models.product import Product, ProductImage
 from app.models.refund import Refund
 from app.models.role import Role
 from app.models.store import Store
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.models.employee import Employee
-from app.models.coupon import Coupon
-
+from .coupon import Coupon
 
 __all__ = [
     "AuditLog",
@@ -38,6 +37,7 @@ __all__ = [
     "PurchaseOrder",
     "PurchaseOrderItem",
     "Delivery",
+    "PasswordResetToken",
     "Product",
     "ProductImage",
     "Refund",
