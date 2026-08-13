@@ -30,7 +30,7 @@ class RefreshRequest(BaseModel):
 
 class TokenPayload(BaseModel):
     sub: int
-    tenant_id: int
+    tenant_id: int | None
     role: str
     exp: datetime
 

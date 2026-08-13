@@ -23,7 +23,10 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     TokenResponse,
 )
-from app.utils.constants import DEFAULT_ROLE_PERMISSIONS, UserRole
+from app.utils.constants import (
+    DEFAULT_ROLE_PERMISSIONS,
+    UserRole,
+)
 
 
 class AuthService:
@@ -61,7 +64,10 @@ class AuthService:
             refresh_token=create_refresh_token(token_data),
         )
 
-    def refresh(self, refresh_token: str) -> TokenResponse:
+    def refresh(
+        self,
+        refresh_token: str,
+    ) -> TokenResponse:
 
         payload = decode_token(refresh_token)
 
@@ -126,10 +132,16 @@ class AuthService:
         self.db.flush()
 
         for role_name in UserRole:
+
+            if role_name == UserRole.SUPERADMIN:
+                continue
+
             role = Role(
                 tenant_id=tenant.id,
                 name=role_name.value,
-                permissions=DEFAULT_ROLE_PERMISSIONS[role_name],
+                permissions=DEFAULT_ROLE_PERMISSIONS[
+                    role_name
+                ],
             )
 
             self.db.add(role)
@@ -163,11 +175,9 @@ class AuthService:
 
         user = self.user_repo.get_by_email(data.email)
 
-        # Do not reveal whether the email exists.
         if not user:
             return ""
 
-        # Invalidate existing unused reset tokens.
         (
             self.db.query(PasswordResetToken)
             .filter(
@@ -180,10 +190,8 @@ class AuthService:
             )
         )
 
-        # Generate secure random token.
         raw_token = secrets.token_urlsafe(32)
 
-        # Store only the hash in database.
         token_hash = hashlib.sha256(
             raw_token.encode("utf-8")
         ).hexdigest()
@@ -202,7 +210,6 @@ class AuthService:
         self.db.add(reset_token)
         self.db.commit()
 
-        # Temporary return for Swagger testing.
         return raw_token
 
     def reset_password(
@@ -229,6 +236,7 @@ class AuthService:
             )
 
         if reset_token.expires_at < datetime.utcnow():
+
             reset_token.used = True
             self.db.commit()
 
@@ -258,7 +266,6 @@ class AuthService:
             data.new_password
         )
 
-        # Token can only be used once.
         reset_token.used = True
 
         self.db.commit()
