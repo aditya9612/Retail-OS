@@ -12,6 +12,7 @@ from app.models.order_item import OrderItem
 from app.models.payment import Payment
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
 from app.models.delivery import Delivery
+from app.models.password_reset_token import PasswordResetToken
 from app.models.product import Product, ProductImage
 from app.models.refund import Refund
 from app.models.role import Role
@@ -20,7 +21,9 @@ from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.warehouse import Warehouse
 from app.models.employee import Employee
+from app.models.employee import Employee
 from app.models.coupon import Coupon
+from app.models.sale import Sale, SaleItem
 
 
 __all__ = [
@@ -31,6 +34,8 @@ __all__ = [
     "DocumentSequence",
     "GstRate",
     "Inventory",
+    "StockMovement",
+    "Supplier",
     "Invoice",
     "InvoiceItem",
     "Order",
@@ -39,16 +44,17 @@ __all__ = [
     "PurchaseOrder",
     "PurchaseOrderItem",
     "Delivery",
+    "PasswordResetToken",
     "Product",
     "ProductImage",
     "Refund",
     "Role",
-    "StockMovement",
-    "Supplier",
     "Store",
     "Tenant",
     "User",
     "Warehouse",
     "Employee",
     "Coupon",
+    "Sale",
+    "SaleItem",
 ]

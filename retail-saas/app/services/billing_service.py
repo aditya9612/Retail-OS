@@ -1,5 +1,3 @@
-"""Billing service — invoice creation, refunds, credit notes, thermal print."""
-
 from datetime import datetime
 from decimal import Decimal
 
@@ -38,7 +36,7 @@ class BillingService:
     def __init__(self, db: Session):
         self.db = db
 
-    # ------------------------------------------------------------------ helpers
+
     def _next_document_number(self, tenant_id: int, doc_type: str, prefix: str) -> str:
         year = datetime.utcnow().year
         row = (
@@ -113,7 +111,7 @@ class BillingService:
             )
         return items
 
-    # ---------------------------------------------------------- invoice items
+    
     def _create_invoice_items_from_order(
         self, invoice: Invoice, order: Order, same_state: bool
     ) -> None:
@@ -147,7 +145,6 @@ class BillingService:
                 )
             )
 
-    # ---------------------------------------------------------- create invoice
     def create_invoice(
         self, tenant_id: int, order_id: int, same_state: bool = True
     ) -> Invoice:
@@ -201,7 +198,6 @@ class BillingService:
         self.db.refresh(invoice)
         return invoice
 
-    # ------------------------------------------------- create invoice from cart
     def create_invoice_from_cart(
         self,
         tenant_id: int,
@@ -274,7 +270,6 @@ class BillingService:
         cart_svc.clear_cart(tenant_id, user_id)
         return invoice
 
-    # ------------------------------------------------------------ get invoice
     def get_invoice(self, tenant_id: int, invoice_id: int) -> Invoice:
         invoice = (
             self.db.query(Invoice)
@@ -285,7 +280,6 @@ class BillingService:
             raise NotFoundException("Invoice not found")
         return invoice
 
-    # --------------------------------------------------------- search invoices
     def search_invoices(
         self,
         tenant_id: int,
@@ -328,13 +322,11 @@ class BillingService:
 
         return query.distinct().order_by(Invoice.created_at.desc()).all()
 
-    # --------------------------------------------------------- reprint invoice
     def reprint_invoice(self, tenant_id: int, invoice_id: int) -> dict:
         invoice = self.get_invoice(tenant_id, invoice_id)
         thermal = self.get_thermal_payload(tenant_id, invoice_id)
         return {"invoice": invoice, "print_payload": thermal}
 
-    # ------------------------------------------------------- thermal payload
     def get_thermal_payload(
         self,
         tenant_id: int,
@@ -405,7 +397,6 @@ class BillingService:
             printer_type=printer_type,
         )
 
-    # ---------------------------------------------------------- generate pdf
     def generate_pdf(self, tenant_id: int, invoice_id: int) -> bytes:
         invoice = self.get_invoice(tenant_id, invoice_id)
         order = (
@@ -463,7 +454,6 @@ class BillingService:
         self.db.commit()
         return url
 
-    # --------------------------------------------------------- process return
     def process_return(
         self,
         tenant_id: int,
@@ -512,7 +502,6 @@ class BillingService:
             "status": "return_processed",
         }
 
-    # --------------------------------------------------------- create refund
     def create_refund(
         self,
         tenant_id: int,
@@ -553,7 +542,6 @@ class BillingService:
         self.db.refresh(refund)
         return refund
 
-    # -------------------------------------------------------- approve refund
     def approve_refund(
         self, tenant_id: int, refund_id: int, approved_by_user_id: int
     ) -> Refund:
@@ -607,7 +595,6 @@ class BillingService:
         self.db.refresh(refund)
         return refund
 
-    # --------------------------------------------------------- reject refund
     def reject_refund(self, tenant_id: int, refund_id: int) -> Refund:
         refund = (
             self.db.query(Refund)
@@ -623,7 +610,6 @@ class BillingService:
         self.db.refresh(refund)
         return refund
 
-    # ---------------------------------------------------- create credit note
     def create_credit_note(
         self,
         tenant_id: int,
@@ -648,7 +634,6 @@ class BillingService:
             raise NotFoundException("Credit note not created")
         return credit_note
 
-    # -------------------------------------------------------------- get refund
     def get_refund(self, tenant_id: int, refund_id: int) -> Refund:
         refund = (
             self.db.query(Refund)
@@ -659,7 +644,6 @@ class BillingService:
             raise NotFoundException("Refund not found")
         return refund
 
-    # ------------------------------------------------------------- list refunds
     def list_refunds(
         self, tenant_id: int, invoice_id: int | None = None
     ) -> list[Refund]:
@@ -668,7 +652,6 @@ class BillingService:
             query = query.filter(Refund.invoice_id == invoice_id)
         return query.order_by(Refund.created_at.desc()).all()
 
-    # -------------------------------------------------------- list credit notes
     def list_credit_notes(
         self, tenant_id: int, invoice_id: int | None = None
     ) -> list[CreditNote]:
@@ -679,7 +662,6 @@ class BillingService:
             query = query.filter(CreditNote.invoice_id == invoice_id)
         return query.order_by(CreditNote.created_at.desc()).all()
 
-    # --------------------------------------------------------- get credit note
     def get_credit_note(self, tenant_id: int, credit_note_id: int) -> CreditNote:
         credit_note = (
             self.db.query(CreditNote)

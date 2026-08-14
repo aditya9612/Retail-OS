@@ -1,4 +1,4 @@
-"""GST calculation engine for intra-state (CGST+SGST) and inter-state (IGST) sales."""
+
 
 from decimal import Decimal, ROUND_HALF_UP
 
