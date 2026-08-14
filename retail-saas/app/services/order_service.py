@@ -1,5 +1,7 @@
 import uuid
 from decimal import Decimal
+from io import BytesIO
+from openpyxl import Workbook
 
 from sqlalchemy.orm import Session
 
@@ -12,9 +14,13 @@ from app.models.order_item import OrderItem
 from app.models.product   import Product
 from app.models.delivery import Delivery
 from app.repositories.order_repo import OrderRepository
+from app.repositories.customer_repo import get_customers_for_export
 from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate
 from app.services.inventory_service import InventoryService
 from app.utils.constants import OrderStatus, OrderType, StockMovementType
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
 class OrderService:
     def __init__(self, db: Session):
@@ -680,4 +686,93 @@ class CustomerService:
                 "balance_points": item.balance_points,
             })
 
-        return result             
+        return result 
+
+    def export_directory(self, tenant_id:int, status="all", format="excel"):
+        customers = get_customers_for_export(
+            self.db,
+            tenant_id,
+            status
+        )
+
+        if format == "excel":
+            return self._create_excel(customers)
+
+        elif format == "pdf":
+            return self._create_pdf(customers)
+
+        raise ValueError("Invalid format")
+
+    def _create_excel(self, customers):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "Customer Directory"
+
+        worksheet.append([
+            "ID",
+            "Name",
+            "Email",
+            "Phone",
+            "Status",
+            "Loyalty Points"
+        ])
+
+        for customer in customers:
+            worksheet.append([
+                customer.id,
+                customer.name,
+                customer.email or "",
+                customer.phone or "",
+                customer.status,
+                customer.loyalty_points or 0
+            ])
+
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0)
+
+        return output
+
+    def _create_pdf(self, customers):
+        output = BytesIO()
+
+        document = SimpleDocTemplate(
+            output,
+            pagesize=A4
+        )
+
+        data = [
+            [
+                "ID",
+                "Name",
+                "Email",
+                "Phone",
+                "Status",
+                "Points"
+            ]
+        ]
+
+        for customer in customers:
+            data.append([
+                customer.id,
+                customer.name,
+                customer.email or "",
+                customer.phone or "",
+                customer.status,
+                customer.loyalty_points or 0
+            ])
+
+        table = Table(data)
+
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 1, colors.black),
+            ("PADDING", (0, 0), (-1, -1), 5),
+        ]))
+
+        document.build([table])
+
+        output.seek(0)
+
+        return output                       

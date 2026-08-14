@@ -17,6 +17,13 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
 def refresh(data: RefreshRequest, db: Session = Depends(get_db)):
     return AuthService(db).refresh(data.refresh_token)
 
+@router.post("/logout")
+def logout():
+    return {
+        "success": True,
+        "message": "Logout successful"
+    }   
+
 
 @router.post("/register")
 def register(
