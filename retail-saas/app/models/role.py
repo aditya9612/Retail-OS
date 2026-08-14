@@ -20,7 +20,7 @@ class Role(Base, TimestampMixin):
         autoincrement=True,
     )
 
-    # NULL for platform-level SuperAdmin
+  
     tenant_id: Mapped[int | None] = mapped_column(
         ForeignKey("tenants.id"),
         nullable=True,
