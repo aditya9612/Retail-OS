@@ -33,7 +33,7 @@ from app.core.database import init_db
 from app.core.logger import logger
 from app.core.middleware import TenantMiddleware
 
-from app.models import *  # noqa: F401, F403
+from app.models import *
 
 
 settings = get_settings()
@@ -84,7 +84,6 @@ app.add_middleware(
 app.add_middleware(TenantMiddleware)
 
 
-
 API_PREFIX = "/api/v1"
 
 app.include_router(auth_router, prefix=API_PREFIX)
@@ -109,7 +108,6 @@ app.include_router(whatsapp_router, prefix=API_PREFIX)
 app.include_router(reports_router, prefix=API_PREFIX)
 app.include_router(analytics_router, prefix=API_PREFIX)
 app.include_router(ai_router, prefix=API_PREFIX)
-
 
 
 @app.get("/health")
