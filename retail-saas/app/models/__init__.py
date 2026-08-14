@@ -20,6 +20,7 @@ from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.employee import Employee
 from app.models.coupon import Coupon
+from app.models.sale import Sale, SaleItem
 
 
 __all__ = [
