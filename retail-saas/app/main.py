@@ -24,6 +24,7 @@ from app.api.v1.purchase_orders.router import router as purchase_orders_router
 from app.api.v1.refunds.router import router as refunds_router
 from app.api.v1.reports.router import router as reports_router
 from app.api.v1.stores.router import router as stores_router
+from app.api.v1.sales import router as sales_router
 from app.api.v1.suppliers.router import router as suppliers_router
 from app.api.v1.users.router import router as users_router
 from app.api.v1.whatsapp.router import router as whatsapp_router
@@ -89,6 +90,7 @@ API_PREFIX = "/api/v1"
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(users_router, prefix=API_PREFIX)
 app.include_router(stores_router, prefix=API_PREFIX)
+app.include_router(sales_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
 app.include_router(purchase_orders_router, prefix=API_PREFIX)
 app.include_router(delivery_router, prefix=API_PREFIX)
