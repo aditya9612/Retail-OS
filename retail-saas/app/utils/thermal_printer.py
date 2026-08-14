@@ -1,4 +1,4 @@
-"""Generate print-ready ESC/POS payloads for thermal receipt printers."""
+
 
 from decimal import Decimal
 from typing import Literal

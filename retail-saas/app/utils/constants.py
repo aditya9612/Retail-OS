@@ -2,6 +2,7 @@ from enum import Enum
 
 
 class UserRole(str, Enum):
+    SUPERADMIN = "superadmin"
     ADMIN = "admin"
     OWNER = "owner"
     MANAGER = "manager"
@@ -66,34 +67,59 @@ class RefundStatus(str, Enum):
 
 
 DEFAULT_ROLE_PERMISSIONS = {
-    UserRole.ADMIN: ["*"],
-    UserRole.OWNER: [
-        "users:read", "users:write",
-        "stores:read", "stores:write",
-        "products:read", "products:write",
-        "inventory:read", "inventory:write",
-        "orders:read", "orders:write",
-        "billing:read", "billing:write", 
-        "billing:refund", "billing:gst_config", "billing:price_override",
-        "payments:read", "payments:write",
-        "customers:read", "customers:write",
-        "reports:read", "analytics:read",
+    UserRole.SUPERADMIN: [
+        "*",
     ],
+
+    UserRole.ADMIN: [
+        "*",
+    ],
+
+    UserRole.OWNER: [
+        "users:read",
+        "users:write",
+        "stores:read",
+        "stores:write",
+        "products:read",
+        "products:write",
+        "inventory:read",
+        "inventory:write",
+        "orders:read",
+        "orders:write",
+        "billing:read",
+        "billing:write",
+        "billing:refund",
+        "billing:gst_config",
+        "billing:price_override",
+        "payments:read",
+        "payments:write",
+        "customers:read",
+        "customers:write",
+        "reports:read",
+        "analytics:read",
+    ],
+
     UserRole.MANAGER: [
         "products:read",
         "inventory:read",
-        "orders:read", "orders:write",
-        "billing:read", "billing:write",
+        "orders:read",
+        "orders:write",
+        "billing:read",
+        "billing:write",
         "payments:read",
         "customers:read",
         "reports:read",
     ],
+
     UserRole.STAFF: [
         "products:read",
         "inventory:read",
-        "orders:read", "orders:write",
-        "billing:read", "billing:write",
-        "payments:read", "payments:write",
+        "orders:read",
+        "orders:write",
+        "billing:read",
+        "billing:write",
+        "payments:read",
+        "payments:write",
         "customers:read",
     ],
 }

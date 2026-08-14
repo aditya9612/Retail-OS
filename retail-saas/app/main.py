@@ -33,7 +33,7 @@ from app.core.database import init_db
 from app.core.logger import logger
 from app.core.middleware import TenantMiddleware
 
-from app.models import *  # noqa: F401, F403
+from app.models import *
 
 
 settings = get_settings()
@@ -58,10 +58,6 @@ app = FastAPI(
 )
 
 
-# ---------------------------------------------------------
-# Static file configuration
-# ---------------------------------------------------------
-
 UPLOAD_DIR = Path("uploads")
 PRODUCT_UPLOAD_DIR = UPLOAD_DIR / "products"
 
@@ -77,10 +73,6 @@ app.mount(
 )
 
 
-# ---------------------------------------------------------
-# Middleware
-# ---------------------------------------------------------
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -91,10 +83,6 @@ app.add_middleware(
 
 app.add_middleware(TenantMiddleware)
 
-
-# ---------------------------------------------------------
-# API Routers
-# ---------------------------------------------------------
 
 API_PREFIX = "/api/v1"
 
@@ -121,10 +109,6 @@ app.include_router(reports_router, prefix=API_PREFIX)
 app.include_router(analytics_router, prefix=API_PREFIX)
 app.include_router(ai_router, prefix=API_PREFIX)
 
-
-# ---------------------------------------------------------
-# Health Check
-# ---------------------------------------------------------
 
 @app.get("/health")
 def health_check():
