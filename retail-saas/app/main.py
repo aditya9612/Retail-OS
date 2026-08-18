@@ -72,6 +72,7 @@ PRODUCT_UPLOAD_DIR.mkdir(
     exist_ok=True,
 )
 
+
 app.mount(
     "/uploads",
     StaticFiles(directory=str(UPLOAD_DIR)),
@@ -91,6 +92,11 @@ app.add_middleware(TenantMiddleware)
 
 
 API_PREFIX = "/api/v1"
+
+
+# =========================
+# API ROUTES
+# =========================
 
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(users_router, prefix=API_PREFIX)
@@ -116,6 +122,16 @@ app.include_router(dashboard_router, prefix=API_PREFIX)
 app.include_router(analytics_router, prefix=API_PREFIX)
 app.include_router(ai_router, prefix=API_PREFIX)
 
+# GRN APIs
+app.include_router(grn_router, prefix=API_PREFIX)
+
+# Super Admin APIs
+app.include_router(super_admin_router, prefix=API_PREFIX)
+
+
+# =========================
+# HEALTH CHECK
+# =========================
 
 @app.get("/health")
 def health_check():
