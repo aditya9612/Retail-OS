@@ -260,9 +260,6 @@ def delete_staff(
 def assign_staff(
     staff_id: int,
     store_id: int,
-    user: User = Depends(
-        require_permission("employees:write")
-    ),
     db: Session = Depends(get_db),
 ):
     return assign_staff_service(
@@ -276,9 +273,6 @@ def assign_staff(
 def transfer_staff(
     staff_id: int,
     store_id: int,
-    user: User = Depends(
-        require_permission("employees:write")
-    ),
     db: Session = Depends(get_db),
 ):
     return transfer_staff_service(
@@ -290,9 +284,6 @@ def transfer_staff(
 
 @router.get("/all")
 def list_all_staff(
-    user: User = Depends(
-        require_permission("employees:read")
-    ),
     db: Session = Depends(get_db),
 ):
     return list_all_staff_service(db)

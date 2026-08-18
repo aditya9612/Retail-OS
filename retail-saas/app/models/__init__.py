@@ -1,4 +1,4 @@
-﻿from app.models.audit_log import AuditLog
+from app.models.audit_log import AuditLog
 from app.models.category import Category
 from app.models.credit_note import CreditNote
 from app.models.customer import Customer
@@ -19,7 +19,7 @@ from app.models.role import Role
 from app.models.store import Store
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.models.employee import Employee
+from app.models.staff import Staff
 from app.models.coupon import Coupon
 from app.models.sale import Sale, SaleItem
 
@@ -50,7 +50,7 @@ __all__ = [
     "Store",
     "Tenant",
     "User",
-    "Employee",
+    "Staff",
     "Coupon",
     "Sale",
     "SaleItem",
