@@ -102,3 +102,16 @@ def get_customer_stats(db: Session, tenant_id: int):
         "new_this_month": new_this_month,
         "vip_customers": vip_customers
     }
+
+def get_customers_for_export(db: Session, tenant_id: int, status="all"):
+    query = db.query(Customer).filter(
+        Customer.tenant_id == tenant_id
+    )
+
+    if status == "active":
+        query = query.filter(Customer.status == "active")
+
+    elif status == "inactive":
+        query = query.filter(Customer.status == "inactive")
+
+    return query.all()
