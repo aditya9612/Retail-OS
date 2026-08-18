@@ -22,6 +22,7 @@ from app.models.user import User
 from app.models.warehouse import Warehouse
 from app.models.employee import Employee
 from app.models.employee import Employee
+from app.models.grn import GRN, GRNItem
 from app.models.coupon import Coupon
 from app.models.sale import Sale, SaleItem
 
@@ -54,6 +55,8 @@ __all__ = [
     "User",
     "Warehouse",
     "Employee",
+    "GRN",
+    "GRNItem",
     "Coupon",
     "Sale",
     "SaleItem",
