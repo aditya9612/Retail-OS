@@ -21,9 +21,9 @@ from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.warehouse import Warehouse
 from app.models.employee import Employee
-from app.models.employee import Employee
 from app.models.coupon import Coupon
 from app.models.sale import Sale, SaleItem
+from app.models.super_admin import SuperAdmin
 
 
 __all__ = [
@@ -57,4 +57,5 @@ __all__ = [
     "Coupon",
     "Sale",
     "SaleItem",
+    "SuperAdmin",
 ]

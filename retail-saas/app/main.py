@@ -28,13 +28,14 @@ from app.api.v1.suppliers.router import router as suppliers_router
 from app.api.v1.users.router import router as users_router
 from app.api.v1.warehouses.router import router as warehouses_router
 from app.api.v1.whatsapp.router import router as whatsapp_router
+from app.api.v1.super_admins.router import router as super_admin_router
 
 from app.core.config import get_settings
 from app.core.database import init_db
 from app.core.logger import logger
 from app.core.middleware import TenantMiddleware
 
-from app.models import *  # noqa: F401, F403
+from app.models import *
 
 
 settings = get_settings()
@@ -46,7 +47,10 @@ async def lifespan(app: FastAPI):
         init_db()
         logger.info("Database connected and tables verified")
     except Exception as exc:
-        logger.error("Database initialization failed: %s", exc)
+        logger.error(
+            "Database initialization failed: %s",
+            exc,
+        )
         raise
 
     yield
@@ -87,29 +91,126 @@ app.add_middleware(TenantMiddleware)
 
 API_PREFIX = "/api/v1"
 
-app.include_router(auth_router, prefix=API_PREFIX)
-app.include_router(users_router, prefix=API_PREFIX)
-app.include_router(stores_router, prefix=API_PREFIX)
-app.include_router(products_router, prefix=API_PREFIX)
-app.include_router(inventory_router, prefix=API_PREFIX)
-app.include_router(suppliers_router, prefix=API_PREFIX)
-app.include_router(purchase_orders_router, prefix=API_PREFIX)
-app.include_router(delivery_router, prefix=API_PREFIX)
-app.include_router(warehouses_router, prefix=API_PREFIX)
-app.include_router(coupons_router, prefix=API_PREFIX)
-app.include_router(orders_router, prefix=API_PREFIX)
-app.include_router(billing_router, prefix=API_PREFIX)
-app.include_router(invoices_router, prefix=API_PREFIX)
-app.include_router(gst_rates_router, prefix=API_PREFIX)
-app.include_router(refunds_router, prefix=API_PREFIX)
-app.include_router(credit_notes_router, prefix=API_PREFIX)
-app.include_router(payments_router, prefix=API_PREFIX)
-app.include_router(customers_router, prefix=API_PREFIX)
-app.include_router(whatsapp_router, prefix=API_PREFIX)
-app.include_router(reports_router, prefix=API_PREFIX)
-app.include_router(dashboard_router, prefix=API_PREFIX)
-app.include_router(analytics_router, prefix=API_PREFIX)
-app.include_router(ai_router, prefix=API_PREFIX)
+
+app.include_router(
+    auth_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    users_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    stores_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    products_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    inventory_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    suppliers_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    purchase_orders_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    delivery_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    warehouses_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    coupons_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    orders_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    billing_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    invoices_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    gst_rates_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    refunds_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    credit_notes_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    payments_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    customers_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    whatsapp_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    reports_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    dashboard_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    analytics_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    ai_router,
+    prefix=API_PREFIX,
+)
+
+app.include_router(
+    super_admin_router,
+    prefix=API_PREFIX,
+)
 
 
 @app.get("/health")
