@@ -314,7 +314,7 @@ def customer_orders(
     return OrderService(db).get_customer_history(user.tenant_id, customer_id)
 
 
-@router.post("/{customer_id}/loyalty")
+@router.post("/{customer_id}/loyalty",response_model=LoyaltyResponse)
 def add_loyalty(
     customer_id: int = Path(..., gt=0),
     points: int = Query(..., gt=0, le=10000),

@@ -9,7 +9,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
 class CustomerBase(BaseModel):
     name: str = Field(min_length=2, max_length=255, description="Name must be 2 to 255 characters")
     email: Optional[EmailStr] = None
-    phone: str = Field(min_length=10, max_length=15, description="Phone must be 10 to 15 digits")
+    phone: str = Field(min_length=10, max_length=10, description="Phone must be exactly 10 digits")
     address: Optional[str] = Field(default=None, max_length=500)
     gstin: Optional[str] = Field(default=None, min_length=15, max_length=15)
     birthday: Optional[date] = None
@@ -23,8 +23,10 @@ class CustomerBase(BaseModel):
     def validate_phone(cls, v: str) -> str:
         if not v.isdigit():
             raise ValueError("Phone must contain digits only")
-        if len(v) < 10 or len(v) > 15:
-            raise ValueError("Phone must be between 10 and 15 digits")
+        if len(v) != 10:
+            raise ValueError("Phone must be exactly 10 digits")
+        if v[0] not in "6789":
+            raise ValueError("Phone must start with 6, 7, 8, or 9")
         return v
 
     @field_validator("name")
@@ -56,7 +58,7 @@ class CustomerCreate(CustomerBase):
 class CustomerUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=2, max_length=255)
     email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(default=None, min_length=10, max_length=15)
+    phone: Optional[str] = Field(default=None, min_length=10, max_length=10,description="Phone must be exactly 10 digits")
     address: Optional[str] = Field(default=None, max_length=500)
     gstin: Optional[str] = Field(default=None, min_length=15, max_length=15)
     birthday: Optional[date] = None
@@ -66,8 +68,18 @@ class CustomerUpdate(BaseModel):
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and not v.isdigit():
+        if v is None:
+            return v
+
+        if not v.isdigit():
             raise ValueError("Phone must contain digits only")
+
+        if len(v) != 10:
+            raise ValueError("Phone must be exactly 10 digits")
+
+        if v[0] not in "6789":
+            raise ValueError("Phone must start with 6, 7, 8, or 9")
+
         return v
 
     @field_validator("gstin")

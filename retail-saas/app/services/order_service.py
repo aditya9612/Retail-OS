@@ -305,12 +305,28 @@ class CustomerService:
     #         "message": "Customer deleted successfully"
     #     }    
 
-    def add_loyalty_points(self, tenant_id: int, customer_id: int, points: int) -> Customer:
+    def add_loyalty_points(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        points: int
+    ):
         customer = self.get_customer(tenant_id, customer_id)
+
         customer.loyalty_points += points
+
+        loyalty = LoyaltyPoint(
+            customer_id=customer_id,
+            points_earned=points,
+            points_redeemed=0,
+            balance_points=customer.loyalty_points,
+        )
+
+        self.db.add(loyalty)
         self.db.commit()
-        self.db.refresh(customer)
-        return customer
+        self.db.refresh(loyalty)
+
+        return loyalty
 
     def get_birthday_customers(self, tenant_id: int, month: int, day: int) -> list[Customer]:
         return (
