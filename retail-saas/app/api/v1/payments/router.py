@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request ,Query
+from fastapi import APIRouter, Depends, Request ,Query,Body
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -66,8 +66,10 @@ def get_qr_payload(
 
 
 @router.post("/webhook")
-async def payment_webhook(request: Request, db: Session = Depends(get_db)):
-    payload = await request.json()
+async def payment_webhook(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db)
+):
     return PaymentService(db).webhook_handler(payload)
 
 @router.post(

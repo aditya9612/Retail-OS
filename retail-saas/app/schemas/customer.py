@@ -9,7 +9,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
 class CustomerBase(BaseModel):
     name: str = Field(min_length=2, max_length=255, description="Name must be 2 to 255 characters")
     email: Optional[EmailStr] = None
-    phone: str = Field(min_length=10, max_length=10, description="Phone must be exactly 10 digits")
+    phone: str = Field(description="Phone must be 10 digits or +91 followed by 10 digits")
     address: Optional[str] = Field(default=None, max_length=500)
     gstin: Optional[str] = Field(default=None, min_length=15, max_length=15)
     birthday: Optional[date] = None
@@ -21,13 +21,32 @@ class CustomerBase(BaseModel):
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, v: str) -> str:
-        if not v.isdigit():
-            raise ValueError("Phone must contain digits only")
-        if len(v) != 10:
-            raise ValueError("Phone must be exactly 10 digits")
-        if v[0] not in "6789":
-            raise ValueError("Phone must start with 6, 7, 8, or 9")
+         # +91 optional
+        if v.startswith("+91"):
+            number = v[3:]
+        else:
+            number = v
+
+        # Exactly 10 digits
+        if len(number) != 10:
+            raise ValueError(
+                "Phone number must contain exactly 10 digits"
+            )
+
+        # Only digits
+        if not number.isdigit():
+            raise ValueError(
+                "Phone number must contain digits only"
+            )
+
+        # Must start with 6, 7, 8 or 9
+        if number[0] not in "6789":
+            raise ValueError(
+                "Phone number must start with 6, 7, 8, or 9"
+            )
+
         return v
+
 
     @field_validator("name")
     @classmethod
