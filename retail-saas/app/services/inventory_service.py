@@ -274,9 +274,24 @@ class InventoryService:
            query = query.filter(
                Inventory.store_id == store_id
         )
+           
+        inventories = query.all()
 
-        return query.all()
+        if not inventories:
+            return {
+                "success": True,
+                "message": "No low-stock items found",
+                "count": 0,
+                "data": [],
+            }
 
+        return {
+            "success": True,
+            "message": "Low-stock items fetched successfully",
+            "count": len(inventories),
+            "data": inventories,
+        }
+        
     def list_inventory(
         self,
         tenant_id: int,

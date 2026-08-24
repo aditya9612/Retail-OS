@@ -17,6 +17,12 @@ class InventoryResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+class LowStockResponse(BaseModel):
+    success: bool
+    message: str
+    count: int
+    data: list[InventoryResponse]
+
 class InventoryValuationResponse(BaseModel):
     total_inventory_value: Decimal
 
