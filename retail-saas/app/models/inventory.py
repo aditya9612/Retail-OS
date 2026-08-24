@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Date, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -10,20 +10,8 @@ from app.core.database import Base, TimestampMixin
 if TYPE_CHECKING:
     from app.models.product import Product
     from app.models.store import Store
+    from app.models.supplier import Supplier
 
-
-class Supplier(Base, TimestampMixin):
-    __tablename__ = "suppliers"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    contact_person: Mapped[str | None] = mapped_column(String(255))
-    email: Mapped[str | None] = mapped_column(String(255))
-    phone: Mapped[str | None] = mapped_column(String(20))
-    address: Mapped[str | None] = mapped_column(String(500))
-    gstin: Mapped[str | None] = mapped_column(String(20))
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 class Inventory(Base, TimestampMixin):
     __tablename__ = "inventory"

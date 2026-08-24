@@ -1,10 +1,11 @@
-from app.models.audit_log import AuditLog
+﻿from app.models.audit_log import AuditLog
 from app.models.category import Category
 from app.models.credit_note import CreditNote
 from app.models.customer import Customer
 from app.models.document_sequence import DocumentSequence
 from app.models.gst_rate import GstRate
-from app.models.inventory import Inventory, StockMovement, Supplier
+from app.models.inventory import Inventory, StockMovement
+from app.models.supplier import Supplier
 from app.models.invoice import Invoice
 from app.models.invoice_item import InvoiceItem
 from app.models.order import Order
