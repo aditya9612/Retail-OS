@@ -21,6 +21,7 @@ from app.api.v1.invoices.router import router as invoices_router
 from app.api.v1.orders.router import router as orders_router
 from app.api.v1.payments.router import router as payments_router
 from app.api.v1.products.router import router as products_router
+from app.api.v1.categories.router import router as categories_router
 from app.api.v1.purchase_orders.router import router as purchase_orders_router
 from app.api.v1.refunds.router import router as refunds_router
 from app.api.v1.reports.router import router as reports_router
@@ -102,6 +103,7 @@ app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(users_router, prefix=API_PREFIX)
 app.include_router(stores_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
+app.include_router(categories_router, prefix=API_PREFIX)
 app.include_router(inventory_router, prefix=API_PREFIX)
 app.include_router(suppliers_router, prefix=API_PREFIX)
 app.include_router(purchase_orders_router, prefix=API_PREFIX)
