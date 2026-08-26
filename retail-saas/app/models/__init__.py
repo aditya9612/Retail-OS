@@ -10,6 +10,7 @@ from app.models.invoice import Invoice
 from app.models.invoice_item import InvoiceItem
 from app.models.order import Order
 from app.models.order_item import OrderItem
+from app.models.order_return import OrderReturn
 from app.models.payment import Payment
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
 from app.models.delivery import Delivery
@@ -43,6 +44,7 @@ __all__ = [
     "InvoiceItem",
     "Order",
     "OrderItem",
+    "OrderReturn",
     "Payment",
     "PurchaseOrder",
     "PurchaseOrderItem",

@@ -1,9 +1,13 @@
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from app.models.order import Order
 
 
 class OrderItem(Base, TimestampMixin):
@@ -21,5 +25,4 @@ class OrderItem(Base, TimestampMixin):
     tax_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
     total: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     variant: Mapped[str | None] = mapped_column(String(100))
-
-    order: Mapped["Order"] = relationship("Order", back_populates="items")
+    order: Mapped["Order"] = relationship("Order", back_populates="items",)

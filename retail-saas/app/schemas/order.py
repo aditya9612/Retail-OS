@@ -166,13 +166,3 @@ class OrderStatusUpdateRequest(BaseModel):
         if v not in VALID_ORDER_STATUSES:
             raise ValueError(f"status must be one of {VALID_ORDER_STATUSES}")
         return v
-    
-    
-from pydantic import BaseModel, Field
-
-class OrderReturnRequest(BaseModel):
-    remarks: str = Field(
-        min_length=5,
-        max_length=500,
-        description="Return reason is required"
-    )

@@ -164,25 +164,6 @@ class OrderService:
 
         return self.repo.update(order)
     
-    def return_order(
-        self,
-        tenant_id: int,
-        order_id: int,
-        remarks: str | None = None,
-    ):
-        order = self.get_order(tenant_id, order_id)
-
-        order.status = OrderStatus.RETURNED.value
-
-        tracking = OrderTracking(
-            order_id=order.id,
-            status=OrderStatus.RETURNED.value,
-            remarks=remarks,
-        )
-
-        self.db.add(tracking)
-
-        return self.repo.update(order)
     
     def get_order_tracking(self, tenant_id: int, order_id: int):
         order = self.get_order(tenant_id, order_id)
