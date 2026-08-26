@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Path
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -8,6 +8,8 @@ from app.schemas.warehouse import (
     WarehouseCreate,
     WarehouseUpdate,
     WarehouseResponse,
+    WarehouseDeleteResponse,
+    WarehouseDashboardResponse,
 )
 from app.services.warehouse_service import WarehouseService
 
@@ -30,7 +32,6 @@ def create_warehouse(
     ),
     db: Session = Depends(get_db),
 ):
-
     return WarehouseService(db).create(
         tenant_id=user.tenant_id,
         data=data,
@@ -47,29 +48,14 @@ def list_warehouses(
     ),
     db: Session = Depends(get_db),
 ):
-
     return WarehouseService(db).list(
         tenant_id=user.tenant_id,
     )
-
-
-@router.get(
-    "/stats",
-)
-def warehouse_stats(
-    user: User = Depends(
-        require_permission("inventory:read")
-    ),
-    db: Session = Depends(get_db),
-):
-
-    return WarehouseService(db).stats(
-        tenant_id=user.tenant_id,
-    )
-
+    
 
 @router.get(
     "/dashboard",
+    response_model=WarehouseDashboardResponse,
 )
 def warehouse_dashboard(
     user: User = Depends(
@@ -77,7 +63,6 @@ def warehouse_dashboard(
     ),
     db: Session = Depends(get_db),
 ):
-
     return WarehouseService(db).dashboard(
         tenant_id=user.tenant_id,
     )
@@ -88,13 +73,16 @@ def warehouse_dashboard(
     response_model=WarehouseResponse,
 )
 def get_warehouse(
-    warehouse_id: int,
+    warehouse_id: int = Path(
+        ...,
+        gt=0,
+        description="Warehouse ID must be a positive integer",
+    ),
     user: User = Depends(
         require_permission("inventory:read")
     ),
     db: Session = Depends(get_db),
 ):
-
     return WarehouseService(db).get(
         tenant_id=user.tenant_id,
         warehouse_id=warehouse_id,
@@ -106,14 +94,17 @@ def get_warehouse(
     response_model=WarehouseResponse,
 )
 def update_warehouse(
-    warehouse_id: int,
     data: WarehouseUpdate,
+    warehouse_id: int = Path(
+        ...,
+        gt=0,
+        description="Warehouse ID must be a positive integer",
+    ),
     user: User = Depends(
         require_permission("inventory:write")
     ),
     db: Session = Depends(get_db),
 ):
-
     return WarehouseService(db).update(
         tenant_id=user.tenant_id,
         warehouse_id=warehouse_id,
@@ -123,15 +114,19 @@ def update_warehouse(
 
 @router.delete(
     "/{warehouse_id}",
+    response_model=WarehouseDeleteResponse,
 )
 def delete_warehouse(
-    warehouse_id: int,
+    warehouse_id: int = Path(
+        ...,
+        gt=0,
+        description="Warehouse ID must be a positive integer",
+    ),
     user: User = Depends(
         require_permission("inventory:write")
     ),
     db: Session = Depends(get_db),
 ):
-
     return WarehouseService(db).delete(
         tenant_id=user.tenant_id,
         warehouse_id=warehouse_id,

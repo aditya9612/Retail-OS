@@ -1,3 +1,4 @@
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.warehouse import Warehouse
@@ -13,11 +14,16 @@ class WarehouseRepository:
         warehouse: Warehouse,
     ) -> Warehouse:
 
-        self.db.add(warehouse)
-        self.db.commit()
-        self.db.refresh(warehouse)
+        try:
+            self.db.add(warehouse)
+            self.db.commit()
+            self.db.refresh(warehouse)
 
-        return warehouse
+            return warehouse
+
+        except IntegrityError:
+            self.db.rollback()
+            raise
 
     def list(
         self,
@@ -29,7 +35,9 @@ class WarehouseRepository:
             .filter(
                 Warehouse.tenant_id == tenant_id,
             )
-            .order_by(Warehouse.created_at.desc())
+            .order_by(
+                Warehouse.created_at.desc()
+            )
             .all()
         )
 
@@ -53,18 +61,28 @@ class WarehouseRepository:
         warehouse: Warehouse,
     ) -> Warehouse:
 
-        self.db.commit()
-        self.db.refresh(warehouse)
+        try:
+            self.db.commit()
+            self.db.refresh(warehouse)
 
-        return warehouse
+            return warehouse
+
+        except IntegrityError:
+            self.db.rollback()
+            raise
 
     def delete(
         self,
         warehouse: Warehouse,
     ) -> None:
 
-        self.db.delete(warehouse)
-        self.db.commit()
+        try:
+            self.db.delete(warehouse)
+            self.db.commit()
+
+        except IntegrityError:
+            self.db.rollback()
+            raise
 
     def count(
         self,
@@ -88,7 +106,7 @@ class WarehouseRepository:
             self.db.query(Warehouse)
             .filter(
                 Warehouse.tenant_id == tenant_id,
-                Warehouse.is_active == True,
+                Warehouse.is_active.is_(True),
             )
             .count()
         )
