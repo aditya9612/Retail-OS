@@ -1,4 +1,5 @@
 import json
+import time
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -10,35 +11,75 @@ from app.services.audit_service import AuditService
 from app.utils.gst_engine import aggregate_taxes, calculate_line_tax, resolve_gst_rate
 
 CART_TTL_SECONDS = 3600
+_MEMORY_CARTS: dict[str, tuple[float, str]] = {}
+
+
+def _empty_cart() -> dict:
+    return {
+        "store_id": None,
+        "customer_id": None,
+        "same_state": True,
+        "discount_amount": "0.00",
+        "coupon_code": None,
+        "items": [],
+    }
 
 
 class CartService:
     def __init__(self, db: Session):
         self.db = db
-        self.redis = get_redis()
+        try:
+            self.redis = get_redis()
+        except Exception:
+            self.redis = None
 
     def _cart_key(self, tenant_id: int, user_id: int) -> str:
         return f"cart:{tenant_id}:{user_id}"
 
+    def _memory_get(self, key: str) -> str | None:
+        entry = _MEMORY_CARTS.get(key)
+        if not entry:
+            return None
+        expires_at, payload = entry
+        if expires_at < time.time():
+            _MEMORY_CARTS.pop(key, None)
+            return None
+        return payload
+
+    def _memory_set(self, key: str, payload: str) -> None:
+        _MEMORY_CARTS[key] = (time.time() + CART_TTL_SECONDS, payload)
+
     def _load_cart(self, tenant_id: int, user_id: int) -> dict:
-        raw = self.redis.get(self._cart_key(tenant_id, user_id))
+        key = self._cart_key(tenant_id, user_id)
+        raw = None
+        if self.redis is not None:
+            try:
+                raw = self.redis.get(key)
+            except Exception:
+                raw = None
+        if not raw:
+            raw = self._memory_get(key)
         if raw:
-            return json.loads(raw)
-        return {
-            "store_id": None,
-            "customer_id": None,
-            "same_state": True,
-            "discount_amount": "0.00",
-            "coupon_code": None,
-            "items": [],
-        }
+            cart = json.loads(raw)
+            cart["items"] = [
+                {**item, "product_id": int(item["product_id"])}
+                for item in cart.get("items", [])
+            ]
+            return cart
+        return _empty_cart()
 
     def _save_cart(self, tenant_id: int, user_id: int, cart: dict) -> None:
-        self.redis.setex(
-            self._cart_key(tenant_id, user_id),
-            CART_TTL_SECONDS,
-            json.dumps(cart),
-        )
+        payload = json.dumps(cart)
+        key = self._cart_key(tenant_id, user_id)
+        saved = False
+        if self.redis is not None:
+            try:
+                self.redis.setex(key, CART_TTL_SECONDS, payload)
+                saved = True
+            except Exception:
+                saved = False
+        if not saved:
+            self._memory_set(key, payload)
 
     def _compute_item(self, tenant_id: int, item: dict, same_state: bool) -> dict:
         product = (
@@ -56,7 +97,7 @@ class CartService:
         return {
             "product_id": product.id,
             "product_name": product.name,
-            "sku": product.sku,
+            "sku": product.sku or "",
             "hsn_code": product.hsn_code,
             "quantity": str(qty),
             "unit_price": str(unit_price),
@@ -112,7 +153,10 @@ class CartService:
         cart["_tenant_id"] = tenant_id
         cart["store_id"] = store_id
         cart["same_state"] = same_state
-        existing = next((i for i in cart["items"] if i["product_id"] == product_id), None)
+        existing = next(
+            (i for i in cart["items"] if int(i["product_id"]) == int(product_id)),
+            None,
+        )
         if existing:
             existing["quantity"] = str(Decimal(str(existing["quantity"])) + quantity)
             if unit_price is not None:
@@ -163,7 +207,10 @@ class CartService:
     ) -> dict:
         cart = self._load_cart(tenant_id, user_id)
         cart["_tenant_id"] = tenant_id
-        item = next((i for i in cart["items"] if i["product_id"] == product_id), None)
+        item = next(
+            (i for i in cart["items"] if int(i["product_id"]) == int(product_id)),
+            None,
+        )
         if not item:
             raise NotFoundException("Cart item not found")
         if quantity is not None:
@@ -191,7 +238,9 @@ class CartService:
     def remove_item(self, tenant_id: int, user_id: int, product_id: int) -> dict:
         cart = self._load_cart(tenant_id, user_id)
         cart["_tenant_id"] = tenant_id
-        cart["items"] = [i for i in cart["items"] if i["product_id"] != product_id]
+        cart["items"] = [
+            i for i in cart["items"] if int(i["product_id"]) != int(product_id)
+        ]
         self._save_cart(tenant_id, user_id, cart)
         return self.get_cart(tenant_id, user_id)
 
@@ -254,7 +303,7 @@ class CartService:
                     "override_price": str(unit_price),
                 },
             )
-        if discount > 0:
+        if discount is not None and discount > 0:
             audit.log(
                 tenant_id,
                 user_id,
@@ -288,7 +337,13 @@ class CartService:
         return self._build_summary(cart)
 
     def clear_cart(self, tenant_id: int, user_id: int) -> None:
-        self.redis.delete(self._cart_key(tenant_id, user_id))
+        key = self._cart_key(tenant_id, user_id)
+        if self.redis is not None:
+            try:
+                self.redis.delete(key)
+            except Exception:
+                pass
+        _MEMORY_CARTS.pop(key, None)
 
     def set_customer(self, tenant_id: int, user_id: int, customer_id: int | None) -> dict:
         cart = self._load_cart(tenant_id, user_id)

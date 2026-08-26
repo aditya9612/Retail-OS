@@ -14,7 +14,7 @@ from app.repositories.store_repo import StoreRepository
 from app.repositories.user_repo import UserRepository
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.schemas.user import StoreCreate, StoreUpdate, UserCreate, UserUpdate
-from app.utils.barcode import generate_barcode, generate_barcode_image
+from app.utils.barcode_generator import generate_barcode, generate_barcode_image
 
 
 class ProductService:

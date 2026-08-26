@@ -23,9 +23,11 @@ def resolve_gst_rate(db: Session, tenant_id: int, product: Product) -> Decimal:
             )
             .first()
         )
-        if rate_row:
-            return rate_row.gst_rate
-    return product.gst_rate
+        if rate_row and rate_row.gst_rate is not None:
+            return Decimal(str(rate_row.gst_rate))
+    if product.gst_rate is None:
+        return Decimal("0.00")
+    return Decimal(str(product.gst_rate))
 
 
 def calculate_line_tax(
@@ -36,12 +38,13 @@ def calculate_line_tax(
     same_state: bool,
 ) -> dict:
     taxable = _quantize(quantity * unit_price - discount)
-    gst_amount = _quantize(taxable * gst_rate / Decimal("100"))
+    rate = Decimal("0.00") if gst_rate is None else Decimal(str(gst_rate))
+    gst_amount = _quantize(taxable * rate / Decimal("100"))
     if same_state:
         half = _quantize(gst_amount / Decimal("2"))
         return {
             "taxable_amount": taxable,
-            "gst_rate": gst_rate,
+            "gst_rate": rate,
             "gst_amount": gst_amount,
             "cgst_amount": half,
             "sgst_amount": half,
@@ -50,7 +53,7 @@ def calculate_line_tax(
         }
     return {
         "taxable_amount": taxable,
-        "gst_rate": gst_rate,
+        "gst_rate": rate,
         "gst_amount": gst_amount,
         "cgst_amount": Decimal("0.00"),
         "sgst_amount": Decimal("0.00"),

@@ -1,10 +1,13 @@
 from decimal import Decimal
+from typing import Literal
 
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictException, NotFoundException
 from app.models.gst_rate import GstRate
-from app.schemas.gst_rate import GstRateCreate, GstRateUpdate
+from app.schemas.gst_rate import GstRateCreate, GstRateResponse, GstRateUpdate
+
+SupplyType = Literal["intra_state", "inter_state"]
 
 
 class GstService:
@@ -21,6 +24,50 @@ class GstService:
         if active_only:
             query = query.filter(GstRate.status.is_(True))
         return query.order_by(GstRate.hsn_code).all()
+
+    def list_rate_views(
+        self,
+        tenant_id: int,
+        supply_type: SupplyType | None = None,
+        active_only: bool = True,
+    ) -> list[GstRateResponse]:
+        """Return GST rates with mutually exclusive tax components.
+
+        Intra-state uses CGST + SGST (IGST = 0). Inter-state uses IGST
+        (CGST = SGST = 0). A single response row never has both.
+        """
+        views: list[GstRateResponse] = []
+        for rate in self.list_rates(tenant_id, active_only=active_only):
+            cgst, sgst, igst = self._split_rate(rate.gst_rate)
+            base = {
+                "id": rate.id,
+                "tenant_id": rate.tenant_id,
+                "hsn_code": rate.hsn_code,
+                "gst_rate": rate.gst_rate,
+                "status": rate.status,
+                "created_at": rate.created_at,
+            }
+            intra = GstRateResponse(
+                **base,
+                cgst=cgst,
+                sgst=sgst,
+                igst=Decimal("0.00"),
+                supply_type="intra_state",
+            )
+            inter = GstRateResponse(
+                **base,
+                cgst=Decimal("0.00"),
+                sgst=Decimal("0.00"),
+                igst=igst,
+                supply_type="inter_state",
+            )
+            if supply_type == "intra_state":
+                views.append(intra)
+            elif supply_type == "inter_state":
+                views.append(inter)
+            else:
+                views.extend([intra, inter])
+        return views
 
     def get_rate(self, tenant_id: int, rate_id: int) -> GstRate:
         rate = (
