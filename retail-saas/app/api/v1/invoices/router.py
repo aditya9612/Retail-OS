@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional, Literal
 
+from celery.exceptions import CeleryError
 from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -62,16 +63,69 @@ def search_invoices(
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
+    invoice_number = invoice_number.strip() if invoice_number else None
+    customer_name = customer_name.strip() if customer_name else None
+    mobile = mobile.strip() if mobile else None
+    gstin = gstin.strip().upper() if gstin else None
+
+    if invoice_number is not None and not invoice_number:
+        raise HTTPException(
+            status_code=422,
+            detail="invoice_number cannot be empty",
+        )
+
+    if customer_name is not None and not customer_name:
+        raise HTTPException(
+            status_code=422,
+            detail="customer_name cannot be empty",
+        )
+
+    if customer_name is not None and len(customer_name) < 2:
+        raise HTTPException(
+            status_code=422,
+            detail="customer_name must contain at least 2 characters",
+        )
+
+    if mobile is not None:
+        if not mobile.isdigit() or len(mobile) != 10:
+            raise HTTPException(
+                status_code=422,
+                detail="mobile must be exactly 10 digits",
+            )
+
+    if gstin is not None:
+        import re
+
+        if not re.fullmatch(
+            r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$",
+            gstin,
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid GSTIN format",
+            )
+
     if date_from and date_to and date_from > date_to:
         raise HTTPException(
             status_code=422,
             detail="date_from must be earlier than or equal to date_to",
         )
 
-    invoice_number = invoice_number.strip() if invoice_number else None
-    customer_name = customer_name.strip() if customer_name else None
-    mobile = mobile.strip() if mobile else None
-    gstin = gstin.strip().upper() if gstin else None
+    if not any(
+        [
+            invoice_number,
+            customer_name,
+            mobile,
+            gstin,
+            payment_status,
+            date_from,
+            date_to,
+        ]
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="At least one search parameter is required",
+        )
 
     return BillingService(db).search_invoices(
         user.tenant_id,
@@ -100,9 +154,7 @@ def get_invoice(
 @router.get("/{invoice_id}/pdf")
 def invoice_pdf(
     invoice_id: int,
-    mode: Literal["download", "preview"] = Query(
-        default="download",
-    ),
+    mode: Literal["download", "preview"] = Query(default="download"),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
@@ -159,12 +211,31 @@ def reprint_invoice(
 def generate_invoice_async(
     invoice_id: int,
     user: User = Depends(require_permission("billing:write")),
+    db: Session = Depends(get_db),
 ):
-    task = generate_invoice_pdf_task.delay(
+    BillingService(db).get_invoice(
         user.tenant_id,
         invoice_id,
     )
 
+    try:
+        task = generate_invoice_pdf_task.delay(
+            user.tenant_id,
+            invoice_id,
+        )
+    except CeleryError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Invoice PDF task could not be queued: {exc}",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Invoice PDF task could not be queued: {exc}",
+        )
+
     return {
+        "message": "Invoice PDF generation queued successfully",
         "task_id": task.id,
+        "invoice_id": invoice_id,
     }

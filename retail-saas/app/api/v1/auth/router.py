@@ -41,12 +41,13 @@ def refresh(
         data.refresh_token
     )
 
+
 @router.post("/logout")
 def logout():
     return {
         "success": True,
         "message": "Logout successful"
-    }   
+    }
 
 
 @router.post("/register")
@@ -83,10 +84,7 @@ def forgot_password(
     reset_token = AuthService(db).forgot_password(data)
 
     return {
-        "message": (
-            "If the email exists, "
-            "a password reset link has been sent."
-        ),
+        "message": "Password reset link has been generated.",
         "reset_token": reset_token,
     }
 
