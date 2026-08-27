@@ -41,19 +41,16 @@ class WarehouseCreate(BaseModel):
         value = value.strip()
 
         if not value:
-            raise ValueError(
-                "Warehouse name cannot be empty"
-            )
-
+            raise ValueError("Warehouse name cannot be empty")
+        
+        if value.lower() == "string":
+           raise ValueError("Please provide a valid warehouse name")
+        
         if value.isdigit():
-            raise ValueError(
-                "Warehouse name cannot contain only numbers"
-            )
+            raise ValueError("Warehouse name cannot contain only numbers")
 
         if not re.search(r"[A-Za-z]", value):
-            raise ValueError(
-                "Warehouse name must contain at least one alphabetic character"
-            )
+            raise ValueError("Warehouse name must contain at least one alphabetic character")
 
         return value
 
@@ -66,7 +63,10 @@ class WarehouseCreate(BaseModel):
             raise ValueError(
                 "Warehouse code cannot be empty"
             )
-
+        
+        if value == "STRING":
+           raise ValueError("Please provide a valid warehouse code")
+        
         if value.isdigit():
             raise ValueError(
                 "Warehouse code cannot contain only numbers"
@@ -95,7 +95,12 @@ class WarehouseCreate(BaseModel):
             raise ValueError(
                 "Warehouse address cannot be empty"
             )
-
+        
+        if value.lower() == "string":
+            raise ValueError(
+               "Please provide a valid warehouse address"
+            )
+        
         return value
 
 
@@ -123,6 +128,7 @@ class WarehouseUpdate(BaseModel):
     )
 
     address: str = Field(
+        default=None,
         min_length=2,
         max_length=500,
     )
@@ -170,7 +176,12 @@ class WarehouseUpdate(BaseModel):
             raise ValueError(
                 "Warehouse name cannot be empty"
             )
-
+        
+        if value.lower() == "string":
+            raise ValueError(
+               "Please provide a valid warehouse name"
+            )
+        
         if value.isdigit():
             raise ValueError(
                 "Warehouse name cannot contain only numbers"
@@ -201,7 +212,12 @@ class WarehouseUpdate(BaseModel):
             raise ValueError(
                 "Warehouse code cannot be empty"
             )
-
+        
+        if value == "STRING":
+            raise ValueError(
+               "Please provide a valid warehouse code"
+            )
+        
         if value.isdigit():
             raise ValueError(
                 "Warehouse code cannot contain only numbers"
@@ -232,7 +248,12 @@ class WarehouseUpdate(BaseModel):
             raise ValueError(
                 "Warehouse address cannot be empty"
             )
-
+        
+        if value.lower() == "string":
+            raise ValueError(
+               "Please provide a valid warehouse address"
+            )
+        
         return value
 
     @field_validator("is_active")

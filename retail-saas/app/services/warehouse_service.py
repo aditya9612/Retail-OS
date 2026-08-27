@@ -3,6 +3,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.exceptions import NotFoundException
 from app.models.warehouse import Warehouse
+from app.models.store import Store
 from app.repositories.warehouse_repo import WarehouseRepository
 from app.schemas.warehouse import (
     WarehouseCreate,
@@ -20,6 +21,23 @@ class WarehouseService:
         tenant_id: int,
         data: WarehouseCreate,
     ):
+        
+        if data.store_id is not None:
+            store = (
+                self.repo.db.query(Store)
+                .filter(
+                    Store.id == data.store_id,
+                    Store.tenant_id == tenant_id,
+                )
+                .first()
+            )
+
+            if not store:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Store not found",
+                )
+                
         warehouse = Warehouse(
             tenant_id=tenant_id,
             store_id=data.store_id,
@@ -39,12 +57,6 @@ class WarehouseService:
                 raise HTTPException(
                     status_code=409,
                     detail="Warehouse code already exists",
-                )
-
-            if "store" in error_message:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Store not found",
                 )
 
             raise HTTPException(

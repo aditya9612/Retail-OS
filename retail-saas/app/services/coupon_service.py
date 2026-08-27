@@ -1,8 +1,6 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy.orm import Session
-
 from app.core.exceptions import (
     ConflictException,
     NotFoundException,
@@ -18,9 +16,14 @@ from app.schemas.coupon import (
 
 class CouponService:
 
-    def __init__(self, db: Session):
+    def __init__(self, db):
+
         self.db = db
         self.repo = CouponRepository(db)
+
+    # ========================================================
+    # CREATE COUPON
+    # ========================================================
 
     def create_coupon(
         self,
@@ -28,32 +31,58 @@ class CouponService:
         data: CouponCreate,
     ) -> Coupon:
 
+        code = data.code.strip().upper()
+
         existing_coupon = self.repo.get_by_code(
-            data.code,
+            code,
             tenant_id,
         )
 
         if existing_coupon:
-            raise ConflictException("Coupon code already exists")
-
-        if data.start_date > data.end_date:
-            raise AppException(
-                "Valid From date cannot be greater than Valid Until date"
+            raise ConflictException(
+                "Coupon code already exists"
             )
 
         coupon = Coupon(
             tenant_id=tenant_id,
-            **data.model_dump()
+            code=code,
+            description=data.description.strip(),
+            discount_type=data.discount_type,
+            discount_value=data.discount_value,
+            minimum_order_amount=data.minimum_order_amount,
+            maximum_discount=data.maximum_discount,
+            usage_limit=data.usage_limit,
+            used_count=0,
+            start_date=data.start_date,
+            end_date=data.end_date,
+            is_active=True,
         )
 
         return self.repo.create(coupon)
+
+    # ========================================================
+    # LIST COUPONS
+    # ========================================================
 
     def list_coupons(
         self,
         tenant_id: int,
     ) -> list[Coupon]:
 
-        return self.repo.list_coupons(tenant_id)
+        coupons = self.repo.list_coupons(
+            tenant_id
+        )
+
+        if not coupons:
+            raise NotFoundException(
+                "No coupons found"
+            )
+
+        return coupons
+
+    # ========================================================
+    # GET SINGLE COUPON
+    # ========================================================
 
     def get_coupon(
         self,
@@ -67,10 +96,15 @@ class CouponService:
         )
 
         if not coupon:
-            raise NotFoundException("Coupon not found")
+            raise NotFoundException(
+                "Coupon not found"
+            )
 
         return coupon
 
+    # ========================================================
+    # UPDATE COUPON
+    # ========================================================
     def update_coupon(
         self,
         tenant_id: int,
@@ -87,108 +121,153 @@ class CouponService:
             exclude_unset=True
         )
 
-        if (
-            "code" in update_data
-            and update_data["code"] != coupon.code
-        ):
-            existing_coupon = self.repo.get_by_code(
-                update_data["code"],
-                tenant_id,
+        if not update_data:
+            raise AppException(
+                "At least one field is required for update"
             )
 
-            if existing_coupon:
-                raise ConflictException(
-                    "Coupon code already exists"
-                )
-
-        valid_from = update_data.get(
+    
+        final_start_date = update_data.get(
             "start_date",
             coupon.start_date,
         )
 
-        valid_until = update_data.get(
+        final_end_date = update_data.get(
             "end_date",
             coupon.end_date,
         )
 
-        if valid_from > valid_until:
+        final_discount_type = update_data.get(
+            "discount_type",
+            coupon.discount_type,
+        )
+
+        final_discount_value = update_data.get(
+            "discount_value",
+            coupon.discount_value,
+        )
+
+        final_usage_limit = update_data.get(
+            "usage_limit",
+            coupon.usage_limit,
+        )
+
+    # ----------------------------------------------------
+    # START DATE
+    # ----------------------------------------------------
+
+        if final_start_date < date.today():
             raise AppException(
-                "Valid From date cannot be greater than Valid Until date"
+               "Start date cannot be in the past"
             )
 
+    # ----------------------------------------------------
+    # END DATE
+    # ----------------------------------------------------
+
+        if final_end_date < final_start_date:
+            raise AppException(
+                "End date must be on or after start date"
+            )
+
+    # ----------------------------------------------------
+    # DISCOUNT TYPE
+    # ----------------------------------------------------
+
+        if final_discount_type not in (
+            "percentage",
+            "fixed",
+        ):
+            raise AppException(
+               "discount_type must be either "
+               "'percentage' or 'fixed'"
+            )
+
+    # ----------------------------------------------------
+    # PERCENTAGE DISCOUNT
+    # ----------------------------------------------------
+
+        if (
+            final_discount_type == "percentage"
+            and final_discount_value > Decimal("100")
+        ):
+            raise AppException(
+                "Percentage discount cannot be greater than 100"
+            )
+
+    # ----------------------------------------------------
+    # USAGE LIMIT
+    # ----------------------------------------------------
+
+        if final_usage_limit < coupon.used_count:
+            raise AppException(
+                f"Usage limit cannot be less than used count "
+                f"({coupon.used_count})"
+            )
+
+    # ----------------------------------------------------
+    # MAXIMUM DISCOUNT
+    # ----------------------------------------------------
+
+        final_maximum_discount = update_data.get(
+           "maximum_discount",
+            coupon.maximum_discount,
+        )
+
+        if (
+            final_maximum_discount is not None
+            and final_discount_type == "percentage"
+            and final_maximum_discount <= 0
+        ):
+            raise AppException(
+                 "Maximum discount must be greater than 0"
+            )
+
+    # ----------------------------------------------------
+    # APPLY UPDATE
+    # ----------------------------------------------------
+
         for key, value in update_data.items():
+
+            if key == "description":
+                value = value.strip()
+
+            if key == "code":
+                value = value.strip().upper()
+
             setattr(
-                coupon,
-                key,
-                value,
+               coupon,
+               key,
+               value,
             )
 
         return self.repo.update(coupon)
+
+    # ========================================================
+    # DELETE COUPON
+    # ========================================================
 
     def delete_coupon(
         self,
         tenant_id: int,
         coupon_id: int,
     ):
-        coupon = self.repo.get_by_id(coupon_id, tenant_id)
- 
-        if not coupon:
-           raise NotFoundException("Coupon not found")
+
+        coupon = self.get_coupon(
+            tenant_id,
+            coupon_id,
+        )
 
         self.repo.delete(coupon)
 
         return {
-           "message": "Coupon deleted successfully"
-        }
-    
-    def apply_coupon(
-        self,
-        tenant_id: int,
-        coupon_code: str,
-        order_amount: Decimal,
-    ):
-
-        validation = self.validate_coupon(
-        tenant_id=tenant_id,
-        coupon_code=coupon_code,
-        order_amount=order_amount,
-    )
-
-        if not validation["valid"]:
-           raise AppException(validation["message"])
-
-        coupon = self.repo.get_by_code(
-        coupon_code,
-        tenant_id,
-    )
-
-        if coupon.discount_type == "fixed":
-           discount = coupon.discount_value
-
-        else:
-            discount = (
-                order_amount * coupon.discount_value
-            ) / Decimal("100")
-
-        if (
-            coupon.maximum_discount
-            and discount > coupon.maximum_discount
-        ):
-            discount = coupon.maximum_discount
-
-        final_amount = order_amount - discount
-
-        if final_amount < 0:
-           final_amount = Decimal("0.00")
-
-        return {
-            "coupon_code": coupon.code,
-            "original_amount": order_amount,
-            "discount_amount": discount,
-            "final_amount": final_amount,
-            "message": "Coupon applied successfully",
+            "message": "Coupon deleted successfully",
+            "coupon_id": coupon_id,
         }
 
+    # ========================================================
+    # UPDATE STATUS
+    # ========================================================
 
     def update_coupon_status(
         self,
@@ -198,19 +277,103 @@ class CouponService:
     ):
 
         coupon = self.get_coupon(
-          tenant_id,
-          coupon_id,
+            tenant_id,
+            coupon_id,
         )
- 
+
         if coupon.is_active == is_active:
-           raise AppException(
-               f"Coupon is already {'active' if is_active else 'inactive'}"
+
+            raise AppException(
+                f"Coupon is already "
+                f"{'active' if is_active else 'inactive'}"
             )
 
         coupon.is_active = is_active
 
         return self.repo.update_status(coupon)
 
+    # ========================================================
+    # COMMON VALID COUPON
+    #
+    # IMPORTANT:
+    # Validate and Apply both use this method.
+    # So validation logic is written only once.
+    # ========================================================
+
+    def get_valid_coupon(
+        self,
+        tenant_id: int,
+        coupon_code: str,
+        order_amount: Decimal,
+    ) -> Coupon:
+
+        code = coupon_code.strip().upper()
+
+        coupon = self.repo.get_by_code(
+            code,
+            tenant_id,
+        )
+
+        if not coupon:
+            raise NotFoundException(
+                "Coupon not found"
+            )
+
+        today = date.today()
+
+        # ----------------------------------------------------
+        # ACTIVE CHECK
+        # ----------------------------------------------------
+
+        if not coupon.is_active:
+            raise AppException(
+                "Coupon is inactive"
+            )
+
+        # ----------------------------------------------------
+        # START DATE CHECK
+        # ----------------------------------------------------
+
+        if today < coupon.start_date:
+            raise AppException(
+                "Coupon is not started yet"
+            )
+
+        # ----------------------------------------------------
+        # END DATE CHECK
+        # ----------------------------------------------------
+
+        if today > coupon.end_date:
+            raise AppException(
+                "Coupon expired"
+            )
+
+        # ----------------------------------------------------
+        # MINIMUM ORDER CHECK
+        # ----------------------------------------------------
+
+        if order_amount < coupon.minimum_order_amount:
+
+            raise AppException(
+                f"Minimum order amount is "
+                f"{coupon.minimum_order_amount}"
+            )
+
+        # ----------------------------------------------------
+        # USAGE LIMIT CHECK
+        # ----------------------------------------------------
+
+        if coupon.used_count >= coupon.usage_limit:
+
+            raise AppException(
+                "Coupon usage limit exceeded"
+            )
+
+        return coupon
+
+    # ========================================================
+    # VALIDATE COUPON
+    # ========================================================
 
     def validate_coupon(
         self,
@@ -218,89 +381,153 @@ class CouponService:
         coupon_code: str,
         order_amount: Decimal,
     ):
-        coupon = self.repo.get_by_code(
-            coupon_code,
-            tenant_id,
-    )
 
-        if not coupon:
-           return {
-               "valid": False,
-               "message": "Coupon not found",
-            }
-
-        today = date.today()
-
-        if not coupon.is_active:
-           return {
-               "valid": False,
-               "message": "Coupon is inactive",
-            }
-
-        if today < coupon.start_date:
-           return {
-               "valid": False,
-               "message": "Coupon is not started yet",
-            }
-
-        if today > coupon.end_date:
-           return {
-               "valid": False,
-               "message": "Coupon expired",
-            }
-
-        if order_amount < coupon.minimum_order_amount:
-           return {
-               "valid": False,
-               "message": f"Minimum order amount is {coupon.minimum_order_amount}",
-            }
-
-        if coupon.used_count >= coupon.usage_limit:
-           return {
-               "valid": False,
-               "message": "Coupon usage limit exceeded",
-            }
+        self.get_valid_coupon(
+            tenant_id=tenant_id,
+            coupon_code=coupon_code,
+            order_amount=order_amount,
+        )
 
         return {
-               "valid": True,
-               "message": "Coupon is valid",
+            "valid": True,
+            "message": "Coupon is valid",
         }
-        
+
+    # ========================================================
+    # APPLY COUPON
+    # ========================================================
+
+    def apply_coupon(
+        self,
+        tenant_id: int,
+        coupon_code: str,
+        order_amount: Decimal,
+    ):
+
+        coupon = self.get_valid_coupon(
+            tenant_id=tenant_id,
+            coupon_code=coupon_code,
+            order_amount=order_amount,
+        )
+
+        # ----------------------------------------------------
+        # CALCULATE DISCOUNT
+        # ----------------------------------------------------
+
+        if coupon.discount_type == "fixed":
+
+            discount = coupon.discount_value
+
+        else:
+
+            discount = (
+                order_amount
+                * coupon.discount_value
+                / Decimal("100")
+            )
+
+        # ----------------------------------------------------
+        # MAXIMUM DISCOUNT
+        # ----------------------------------------------------
+
+        if (
+            coupon.maximum_discount is not None
+            and discount > coupon.maximum_discount
+        ):
+            discount = coupon.maximum_discount
+
+        # ----------------------------------------------------
+        # DISCOUNT CANNOT EXCEED ORDER AMOUNT
+        # ----------------------------------------------------
+
+        discount = min(
+            discount,
+            order_amount,
+        )
+
+        # ----------------------------------------------------
+        # FINAL AMOUNT
+        # ----------------------------------------------------
+
+        final_amount = (
+            order_amount - discount
+        )
+
+        return {
+            "coupon_code": coupon.code,
+            "original_amount": order_amount,
+            "discount_amount": discount,
+            "final_amount": final_amount,
+            "message": "Coupon applied successfully",
+        }
+
+    # ========================================================
+    # ACTIVE COUPONS
+    # ========================================================
+
     def get_active_coupons(
         self,
         tenant_id: int,
     ):
-        return self.repo.get_active_coupons(
-             tenant_id
+
+        coupons = self.repo.get_active_coupons(
+            tenant_id
         )
-        
+
+        if not coupons:
+
+            raise NotFoundException(
+                "No active coupons found"
+            )
+
+        return coupons
+
+    # ========================================================
+    # EXPIRED COUPONS
+    # ========================================================
+
     def get_expired_coupons(
         self,
         tenant_id: int,
     ):
 
-        return self.repo.get_expired_coupons(
+        coupons = self.repo.get_expired_coupons(
             tenant_id
         )
-        
+
+        if not coupons:
+
+            raise NotFoundException(
+                "No expired coupons found"
+            )
+
+        return coupons
+
+    # ========================================================
+    # COUPON STATS
+    # ========================================================
+
     def get_coupon_stats(
         self,
         tenant_id: int,
-):
+    ):
 
         today = date.today()
 
-        coupons = self.repo.get_coupon_stats(
+        coupons = self.repo.list_all_for_stats(
             tenant_id
-    )
+        )
 
         total = len(coupons)
 
         active = sum(
             1
             for coupon in coupons
-            if coupon.is_active
-            and coupon.start_date <= today <= coupon.end_date
+            if (
+                coupon.is_active
+                and coupon.start_date <= today
+                and coupon.end_date >= today
+            )
         )
 
         expired = sum(
@@ -310,12 +537,21 @@ class CouponService:
         )
 
         inactive = sum(
-             1
-             for coupon in coupons
-             if not coupon.is_active
+            1
+            for coupon in coupons
+            if not coupon.is_active
         )
 
-        used = sum(
+        scheduled = sum(
+            1
+            for coupon in coupons
+            if (
+                coupon.is_active
+                and coupon.start_date > today
+            )
+        )
+
+        total_used = sum(
             coupon.used_count
             for coupon in coupons
         )
@@ -325,5 +561,6 @@ class CouponService:
             "active_coupons": active,
             "expired_coupons": expired,
             "inactive_coupons": inactive,
-            "total_used": used,
+            "scheduled_coupons": scheduled,
+            "total_used": total_used,
         }
