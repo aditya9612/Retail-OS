@@ -6,6 +6,7 @@ from app.core.security import get_current_user, require_permission
 from app.models.user import User
 from app.schemas.inventory import (
     InventoryResponse,
+    LowStockResponse,
     StockInRequest,
     StockMovementResponse,
     StockOutRequest,
@@ -28,7 +29,7 @@ def list_inventory(
     return InventoryService(db).list_inventory(user.tenant_id, store_id)
 
 
-@router.get("/low-stock", response_model=list[InventoryResponse])
+@router.get("/low-stock", response_model=LowStockResponse)
 def low_stock(
     store_id: int | None = None,
     user: User = Depends(require_permission("inventory:read")),

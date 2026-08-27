@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import get_current_user, require_permission
+from app.core.security import require_permission
 from app.models.user import User
-from app.schemas.order import OrderCreate, OrderResponse, OrderUpdate, OrderTrackingResponse, OrderStatusUpdateRequest, OrderReturnRequest
+from app.schemas.order import OrderCreate, OrderResponse, OrderUpdate, OrderTrackingResponse, OrderStatusUpdateRequest
 from app.services.order_service import OrderService
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -80,22 +80,11 @@ def update_order_status(
         data.status,
         data.remarks,
     )
- 
- 
-@router.post("/{order_id}/return", response_model=OrderResponse)
-def return_order(
-    order_id: int,
-    data: OrderReturnRequest,
-    user: User = Depends(require_permission("orders:write")),
-    db: Session = Depends(get_db),
-):
-    return OrderService(db).return_order(
-        user.tenant_id,
-        order_id,
-        data.remarks,
-    )   
     
-@router.get("/{order_id}/tracking", response_model=list[OrderTrackingResponse])
+@router.get(
+    "/{order_id}/tracking",
+    response_model=list[OrderTrackingResponse],
+)
 def order_tracking(
     order_id: int,
     user: User = Depends(require_permission("orders.view")),

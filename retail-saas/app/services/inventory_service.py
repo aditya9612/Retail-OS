@@ -3,7 +3,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppException, NotFoundException
-from app.models.inventory import Inventory, StockMovement, Supplier
+from app.models.inventory import Inventory, StockMovement
 from app.models.product import Product
 from app.models.store import Store
 from app.schemas.inventory import (
@@ -11,12 +11,11 @@ from app.schemas.inventory import (
     StockOutRequest,
     StockTransferRequest,
     InventoryAdjustmentRequest,
-    SupplierCreate,
-    SupplierUpdate,
 )
 from app.utils.constants import StockMovementType
 from app.utils.helpers import cache_delete_pattern
 from app.models.purchase_order import PurchaseOrder
+from app.models.supplier import Supplier
 
 class InventoryService:
     def __init__(self, db: Session):
@@ -248,24 +247,77 @@ class InventoryService:
 
         return movement
 
-    def get_low_stock(self, tenant_id: int, store_id: int | None = None):
-        query = self.db.query(Inventory).filter(
-            Inventory.tenant_id == tenant_id,
-            Inventory.quantity <= Inventory.low_stock_threshold,
+    def get_low_stock(
+        self,
+        tenant_id: int,
+        store_id: int | None = None,
+    ):
+
+        if store_id is not None:
+
+           self._get_store(
+               tenant_id,
+               store_id,
+               "Store not found",
+            )
+
+        query = (
+           self.db.query(Inventory)
+           .filter(
+                Inventory.tenant_id == tenant_id,
+                Inventory.quantity <= Inventory.low_stock_threshold,
+            )
         )
 
-        if store_id:
-            query = query.filter(Inventory.store_id == store_id)
+        if store_id is not None:
 
-        return query.all()
+           query = query.filter(
+               Inventory.store_id == store_id
+        )
+           
+        inventories = query.all()
 
-    def list_inventory(self, tenant_id: int, store_id: int | None = None):
-        query = self.db.query(Inventory).filter(
-            Inventory.tenant_id == tenant_id
+        if not inventories:
+            return {
+                "success": True,
+                "message": "No low-stock items found",
+                "count": 0,
+                "data": [],
+            }
+
+        return {
+            "success": True,
+            "message": "Low-stock items fetched successfully",
+            "count": len(inventories),
+            "data": inventories,
+        }
+        
+    def list_inventory(
+        self,
+        tenant_id: int,
+        store_id: int | None = None,
+    ):
+
+        if store_id is not None:
+
+            self._get_store(
+                tenant_id,
+                store_id,
+                "Store not found",
+            )
+
+        query = (
+            self.db.query(Inventory)
+            .filter(
+               Inventory.tenant_id == tenant_id
+            )
         )
 
-        if store_id:
-            query = query.filter(Inventory.store_id == store_id)
+        if store_id is not None:
+
+           query = query.filter(
+              Inventory.store_id == store_id
+            )
 
         return query.all()
     
@@ -313,151 +365,51 @@ class InventoryService:
         }
 
     def expiry_inventory(
-         self,
-         tenant_id: int,
+        self,
+        tenant_id: int,
     ):
-         return (
-             self.db.query(Inventory)
-             .filter(
-                 Inventory.tenant_id == tenant_id,
-                 Inventory.expiry_date.is_not(None),
+        return (
+            self.db.query(Inventory)
+            .filter(
+                Inventory.tenant_id == tenant_id,
+                Inventory.expiry_date.is_not(None),
             )
             .order_by(Inventory.expiry_date.asc())
             .all()
         )
 
-    def create_supplier(self, tenant_id: int, data: SupplierCreate):
-
-        supplier = Supplier(
-            tenant_id=tenant_id,
-            **data.model_dump()
-        )
-
-        try:
-            self.db.add(supplier)
-            self.db.commit()
-            self.db.refresh(supplier)
-        except Exception:
-            self.db.rollback()
-            raise
-
-        return supplier
-
-    def list_suppliers(self, tenant_id: int):
-        return (
-            self.db.query(Supplier)
-            .filter(Supplier.tenant_id == tenant_id)
-            .all()
-        )
-
-    def get_supplier(self, tenant_id: int, supplier_id: int) -> Supplier:
-        supplier = (
-            self.db.query(Supplier)
-             .filter(
-                Supplier.tenant_id == tenant_id,
-                Supplier.id == supplier_id,
-             )
-             .first()
-        )
-
-        if not supplier:
-           raise NotFoundException("Supplier not found")
-        
-        return supplier
-
-
-    def update_supplier(
+    def list_movements(
         self,
         tenant_id: int,
-        supplier_id: int,
-        data: SupplierUpdate,
-    ) -> Supplier:
-
-         supplier = self.get_supplier(tenant_id, supplier_id)
-
-         update_data = data.model_dump(exclude_unset=True)
-
-         for key, value in update_data.items():
-             setattr(supplier, key, value)
-
-         self.db.commit()
-         self.db.refresh(supplier)
-
-         return supplier
-
-
-    def update_supplier_status(
-         self,
-         tenant_id: int,
-         supplier_id: int,
-         is_active: bool,
-    ):    
-
-         supplier = self.get_supplier(
-         tenant_id,
-         supplier_id,
-        )
-
-         supplier.is_active = is_active
-
-         self.db.commit()
-         self.db.refresh(supplier)
-
-         return supplier
-
-    
-    def search_suppliers(
-         self,
-         tenant_id: int,
-         search: str,
+        store_id: int | None = None,
     ):
 
-         return (
-             self.db.query(Supplier)
-             .filter(
-                 Supplier.tenant_id == tenant_id,
-                 Supplier.name.ilike(f"%{search}%"),
+        if store_id is not None:
+
+           self._get_store(
+              tenant_id,
+              store_id,
+              "Store not found",
             )
-            .all()
-    )
-         
-    def supplier_stats(
-         self,
-         tenant_id: int,
-    ):
 
-         suppliers = (
-            self.db.query(Supplier)
+        query = (
+            self.db.query(StockMovement)
             .filter(
-                Supplier.tenant_id == tenant_id
+                StockMovement.tenant_id == tenant_id
             )
-            .all()
-    )
-
-         return {
-            "total_suppliers": len(suppliers),
-            "active_suppliers": sum(
-                1 for supplier in suppliers
-                if supplier.is_active
-            ),
-            "inactive_suppliers": sum(
-                1 for supplier in suppliers
-                if not supplier.is_active
-            ),
-        }
-    
-        
-    def list_movements(self, tenant_id: int, store_id: int | None = None):
-
-        query = self.db.query(StockMovement).filter(
-            StockMovement.tenant_id == tenant_id
         )
 
-        if store_id:
-            query = query.filter(StockMovement.store_id == store_id)
+        if store_id is not None:
+
+           query = query.filter(
+               StockMovement.store_id == store_id
+            )
 
         return (
-            query.order_by(StockMovement.created_at.desc())
+            query
+            .order_by(
+                 StockMovement.created_at.desc()
+            )
             .limit(100)
             .all()
         )
@@ -548,23 +500,3 @@ class InventoryService:
            "pending_transfers": 0,
            "pending_purchase_orders": 0,
 }
-        
-    def get_purchase_history(
-        self,
-        tenant_id: int,
-        supplier_id: int,
-    ):
-        self.get_supplier(
-           tenant_id,
-           supplier_id,
-        )
-
-        return (
-            self.db.query(PurchaseOrder)
-            .filter(
-              PurchaseOrder.tenant_id == tenant_id,
-              PurchaseOrder.supplier_id == supplier_id,
-            )
-            .order_by(PurchaseOrder.created_at.desc())
-            .all()
-        )
