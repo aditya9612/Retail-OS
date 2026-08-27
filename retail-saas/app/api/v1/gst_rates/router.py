@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from typing import Literal, Optional
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -12,10 +14,14 @@ router = APIRouter(prefix="/gst-rates", tags=["gst-rates"])
 
 @router.get("", response_model=list[GstRateResponse])
 def list_gst_rates(
+    supply_type: Optional[Literal["intra_state", "inter_state"]] = Query(
+        default=None,
+        description="intra_state returns CGST+SGST only; inter_state returns IGST only",
+    ),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
-    return GstService(db).list_rates(user.tenant_id)
+    return GstService(db).list_rate_views(user.tenant_id, supply_type=supply_type)
 
 
 @router.post("", response_model=GstRateResponse, status_code=201)

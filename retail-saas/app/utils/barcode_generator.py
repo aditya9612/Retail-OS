@@ -1,19 +1,17 @@
 import hashlib
 import io
 
-from barcode import Code128
+from barcode.codex import Code128
 from barcode.writer import ImageWriter
 
 
 def generate_barcode(sku: str) -> str:
-    """Generate a numeric barcode string from SKU."""
     digest = hashlib.sha256(sku.encode()).hexdigest()
     numeric = "".join(str(int(c, 16) % 10) for c in digest[:12])
     return numeric
 
 
 def generate_barcode_image(barcode_value: str, product_name: str = "") -> bytes:
-    """Generate a barcode image as PNG bytes."""
     buffer = io.BytesIO()
     barcode = Code128(barcode_value, writer=ImageWriter())
     barcode.write(
