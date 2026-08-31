@@ -27,18 +27,10 @@ class Coupon(Base, TimestampMixin):
         ),
     )
 
-    # ========================================================
-    # ID
-    # ========================================================
-
     id: Mapped[int] = mapped_column(
         primary_key=True,
         autoincrement=True,
     )
-
-    # ========================================================
-    # TENANT
-    # ========================================================
 
     tenant_id: Mapped[int] = mapped_column(
         ForeignKey("tenants.id"),
@@ -46,63 +38,35 @@ class Coupon(Base, TimestampMixin):
         index=True,
     )
 
-    # ========================================================
-    # COUPON CODE
-    # ========================================================
-
     code: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
     )
 
-    # ========================================================
-    # DESCRIPTION
-    # ========================================================
-
     description: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
     )
-
-    # ========================================================
-    # DISCOUNT TYPE
-    # ========================================================
-
+    
     discount_type: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
     )
-
-    # ========================================================
-    # DISCOUNT VALUE
-    # ========================================================
 
     discount_value: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
     )
 
-    # ========================================================
-    # MINIMUM ORDER AMOUNT
-    # ========================================================
-
     minimum_order_amount: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
     )
 
-    # ========================================================
-    # MAXIMUM DISCOUNT
-    # ========================================================
-
     maximum_discount: Mapped[Decimal | None] = mapped_column(
         Numeric(10, 2),
         nullable=True,
     )
-
-    # ========================================================
-    # USAGE LIMIT
-    # ========================================================
 
     usage_limit: Mapped[int] = mapped_column(
         Integer,
@@ -110,37 +74,21 @@ class Coupon(Base, TimestampMixin):
         default=1,
     )
 
-    # ========================================================
-    # USED COUNT
-    # ========================================================
-
     used_count: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
         default=0,
     )
 
-    # ========================================================
-    # START DATE
-    # ========================================================
-
     start_date: Mapped[date] = mapped_column(
         Date,
         nullable=False,
     )
 
-    # ========================================================
-    # END DATE
-    # ========================================================
-
     end_date: Mapped[date] = mapped_column(
         Date,
         nullable=False,
     )
-
-    # ========================================================
-    # ACTIVE STATUS
-    # ========================================================
 
     is_active: Mapped[bool] = mapped_column(
         Boolean,

@@ -87,7 +87,7 @@ def update_order_status(
 )
 def order_tracking(
     order_id: int,
-    user: User = Depends(require_permission("orders.view")),
+    user: User = Depends(require_permission("orders:read")),
     db: Session = Depends(get_db),
 ):
     return OrderService(db).get_order_tracking(

@@ -31,11 +31,6 @@ router = APIRouter(
     tags=["Coupons"],
 )
 
-
-# ============================================================
-# LIST ALL COUPONS
-# ============================================================
-
 @router.get(
     "",
     response_model=list[CouponResponse],
@@ -50,11 +45,6 @@ def list_coupons(
     return CouponService(db).list_coupons(
         user.tenant_id
     )
-
-
-# ============================================================
-# CREATE COUPON
-# ============================================================
 
 @router.post(
     "",
@@ -74,11 +64,6 @@ def create_coupon(
         data,
     )
 
-
-# ============================================================
-# ACTIVE COUPONS
-# ============================================================
-
 @router.get(
     "/active",
     response_model=list[CouponResponse],
@@ -93,11 +78,6 @@ def get_active_coupons(
     return CouponService(db).get_active_coupons(
         tenant_id=user.tenant_id
     )
-
-
-# ============================================================
-# EXPIRED COUPONS
-# ============================================================
 
 @router.get(
     "/expired",
@@ -114,11 +94,6 @@ def get_expired_coupons(
         tenant_id=user.tenant_id
     )
 
-
-# ============================================================
-# COUPON STATS
-# ============================================================
-
 @router.get(
     "/stats",
     response_model=CouponStatsResponse,
@@ -133,14 +108,6 @@ def get_coupon_stats(
     return CouponService(db).get_coupon_stats(
         tenant_id=user.tenant_id
     )
-
-
-# ============================================================
-# VALIDATE COUPON
-#
-# IMPORTANT:
-# Keep this BEFORE /{coupon_id}
-# ============================================================
 
 @router.post(
     "/validate",
@@ -160,11 +127,6 @@ def validate_coupon(
         order_amount=data.order_amount,
     )
 
-
-# ============================================================
-# APPLY COUPON
-# ============================================================
-
 @router.post(
     "/apply",
     response_model=ApplyCouponResponse,
@@ -182,11 +144,6 @@ def apply_coupon(
         coupon_code=data.coupon_code,
         order_amount=data.order_amount,
     )
-
-
-# ============================================================
-# GET SINGLE COUPON
-# ============================================================
 
 @router.get(
     "/{coupon_id}",
@@ -208,11 +165,6 @@ def get_coupon(
         user.tenant_id,
         coupon_id,
     )
-
-
-# ============================================================
-# UPDATE COUPON STATUS
-# ============================================================
 
 @router.patch(
     "/{coupon_id}/status",
@@ -237,11 +189,6 @@ def update_coupon_status(
         is_active=data.is_active,
     )
 
-
-# ============================================================
-# UPDATE COUPON
-# ============================================================
-
 @router.patch(
     "/{coupon_id}",
     response_model=CouponResponse,
@@ -264,11 +211,6 @@ def update_coupon(
         coupon_id,
         data,
     )
-
-
-# ============================================================
-# DELETE COUPON
-# ============================================================
 
 @router.delete(
     "/{coupon_id}",

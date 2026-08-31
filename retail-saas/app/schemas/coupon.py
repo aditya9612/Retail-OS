@@ -9,11 +9,6 @@ from pydantic import (
     model_validator,
 )
 
-
-# ============================================================
-# COMMON COUPON FIELDS
-# ============================================================
-
 class CouponBase(BaseModel):
 
     code: str = Field(
@@ -72,10 +67,6 @@ class CouponBase(BaseModel):
         description="Coupon end date",
     )
 
-    # ========================================================
-    # CODE VALIDATION
-    # ========================================================
-
     @field_validator("code")
     @classmethod
     def validate_code(cls, value: str) -> str:
@@ -89,9 +80,6 @@ class CouponBase(BaseModel):
 
         return value.upper()
 
-    # ========================================================
-    # DESCRIPTION VALIDATION
-    # ========================================================
 
     @field_validator("description")
     @classmethod
@@ -109,9 +97,6 @@ class CouponBase(BaseModel):
 
         return value
 
-    # ========================================================
-    # DISCOUNT TYPE VALIDATION
-    # ========================================================
 
     @field_validator("discount_type")
     @classmethod
@@ -134,26 +119,20 @@ class CouponBase(BaseModel):
 
         return value
 
-    # ========================================================
-    # CROSS-FIELD VALIDATION
-    # ========================================================
 
     @model_validator(mode="after")
     def validate_coupon(self):
 
-        # Start date cannot be in the past
         if self.start_date < date.today():
             raise ValueError(
                 "Start date cannot be in the past"
             )
 
-        # End date must be >= start date
         if self.end_date < self.start_date:
             raise ValueError(
                 "End date must be on or after start date"
             )
 
-        # Percentage discount cannot exceed 100
         if (
             self.discount_type == "percentage"
             and self.discount_value > Decimal("100")
@@ -163,11 +142,6 @@ class CouponBase(BaseModel):
             )
 
         return self
-
-
-# ============================================================
-# CREATE COUPON
-# ============================================================
 
 class CouponCreate(CouponBase):
 
@@ -186,11 +160,6 @@ class CouponCreate(CouponBase):
             }
         }
     }
-
-
-# ============================================================
-# UPDATE COUPON
-# ============================================================
 
 class CouponUpdate(BaseModel):
 
@@ -248,11 +217,6 @@ class CouponUpdate(BaseModel):
         }
     }
 
-    
-    # ========================================================
-    # DESCRIPTION
-    # ========================================================
-
     @field_validator("description")
     @classmethod
     def validate_description(
@@ -271,10 +235,6 @@ class CouponUpdate(BaseModel):
         )
 
         return value
-
-    # ========================================================
-    # DISCOUNT TYPE
-    # ========================================================
 
     @field_validator("discount_type")
     @classmethod
@@ -295,16 +255,8 @@ class CouponUpdate(BaseModel):
 
         return value
 
-    # ========================================================
-    # UPDATE CROSS-FIELD VALIDATION
-    # ========================================================
-
     @model_validator(mode="after")
     def validate_update_values(self):
-
-    # ----------------------------------------------------
-    # START DATE
-    # ----------------------------------------------------
 
         if (
             self.start_date is not None
@@ -313,11 +265,7 @@ class CouponUpdate(BaseModel):
             raise ValueError(
                 "Start date cannot be in the past"
             )
-
-    # ----------------------------------------------------
-    # END DATE
-    # ----------------------------------------------------
-
+            
         if (
             self.start_date is not None
             and self.end_date is not None
@@ -326,10 +274,6 @@ class CouponUpdate(BaseModel):
             raise ValueError(
                 "End date must be on or after start date"
             )
-
-    # ----------------------------------------------------
-    # DISCOUNT TYPE + VALUE
-    # ----------------------------------------------------
 
         if (
            self.discount_type == "percentage"
@@ -342,19 +286,9 @@ class CouponUpdate(BaseModel):
 
         return self
 
-
-# ============================================================
-# COUPON STATUS UPDATE
-# ============================================================
-
 class CouponStatusUpdate(BaseModel):
 
     is_active: bool
-
-
-# ============================================================
-# COUPON RESPONSE
-# ============================================================
 
 class CouponResponse(BaseModel):
 
@@ -377,10 +311,6 @@ class CouponResponse(BaseModel):
         "from_attributes": True
     }
 
-
-# ============================================================
-# VALIDATE COUPON REQUEST
-# ============================================================
 
 class ValidateCouponRequest(BaseModel):
 
@@ -413,19 +343,11 @@ class ValidateCouponRequest(BaseModel):
         return value.upper()
 
 
-# ============================================================
-# VALIDATE COUPON RESPONSE
-# ============================================================
-
 class ValidateCouponResponse(BaseModel):
 
     valid: bool
     message: str
-
-
-# ============================================================
-# APPLY COUPON REQUEST
-# ============================================================
+    
 
 class ApplyCouponRequest(BaseModel):
 
@@ -458,10 +380,6 @@ class ApplyCouponRequest(BaseModel):
         return value.upper()
 
 
-# ============================================================
-# APPLY COUPON RESPONSE
-# ============================================================
-
 class ApplyCouponResponse(BaseModel):
 
     coupon_code: str
@@ -469,11 +387,6 @@ class ApplyCouponResponse(BaseModel):
     discount_amount: Decimal
     final_amount: Decimal
     message: str
-
-
-# ============================================================
-# COUPON STATS RESPONSE
-# ============================================================
 
 class CouponStatsResponse(BaseModel):
 
