@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends,Query
 from sqlalchemy.orm import Session
 from datetime import date
 from fastapi import Path
+from fastapi.responses import StreamingResponse
 
 from typing import Optional
 from fastapi import Query
@@ -243,7 +244,47 @@ def get_notes(
     return CustomerService(db).get_notes(
         user.tenant_id,
         customer_id,
-    )            
+    )
+
+@router.get("/export-directory")
+def export_directory(
+    status: str = Query(
+        "all",
+        pattern="^(all|active|inactive)$"
+    ),
+    format: str = Query(
+        "excel",
+        pattern="^(excel|pdf)$"
+    ),
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db)
+):
+    service = CustomerService(db)
+
+    file = service.export_directory(
+        tenant_id=user.tenant_id,
+        status=status,
+        format=format
+    )
+
+    if format == "excel":
+        return StreamingResponse(
+            file,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition":
+                "attachment; filename=customer_directory.xlsx"
+            }
+        )
+
+    return StreamingResponse(
+        file,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition":
+            "attachment; filename=customer_directory.pdf"
+        }
+    )
 
 @router.get("/{customer_id}", response_model=CustomerResponse)
 def get_customer(
@@ -352,7 +393,7 @@ def update_customer_status(
         user.tenant_id,
         customer_id,
         data.status
-    )   
+    )
 
 # @router.delete("/{customer_id}", response_model=MessageResponse)
 # def delete_customer(
@@ -417,7 +458,7 @@ def top_customers(
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_top_customers(user.tenant_id)   
+    return CustomerService(db).get_top_customers(user.tenant_id)
 
 @router.get(
     "/customer-analytics/retention",
@@ -455,4 +496,4 @@ def loyalty_report(
     return CustomerService(db).get_loyalty_report(
         user.tenant_id
     )
-        
+

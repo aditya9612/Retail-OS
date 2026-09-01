@@ -41,6 +41,13 @@ def refresh(
         data.refresh_token
     )
 
+@router.post("/logout")
+def logout():
+    return {
+        "success": True,
+        "message": "Logout successful"
+    }
+
 
 @router.post("/register")
 def register(

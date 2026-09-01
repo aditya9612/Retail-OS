@@ -1,5 +1,7 @@
 import uuid
 from decimal import Decimal
+from io import BytesIO
+from openpyxl import Workbook
 
 from sqlalchemy.orm import Session
 
@@ -7,14 +9,18 @@ from sqlalchemy import extract
 
 from app.core.exceptions import AppException, NotFoundException
 from app.models.customer import Customer ,CustomerFeedback,CustomerWallet, WalletTransaction ,LoyaltyPoint,CustomerCommunication,CustomerReferral,CustomerNote
-from app.models.order import Order,OrderTracking 
+from app.models.order import Order,OrderTracking
 from app.models.order_item import OrderItem
 from app.models.product   import Product
 from app.models.delivery import Delivery
 from app.repositories.order_repo import OrderRepository
+from app.repositories.customer_repo import get_customers_for_export
 from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate
 from app.services.inventory_service import InventoryService
 from app.utils.constants import OrderStatus, OrderType, StockMovementType
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
 class OrderService:
     def __init__(self, db: Session):
@@ -103,7 +109,7 @@ class OrderService:
                 StockOutRequest(store_id=order.store_id, product_id=item.product_id, quantity=item.quantity),
             )
         order.status = OrderStatus.CONFIRMED.value
-        
+
         delivery = Delivery(
           tenant_id=tenant_id,
           order_id=order.id,
@@ -136,7 +142,7 @@ class OrderService:
         self.db.add(tracking)
 
         return self.repo.update(order)
-    
+
     def update_order_status(
         self,
         tenant_id: int,
@@ -157,7 +163,7 @@ class OrderService:
         self.db.add(tracking)
 
         return self.repo.update(order)
-    
+
     def return_order(
         self,
         tenant_id: int,
@@ -177,10 +183,10 @@ class OrderService:
         self.db.add(tracking)
 
         return self.repo.update(order)
-    
+
     def get_order_tracking(self, tenant_id: int, order_id: int):
         order = self.get_order(tenant_id, order_id)
-        
+
         return (
             self.db.query(OrderTracking)
             .filter(OrderTracking.order_id == order.id)
@@ -202,7 +208,7 @@ class CustomerService:
         self.db = db
 
     def create_customer(self, tenant_id: int, data) -> Customer:
-         
+
         if data.email:
             existing_email = (
                 self.db.query(Customer)
@@ -242,13 +248,13 @@ class CustomerService:
                 raise AppException("GSTIN already exists")
         customer = Customer(
             tenant_id=tenant_id,
-            total_spend=0, 
+            total_spend=0,
             **data.model_dump()
         )
         self.db.add(customer)
         self.db.commit()
         self.db.refresh(customer)
-        
+
         return customer
 
     def get_customer(self, tenant_id: int, customer_id: int) -> Customer:
@@ -297,7 +303,7 @@ class CustomerService:
 
     #     return {
     #         "message": "Customer deleted successfully"
-    #     }    
+    #     }
 
     def add_loyalty_points(self, tenant_id: int, customer_id: int, points: int) -> Customer:
         customer = self.get_customer(tenant_id, customer_id)
@@ -316,7 +322,7 @@ class CustomerService:
             )
             .all()
         )
-    
+
     def create_feedback(self, data):
         feedback = CustomerFeedback(
             customer_id=data.customer_id,
@@ -341,7 +347,7 @@ class CustomerService:
             )
 
         return query.all()
-    
+
 
     def get_wallet(self, tenant_id: int, customer_id: int):
         customer = self.get_customer(tenant_id, customer_id)
@@ -361,8 +367,8 @@ class CustomerService:
             self.db.refresh(wallet)
 
         return wallet
-    
-    
+
+
     def credit_wallet(self, tenant_id: int, data):
         wallet = self.get_wallet(tenant_id, data.customer_id)
 
@@ -381,7 +387,7 @@ class CustomerService:
         self.db.refresh(wallet)
 
         return wallet
-    
+
 
     def debit_wallet(self, tenant_id: int, data):
         wallet = self.get_wallet(tenant_id, data.customer_id)
@@ -404,7 +410,7 @@ class CustomerService:
         self.db.refresh(wallet)
 
         return wallet
-    
+
 
     def get_wallet_transactions(self, tenant_id: int, customer_id: int):
         wallet = self.get_wallet(tenant_id, customer_id)
@@ -415,7 +421,7 @@ class CustomerService:
             .order_by(WalletTransaction.created_at.desc())
             .all()
         )
-    
+
     def earn_loyalty_points(self, tenant_id: int, data):
         customer = self.get_customer(tenant_id, data.customer_id)
 
@@ -434,7 +440,7 @@ class CustomerService:
         self.db.refresh(loyalty)
 
         return loyalty
-    
+
     def redeem_loyalty_points(self, tenant_id: int, data):
         customer = self.get_customer(tenant_id, data.customer_id)
 
@@ -455,7 +461,7 @@ class CustomerService:
         self.db.refresh(loyalty)
 
         return loyalty
-    
+
     def get_loyalty(self, tenant_id: int, customer_id: int):
         self.get_customer(tenant_id, customer_id)
 
@@ -470,7 +476,7 @@ class CustomerService:
             raise NotFoundException("No loyalty record found")
 
         return loyalty
-    
+
     def get_loyalty_history(self, tenant_id: int, customer_id: int):
         self.get_customer(tenant_id, customer_id)
 
@@ -507,7 +513,7 @@ class CustomerService:
             .filter(Customer.tenant_id == tenant_id)
             .order_by(CustomerCommunication.sent_at.desc())
             .all()
-        )    
+        )
 
     def create_referral(self, tenant_id: int, data):
         self.get_customer(tenant_id, data.customer_id)
@@ -547,7 +553,7 @@ class CustomerService:
         self.db.commit()
         self.db.refresh(note)
 
-        return note 
+        return note
 
     def get_notes(self, tenant_id: int, customer_id: int | None = None):
 
@@ -564,7 +570,7 @@ class CustomerService:
             query
             .order_by(CustomerNote.created_at.desc())
             .all()
-        ) 
+        )
 
     def send_campaign(self, tenant_id: int, data):
         for customer_id in data.customer_ids:
@@ -632,7 +638,7 @@ class CustomerService:
             "active_customers": active,
             "inactive_customers": inactive,
             "retention_rate": retention_rate,
-        } 
+        }
 
     def get_lifetime_value(self, tenant_id: int):
 
@@ -653,7 +659,7 @@ class CustomerService:
                 "loyalty_points": customer.loyalty_points,
             })
 
-        return result 
+        return result
 
     def get_loyalty_report(self, tenant_id: int):
 
@@ -680,4 +686,93 @@ class CustomerService:
                 "balance_points": item.balance_points,
             })
 
-        return result             
+        return result
+
+    def export_directory(self, tenant_id:int, status="all", format="excel"):
+        customers = get_customers_for_export(
+            self.db,
+            tenant_id,
+            status
+        )
+
+        if format == "excel":
+            return self._create_excel(customers)
+
+        elif format == "pdf":
+            return self._create_pdf(customers)
+
+        raise ValueError("Invalid format")
+
+    def _create_excel(self, customers):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "Customer Directory"
+
+        worksheet.append([
+            "ID",
+            "Name",
+            "Email",
+            "Phone",
+            "Status",
+            "Loyalty Points"
+        ])
+
+        for customer in customers:
+            worksheet.append([
+                customer.id,
+                customer.name,
+                customer.email or "",
+                customer.phone or "",
+                customer.status,
+                customer.loyalty_points or 0
+            ])
+
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0)
+
+        return output
+
+    def _create_pdf(self, customers):
+        output = BytesIO()
+
+        document = SimpleDocTemplate(
+            output,
+            pagesize=A4
+        )
+
+        data = [
+            [
+                "ID",
+                "Name",
+                "Email",
+                "Phone",
+                "Status",
+                "Points"
+            ]
+        ]
+
+        for customer in customers:
+            data.append([
+                customer.id,
+                customer.name,
+                customer.email or "",
+                customer.phone or "",
+                customer.status,
+                customer.loyalty_points or 0
+            ])
+
+        table = Table(data)
+
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 1, colors.black),
+            ("PADDING", (0, 0), (-1, -1), 5),
+        ]))
+
+        document.build([table])
+
+        output.seek(0)
+
+        return output
