@@ -1,14 +1,16 @@
 import uuid
+from datetime import date
 from decimal import Decimal
 from io import BytesIO
+
 from openpyxl import Workbook
-
 from sqlalchemy.orm import Session
-
 from sqlalchemy import extract
 
 from app.core.exceptions import AppException, NotFoundException
 from app.models.customer import Customer ,CustomerFeedback,CustomerWallet, WalletTransaction ,LoyaltyPoint,CustomerCommunication,CustomerReferral,CustomerNote
+from app.models.store import Store
+from app.models.coupon import Coupon
 from app.models.order import Order,OrderTracking 
 from app.models.order_item import OrderItem
 from app.models.product   import Product
@@ -17,7 +19,7 @@ from app.repositories.order_repo import OrderRepository
 from app.repositories.customer_repo import get_customers_for_export
 from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate
 from app.services.inventory_service import InventoryService
-from app.utils.constants import OrderStatus, OrderType, StockMovementType
+from app.utils.constants import OrderStatus, StockMovementType
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
@@ -31,12 +33,199 @@ class OrderService:
     def _generate_order_number(self) -> str:
         return f"ORD-{uuid.uuid4().hex[:8].upper()}"
 
-    def _calculate_item_totals(self, product: Product, item: OrderItemCreate) -> OrderItem:
-        unit_price = item.unit_price or product.price
-        subtotal = unit_price * item.quantity - item.discount
+    def _get_store(
+        self,
+        tenant_id: int,
+        store_id: int,
+    ) -> Store:
+
+        store = (
+            self.db.query(Store)
+            .filter(
+                Store.id == store_id,
+                Store.tenant_id == tenant_id,
+            )
+            .first()
+        )
+
+        if not store:
+            raise NotFoundException(f"Store {store_id} not found")
+
+        return store
+
+    def _get_customer(
+        self,
+        tenant_id: int,
+        customer_id: int,
+    ) -> Customer:
+
+        customer = (
+            self.db.query(Customer)
+            .filter(
+                Customer.id == customer_id,
+                Customer.tenant_id == tenant_id,
+            )
+            .first()
+        )
+
+        if not customer:
+            raise NotFoundException(f"Customer {customer_id} not found")
+
+        return customer
+
+    def _get_coupon(
+        self,
+        tenant_id: int,
+        coupon_code: str,
+    ) -> Coupon:
+
+        code = coupon_code.strip().upper()
+
+        coupon = (
+            self.db.query(Coupon)
+            .filter(
+                Coupon.code == code,
+                Coupon.tenant_id == tenant_id,
+            )
+            .first()
+        )
+
+        if not coupon:
+            raise NotFoundException("Coupon not found")
+
+        return coupon
+
+    def _validate_coupon(
+        self,
+        tenant_id: int,
+        coupon_code: str,
+        order_amount: Decimal,
+    ) -> Coupon:
+
+        coupon = self._get_coupon(
+            tenant_id,
+            coupon_code,
+        )
+
+        today = date.today()
+
+        if not coupon.is_active:
+            raise AppException("Coupon is inactive")
+
+        if today < coupon.start_date:
+            raise AppException("Coupon is not started yet")
+
+        if today > coupon.end_date:
+            raise AppException("Coupon expired")
+
+        if order_amount < coupon.minimum_order_amount:
+            raise AppException(
+                f"Minimum order amount is "
+                f"{coupon.minimum_order_amount}"
+            )
+
+        if coupon.used_count >= coupon.usage_limit:
+            raise AppException("Coupon usage limit exceeded")
+        
+        if coupon.discount_type not in ("percentage", "fixed",):
+            raise AppException("Invalid coupon discount type")
+
+        if coupon.discount_value <= 0:
+            raise AppException("Coupon discount value must be greater than 0")
+
+        return coupon
+    
+    def _calculate_coupon_discount(
+        self,
+        coupon: Coupon,
+        order_amount: Decimal,
+    ) -> Decimal:
+
+        if order_amount <= 0:
+            return Decimal("0.00")
+
+        if coupon.discount_type == "percentage":
+
+            discount = (
+                order_amount
+                * coupon.discount_value
+                / Decimal("100")
+            ).quantize(
+                Decimal("0.01")
+            )
+
+            if coupon.maximum_discount is not None:
+                discount = min(
+                    discount,
+                    coupon.maximum_discount,
+                )
+
+        elif coupon.discount_type == "fixed":
+
+            discount = coupon.discount_value
+
+            if coupon.maximum_discount is not None:
+                discount = min(
+                    discount,
+                    coupon.maximum_discount,
+                )
+
+        else:
+            raise AppException(
+                "Invalid coupon discount type"
+            )
+
+        return min(
+            discount,
+            order_amount,
+        ).quantize(
+            Decimal("0.01")
+        )
+
+
+    def _calculate_item_totals(
+        self,
+        product: Product,
+        item: OrderItemCreate,
+    ) -> OrderItem:
+
+        unit_price = (
+            item.unit_price
+            if item.unit_price is not None
+            else product.price
+        )
+
+        gross_amount = (
+            unit_price * item.quantity
+        )
+
+        if item.discount > gross_amount:
+            raise AppException(
+                f"Discount for product {product.id} "
+                f"cannot be greater than item amount "
+                f"{gross_amount}"
+            )
+
+        subtotal = (
+            gross_amount - item.discount
+        )
+
         tax_rate = product.gst_rate
-        tax_amount = (subtotal * tax_rate / Decimal("100")).quantize(Decimal("0.01"))
-        total = subtotal + tax_amount
+
+        tax_amount = (
+            subtotal
+            * tax_rate
+            / Decimal("100")
+        ).quantize(
+            Decimal("0.01")
+        )
+
+        total = (
+            subtotal + tax_amount
+        ).quantize(
+            Decimal("0.01")
+        )
+
         return OrderItem(
             product_id=product.id,
             product_name=product.name,
@@ -50,14 +239,98 @@ class OrderService:
             variant=item.variant,
         )
 
-    def _recalculate_order(self, order: Order) -> None:
-        subtotal = sum((i.unit_price * i.quantity - i.discount for i in order.items), Decimal("0"))
-        tax_amount = sum((i.tax_amount for i in order.items), Decimal("0"))
+    def _calculate_order_discount(
+        self,
+        subtotal: Decimal,
+        discount_percentage: Decimal,
+    ) -> Decimal:
+
+        if discount_percentage < 0:
+            raise AppException("Discount percentage cannot be negative")
+
+        if discount_percentage > 100:
+            raise AppException("Discount percentage cannot be greater than 100")
+
+        discount_amount = (
+            subtotal
+            * discount_percentage
+            / Decimal("100")
+        ).quantize(
+            Decimal("0.01")
+        )
+
+        return min(
+            discount_amount,
+            subtotal,
+        )
+
+    def _recalculate_order(
+        self,
+        order: Order,
+    ) -> None:
+
+        subtotal = sum(
+            (
+                item.unit_price * item.quantity
+                - item.discount
+                for item in order.items
+            ),
+            Decimal("0.00"),
+        ).quantize(
+            Decimal("0.01")
+        )
+            
+        tax_amount = sum(
+            (
+                item.tax_amount
+                for item in order.items
+            ),
+            Decimal("0.00"),
+        ).quantize(
+            Decimal("0.01")
+        )
+
+        if order.discount_amount < 0:
+            raise AppException("Order discount cannot be negative")
+
+        if order.discount_amount > subtotal:
+            raise AppException(
+                "Order discount cannot be greater "
+                "than order subtotal"
+            )
+
         order.subtotal = subtotal
         order.tax_amount = tax_amount
-        order.total_amount = subtotal + tax_amount - order.discount_amount
 
-    def create_order(self, tenant_id: int, user_id: int, data: OrderCreate) -> Order:
+        order.total_amount = (
+            subtotal
+            + tax_amount
+            - order.discount_amount
+        ).quantize(
+            Decimal("0.01")
+        )
+
+        if order.total_amount < 0:
+            order.total_amount = Decimal("0.00")
+
+    def create_order(
+        self,
+        tenant_id: int,
+        user_id: int,
+        data: OrderCreate,
+    ) -> Order:
+
+        self._get_store(
+            tenant_id,
+            data.store_id,
+        )
+
+        if data.customer_id is not None:
+            self._get_customer(
+                tenant_id,
+                data.customer_id,
+            )
+
         order = Order(
             tenant_id=tenant_id,
             store_id=data.store_id,
@@ -67,82 +340,358 @@ class OrderService:
             order_type=data.order_type,
             status=OrderStatus.DRAFT.value,
             coupon_code=data.coupon_code,
-            discount_amount=data.discount_amount,
+            discount_amount=Decimal("0.00"),
             delivery_address=data.delivery_address,
             notes=data.notes,
         )
+
         for item_data in data.items:
-            product = self.db.query(Product).filter(Product.id == item_data.product_id, Product.tenant_id == tenant_id).first()
+
+            product = (
+                self.db.query(Product)
+                .filter(
+                    Product.id == item_data.product_id,
+                    Product.tenant_id == tenant_id,
+                )
+                .first()
+            )
+
             if not product:
                 raise NotFoundException(f"Product {item_data.product_id} not found")
-            order.items.append(self._calculate_item_totals(product, item_data))
-        self._recalculate_order(order)
-        return self.repo.create(order)
 
-    def get_order(self, tenant_id: int, order_id: int) -> Order:
-        order = self.repo.get_by_id(order_id, tenant_id)
+            order.items.append(
+                self._calculate_item_totals(
+                    product,
+                    item_data,
+                )
+            )
+
+        subtotal = sum(
+            (
+                item.unit_price * item.quantity
+                - item.discount
+                for item in order.items
+            ),
+            Decimal("0.00"),
+        ).quantize(
+            Decimal("0.01")
+        )
+
+        if data.coupon_code:
+            coupon = self._validate_coupon(
+                tenant_id=tenant_id,
+                coupon_code=data.coupon_code,
+                order_amount=subtotal,
+            )
+
+            coupon_discount = (
+                self._calculate_coupon_discount(
+                    coupon,
+                    subtotal,
+                )
+            )
+
+            order.coupon_code = coupon.code
+            order.discount_amount = coupon_discount
+
+        else:
+
+            order.discount_amount = (
+                self._calculate_order_discount(
+                    subtotal,
+                    data.discount_amount,
+                )
+            )
+
+        self._recalculate_order(order)
+
+        created_order = self.repo.create(order)
+
+        if data.coupon_code:
+
+            coupon.used_count += 1
+            self.db.commit()
+            self.db.refresh(created_order)
+
+        return created_order
+
+    def get_order(
+        self,
+        tenant_id: int,
+        order_id: int,
+    ) -> Order:
+
+        order = self.repo.get_by_id(
+            order_id,
+            tenant_id,
+        )
+
         if not order:
-            raise NotFoundException("Order not found")
+            raise NotFoundException(
+                "Order not found"
+            )
+
         return order
 
-    def list_orders(self, tenant_id: int, store_id: int | None = None, page: int = 1, page_size: int = 20):
-        skip = (page - 1) * page_size
-        return self.repo.list_orders(tenant_id, store_id, skip, page_size)
+    def list_orders(
+        self,
+        tenant_id: int,
+        store_id: int | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ):
+        
+        if page < 1:
+            raise AppException(
+                "Page must be greater than 0"
+            )
 
-    def update_order(self, tenant_id: int, order_id: int, data: OrderUpdate) -> Order:
-        order = self.get_order(tenant_id, order_id)
-        if order.status not in (OrderStatus.DRAFT.value, OrderStatus.CONFIRMED.value):
-            raise AppException("Order cannot be updated in current status")
-        for key, value in data.model_dump(exclude_unset=True).items():
-            setattr(order, key, value)
+        if page_size < 1:
+            raise AppException(
+                "Page size must be greater than 0"
+            )
+
+        if store_id is not None:
+            self._get_store(
+                tenant_id,
+                store_id,
+            )
+
+        skip = (
+            page - 1
+        ) * page_size
+
+        return self.repo.list_orders(
+            tenant_id,
+            store_id,
+            skip,
+            page_size,
+        )
+
+    def update_order(
+        self,
+        tenant_id: int,
+        order_id: int,
+        data: OrderUpdate,
+    ) -> Order:
+
+        order = self.get_order(
+            tenant_id,
+            order_id,
+        )
+
+        if order.status not in (
+            OrderStatus.DRAFT.value,
+            OrderStatus.CONFIRMED.value,
+        ):
+            raise AppException(
+                "Order cannot be updated in current status"
+            )
+
+        update_data = data.model_dump(
+            exclude_unset=True
+        )
+
+        if not update_data:
+            raise AppException(
+                "At least one field is required for update"
+            )
+            
+        if "status" in update_data:
+
+            raise AppException(
+                "Order status must be updated "
+                "using the order status endpoint"
+            )
+
+        if "customer_id" in update_data:
+
+            customer_id = update_data["customer_id"]
+
+            if customer_id is not None:
+                self._get_customer(
+                    tenant_id,
+                    customer_id,
+                )
+
+        if "coupon_code" in update_data:
+
+            coupon_code = update_data["coupon_code"]
+
+            if coupon_code is None:
+                
+                discount_percentage = (
+                    update_data.get(
+                        "discount_amount",
+                        Decimal("0.00"),
+                    )
+                )
+                
+                update_data["discount_amount"] = (
+                    self._calculate_order_discount(
+                        order.subtotal,
+                        discount_percentage,
+                    )
+                )
+                
+            else:
+
+                coupon = self._validate_coupon(
+                    tenant_id=tenant_id,
+                    coupon_code=coupon_code,
+                    order_amount=order.subtotal,
+                )
+
+                update_data["coupon_code"] = coupon.code
+
+                update_data["discount_amount"] = (
+                    self._calculate_coupon_discount(
+                        coupon,
+                        order.subtotal,
+                    )
+                )
+
+        elif "discount_amount" in update_data:
+
+            if order.coupon_code:
+
+                coupon = self._validate_coupon(
+                    tenant_id=tenant_id,
+                    coupon_code=order.coupon_code,
+                    order_amount=order.subtotal,
+                )
+
+                update_data["discount_amount"] = (
+                    self._calculate_coupon_discount(
+                        coupon,
+                        order.subtotal,
+                    )
+                )
+
+            else:
+
+                update_data["discount_amount"] = (
+                    self._calculate_order_discount(
+                        order.subtotal,
+                        update_data["discount_amount"],
+                    )
+                )
+
+        for key, value in update_data.items():
+            setattr(
+                order,
+                key,
+                value,
+            )
+
         self._recalculate_order(order)
+
         return self.repo.update(order)
 
-    def confirm_order(self, tenant_id: int, order_id: int) -> Order:
-        order = self.get_order(tenant_id, order_id)
+    def confirm_order(
+        self,
+        tenant_id: int,
+        order_id: int,
+    ) -> Order:
+
+        order = self.get_order(
+            tenant_id,
+            order_id,
+        )
+
         if order.status != OrderStatus.DRAFT.value:
-            raise AppException("Only draft orders can be confirmed")
+            raise AppException(
+                "Only draft orders can be confirmed"
+            )
+
+        self._get_store(
+            tenant_id,
+            order.store_id,
+        )
+
+        if order.customer_id is not None:
+            self._get_customer(
+                tenant_id,
+                order.customer_id,
+            )
+
+        from app.schemas.inventory import StockOutRequest
+
         for item in order.items:
-            from app.schemas.inventory import StockOutRequest
+
             self.inventory_service.stock_out(
                 tenant_id,
-                StockOutRequest(store_id=order.store_id, product_id=item.product_id, quantity=item.quantity),
+                StockOutRequest(
+                    store_id=order.store_id,
+                    product_id=item.product_id,
+                    quantity=item.quantity,
+                ),
             )
+
         order.status = OrderStatus.CONFIRMED.value
-        
+
         delivery = Delivery(
-          tenant_id=tenant_id,
-          order_id=order.id,
-          status="pending",
+            tenant_id=tenant_id,
+            order_id=order.id,
+            status="pending",
         )
 
         self.db.add(delivery)
 
         tracking = OrderTracking(
-          order_id=order.id,
-          status=OrderStatus.CONFIRMED.value,
-          remarks="Order confirmed",
+            order_id=order.id,
+            status=OrderStatus.CONFIRMED.value,
+            remarks="Order confirmed",
         )
 
         self.db.add(tracking)
+        
+        if order.customer_id is not None:
+
+            customer = self._get_customer(
+                tenant_id,
+                order.customer_id,
+            )
+
+            customer.total_spend = (
+                customer.total_spend
+                + order.total_amount
+            )
 
         return self.repo.update(order)
 
-    def cancel_order(self, tenant_id: int, order_id: int) -> Order:
-        order = self.get_order(tenant_id, order_id)
+    def cancel_order(
+        self,
+        tenant_id: int,
+        order_id: int,
+    ) -> Order:
+
+        order = self.get_order(
+            tenant_id,
+            order_id,
+        )
+
+        if order.status not in (
+            OrderStatus.DRAFT.value,
+            OrderStatus.CONFIRMED.value,
+            OrderStatus.PROCESSING.value,
+        ):
+            raise AppException(
+                "Order cannot be cancelled in current status"
+            )
 
         order.status = OrderStatus.CANCELLED.value
 
         tracking = OrderTracking(
-          order_id=order.id,
-          status=OrderStatus.CANCELLED.value,
-          remarks="Order cancelled",
+            order_id=order.id,
+            status=OrderStatus.CANCELLED.value,
+            remarks="Order cancelled",
         )
 
         self.db.add(tracking)
 
         return self.repo.update(order)
-    
+
     def update_order_status(
         self,
         tenant_id: int,
@@ -150,55 +699,111 @@ class OrderService:
         status: str,
         remarks: str | None = None,
     ):
-        order = self.get_order(tenant_id, order_id)
+
+        order = self.get_order(
+            tenant_id,
+            order_id,
+        )
+
+        current_status = order.status
+
+        allowed_transitions = {
+            OrderStatus.DRAFT.value: {
+                OrderStatus.CONFIRMED.value,
+                OrderStatus.CANCELLED.value,
+            },
+            OrderStatus.CONFIRMED.value: {
+                OrderStatus.PROCESSING.value,
+                OrderStatus.SHIPPED.value,
+                OrderStatus.CANCELLED.value,
+            },
+            OrderStatus.PROCESSING.value: {
+                OrderStatus.SHIPPED.value,
+                OrderStatus.CANCELLED.value,
+            },
+            OrderStatus.SHIPPED.value: {
+                OrderStatus.DELIVERED.value,
+                OrderStatus.RETURNED.value,
+            },
+            OrderStatus.DELIVERED.value: {
+                OrderStatus.RETURNED.value,
+                OrderStatus.REFUNDED.value,
+            },
+            OrderStatus.RETURNED.value: {
+                OrderStatus.REFUNDED.value,
+            },
+            OrderStatus.CANCELLED.value: set(),
+            OrderStatus.REFUNDED.value: set(),
+        }
+
+        if status == current_status:
+            raise AppException(
+                f"Order is already {current_status}"
+            )
+
+        if status not in allowed_transitions.get(
+            current_status,
+            set(),
+        ):
+            raise AppException(
+                f"Cannot change order status "
+                f"from '{current_status}' to '{status}'"
+            )
 
         order.status = status
 
         tracking = OrderTracking(
-           order_id=order.id,
-           status=status,
-           remarks=remarks,
-        )
-
-        self.db.add(tracking)
-
-        return self.repo.update(order)
-    
-    def return_order(
-        self,
-        tenant_id: int,
-        order_id: int,
-        remarks: str | None = None,
-    ):
-        order = self.get_order(tenant_id, order_id)
-
-        order.status = OrderStatus.RETURNED.value
-
-        tracking = OrderTracking(
             order_id=order.id,
-            status=OrderStatus.RETURNED.value,
+            status=status,
             remarks=remarks,
         )
 
         self.db.add(tracking)
 
         return self.repo.update(order)
-    
-    def get_order_tracking(self, tenant_id: int, order_id: int):
-        order = self.get_order(tenant_id, order_id)
-        
+
+    def get_order_tracking(
+        self,
+        tenant_id: int,
+        order_id: int,
+    ):
+
+        order = self.get_order(
+            tenant_id,
+            order_id,
+        )
+
         return (
             self.db.query(OrderTracking)
-            .filter(OrderTracking.order_id == order.id)
-            .order_by(OrderTracking.updated_at.desc())
+            .filter(
+                OrderTracking.order_id == order.id
+            )
+            .order_by(
+                OrderTracking.updated_at.desc()
+            )
             .all()
         )
 
-    def get_customer_history(self, tenant_id: int, customer_id: int) -> list[Order]:
+    def get_customer_history(
+        self,
+        tenant_id: int,
+        customer_id: int,
+    ) -> list[Order]:
+
+        self._get_customer(
+            tenant_id,
+            customer_id,
+        )
+
         return (
             self.db.query(Order)
-            .filter(Order.tenant_id == tenant_id, Order.customer_id == customer_id)
-            .order_by(Order.created_at.desc())
+            .filter(
+                Order.tenant_id == tenant_id,
+                Order.customer_id == customer_id,
+            )
+            .order_by(
+                Order.created_at.desc()
+            )
             .all()
         )
 

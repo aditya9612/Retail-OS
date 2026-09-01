@@ -1,5 +1,5 @@
 import re
-
+from typing import Optional
 from pydantic import BaseModel, ConfigDict, field_validator
 
 
@@ -78,31 +78,27 @@ class StoreCreate(BaseModel):
 
         return value
 
-
 class StoreUpdate(BaseModel):
-    name: str | None = None
-    code: str | None = None
-    address: str | None = None
-    city: str | None = None
-    state: str | None = None
-    pincode: str | None = None
-    phone: str | None = None
-    gstin: str | None = None
-    is_active: bool | None = None
-    is_warehouse: bool | None = None
+    name: Optional[str] = None
+    code: Optional[str] = None
+    address: Optional[str] = None
 
-    @field_validator("name")
+    # Mandatory for PATCH
+    city: str
+    state: str
+
+    pincode: Optional[str] = None
+    phone: Optional[str] = None
+    gstin: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_warehouse: Optional[bool] = None
+
+    @field_validator("city", "state")
     @classmethod
-    def validate_name(cls, value):
-        if value is None:
-            return value
-
-        value = value.strip()
-
-        if len(value) < 3:
-            raise ValueError("Store name must contain at least 3 characters")
-
-        return value
+    def validate_city_state(cls, value):
+        if not value or not value.strip():
+            raise ValueError("City and state cannot be blank")
+        return value.strip()
 
     @field_validator("code")
     @classmethod

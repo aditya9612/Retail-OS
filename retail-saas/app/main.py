@@ -9,6 +9,7 @@ from app.api.v1.ai.router import router as ai_router
 from app.api.v1.analytics.router import router as analytics_router
 from app.api.v1.auth.router import router as auth_router
 from app.api.v1.billing.router import router as billing_router
+from app.api.v1.sales import router as sales_router
 from app.api.v1.credit_notes.router import router as credit_notes_router
 from app.api.v1.customers.router import router as customers_router
 from app.api.v1.dashboard.router import router as dashboard_router
@@ -19,6 +20,7 @@ from app.api.v1.grn.router import router as grn_router
 from app.api.v1.inventory.router import router as inventory_router
 from app.api.v1.invoices.router import router as invoices_router
 from app.api.v1.orders.router import router as orders_router
+from app.api.v1.order_returns.router import router as order_returns_router
 from app.api.v1.payments.router import router as payments_router
 from app.api.v1.products.router import router as products_router
 from app.api.v1.categories.router import router as categories_router
@@ -102,6 +104,7 @@ API_PREFIX = "/api/v1"
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(users_router, prefix=API_PREFIX)
 app.include_router(stores_router, prefix=API_PREFIX)
+app.include_router(sales_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
 app.include_router(categories_router, prefix=API_PREFIX)
 app.include_router(inventory_router, prefix=API_PREFIX)
@@ -111,6 +114,7 @@ app.include_router(delivery_router, prefix=API_PREFIX)
 app.include_router(warehouses_router, prefix=API_PREFIX)
 app.include_router(coupons_router, prefix=API_PREFIX)
 app.include_router(orders_router, prefix=API_PREFIX)
+app.include_router(order_returns_router, prefix=API_PREFIX)
 app.include_router(billing_router, prefix=API_PREFIX)
 app.include_router(invoices_router, prefix=API_PREFIX)
 app.include_router(gst_rates_router, prefix=API_PREFIX)

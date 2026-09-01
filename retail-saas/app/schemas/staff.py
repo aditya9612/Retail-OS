@@ -1,8 +1,9 @@
-from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 
+from pydantic import BaseModel, EmailStr, Field
 
-class EmployeeCreate(BaseModel):
+
+class StaffCreate(BaseModel):
     name: str = Field(
         ...,
         min_length=2,
@@ -23,24 +24,31 @@ class EmployeeCreate(BaseModel):
         gt=0
     )
 
-    store_id: int = Field(
-        ...,
-        gt=0
-    )
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name": "string",
+                "email": "user@example.com",
+                "phone": "string",
+                "role_id": 1
+            }
+        }
+    }
 
 
-class EmployeeResponse(BaseModel):
+class StaffResponse(BaseModel):
     id: int
     name: str
     email: str
     phone: str
     store_id: int
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }
 
 
-class EmployeeUpdate(BaseModel):
+class StaffUpdate(BaseModel):
     name: Optional[str] = Field(
         None,
         min_length=2,
@@ -68,5 +76,31 @@ class EmployeeUpdate(BaseModel):
 
     is_active: Optional[bool] = None
 
-    class Config:
-        from_attributes = True
+
+class StaffAssign(BaseModel):
+    staff_id: int = Field(
+        ...,
+        gt=0
+    )
+
+    store_id: int = Field(
+        ...,
+        gt=0
+    )
+
+
+class StaffTransfer(BaseModel):
+    staff_id: int = Field(
+        ...,
+        gt=0
+    )
+
+    source_store_id: int = Field(
+        ...,
+        gt=0
+    )
+
+    destination_store_id: int = Field(
+        ...,
+        gt=0
+    )

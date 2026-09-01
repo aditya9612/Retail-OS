@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -48,5 +48,6 @@ class GstRateResponse(BaseModel):
     igst: Decimal
     status: bool
     created_at: datetime
+    supply_type: Optional[Literal["intra_state", "inter_state"]] = None
 
     model_config = {"from_attributes": True}

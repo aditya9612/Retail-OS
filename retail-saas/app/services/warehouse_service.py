@@ -1,5 +1,9 @@
+from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
+
 from app.core.exceptions import NotFoundException
 from app.models.warehouse import Warehouse
+from app.models.store import Store
 from app.repositories.warehouse_repo import WarehouseRepository
 from app.schemas.warehouse import (
     WarehouseCreate,
@@ -17,7 +21,23 @@ class WarehouseService:
         tenant_id: int,
         data: WarehouseCreate,
     ):
+        
+        if data.store_id is not None:
+            store = (
+                self.repo.db.query(Store)
+                .filter(
+                    Store.id == data.store_id,
+                    Store.tenant_id == tenant_id,
+                )
+                .first()
+            )
 
+            if not store:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Store not found",
+                )
+                
         warehouse = Warehouse(
             tenant_id=tenant_id,
             store_id=data.store_id,
@@ -27,13 +47,27 @@ class WarehouseService:
             is_active=True,
         )
 
-        return self.repo.create(warehouse)
+        try:
+            return self.repo.create(warehouse)
+
+        except IntegrityError as exc:
+            error_message = str(exc).lower()
+
+            if "code" in error_message:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Warehouse code already exists",
+                )
+
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid warehouse data",
+            )
 
     def list(
         self,
         tenant_id: int,
     ):
-
         return self.repo.list(tenant_id)
 
     def get(
@@ -41,7 +75,6 @@ class WarehouseService:
         tenant_id: int,
         warehouse_id: int,
     ):
-
         warehouse = self.repo.get_by_id(
             warehouse_id,
             tenant_id,
@@ -60,7 +93,6 @@ class WarehouseService:
         warehouse_id: int,
         data: WarehouseUpdate,
     ):
-
         warehouse = self.get(
             tenant_id,
             warehouse_id,
@@ -77,44 +109,60 @@ class WarehouseService:
                 value,
             )
 
-        return self.repo.update(warehouse)
+        try:
+            return self.repo.update(warehouse)
+
+        except IntegrityError as exc:
+            error_message = str(exc).lower()
+
+            if "code" in error_message:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Warehouse code already exists",
+                )
+
+            if "store" in error_message:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Store not found",
+                )
+
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid warehouse data",
+            )
 
     def delete(
         self,
         tenant_id: int,
         warehouse_id: int,
     ):
-
         warehouse = self.get(
             tenant_id,
             warehouse_id,
         )
 
-        self.repo.delete(warehouse)
+        try:
+            self.repo.delete(warehouse)
+
+        except IntegrityError:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Warehouse cannot be deleted because "
+                    "it is being used by other records"
+                ),
+            )
 
         return {
             "message": "Warehouse deleted successfully"
         }
 
-    def stats(
-        self,
-        tenant_id: int,
-    ):
-
-        total = self.repo.count(tenant_id)
-        active = self.repo.active_count(tenant_id)
-
-        return {
-            "total_warehouses": total,
-            "active_warehouses": active,
-            "inactive_warehouses": total - active,
-        }
-
+    
     def dashboard(
         self,
         tenant_id: int,
     ):
-
         total = self.repo.count(tenant_id)
         active = self.repo.active_count(tenant_id)
 

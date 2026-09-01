@@ -1,52 +1,64 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Body
+
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+
 from app.core.security import require_permission
+
 from app.models.user import User
 
 from app.schemas.store import (
-    StoreCreate,
-    StoreResponse,
-    StoreUpdate
+
+      StoreCreate,
+
+      StoreResponse,
+
+      StoreUpdate,
+
 )
 
-from app.schemas.employee import (
-    EmployeeCreate,
-    EmployeeUpdate,
-    EmployeeResponse
+from app.schemas.staff import (
+
+      StaffCreate,
+
+      StaffUpdate,
+
+      StaffResponse,
+
 )
 
 from app.services.store_service import StoreService
-
-from app.services.employee_service import (
-    create_employee_service,
-    list_employee_service,
-    get_employee_service,
-    update_employee_service,
-    delete_employee_service
+from app.services.staff_service import (
+    create_staff_service,
+    list_staff_service,
+    get_staff_service,
+    update_staff_service,
+    delete_staff_service,
+    assign_staff_service,
+    transfer_staff_service,
+    list_all_staff_service,
 )
-
 
 router = APIRouter(
     prefix="/stores",
-    tags=["Stores"]
+    tags=["Stores"],
 )
 
 
 def get_store_service(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     return StoreService(db)
 
 
-# ==========================
+# ============================================================
 # STORE APIs
-# ==========================
+# ============================================================
 
 @router.get(
     "/",
-    response_model=list[StoreResponse]
+    response_model=list[StoreResponse],
 )
 def list_stores(
     user: User = Depends(
@@ -64,7 +76,7 @@ def list_stores(
 @router.post(
     "/",
     response_model=StoreResponse,
-    status_code=201
+    status_code=201,
 )
 def create_store(
     data: StoreCreate,
@@ -77,13 +89,13 @@ def create_store(
 ):
     return service.create_store(
         user.tenant_id,
-        data
+        data,
     )
 
 
 @router.get(
     "/{store_id}",
-    response_model=StoreResponse
+    response_model=StoreResponse,
 )
 def get_store(
     store_id: int,
@@ -96,13 +108,13 @@ def get_store(
 ):
     return service.get_store(
         user.tenant_id,
-        store_id
+        store_id,
     )
 
 
 @router.patch(
     "/{store_id}",
-    response_model=StoreResponse
+    response_model=StoreResponse,
 )
 def update_store(
     store_id: int,
@@ -117,12 +129,12 @@ def update_store(
     return service.update_store(
         user.tenant_id,
         store_id,
-        data
+        data,
     )
 
 
 @router.delete(
-    "/{store_id}"
+    "/{store_id}",
 )
 def delete_store(
     store_id: int,
@@ -135,95 +147,152 @@ def delete_store(
 ):
     service.delete_store(
         user.tenant_id,
-        store_id
+        store_id,
     )
 
     return {
         "message": "Store deleted successfully"
     }
 
-
-# ==========================
-# EMPLOYEE APIs
-# ==========================
+# ============================================================
+# STAFF APIs
+# ============================================================
 
 @router.post(
-    "/{store_id}/employees",
-    response_model=EmployeeResponse,
-    status_code=201
+    "/{store_id}/staff",
+    response_model=StaffResponse,
+    status_code=201,
 )
-def create_employee(
+def create_staff(
     store_id: int,
-    data: EmployeeCreate,
-    db: Session = Depends(get_db)
+    data: StaffCreate,
+    user: User = Depends(
+        require_permission("employees:write")
+    ),
+    db: Session = Depends(get_db),
 ):
-    # Always use store_id from URL
-    data.store_id = store_id
-
     return create_employee_service(
         db,
-        data
+        store_id,
+        data,
     )
 
 
 @router.get(
-    "/{store_id}/employees",
-    response_model=list[EmployeeResponse]
+    "/{store_id}/staff",
+    response_model=list[StaffResponse],
 )
-def list_employees(
+def list_staff(
     store_id: int,
-    db: Session = Depends(get_db)
+    user: User = Depends(
+        require_permission("employees:read")
+    ),
+    db: Session = Depends(get_db),
 ):
     return list_employee_service(
         db,
-        store_id
+        store_id,
     )
 
 
 @router.get(
-    "/{store_id}/employees/{employee_id}",
-    response_model=EmployeeResponse
+    "/{store_id}/staff/{staff_id}",
+    response_model=StaffResponse,
 )
-def get_employee(
+def get_staff(
     store_id: int,
-    employee_id: int,
-    db: Session = Depends(get_db)
+    staff_id: int,
+    user: User = Depends(
+        require_permission("employees:read")
+    ),
+    db: Session = Depends(get_db),
 ):
     return get_employee_service(
         db,
-        employee_id,
-        store_id
+        store_id,
+        staff_id,
     )
 
 
 @router.patch(
-    "/{store_id}/employees/{employee_id}",
-    response_model=EmployeeResponse
+    "/{store_id}/staff/{staff_id}",
+    response_model=StaffResponse,
 )
-def patch_employee(
+def patch_staff(
     store_id: int,
-    employee_id: int,
-    data: EmployeeUpdate,
-    db: Session = Depends(get_db)
+    staff_id: int,
+    data: StaffUpdate,
+    user: User = Depends(
+        require_permission("employees:write")
+    ),
+    db: Session = Depends(get_db),
 ):
     return update_employee_service(
         db,
-        employee_id,
         store_id,
-        data
+        staff_id,
+        data,
     )
 
 
 @router.delete(
-    "/{store_id}/employees/{employee_id}"
+    "/{store_id}/staff/{staff_id}",
 )
-def delete_employee(
+def delete_staff(
     store_id: int,
-    employee_id: int,
-    db: Session = Depends(get_db)
+    staff_id: int,
+    user: User = Depends(
+        require_permission("employees:write")
+    ),
+    db: Session = Depends(get_db),
 ):
     return delete_employee_service(
         db,
-        employee_id,
-        store_id
+        store_id,
+        staff_id,
     )
+
+# ============================================================
+# STAFF ASSIGN / TRANSFER / ALL
+# ============================================================
+
+@router.patch("/assign/{staff_id}/{store_id}")
+def assign_staff(
+    staff_id: int,
+    store_id: int,
+    user: User = Depends(
+        require_permission("employees:write")
+    ),
+    db: Session = Depends(get_db),
+):
+    return assign_staff_service(
+        db,
+        staff_id,
+        store_id,
+    )
+
+
+@router.patch("/transfer/{staff_id}/{store_id}")
+def transfer_staff(
+    staff_id: int,
+    store_id: int,
+    user: User = Depends(
+        require_permission("employees:write")
+    ),
+    db: Session = Depends(get_db),
+):
+    return transfer_staff_service(
+        db,
+        staff_id,
+        store_id,
+    )
+
+
+@router.get("/all")
+def list_all_staff(
+    user: User = Depends(
+        require_permission("employees:read")
+    ),
+    db: Session = Depends(get_db),
+):
+    return list_all_staff_service(db)

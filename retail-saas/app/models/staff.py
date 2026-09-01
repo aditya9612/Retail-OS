@@ -2,9 +2,9 @@ from sqlalchemy import Column, Integer, String, ForeignKey, Boolean
 from app.core.database import Base
 
 
-class Employee(Base):
+class Staff(Base):
 
-    __tablename__ = "employees"
+    __tablename__ = "staff"
 
     id = Column(Integer, primary_key=True)
 

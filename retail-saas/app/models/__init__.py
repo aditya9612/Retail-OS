@@ -4,11 +4,13 @@ from app.models.credit_note import CreditNote
 from app.models.customer import Customer
 from app.models.document_sequence import DocumentSequence
 from app.models.gst_rate import GstRate
-from app.models.inventory import Inventory, StockMovement, Supplier
+from app.models.inventory import Inventory, StockMovement
+from app.models.supplier import Supplier
 from app.models.invoice import Invoice
 from app.models.invoice_item import InvoiceItem
 from app.models.order import Order
 from app.models.order_item import OrderItem
+from app.models.order_return import OrderReturn
 from app.models.payment import Payment
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
 from app.models.delivery import Delivery
@@ -19,8 +21,9 @@ from app.models.role import Role
 from app.models.store import Store
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.models.staff import Staff
 from app.models.warehouse import Warehouse
-from app.models.employee import Employee
+from app.models.staff import Staff
 from app.models.grn import GRN, GRNItem
 from app.models.coupon import Coupon
 from app.models.sale import Sale, SaleItem
@@ -41,6 +44,7 @@ __all__ = [
     "InvoiceItem",
     "Order",
     "OrderItem",
+    "OrderReturn",
     "Payment",
     "PurchaseOrder",
     "PurchaseOrderItem",
@@ -53,8 +57,9 @@ __all__ = [
     "Store",
     "Tenant",
     "User",
+    "Staff",
     "Warehouse",
-    "Employee",
+    "Staff",
     "GRN",
     "GRNItem",
     "Coupon",

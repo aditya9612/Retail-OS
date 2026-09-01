@@ -38,9 +38,11 @@ class Warehouse(Base, TimestampMixin):
 
     address: Mapped[str | None] = mapped_column(
         Text,
+        nullable=True,
     )
 
     is_active: Mapped[bool] = mapped_column(
         Boolean,
+        nullable=False,
         default=True,
     )

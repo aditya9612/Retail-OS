@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import UnauthorizedException
+from app.core.exceptions import UnauthorizedException, NotFoundException
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -36,7 +36,6 @@ class AuthService:
         self.user_repo = UserRepository(db)
 
     def login(self, data: LoginRequest) -> TokenResponse:
-
         user = self.user_repo.get_by_email(data.email)
 
         if not user or not verify_password(
@@ -176,7 +175,9 @@ class AuthService:
         user = self.user_repo.get_by_email(data.email)
 
         if not user:
-            return ""
+            raise NotFoundException(
+                "Email address is not registered"
+            )
 
         (
             self.db.query(PasswordResetToken)

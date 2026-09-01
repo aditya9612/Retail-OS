@@ -5,24 +5,29 @@ from pydantic import BaseModel, Field
 
 
 class CartItemCreate(BaseModel):
-    product_id: int
+    product_id: int = Field(gt=0)
     quantity: Decimal = Field(gt=0)
     unit_price: Optional[Decimal] = None
     discount: Decimal = Field(default=Decimal("0.00"))
+    store_id: Optional[int] = Field(default=None, gt=0)
 
 
 class CartItemUpdate(BaseModel):
-    product_id: int
+    product_id: int = Field(gt=0)
     quantity: Optional[Decimal] = Field(default=None, gt=0)
     unit_price: Optional[Decimal] = None
-    discount: Optional[Decimal] = None
+    discount: Optional[Decimal] = Field(default=None, ge=0)
+
+
+class CartItemRemove(BaseModel):
+    product_id: int = Field(gt=0)
 
 
 class CartItemResponse(BaseModel):
     product_id: int
     product_name: str
-    sku: str
-    hsn_code: Optional[str]
+    sku: str = ""
+    hsn_code: Optional[str] = None
     quantity: Decimal
     unit_price: Decimal
     discount: Decimal
