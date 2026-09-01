@@ -5,7 +5,7 @@ from app.core.database import get_db
 from app.core.security import require_permission
 from app.models.category import Category
 from app.models.user import User
-from app.schemas.product import CategoryCreate, CategoryResponse
+from app.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
 from app.services.category_service import CategoryService
 
 
@@ -58,3 +58,37 @@ def get_category(
         tenant_id=user.tenant_id,
         category_id=category_id,
     )
+
+@router.put(
+    "/{category_id}",
+    response_model=CategoryResponse,
+)
+def update_category(
+    category_id: int,
+    data: CategoryUpdate,
+    user: User = Depends(require_permission("products:write")),
+    db: Session = Depends(get_db),
+):
+    category = CategoryService(db).update_category(
+        tenant_id=user.tenant_id,
+        category_id=category_id,
+        data=data,
+    )
+
+    return category
+
+@router.delete(
+    "/{category_id}",
+    response_model=CategoryResponse,
+)
+def delete_category(
+    category_id: int,
+    user: User = Depends(require_permission("products:write")),
+    db: Session = Depends(get_db),
+):
+    category = CategoryService(db).delete_category(
+        tenant_id=user.tenant_id,
+        category_id=category_id,
+    )
+
+    return category    

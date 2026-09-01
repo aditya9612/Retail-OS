@@ -50,3 +50,29 @@ class CategoryRepository:
             )
             .first()
         )    
+
+    def update(
+        self,
+        category: Category,
+        name: str | None = None,
+        description: str | None = None,
+        parent_id: int | None = None,
+    ) -> Category:
+
+        if name is not None:
+            category.name = name
+
+        if description is not None:
+            category.description = description
+
+        if parent_id is not None:
+            category.parent_id = parent_id
+
+        self.db.commit()
+        self.db.refresh(category)
+
+        return category    
+
+    def delete(self, category: Category) -> None:
+        self.db.delete(category)
+        self.db.commit()    

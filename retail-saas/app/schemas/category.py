@@ -6,6 +6,11 @@ class CategoryCreate(BaseModel):
     description: str | None = None
     parent_id: int | None = None
 
+class CategoryUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    parent_id: int | None = None    
+
 
 class CategoryResponse(BaseModel):
     id: int
