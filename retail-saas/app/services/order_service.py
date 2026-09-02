@@ -716,7 +716,7 @@ class OrderService:
                 OrderStatus.PROCESSING.value,
                 OrderStatus.SHIPPED.value,
                 OrderStatus.CANCELLED.value,
-            },
+            }, 
             OrderStatus.PROCESSING.value: {
                 OrderStatus.SHIPPED.value,
                 OrderStatus.CANCELLED.value,
@@ -759,19 +759,10 @@ class OrderService:
         )
 
         self.db.add(tracking)
-
         return self.repo.update(order)
 
-    def get_order_tracking(
-        self,
-        tenant_id: int,
-        order_id: int,
-    ):
-
-        order = self.get_order(
-            tenant_id,
-            order_id,
-        )
+    def get_order_tracking(self, tenant_id: int, order_id: int):
+        order = self.get_order(tenant_id, order_id)
 
         return (
             self.db.query(OrderTracking)
@@ -813,7 +804,7 @@ class CustomerService:
         self.db = db
 
     def create_customer(self, tenant_id: int, data) -> Customer:
-         
+
         if data.email:
             existing_email = (
                 self.db.query(Customer)
@@ -853,13 +844,13 @@ class CustomerService:
                 raise AppException("GSTIN already exists")
         customer = Customer(
             tenant_id=tenant_id,
-            total_spend=0, 
+            total_spend=0,
             **data.model_dump()
         )
         self.db.add(customer)
         self.db.commit()
         self.db.refresh(customer)
-        
+
         return customer
 
     def get_customer(self, tenant_id: int, customer_id: int) -> Customer:
@@ -908,7 +899,7 @@ class CustomerService:
 
     #     return {
     #         "message": "Customer deleted successfully"
-    #     }    
+    #     }
 
     def add_loyalty_points(
         self,
@@ -943,7 +934,7 @@ class CustomerService:
             )
             .all()
         )
-    
+
     def create_feedback(self, data):
         feedback = CustomerFeedback(
             customer_id=data.customer_id,
@@ -968,7 +959,7 @@ class CustomerService:
             )
 
         return query.all()
-    
+
 
     def get_wallet(self, tenant_id: int, customer_id: int):
         customer = self.get_customer(tenant_id, customer_id)
@@ -988,8 +979,8 @@ class CustomerService:
             self.db.refresh(wallet)
 
         return wallet
-    
-    
+
+
     def credit_wallet(self, tenant_id: int, data):
         wallet = self.get_wallet(tenant_id, data.customer_id)
 
@@ -1008,7 +999,7 @@ class CustomerService:
         self.db.refresh(wallet)
 
         return wallet
-    
+
 
     def debit_wallet(self, tenant_id: int, data):
         wallet = self.get_wallet(tenant_id, data.customer_id)
@@ -1031,7 +1022,7 @@ class CustomerService:
         self.db.refresh(wallet)
 
         return wallet
-    
+
 
     def get_wallet_transactions(self, tenant_id: int, customer_id: int):
         wallet = self.get_wallet(tenant_id, customer_id)
@@ -1042,7 +1033,7 @@ class CustomerService:
             .order_by(WalletTransaction.created_at.desc())
             .all()
         )
-    
+
     def earn_loyalty_points(self, tenant_id: int, data):
         customer = self.get_customer(tenant_id, data.customer_id)
 
@@ -1061,7 +1052,7 @@ class CustomerService:
         self.db.refresh(loyalty)
 
         return loyalty
-    
+
     def redeem_loyalty_points(self, tenant_id: int, data):
         customer = self.get_customer(tenant_id, data.customer_id)
 
@@ -1082,7 +1073,7 @@ class CustomerService:
         self.db.refresh(loyalty)
 
         return loyalty
-    
+
     def get_loyalty(self, tenant_id: int, customer_id: int):
         self.get_customer(tenant_id, customer_id)
 
@@ -1097,7 +1088,7 @@ class CustomerService:
             raise NotFoundException("No loyalty record found")
 
         return loyalty
-    
+
     def get_loyalty_history(self, tenant_id: int, customer_id: int):
         self.get_customer(tenant_id, customer_id)
 
@@ -1134,7 +1125,7 @@ class CustomerService:
             .filter(Customer.tenant_id == tenant_id)
             .order_by(CustomerCommunication.sent_at.desc())
             .all()
-        )    
+        )
 
     def create_referral(self, tenant_id: int, data):
         self.get_customer(tenant_id, data.customer_id)
@@ -1174,7 +1165,7 @@ class CustomerService:
         self.db.commit()
         self.db.refresh(note)
 
-        return note 
+        return note
 
     def get_notes(self, tenant_id: int, customer_id: int | None = None):
 
@@ -1191,7 +1182,7 @@ class CustomerService:
             query
             .order_by(CustomerNote.created_at.desc())
             .all()
-        ) 
+        )
 
     def send_campaign(self, tenant_id: int, data):
         for customer_id in data.customer_ids:
@@ -1259,7 +1250,7 @@ class CustomerService:
             "active_customers": active,
             "inactive_customers": inactive,
             "retention_rate": retention_rate,
-        } 
+        }
 
     def get_lifetime_value(self, tenant_id: int):
 
@@ -1280,7 +1271,7 @@ class CustomerService:
                 "loyalty_points": customer.loyalty_points,
             })
 
-        return result 
+        return result
 
     def get_loyalty_report(self, tenant_id: int):
 
@@ -1307,7 +1298,7 @@ class CustomerService:
                 "balance_points": item.balance_points,
             })
 
-        return result 
+        return result
 
     def export_directory(self, tenant_id:int, status="all", format="excel"):
         customers = get_customers_for_export(
@@ -1396,4 +1387,4 @@ class CustomerService:
 
         output.seek(0)
 
-        return output                       
+        return output
