@@ -1,7 +1,10 @@
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.security import get_current_user
+from app.models.user import User
 from app.schemas.store_transfer import (
     StoreTransferCreate,
     StoreTransferResponse
@@ -22,7 +25,8 @@ router = APIRouter(
 )
 def create_transfer(
     data: StoreTransferCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     try:
         return StoreTransferService.create_transfer(
@@ -46,7 +50,8 @@ def list_transfers(
     source_store_id: int | None = None,
     destination_store_id: int | None = None,
     status: str | None = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     return StoreTransferService.get_transfers(
         db=db,
@@ -62,7 +67,8 @@ def list_transfers(
 )
 def get_transfer(
     transfer_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     try:
         return StoreTransferService.get_transfer(
@@ -83,7 +89,8 @@ def get_transfer(
 def approve_transfer(
     transfer_id: int,
     approved_by: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     try:
         return StoreTransferService.approve_transfer(
@@ -104,7 +111,8 @@ def approve_transfer(
 )
 def reject_transfer(
     transfer_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     try:
         return StoreTransferService.reject_transfer(
@@ -124,7 +132,8 @@ def reject_transfer(
 )
 def dispatch_transfer(
     transfer_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     try:
         return StoreTransferService.dispatch_transfer(
@@ -144,7 +153,8 @@ def dispatch_transfer(
 )
 def receive_transfer(
     transfer_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     try:
         return StoreTransferService.receive_transfer(
@@ -156,3 +166,4 @@ def receive_transfer(
             status_code=400,
             detail=str(e)
         )
+
