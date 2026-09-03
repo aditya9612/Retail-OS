@@ -11,7 +11,6 @@ from app.schemas.auth import (
 )
 from app.services.auth_service import AuthService
 
-
 router = APIRouter(
     prefix="/auth",
     tags=["auth"],
@@ -60,6 +59,8 @@ def register(
     phone: str | None = None,
     db: Session = Depends(get_db),
 ):
+    email = email.strip()
+
     user = AuthService(db).register_tenant(
         tenant_name,
         slug,

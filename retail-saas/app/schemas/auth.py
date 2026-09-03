@@ -1,11 +1,16 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, TypeAdapter, field_validator
+
+
+email_adapter = TypeAdapter(EmailStr)
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr = Field(
-        description="Must be a valid email address"
+    email: str = Field(
+        min_length=5,
+        max_length=254,
+        description="Valid email address. Email matching is case-sensitive.",
     )
 
     password: str = Field(
@@ -13,6 +18,22 @@ class LoginRequest(BaseModel):
         max_length=100,
         description="Password must be at least 6 characters",
     )
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("Email must not contain leading or trailing spaces")
+
+        if not value:
+            raise ValueError("Email is required")
+
+        try:
+            email_adapter.validate_python(value)
+        except Exception:
+            raise ValueError("Invalid email address")
+
+        return value
 
 
 class TokenResponse(BaseModel):
@@ -36,9 +57,27 @@ class TokenPayload(BaseModel):
 
 
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr = Field(
-        description="Registered user email address",
+    email: str = Field(
+        min_length=5,
+        max_length=254,
+        description="Registered user email address. Email matching is case-sensitive.",
     )
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("Email must not contain leading or trailing spaces")
+
+        if not value:
+            raise ValueError("Email is required")
+
+        try:
+            email_adapter.validate_python(value)
+        except Exception:
+            raise ValueError("Invalid email address")
+
+        return value
 
 
 class ResetPasswordRequest(BaseModel):

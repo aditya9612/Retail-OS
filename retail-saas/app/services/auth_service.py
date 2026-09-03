@@ -107,6 +107,8 @@ class AuthService:
         phone: str | None = None,
     ) -> User:
 
+        email = email.strip()
+
         existing = (
             self.db.query(Tenant)
             .filter(Tenant.slug == slug)

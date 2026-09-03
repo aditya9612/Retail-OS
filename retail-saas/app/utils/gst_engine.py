@@ -1,19 +1,27 @@
-
-
 from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy.orm import Session
 
 from app.models.gst_rate import GstRate
-from app.models.product import Product
+
+
+MONEY = Decimal("0.01")
+ZERO = Decimal("0.00")
+HUNDRED = Decimal("100")
 
 
 def _quantize(value: Decimal) -> Decimal:
-    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return Decimal(str(value)).quantize(MONEY, rounding=ROUND_HALF_UP)
 
 
-def resolve_gst_rate(db: Session, tenant_id: int, product: Product) -> Decimal:
-    if product.hsn_code:
+def resolve_gst_rate(
+    db: Session,
+    tenant_id: int,
+    product,
+) -> Decimal:
+    rate = None
+
+    if getattr(product, "hsn_code", None):
         rate_row = (
             db.query(GstRate)
             .filter(
@@ -23,11 +31,17 @@ def resolve_gst_rate(db: Session, tenant_id: int, product: Product) -> Decimal:
             )
             .first()
         )
+
         if rate_row and rate_row.gst_rate is not None:
-            return Decimal(str(rate_row.gst_rate))
-    if product.gst_rate is None:
-        return Decimal("0.00")
-    return Decimal(str(product.gst_rate))
+            rate = Decimal(str(rate_row.gst_rate))
+
+    if rate is None:
+        rate = Decimal(str(product.gst_rate or ZERO))
+
+    if rate < ZERO or rate > HUNDRED:
+        raise ValueError("GST rate must be between 0 and 100")
+
+    return _quantize(rate)
 
 
 def calculate_line_tax(
@@ -36,38 +50,151 @@ def calculate_line_tax(
     discount: Decimal,
     gst_rate: Decimal,
     same_state: bool,
-) -> dict:
-    taxable = _quantize(quantity * unit_price - discount)
-    rate = Decimal("0.00") if gst_rate is None else Decimal(str(gst_rate))
-    gst_amount = _quantize(taxable * rate / Decimal("100"))
+):
+    quantity = Decimal(str(quantity))
+    unit_price = Decimal(str(unit_price))
+    discount = Decimal(str(discount))
+    gst_rate = Decimal(str(gst_rate or ZERO))
+
+    if quantity <= ZERO:
+        raise ValueError("Quantity must be greater than zero")
+
+    if unit_price <= ZERO:
+        raise ValueError("Unit price must be greater than zero")
+
+    if discount < ZERO:
+        raise ValueError("Discount cannot be negative")
+
+    gross_amount = _quantize(quantity * unit_price)
+
+    if discount > gross_amount:
+        raise ValueError("Discount cannot exceed gross amount")
+
+    if gst_rate < ZERO or gst_rate > HUNDRED:
+        raise ValueError("GST rate must be between 0 and 100")
+
+    taxable_amount = _quantize(gross_amount - discount)
+
+    gst_amount = _quantize(
+        taxable_amount * gst_rate / HUNDRED
+    )
+
     if same_state:
-        half = _quantize(gst_amount / Decimal("2"))
-        return {
-            "taxable_amount": taxable,
-            "gst_rate": rate,
-            "gst_amount": gst_amount,
-            "cgst_amount": half,
-            "sgst_amount": half,
-            "igst_amount": Decimal("0.00"),
-            "total_amount": _quantize(taxable + gst_amount),
-        }
+        cgst_amount = _quantize(gst_amount / Decimal("2"))
+        sgst_amount = _quantize(gst_amount - cgst_amount)
+        igst_amount = ZERO
+    else:
+        cgst_amount = ZERO
+        sgst_amount = ZERO
+        igst_amount = gst_amount
+
+    if same_state:
+        if cgst_amount + sgst_amount != gst_amount:
+            raise ValueError(
+                "Total GST amount does not match the sum of CGST and SGST amounts"
+            )
+
+        if igst_amount != ZERO:
+            raise ValueError(
+                "IGST must be zero for intra-state billing"
+            )
+    else:
+        if cgst_amount != ZERO or sgst_amount != ZERO:
+            raise ValueError(
+                "CGST and SGST must be zero for inter-state billing"
+            )
+
+        if igst_amount != gst_amount:
+            raise ValueError(
+                "Total GST amount does not match IGST amount"
+            )
+
+    total_amount = _quantize(
+        taxable_amount + gst_amount
+    )
+
     return {
-        "taxable_amount": taxable,
-        "gst_rate": rate,
+        "taxable_amount": taxable_amount,
+        "gst_rate": _quantize(gst_rate),
         "gst_amount": gst_amount,
-        "cgst_amount": Decimal("0.00"),
-        "sgst_amount": Decimal("0.00"),
-        "igst_amount": gst_amount,
-        "total_amount": _quantize(taxable + gst_amount),
+        "cgst_amount": cgst_amount,
+        "sgst_amount": sgst_amount,
+        "igst_amount": igst_amount,
+        "total_amount": total_amount,
     }
 
 
-def aggregate_taxes(line_taxes: list[dict]) -> dict:
+def aggregate_taxes(line_taxes):
+    subtotal = _quantize(
+        sum(
+            (
+                Decimal(str(t["taxable_amount"]))
+                for t in line_taxes
+            ),
+            ZERO,
+        )
+    )
+
+    gst_amount = _quantize(
+        sum(
+            (
+                Decimal(str(t["gst_amount"]))
+                for t in line_taxes
+            ),
+            ZERO,
+        )
+    )
+
+    cgst_amount = _quantize(
+        sum(
+            (
+                Decimal(str(t["cgst_amount"]))
+                for t in line_taxes
+            ),
+            ZERO,
+        )
+    )
+
+    sgst_amount = _quantize(
+        sum(
+            (
+                Decimal(str(t["sgst_amount"]))
+                for t in line_taxes
+            ),
+            ZERO,
+        )
+    )
+
+    igst_amount = _quantize(
+        sum(
+            (
+                Decimal(str(t["igst_amount"]))
+                for t in line_taxes
+            ),
+            ZERO,
+        )
+    )
+
+    grand_total = _quantize(
+        sum(
+            (
+                Decimal(str(t["total_amount"]))
+                for t in line_taxes
+            ),
+            ZERO,
+        )
+    )
+
+    if cgst_amount + sgst_amount + igst_amount != gst_amount:
+        raise ValueError(
+            "Total GST amount does not match the sum of CGST, SGST and IGST amounts"
+        )
+
     return {
-        "subtotal": _quantize(sum((t["taxable_amount"] for t in line_taxes), Decimal("0"))),
-        "gst_amount": _quantize(sum((t["gst_amount"] for t in line_taxes), Decimal("0"))),
-        "cgst_amount": _quantize(sum((t["cgst_amount"] for t in line_taxes), Decimal("0"))),
-        "sgst_amount": _quantize(sum((t["sgst_amount"] for t in line_taxes), Decimal("0"))),
-        "igst_amount": _quantize(sum((t["igst_amount"] for t in line_taxes), Decimal("0"))),
-        "grand_total": _quantize(sum((t["total_amount"] for t in line_taxes), Decimal("0"))),
+        "subtotal": subtotal,
+        "gst_amount": gst_amount,
+        "cgst_amount": cgst_amount,
+        "sgst_amount": sgst_amount,
+        "igst_amount": igst_amount,
+        "grand_total": grand_total,
     }

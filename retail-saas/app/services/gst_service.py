@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Literal
 
 from sqlalchemy.orm import Session
@@ -7,7 +7,25 @@ from app.core.exceptions import ConflictException, NotFoundException
 from app.models.gst_rate import GstRate
 from app.schemas.gst_rate import GstRateCreate, GstRateResponse, GstRateUpdate
 
+
 SupplyType = Literal["intra_state", "inter_state"]
+
+MONEY = Decimal("0.01")
+ZERO = Decimal("0.00")
+HUNDRED = Decimal("100")
+
+
+def _money(value: Decimal) -> Decimal:
+    return Decimal(str(value)).quantize(MONEY, rounding=ROUND_HALF_UP)
+
+
+def _validate_gst_rate(value: Decimal) -> Decimal:
+    value = Decimal(str(value))
+
+    if value < ZERO or value > HUNDRED:
+        raise ValueError("GST rate must be between 0 and 100")
+
+    return _money(value)
 
 
 class GstService:
@@ -15,62 +33,64 @@ class GstService:
         self.db = db
 
     @staticmethod
-    def _split_rate(gst_rate: Decimal) -> tuple[Decimal, Decimal, Decimal]:
-        half = (gst_rate / Decimal("2")).quantize(Decimal("0.01"))
-        return half, half, gst_rate
+    def _split_rate(gst_rate: Decimal):
+        gst_rate = _validate_gst_rate(gst_rate)
 
-    def list_rates(self, tenant_id: int, active_only: bool = True) -> list[GstRate]:
-        query = self.db.query(GstRate).filter(GstRate.tenant_id == tenant_id)
+        cgst = _money(gst_rate / Decimal("2"))
+        sgst = _money(gst_rate - cgst)
+        igst = gst_rate
 
-        if active_only:
-            query = query.filter(GstRate.status.is_(True))
+        if cgst + sgst != gst_rate:
+            raise ValueError(
+                "CGST and SGST must exactly equal the total GST rate"
+            )
 
-        return query.order_by(GstRate.hsn_code).all()
+        return cgst, sgst, igst
 
-    def list_rate_views(
+    def create_rate(
         self,
         tenant_id: int,
-        supply_type: SupplyType | None = None,
-        active_only: bool = True,
-    ) -> list[GstRateResponse]:
-        views = []
+        data: GstRateCreate,
+    ) -> GstRateResponse:
+        gst_rate = _validate_gst_rate(data.gst_rate)
 
-        for rate in self.list_rates(tenant_id, active_only=active_only):
-            cgst, sgst, igst = self._split_rate(rate.gst_rate)
+        existing = (
+            self.db.query(GstRate)
+            .filter(
+                GstRate.tenant_id == tenant_id,
+                GstRate.hsn_code == data.hsn_code,
+            )
+            .first()
+        )
 
-            base = {
-                "id": rate.id,
-                "tenant_id": rate.tenant_id,
-                "hsn_code": rate.hsn_code,
-                "gst_rate": rate.gst_rate,
-                "status": rate.status,
-                "created_at": rate.created_at,
-            }
+        if existing:
+            raise ConflictException(
+                "GST rate already exists for this HSN code"
+            )
 
-            if supply_type == "inter_state":
-                views.append(
-                    GstRateResponse(
-                        **base,
-                        cgst=Decimal("0.00"),
-                        sgst=Decimal("0.00"),
-                        igst=igst,
-                        supply_type="inter_state",
-                    )
-                )
-            else:
-                views.append(
-                    GstRateResponse(
-                        **base,
-                        cgst=cgst,
-                        sgst=sgst,
-                        igst=Decimal("0.00"),
-                        supply_type="intra_state",
-                    )
-                )
+        cgst, sgst, igst = self._split_rate(gst_rate)
 
-        return views
+        rate = GstRate(
+            tenant_id=tenant_id,
+            hsn_code=data.hsn_code,
+            gst_rate=gst_rate,
+            cgst_rate=cgst,
+            sgst_rate=sgst,
+            igst_rate=igst,
+            status=True,
+        )
 
-    def get_rate(self, tenant_id: int, rate_id: int) -> GstRate:
+        self.db.add(rate)
+        self.db.commit()
+        self.db.refresh(rate)
+
+        return GstRateResponse.model_validate(rate)
+
+    def get_rate(
+        self,
+        tenant_id: int,
+        rate_id: int,
+    ) -> GstRateResponse:
         rate = (
             self.db.query(GstRate)
             .filter(
@@ -83,55 +103,68 @@ class GstService:
         if not rate:
             raise NotFoundException("GST rate not found")
 
-        return rate
+        return GstRateResponse.model_validate(rate)
 
-    def create_rate(self, tenant_id: int, data: GstRateCreate) -> GstRate:
-        existing = (
+    def list_rates(
+        self,
+        tenant_id: int,
+    ):
+        rates = (
             self.db.query(GstRate)
-            .filter(
-                GstRate.tenant_id == tenant_id,
-                GstRate.hsn_code == data.hsn_code,
-            )
-            .first()
+            .filter(GstRate.tenant_id == tenant_id)
+            .order_by(GstRate.id.desc())
+            .all()
         )
 
-        if existing:
-            raise ConflictException(
-                f"GST rate for HSN {data.hsn_code} already exists"
-            )
-
-        cgst, sgst, igst = self._split_rate(data.gst_rate)
-
-        rate = GstRate(
-            tenant_id=tenant_id,
-            hsn_code=data.hsn_code,
-            gst_rate=data.gst_rate,
-            cgst=cgst,
-            sgst=sgst,
-            igst=igst,
-            status=True,
-        )
-
-        self.db.add(rate)
-        self.db.commit()
-        self.db.refresh(rate)
-
-        return rate
+        return [
+            GstRateResponse.model_validate(rate)
+            for rate in rates
+        ]
 
     def update_rate(
         self,
         tenant_id: int,
         rate_id: int,
         data: GstRateUpdate,
-    ) -> GstRate:
-        rate = self.get_rate(tenant_id, rate_id)
+    ) -> GstRateResponse:
+        rate = (
+            self.db.query(GstRate)
+            .filter(
+                GstRate.id == rate_id,
+                GstRate.tenant_id == tenant_id,
+            )
+            .first()
+        )
+
+        if not rate:
+            raise NotFoundException("GST rate not found")
+
+        if data.hsn_code is not None and data.hsn_code != rate.hsn_code:
+            existing = (
+                self.db.query(GstRate)
+                .filter(
+                    GstRate.tenant_id == tenant_id,
+                    GstRate.hsn_code == data.hsn_code,
+                    GstRate.id != rate_id,
+                )
+                .first()
+            )
+
+            if existing:
+                raise ConflictException(
+                    "GST rate already exists for this HSN code"
+                )
+
+            rate.hsn_code = data.hsn_code
 
         if data.gst_rate is not None:
-            rate.gst_rate = data.gst_rate
-            cgst, sgst, igst = self._split_rate(data.gst_rate)
-            rate.cgst = cgst
-            rate.sgst = sgst
-            rate.igst = igst
+            gst_rate = _validate_gst_rate(data.gst_rate)
+            cgst, sgst, igst = self._split_rate(gst_rate)
+
+            rate.gst_rate = gst_rate
+            rate.cgst_rate = cgst
+            rate.sgst_rate = sgst
+            rate.igst_rate = igst
 
         if data.status is not None:
             rate.status = data.status
@@ -139,4 +172,28 @@ class GstService:
         self.db.commit()
         self.db.refresh(rate)
 
-        return rate
+        return GstRateResponse.model_validate(rate)
+
+    def delete_rate(
+        self,
+        tenant_id: int,
+        rate_id: int,
+    ):
+        rate = (
+            self.db.query(GstRate)
+            .filter(
+                GstRate.id == rate_id,
+                GstRate.tenant_id == tenant_id,
+            )
+            .first()
+        )
+
+        if not rate:
+            raise NotFoundException("GST rate not found")
+
+        self.db.delete(rate)
+        self.db.commit()
+
+        return {
+            "message": "GST rate deleted successfully"
+        }

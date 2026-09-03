@@ -24,7 +24,15 @@ pwd_context = CryptContext(
     deprecated="auto",
 )
 
-security_scheme = HTTPBearer(auto_error=False)
+security_scheme = HTTPBearer(
+    auto_error=False,
+    scheme_name="UserBearer",
+)
+
+super_admin_security_scheme = HTTPBearer(
+    auto_error=False,
+    scheme_name="SuperAdminBearer",
+)
 
 
 def verify_password(
@@ -210,13 +218,15 @@ def get_current_user(
 def get_current_super_admin(
     credentials: Optional[
         HTTPAuthorizationCredentials
-    ] = Depends(security_scheme),
+    ] = Depends(super_admin_security_scheme),
     db: Session = Depends(get_db),
 ):
     from app.models.super_admin import SuperAdmin
 
     if not credentials:
-        raise UnauthorizedException()
+        raise UnauthorizedException(
+            "Super Admin authentication required"
+        )
 
     payload = decode_token(
         credentials.credentials
@@ -227,10 +237,17 @@ def get_current_super_admin(
             "Invalid SuperAdmin token type"
         )
 
+    if payload.get("role") != "SUPERADMIN":
+        raise UnauthorizedException(
+            "Invalid SuperAdmin role"
+        )
+
     super_admin_id = payload.get("sub")
 
     if not super_admin_id:
-        raise UnauthorizedException()
+        raise UnauthorizedException(
+            "Invalid SuperAdmin token"
+        )
 
     try:
         super_admin_id = int(super_admin_id)
