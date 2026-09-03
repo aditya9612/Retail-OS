@@ -13,6 +13,7 @@ from app.models.order_item import OrderItem
 from app.models.order_return import OrderReturn
 from app.models.payment import Payment
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
+from app.models.purchase_order_return import PurchaseOrderReturn, PurchaseOrderReturnItem
 from app.models.delivery import Delivery
 from app.models.password_reset_token import PasswordResetToken
 from app.models.product import Product, ProductImage
@@ -50,6 +51,8 @@ __all__ = [
     "Payment",
     "PurchaseOrder",
     "PurchaseOrderItem",
+    "PurchaseOrderReturn",
+    "PurchaseOrderReturnItem",
     "Delivery",
     "PasswordResetToken",
     "Product",
