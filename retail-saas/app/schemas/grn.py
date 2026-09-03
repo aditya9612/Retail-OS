@@ -42,8 +42,8 @@ class GRNResponse(BaseModel):
     updated_at: datetime
 
     items: list[GRNItemResponse] = []
-    
-    
+
+
 class GRNHistoryResponse(BaseModel):
     grn_id: int
     grn_number: str

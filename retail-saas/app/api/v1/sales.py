@@ -1,13 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from typing import List, Optional
 
 from app.core.database import get_db
 from app.core.security import require_permission
 from app.models.user import User
-
 from app.schemas.sale import SaleCreate, SaleResponse
 from app.services.sale_service import SaleService
-
 
 router = APIRouter(
     prefix="/sales",
@@ -15,79 +14,76 @@ router = APIRouter(
 )
 
 
-# 1. CREATE SALE
 @router.post(
     "",
-    response_model=SaleResponse
+    response_model=SaleResponse,
+    status_code=status.HTTP_201_CREATED
 )
 def create_sale(
     data: SaleCreate,
-    user: User = Depends(
-        require_permission("sales:write")
-    ),
+    user: User = Depends(require_permission("sales:write")),
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.create_sale(
-            db,
-            data
-        )
+        return SaleService.create_sale(db, data)
     except ValueError as e:
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal Server Error: {str(e)}"
         )
 
 
-# 2. GET ALL SALES
 @router.get(
     "",
-    response_model=list[SaleResponse]
+    response_model=List[SaleResponse]
 )
 def get_sales(
-    store_id: int | None = None,
-    user: User = Depends(
-        require_permission("sales:read")
-    ),
+    store_id: Optional[int] = None,
+    user: User = Depends(require_permission("sales:read")),
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.get_sales(
-            db,
-            store_id
-        )
+        return SaleService.get_sales(db, store_id)
     except ValueError as e:
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal Server Error: {str(e)}"
         )
 
 
-# 3. GET SINGLE SALE
 @router.get(
     "/{sale_id}",
     response_model=SaleResponse
 )
 def get_sale(
     sale_id: int,
-    user: User = Depends(
-        require_permission("sales:read")
-    ),
+    user: User = Depends(require_permission("sales:read")),
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.get_sale(
-            db,
-            sale_id
-        )
+        return SaleService.get_sale(db, sale_id)
     except ValueError as e:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal Server Error: {str(e)}"
         )
 
 
-# 4. UPDATE SALE
 @router.put(
     "/{sale_id}",
     response_model=SaleResponse
@@ -95,41 +91,40 @@ def get_sale(
 def update_sale(
     sale_id: int,
     data: SaleCreate,
-    user: User = Depends(
-        require_permission("sales:write")
-    ),
+    user: User = Depends(require_permission("sales:write")),
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.update_sale(
-            db,
-            sale_id,
-            data
-        )
+        return SaleService.update_sale(db, sale_id, data)
     except ValueError as e:
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
-# 5. DELETE SALE
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal Server Error: {str(e)}"
+        )
+
+
 @router.delete(
     "/{sale_id}"
 )
 def delete_sale(
     sale_id: int,
-    user: User = Depends(
-        require_permission("sales:write")
-    ),
+    user: User = Depends(require_permission("sales:write")),
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.delete_sale(
-            db,
-            sale_id
-        )
+        return SaleService.delete_sale(db, sale_id)
     except ValueError as e:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
-        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal Server Error: {str(e)}"
+        )
