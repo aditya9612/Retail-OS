@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -35,14 +35,24 @@ def list_products(
 @router.get("/search", response_model=list[ProductResponse])
 def search_products(
     search: str = Query(
-        min_length=1,
-        description="Search by name, SKU or barcode",
+        ...,
+        min_length=2,
+        max_length=100,
+        description="Search by product name, SKU, barcode or HSN code",
     ),
     page: int = Query(default=1, gt=0),
     page_size: int = Query(default=20, gt=0, le=100),
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
+    search = search.strip()
+
+    if not search:
+        raise HTTPException(
+            status_code=422,
+            detail="Search query cannot be empty or whitespace",
+        )
+
     return ProductService(db).search_products(
         user.tenant_id,
         search,
@@ -53,8 +63,17 @@ def search_products(
 
 @router.get("/low-stock", response_model=list[ProductResponse])
 def list_low_stock(
-    store_id: int = Query(..., gt=0),
-    threshold: int = Query(default=10, gt=0),
+    store_id: int = Query(
+        ...,
+        gt=0,
+        description="Active store ID belonging to the current tenant",
+    ),
+    threshold: int = Query(
+        default=10,
+        gt=0,
+        le=1000000,
+        description="Low-stock threshold",
+    ),
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
@@ -270,5 +289,3 @@ def delete_product_image(
     if image:
         db.delete(image)
         db.commit()
-
-

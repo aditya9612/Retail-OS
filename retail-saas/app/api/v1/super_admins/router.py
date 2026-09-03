@@ -42,9 +42,7 @@ def create_super_admin(
     data: SuperAdminCreate,
     db: Session = Depends(get_db),
 ):
-    service = SuperAdminService(db)
-
-    return service.create_super_admin(data)
+    return SuperAdminService(db).create_super_admin(data)
 
 
 @router.post(
@@ -56,9 +54,7 @@ def super_admin_login(
     data: SuperAdminLogin,
     db: Session = Depends(get_db),
 ):
-    service = SuperAdminService(db)
-
-    return service.login(data)
+    return SuperAdminService(db).login(data)
 
 
 @router.post(
@@ -89,10 +85,17 @@ def refresh_super_admin_token(
             "Invalid Super Admin refresh token"
         )
 
+    try:
+        super_admin_id = int(super_admin_id)
+    except (TypeError, ValueError) as exc:
+        raise UnauthorizedException(
+            "Invalid Super Admin ID"
+        ) from exc
+
     service = SuperAdminService(db)
 
     super_admin = service.get_by_id(
-        int(super_admin_id)
+        super_admin_id
     )
 
     if not super_admin.is_active:
@@ -130,6 +133,87 @@ def get_current_super_admin_profile(
 
 
 @router.get(
+    "/dashboard",
+    response_model=SuperAdminDashboardResponse,
+    summary="Super Admin Dashboard",
+)
+def super_admin_dashboard(
+    current_super_admin: SuperAdmin = Depends(
+        get_current_super_admin
+    ),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).dashboard()
+
+
+@router.get(
+    "/tenants",
+    response_model=list[SuperAdminTenantResponse],
+    summary="List All Tenants",
+)
+def list_tenants(
+    current_super_admin: SuperAdmin = Depends(
+        get_current_super_admin
+    ),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).list_tenants()
+
+
+@router.get(
+    "/tenants/{tenant_id}",
+    response_model=SuperAdminTenantResponse,
+    summary="Get Tenant",
+)
+def get_tenant(
+    tenant_id: int,
+    current_super_admin: SuperAdmin = Depends(
+        get_current_super_admin
+    ),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).get_tenant(
+        tenant_id
+    )
+
+
+@router.patch(
+    "/tenants/{tenant_id}/status",
+    response_model=SuperAdminTenantResponse,
+    summary="Activate or Deactivate Tenant",
+)
+def update_tenant_status(
+    tenant_id: int,
+    data: TenantStatusUpdate,
+    current_super_admin: SuperAdmin = Depends(
+        get_current_super_admin
+    ),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).update_tenant_status(
+        tenant_id,
+        data.is_active,
+    )
+
+
+@router.get(
+    "/tenants/{tenant_id}/users",
+    response_model=list[SuperAdminTenantUserResponse],
+    summary="List Tenant Users",
+)
+def list_tenant_users(
+    tenant_id: int,
+    current_super_admin: SuperAdmin = Depends(
+        get_current_super_admin
+    ),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).list_tenant_users(
+        tenant_id
+    )
+
+
+@router.get(
     "",
     response_model=list[SuperAdminResponse],
     summary="List Super Admins",
@@ -140,9 +224,7 @@ def list_super_admins(
     ),
     db: Session = Depends(get_db),
 ):
-    service = SuperAdminService(db)
-
-    return service.list_super_admins()
+    return SuperAdminService(db).list_super_admins()
 
 
 @router.get(
@@ -157,9 +239,7 @@ def get_super_admin(
     ),
     db: Session = Depends(get_db),
 ):
-    service = SuperAdminService(db)
-
-    return service.get_by_id(
+    return SuperAdminService(db).get_by_id(
         super_admin_id
     )
 
@@ -177,9 +257,7 @@ def update_super_admin(
     ),
     db: Session = Depends(get_db),
 ):
-    service = SuperAdminService(db)
-
-    return service.update_super_admin(
+    return SuperAdminService(db).update_super_admin(
         super_admin_id,
         data,
     )
@@ -198,8 +276,6 @@ def update_super_admin_status(
     ),
     db: Session = Depends(get_db),
 ):
-    service = SuperAdminService(db)
-
     if (
         super_admin_id == current_super_admin.id
         and not data.is_active
@@ -208,7 +284,7 @@ def update_super_admin_status(
             "You cannot deactivate your own account"
         )
 
-    return service.update_status(
+    return SuperAdminService(db).update_status(
         super_admin_id,
         data.is_active,
     )
@@ -225,9 +301,7 @@ def delete_super_admin(
     ),
     db: Session = Depends(get_db),
 ):
-    service = SuperAdminService(db)
-
-    return service.delete_super_admin(
+    return SuperAdminService(db).delete_super_admin(
         super_admin_id,
         current_super_admin.id,
     )
@@ -244,100 +318,7 @@ def change_password(
     ),
     db: Session = Depends(get_db),
 ):
-    service = SuperAdminService(db)
-
-    return service.change_password(
+    return SuperAdminService(db).change_password(
         current_super_admin.id,
         data,
-    )
-
-
-@router.get(
-    "/dashboard",
-    response_model=SuperAdminDashboardResponse,
-    summary="Super Admin Dashboard",
-)
-def super_admin_dashboard(
-    current_super_admin: SuperAdmin = Depends(
-        get_current_super_admin
-    ),
-    db: Session = Depends(get_db),
-):
-    service = SuperAdminService(db)
-
-    return service.dashboard()
-
-
-@router.get(
-    "/tenants",
-    response_model=list[SuperAdminTenantResponse],
-    summary="List All Tenants",
-)
-def list_tenants(
-    current_super_admin: SuperAdmin = Depends(
-        get_current_super_admin
-    ),
-    db: Session = Depends(get_db),
-):
-    service = SuperAdminService(db)
-
-    return service.list_tenants()
-
-
-@router.get(
-    "/tenants/{tenant_id}",
-    response_model=SuperAdminTenantResponse,
-    summary="Get Tenant",
-)
-def get_tenant(
-    tenant_id: int,
-    current_super_admin: SuperAdmin = Depends(
-        get_current_super_admin
-    ),
-    db: Session = Depends(get_db),
-):
-    service = SuperAdminService(db)
-
-    return service.get_tenant(
-        tenant_id
-    )
-
-
-@router.patch(
-    "/tenants/{tenant_id}/status",
-    response_model=SuperAdminTenantResponse,
-    summary="Activate or Deactivate Tenant",
-)
-def update_tenant_status(
-    tenant_id: int,
-    data: TenantStatusUpdate,
-    current_super_admin: SuperAdmin = Depends(
-        get_current_super_admin
-    ),
-    db: Session = Depends(get_db),
-):
-    service = SuperAdminService(db)
-
-    return service.update_tenant_status(
-        tenant_id,
-        data.is_active,
-    )
-
-
-@router.get(
-    "/tenants/{tenant_id}/users",
-    response_model=list[SuperAdminTenantUserResponse],
-    summary="List Tenant Users",
-)
-def list_tenant_users(
-    tenant_id: int,
-    current_super_admin: SuperAdmin = Depends(
-        get_current_super_admin
-    ),
-    db: Session = Depends(get_db),
-):
-    service = SuperAdminService(db)
-
-    return service.list_tenant_users(
-        tenant_id
     )

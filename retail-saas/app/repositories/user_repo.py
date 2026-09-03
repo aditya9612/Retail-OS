@@ -1,5 +1,6 @@
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.user import User
@@ -39,13 +40,19 @@ class UserRepository:
         query = (
             self.db.query(User)
             .options(joinedload(User.role))
-            .filter(User.email == email.strip().lower())
+            .filter(func.binary(User.email) == email)
         )
 
         if tenant_id is not None:
             query = query.filter(User.tenant_id == tenant_id)
 
-        return query.first()
+        users = query.all()
+
+        for user in users:
+            if user.email == email:
+                return user
+
+        return None
 
     def list_users(
         self,
