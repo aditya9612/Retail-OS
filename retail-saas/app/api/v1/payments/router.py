@@ -1,138 +1,148 @@
-from fastapi import APIRouter, Depends, Request ,Query,Body
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import Optional
 
 from app.core.database import get_db
-from app.core.security import require_permission
+from app.core.security import get_current_user
 from app.models.user import User
-from app.schemas.order import PaymentCreate, PaymentResponse
+from app.schemas.order import PaymentResponse
 from app.schemas.payment import (
-    PaymentVerify,
+    PaymentCreate,
     PaymentGatewayCreate,
-    PaymentGatewayUpdate,
     PaymentGatewayResponse,
+    PaymentGatewayUpdate,
     PaymentSplitCreate,
     PaymentSplitResponse,
+    PaymentStatusValue,
+    PaymentVerify,
     SettlementCreate,
     SettlementResponse,
     PaymentWebhookLogCreate,
     PaymentWebhookLogResponse,
+    PaymentWebhookRequest,
 )
 from app.services.payment_service import PaymentService
 
-router = APIRouter(prefix="/payments", tags=["payments"])
+
+router = APIRouter(
+    prefix="/payments",
+    tags=["payments"],
+)
+
+
+def get_payment_service(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> PaymentService:
+    return PaymentService(db, user.tenant_id)
+
+
+@router.post("", response_model=PaymentResponse)
+def create_payment(
+    data: PaymentCreate,
+    service: PaymentService = Depends(get_payment_service),
+):
+    return service.record_payment(data)
 
 
 @router.get("", response_model=list[PaymentResponse])
 def list_payments(
-    order_id: int | None = None,
-    user: User = Depends(require_permission("payments:read")),
-    db: Session = Depends(get_db),
+    order_id: int | None = Query(default=None),
+    payment_method: str | None = Query(default=None),
+    status: PaymentStatusValue | None = Query(default=None),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).list_payments(user.tenant_id, order_id)
+    return service.list_payments(
+        order_id=order_id,
+        status=status,
+        method=payment_method,
+    )
 
-
-@router.post("", response_model=PaymentResponse, status_code=201)
-def record_payment(
-    data: PaymentCreate,
-    user: User = Depends(require_permission("payments:write")),
-    db: Session = Depends(get_db),
-):
-    return PaymentService(db).record_payment(user.tenant_id, data)
 
 @router.get("/history", response_model=list[PaymentResponse])
 def payment_history(
-    status: Optional[str] = Query(None),
-    payment_method: Optional[str] = Query(None),
-    user: User = Depends(require_permission("payments:read")),
-    db: Session = Depends(get_db),
+    status: PaymentStatusValue | None = Query(default=None),
+    payment_method: str | None = Query(default=None),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    service = PaymentService(db)
-
     return service.payment_history(
-        tenant_id=user.tenant_id,
         status=status,
-        payment_method=payment_method,
-    )    
+        method=payment_method,
+    )
+
 
 @router.get("/qr/{order_id}")
-def get_qr_payload(
+def generate_payment_qr(
     order_id: int,
-    upi_id: str = "merchant@upi",
-    user: User = Depends(require_permission("payments:read")),
-    db: Session = Depends(get_db),
+    upi_id: str = Query(...),
+    amount: float | None = Query(default=None),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).generate_qr_payload(user.tenant_id, order_id, upi_id)
+    return service.generate_qr_payload(
+        order_id=order_id,
+        upi_id=upi_id,
+        amount=amount,
+    )
 
 
 @router.post("/webhook")
-async def payment_webhook(
-    payload: dict = Body(...),
-    db: Session = Depends(get_db)
+def process_webhook(
+    data: PaymentWebhookRequest,
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).webhook_handler(payload)
+    return service.webhook_handler(data)
 
-@router.post(
-    "/webhooks",
-    response_model=PaymentWebhookLogResponse,
-)
+
+@router.post("/webhooks", response_model=PaymentWebhookLogResponse)
 def create_webhook_log(
     data: PaymentWebhookLogCreate,
-    user: User = Depends(require_permission("payments:write")),
-    db: Session = Depends(get_db),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).create_webhook_log(
-        user.tenant_id,
-        data,
-    )
+    return service.create_webhook_log(data)
 
-@router.get(
-    "/webhooks",
-    response_model=list[PaymentWebhookLogResponse],
-)
+
+@router.get("/webhooks", response_model=list[PaymentWebhookLogResponse])
 def list_webhook_logs(
-    user: User = Depends(require_permission("payments:read")),
-    db: Session = Depends(get_db),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).list_webhook_logs()
+    return service.list_webhook_logs()
 
-@router.get(
-    "/webhooks/{webhook_id}",
-    response_model=PaymentWebhookLogResponse,
-)
+
+@router.get("/webhooks/{log_id}", response_model=PaymentWebhookLogResponse)
 def get_webhook_log(
-    webhook_id: int,
-    user: User = Depends(require_permission("payments:read")),
-    db: Session = Depends(get_db),
+    log_id: int,
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).get_webhook_log(webhook_id)
+    result = service.get_webhook_log(log_id)
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Webhook log not found",
+        )
+
+    return result
+
 
 @router.post(
     "/payment-gateways",
     response_model=PaymentGatewayResponse,
-    status_code=201,
 )
 def create_payment_gateway(
     data: PaymentGatewayCreate,
-    user: User = Depends(require_permission("payments:write")),
-    db: Session = Depends(get_db),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).create_payment_gateway(
-        user.tenant_id,
-        data,
-    )
+    return service.create_gateway(data)
+
 
 @router.get(
     "/payment-gateways",
     response_model=list[PaymentGatewayResponse],
 )
 def list_payment_gateways(
-    user: User = Depends(require_permission("payments:read")),
-    db: Session = Depends(get_db),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).list_payment_gateways(
-        user.tenant_id,
-    )
+    return service.list_gateways()
+
 
 @router.get(
     "/payment-gateways/{gateway_id}",
@@ -140,13 +150,18 @@ def list_payment_gateways(
 )
 def get_payment_gateway(
     gateway_id: int,
-    user: User = Depends(require_permission("payments:read")),
-    db: Session = Depends(get_db),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).get_payment_gateway(
-        user.tenant_id,
-        gateway_id,
-    )
+    result = service.get_gateway(gateway_id)
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Payment gateway not found",
+        )
+
+    return result
+
 
 @router.put(
     "/payment-gateways/{gateway_id}",
@@ -155,29 +170,23 @@ def get_payment_gateway(
 def update_payment_gateway(
     gateway_id: int,
     data: PaymentGatewayUpdate,
-    user: User = Depends(require_permission("payments:write")),
-    db: Session = Depends(get_db),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).update_payment_gateway(
-        user.tenant_id,
+    return service.update_gateway(
         gateway_id,
         data,
     )
 
-@router.delete("/payment-gateways/{gateway_id}")
+
+@router.delete(
+    "/payment-gateways/{gateway_id}",
+)
 def delete_payment_gateway(
     gateway_id: int,
-    user: User = Depends(require_permission("payments:write")),
-    db: Session = Depends(get_db),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    PaymentService(db).delete_payment_gateway(
-        user.tenant_id,
-        gateway_id,
-    )
+    return service.delete_gateway(gateway_id)
 
-    return {
-        "message": "Payment Gateway deleted successfully"
-    }
 
 @router.post(
     "/payment-splits",
@@ -185,13 +194,9 @@ def delete_payment_gateway(
 )
 def create_payment_split(
     data: PaymentSplitCreate,
-    user: User = Depends(require_permission("payments:write")),
-    db: Session = Depends(get_db),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).create_payment_split(
-        user.tenant_id,
-        data,
-    )
+    return service.create_payment_split(data)
 
 
 @router.get(
@@ -199,10 +204,12 @@ def create_payment_split(
     response_model=list[PaymentSplitResponse],
 )
 def list_payment_splits(
-    user: User = Depends(require_permission("payments:read")),
-    db: Session = Depends(get_db),
+    transaction_id: int | None = Query(default=None),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).list_payment_splits()
+    return service.list_payment_splits(
+        transaction_id=transaction_id,
+    )
 
 
 @router.get(
@@ -211,35 +218,39 @@ def list_payment_splits(
 )
 def get_payment_split(
     split_id: int,
-    user: User = Depends(require_permission("payments:read")),
-    db: Session = Depends(get_db),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).get_payment_split(split_id)
+    result = service.get_payment_split(split_id)
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Payment split not found",
+        )
+
+    return result
+
 
 @router.post(
     "/settlements",
     response_model=SettlementResponse,
-    status_code=201,
 )
 def create_settlement(
     data: SettlementCreate,
-    user: User = Depends(require_permission("payments:write")),
-    db: Session = Depends(get_db),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).create_settlement(
-        user.tenant_id,
-        data,
-    )
+    return service.create_settlement(data)
+
 
 @router.get(
     "/settlements",
     response_model=list[SettlementResponse],
 )
 def list_settlements(
-    user: User = Depends(require_permission("payments:read")),
-    db: Session = Depends(get_db),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).list_settlements()
+    return service.list_settlements()
+
 
 @router.get(
     "/settlements/{settlement_id}",
@@ -247,37 +258,48 @@ def list_settlements(
 )
 def get_settlement(
     settlement_id: int,
-    user: User = Depends(require_permission("payments:read")),
-    db: Session = Depends(get_db),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).get_settlement(
-        settlement_id
-    )
+    result = service.get_settlement(settlement_id)
 
-@router.get("/{payment_id}", response_model=PaymentResponse)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Settlement not found",
+        )
+
+    return result
+
+
+@router.get(
+    "/{payment_id}",
+    response_model=PaymentResponse,
+)
 def get_payment(
     payment_id: int,
-    user: User = Depends(require_permission("payments:read")),
-    db: Session = Depends(get_db),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).get_payment(user.tenant_id, payment_id)
+    result = service.get_payment(payment_id)
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Payment not found",
+        )
+
+    return result
 
 
-@router.post("/{payment_id}/refund", response_model=PaymentResponse)
-def refund_payment(
+@router.post(
+    "/{payment_id}/verify",
+    response_model=PaymentResponse,
+)
+def verify_payment(
     payment_id: int,
-    user: User = Depends(require_permission("payments:write")),
-    db: Session = Depends(get_db),
+    data: PaymentVerify,
+    service: PaymentService = Depends(get_payment_service),
 ):
-    return PaymentService(db).refund_payment(user.tenant_id, payment_id)
-
-@router.post("/{payment_id}/verify")
-def verify_payment_api(
-    payment_id: int,
-    verify_data: PaymentVerify,
-    db: Session = Depends(get_db),
-):
-    service = PaymentService(db)
-    return service.verify_payment_service(payment_id, verify_data)        
-
-
+    return service.verify_payment_service(
+        payment_id,
+        data,
+    )

@@ -1,18 +1,47 @@
 from sqlalchemy.orm import Session
-from app.models.payment import Payment, PaymentGateway ,PaymentSplit
+
+from app.models.payment import (
+    Payment,
+    PaymentGateway,
+    PaymentSplit,
+)
 from app.schemas.payment import (
     PaymentGatewayCreate,
-    PaymentGatewayUpdate
+    PaymentGatewayUpdate,
 )
 
-def verify_payment(db, payment_id: int, verify_data):
-    payment = (
+
+def get_payment_by_transaction_id(
+    db: Session,
+    tenant_id: int,
+    transaction_id: str,
+):
+    return (
         db.query(Payment)
-        .filter(Payment.id == payment_id)
+        .filter(
+            Payment.tenant_id == tenant_id,
+            Payment.transaction_id == transaction_id,
+        )
         .first()
     )
 
-    if not payment:
+
+def verify_payment(
+    db: Session,
+    tenant_id: int,
+    payment_id: int,
+    verify_data,
+):
+    payment = (
+        db.query(Payment)
+        .filter(
+            Payment.id == payment_id,
+            Payment.tenant_id == tenant_id,
+        )
+        .first()
+    )
+
+    if payment is None:
         return None
 
     payment.transaction_id = verify_data.transaction_id
@@ -23,6 +52,45 @@ def verify_payment(db, payment_id: int, verify_data):
     db.refresh(payment)
 
     return payment
+
+
+def gateway_name_exists(
+    db: Session,
+    tenant_id: int,
+    gateway_name: str,
+    exclude_id: int | None = None,
+) -> bool:
+    query = db.query(PaymentGateway).filter(
+        PaymentGateway.tenant_id == tenant_id,
+        PaymentGateway.gateway_name == gateway_name,
+    )
+
+    if exclude_id is not None:
+        query = query.filter(
+            PaymentGateway.id != exclude_id
+        )
+
+    return query.first() is not None
+
+
+def merchant_id_exists(
+    db: Session,
+    tenant_id: int,
+    merchant_id: str,
+    exclude_id: int | None = None,
+) -> bool:
+    query = db.query(PaymentGateway).filter(
+        PaymentGateway.tenant_id == tenant_id,
+        PaymentGateway.merchant_id == merchant_id,
+    )
+
+    if exclude_id is not None:
+        query = query.filter(
+            PaymentGateway.id != exclude_id
+        )
+
+    return query.first() is not None
+
 
 def create_gateway(
     db: Session,
@@ -43,6 +111,7 @@ def create_gateway(
     db.add(gateway)
     db.commit()
     db.refresh(gateway)
+
     return gateway
 
 
@@ -67,17 +136,33 @@ def list_gateways(
 ):
     return (
         db.query(PaymentGateway)
-        .filter(PaymentGateway.tenant_id == tenant_id)
+        .filter(
+            PaymentGateway.tenant_id == tenant_id,
+        )
+        .order_by(PaymentGateway.id.desc())
         .all()
     )
 
 
 def update_gateway(
     db: Session,
-    gateway: PaymentGateway,
+    tenant_id: int,
+    gateway_id: int,
     data: PaymentGatewayUpdate,
 ):
-    update_data = data.model_dump(exclude_unset=True)
+    gateway = get_gateway(
+        db,
+        tenant_id,
+        gateway_id,
+    )
+
+    if gateway is None:
+        return None
+
+    update_data = data.model_dump(
+        exclude_unset=True,
+        exclude_none=True,
+    )
 
     for key, value in update_data.items():
         setattr(gateway, key, value)
@@ -90,25 +175,98 @@ def update_gateway(
 
 def delete_gateway(
     db: Session,
-    gateway: PaymentGateway,
+    tenant_id: int,
+    gateway_id: int,
 ):
-    db.delete(gateway)
-    db.commit()    
+    gateway = get_gateway(
+        db,
+        tenant_id,
+        gateway_id,
+    )
 
-def create_payment_split(db, split):
+    if gateway is None:
+        return None
+
+    db.delete(gateway)
+    db.commit()
+
+    return gateway
+
+
+def get_payment_for_split(
+    db: Session,
+    tenant_id: int,
+    payment_id: int,
+):
+    return (
+        db.query(Payment)
+        .filter(
+            Payment.id == payment_id,
+            Payment.tenant_id == tenant_id,
+        )
+        .first()
+    )
+
+
+def create_payment_split(
+    db: Session,
+    tenant_id: int,
+    data,
+):
+    payment = get_payment_for_split(
+        db,
+        tenant_id,
+        data.transaction_id,
+    )
+
+    if payment is None:
+        return None
+
+    split = PaymentSplit(
+        transaction_id=payment.id,
+        payment_method=data.payment_method,
+        amount=data.amount,
+    )
+
     db.add(split)
     db.commit()
     db.refresh(split)
+
     return split
 
 
-def list_payment_splits(db):
-    return db.query(PaymentSplit).all()
-
-
-def get_payment_split(db, split_id):
+def list_payment_splits(
+    db: Session,
+    tenant_id: int,
+):
     return (
         db.query(PaymentSplit)
-        .filter(PaymentSplit.id == split_id)
+        .join(
+            Payment,
+            Payment.id == PaymentSplit.transaction_id,
+        )
+        .filter(
+            Payment.tenant_id == tenant_id,
+        )
+        .order_by(PaymentSplit.id.desc())
+        .all()
+    )
+
+
+def get_payment_split(
+    db: Session,
+    tenant_id: int,
+    split_id: int,
+):
+    return (
+        db.query(PaymentSplit)
+        .join(
+            Payment,
+            Payment.id == PaymentSplit.transaction_id,
+        )
+        .filter(
+            PaymentSplit.id == split_id,
+            Payment.tenant_id == tenant_id,
+        )
         .first()
     )
