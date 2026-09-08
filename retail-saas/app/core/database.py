@@ -70,7 +70,7 @@ def get_database_name(database_url: str) -> str:
 
 
 def ensure_database_exists(database_url: str | None = None) -> None:
-   
+
 
     url = database_url or settings.DATABASE_URL
 
@@ -108,7 +108,7 @@ def ensure_database_exists(database_url: str | None = None) -> None:
 
 
 def init_db() -> None:
-   
+
     import app.models  # noqa: F401
 
     if not settings.DATABASE_URL.startswith("sqlite"):

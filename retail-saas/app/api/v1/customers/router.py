@@ -284,7 +284,7 @@ def export_directory(
             "Content-Disposition":
             "attachment; filename=customer_directory.pdf"
         }
-    )                
+    )
 
 @router.get("/{customer_id}", response_model=CustomerResponse)
 def get_customer(
@@ -393,7 +393,7 @@ def update_customer_status(
         user.tenant_id,
         customer_id,
         data.status
-    )   
+    )
 
 # @router.delete("/{customer_id}", response_model=MessageResponse)
 # def delete_customer(
@@ -458,7 +458,7 @@ def top_customers(
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_top_customers(user.tenant_id)   
+    return CustomerService(db).get_top_customers(user.tenant_id)
 
 @router.get(
     "/customer-analytics/retention",

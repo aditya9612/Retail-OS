@@ -98,7 +98,7 @@ class GRNService:
         grn.status = "rejected"
 
         return self.repo.update(grn)
-    
+
     def history(
         self,
         tenant_id: int,
@@ -117,7 +117,7 @@ class GRNService:
             "received_at": grn.received_at,
             "updated_at": grn.updated_at,
         }
-        
+
     def print_grn(
         self,
         tenant_id: int,

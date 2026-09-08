@@ -5,11 +5,11 @@ from app.core.database import get_db
 from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.grn import (
-    GRNCreate, 
+    GRNCreate,
     GRNResponse,
     GRNHistoryResponse,
     GRNPrintResponse,
-)   
+)
 from app.services.grn_service import GRNService
 
 
@@ -106,8 +106,8 @@ def reject_grn(
         tenant_id=user.tenant_id,
         grn_id=grn_id,
     )
-    
-    
+
+
 @router.get(
     "/{grn_id}/history",
     response_model=GRNHistoryResponse,
@@ -124,8 +124,8 @@ def grn_history(
         tenant_id=user.tenant_id,
         grn_id=grn_id,
     )
-    
-    
+
+
 @router.get(
     "/{grn_id}/print",
     response_model=GRNPrintResponse,

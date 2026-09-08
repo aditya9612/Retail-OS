@@ -19,6 +19,8 @@ from app.models.product import Product, ProductImage
 from app.models.refund import Refund
 from app.models.role import Role
 from app.models.store import Store
+from app.models.store_transfer import StoreTransfer
+from app.models.store_transfer_item import StoreTransferItem
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.staff import Staff

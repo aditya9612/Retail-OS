@@ -1,5 +1,4 @@
 from sqlalchemy.orm import Session, joinedload
-
 from app.models.sale import Sale
 
 
@@ -13,7 +12,6 @@ class SaleRepository:
         db.add(sale)
         db.commit()
         db.refresh(sale)
-
         return sale
 
     @staticmethod
@@ -23,12 +21,8 @@ class SaleRepository:
     ):
         return (
             db.query(Sale)
-            .options(
-                joinedload(Sale.items)
-            )
-            .filter(
-                Sale.id == sale_id
-            )
+            .options(joinedload(Sale.items))
+            .filter(Sale.id == sale_id)
             .first()
         )
 
@@ -39,15 +33,11 @@ class SaleRepository:
     ):
         query = (
             db.query(Sale)
-            .options(
-                joinedload(Sale.items)
-            )
+            .options(joinedload(Sale.items))
         )
 
         if store_id is not None:
-            query = query.filter(
-                Sale.store_id == store_id
-            )
+            query = query.filter(Sale.store_id == store_id)
 
         return (
             query
@@ -62,7 +52,6 @@ class SaleRepository:
     ):
         db.commit()
         db.refresh(sale)
-
         return sale
 
     @staticmethod

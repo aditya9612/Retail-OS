@@ -5,6 +5,7 @@ Revises: bc7a49751a24
 Create Date: 2026-08-12 15:03:28.919713
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -12,30 +13,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '176cf1381b78'
-down_revision: Union[str, None] = 'bc7a49751a24'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
-
-
-
-    
-"""add updated_at to wallet transactions
-
-Revision ID: 176cf1381b78
-Revises: bc7a49751a24
-Create Date: 2026-08-12 15:03:28.919713
-
-"""
-from typing import Sequence, Union
-
-from alembic import op
-import sqlalchemy as sa
-
-
-# revision identifiers, used by Alembic.
-revision: str = '176cf1381b78'
-down_revision: Union[str, None] = 'bc7a49751a24'
+revision: str = "176cf1381b78"
+down_revision: Union[str, None] = "bc7a49751a24"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -55,8 +34,8 @@ def upgrade() -> None:
             sa.Column(
                 "updated_at",
                 sa.DateTime(),
-                nullable=True
-            )
+                nullable=True,
+            ),
         )
 
         op.execute(
@@ -69,8 +48,9 @@ def upgrade() -> None:
             "wallet_transactions",
             "updated_at",
             existing_type=sa.DateTime(),
-            nullable=False
+            nullable=False,
         )
+
 
 def downgrade() -> None:
     bind = op.get_bind()
@@ -83,5 +63,3 @@ def downgrade() -> None:
 
     if "updated_at" in columns:
         op.drop_column("wallet_transactions", "updated_at")
-
-    
