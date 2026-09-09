@@ -371,10 +371,7 @@ def export_directory(
             "attachment; filename=customer_directory.pdf"
         }
     )
-<<<<<<< HEAD
-=======
 
->>>>>>> d3c5a69 (Improve customer APIs)
 
 @router.get("/{customer_id}", response_model=CustomerResponse)
 def get_customer(
@@ -585,10 +582,7 @@ def top_customers(
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_top_customers(user.tenant_id)
-<<<<<<< HEAD
-=======
 
->>>>>>> d3c5a69 (Improve customer APIs)
 
 @router.get(
     "/customer-analytics/retention",
