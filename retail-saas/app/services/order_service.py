@@ -914,7 +914,7 @@ class CustomerService:
 
         customer = Customer(
             tenant_id=tenant_id,
-            total_spend=Decimal("0.00"),
+            total_spend=0,
             loyalty_points=0,
             **customer_data,
         )

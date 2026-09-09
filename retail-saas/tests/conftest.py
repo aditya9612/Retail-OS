@@ -15,6 +15,12 @@ get_settings.cache_clear()
 @pytest.fixture(scope="session", autouse=True)
 def init_test_database():
     from app.core.database import Base, engine
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def register_sqlite_functions(dbapi_connection, connection_record):
+        if hasattr(dbapi_connection, "create_function"):
+            dbapi_connection.create_function("binary", 1, lambda x: x)
 
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)

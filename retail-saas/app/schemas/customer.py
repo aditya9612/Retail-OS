@@ -1,4 +1,4 @@
-﻿from datetime import date, datetime
+from datetime import date, datetime
 import re
 from typing import Optional, Literal
 from decimal import Decimal
@@ -241,63 +241,40 @@ class CustomerUpdate(BaseModel):
 
         return v
 
-    @field_validator("birthday")
-    @classmethod
-    def validate_birthday(cls, value: Optional[date]) -> Optional[date]:
-        if value is not None and value > date.today():
-            raise ValueError("Birthday cannot be in the future")
-
-        return value
-
 
 class CustomerResponse(CustomerBase):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     tenant_id: int
+    loyalty_points: Optional[int] = 0
     created_at: datetime
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MessageResponse(BaseModel):
-    message: str
     message: str
 
 
 class CustomerStatsResponse(BaseModel):
     total_customers: int
     active_customers: int
-    inactive_customers: int
-    blocked_customers: int
-    new_customers: int
-    regular_customers: int
-    vip_customers: int
-
+    total_revenue: Optional[int] = 0
+    new_this_month: Optional[int] = 0
+    vip_customers: Optional[int] = 0
+    inactive_customers: Optional[int] = 0
+    blocked_customers: Optional[int] = 0
+    new_customers: Optional[int] = 0
+    regular_customers: Optional[int] = 0
 
 
 class CustomerFeedbackCreate(BaseModel):
     customer_id: int = Field(gt=0)
     invoice_id: Optional[int] = Field(default=None, gt=0)
     rating: int = Field(ge=1, le=5)
-    feedback: str = Field(min_length=1, max_length=2000)
-
-
-    @field_validator("comments")
-    @classmethod
-    def validate_comments(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None:
-            v = v.strip()
-            return v if v else None
-        return v
-
-    @field_validator("suggestions")
-    @classmethod
-    def validate_suggestions(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None:
-            v = v.strip()
-            return v if v else None
-        return v
-
+    comments: Optional[str] = Field(default=None, max_length=2000)
+    suggestions: Optional[str] = Field(default=None, max_length=2000)
+    feedback: Optional[str] = Field(default=None, max_length=2000)
 
     @field_validator("comments")
     @classmethod
@@ -314,18 +291,41 @@ class CustomerFeedbackCreate(BaseModel):
             v = v.strip()
             return v if v else None
         return v
+
+    @field_validator("feedback")
+    @classmethod
+    def validate_feedback(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = v.strip()
+            return v if v else None
+        return v
+
+    @model_validator(mode="after")
+    def sync_comments_and_feedback(self):
+        if self.feedback and not self.comments:
+            self.comments = self.feedback
+        elif self.comments and not self.feedback:
+            self.feedback = self.comments
+        return self
 
 
 class CustomerFeedbackResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     customer_id: int
+    invoice_id: Optional[int] = None
     rating: int
-    feedback: str
+    comments: Optional[str] = None
+    suggestions: Optional[str] = None
+    feedback: Optional[str] = None
     created_at: datetime
 
+    model_config = ConfigDict(from_attributes=True)
 
+    @model_validator(mode="after")
+    def sync_response_feedback(self):
+        if not self.feedback and self.comments:
+            self.feedback = self.comments
+        return self
 
 
 class WalletCreditRequest(BaseModel):
@@ -377,23 +377,37 @@ class WalletDebitRequest(BaseModel):
 
 
 class WalletResponse(BaseModel):
+    id: Optional[int] = None
+    customer_id: int
+    current_balance: Optional[float] = None
+    balance: Optional[Decimal] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
     model_config = ConfigDict(from_attributes=True)
 
-    customer_id: int
-    balance: Decimal
+    @model_validator(mode="after")
+    def sync_balance(self):
+        if self.balance is None and self.current_balance is not None:
+            self.balance = Decimal(str(self.current_balance))
+        elif self.current_balance is None and self.balance is not None:
+            self.current_balance = float(self.balance)
+        return self
 
 
 class WalletTransactionResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
-    customer_id: int
+    wallet_id: Optional[int] = None
+    customer_id: Optional[int] = None
     transaction_type: str
-    amount: Decimal
-    balance_after: Decimal
+    amount: float
+    reference_no: Optional[str] = None
+    remarks: Optional[str] = None
+    balance_after: Optional[Decimal] = None
     reason: Optional[str] = None
     created_at: datetime
 
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WalletOperationResponse(BaseModel):
@@ -405,12 +419,14 @@ class WalletOperationResponse(BaseModel):
     balance: float
     current_balance: Optional[float] = None
 
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LoyaltyEarnRequest(BaseModel):
     customer_id: int = Field(gt=0)
     points: int = Field(gt=0)
-    reason: Optional[str] = Field(default=Field(default=None, gt=0), max_length=500)
+    invoice_id: Optional[int] = Field(default=None, gt=0)
+    reason: Optional[str] = Field(default=None, max_length=500)
 
 
 class LoyaltyRedeemRequest(BaseModel):
@@ -419,12 +435,26 @@ class LoyaltyRedeemRequest(BaseModel):
 
 
 class LoyaltyResponse(BaseModel):
+    id: Optional[int] = None
+    customer_id: int
+    invoice_id: Optional[int] = None
+    points_earned: Optional[int] = None
+    points_redeemed: Optional[int] = None
+    balance_points: Optional[int] = None
+    points: Optional[int] = None
+    expiry_date: Optional[date] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
     model_config = ConfigDict(from_attributes=True)
 
-    customer_id: int
-    points: int
-
-
+    @model_validator(mode="after")
+    def sync_points(self):
+        if self.points is None and self.balance_points is not None:
+            self.points = self.balance_points
+        elif self.balance_points is None and self.points is not None:
+            self.balance_points = self.points
+        return self
 
 
 class CommunicationCreate(BaseModel):
@@ -448,16 +478,24 @@ class CommunicationCreate(BaseModel):
 
 
 class CommunicationResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     customer_id: int
-    channel: str
+    communication_type: str
     message: str
-    status: str
-    created_at: datetime
+    delivery_status: str
+    sent_at: datetime
+    channel: Optional[str] = None
+    status: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def sync_channel_and_status(self):
+        if not self.channel and self.communication_type:
+            self.channel = self.communication_type
+        if not self.status and self.delivery_status:
+            self.status = self.delivery_status
+        return self
 
 
 class ReferralCreate(BaseModel):
@@ -472,15 +510,16 @@ class ReferralCreate(BaseModel):
 
 
 class ReferralResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     customer_id: int
-    referred_customer_id: int
-    status: str
-    created_at: datetime
+    referral_code: str
+    referred_customer_id: Optional[int] = None
+    reward_amount: Optional[float] = None
+    status: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
-
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CustomerNoteCreate(BaseModel):
@@ -514,15 +553,14 @@ class CustomerNoteCreate(BaseModel):
 
 
 class CustomerNoteResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     customer_id: int
     note: str
     created_by: Optional[int] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
-
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CampaignSendRequest(BaseModel):
@@ -558,10 +596,11 @@ class CampaignSendRequest(BaseModel):
 
 
 class CampaignSendResponse(BaseModel):
-    campaign_id: int
-    sent_count: int
-    failed_count: int
     message: str
+    total_customers: Optional[int] = None
+    campaign_id: Optional[int] = None
+    sent_count: Optional[int] = None
+    failed_count: Optional[int] = None
 
 
 class TopCustomerResponse(BaseModel):
@@ -572,32 +611,42 @@ class TopCustomerResponse(BaseModel):
     total_spend: float
     loyalty_points: int
     status: str
+    order_count: Optional[int] = None
+    customer_id: Optional[int] = None
+    customer_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class RetentionResponse(BaseModel):
     total_customers: int
-    retained_customers: int
-    retention_rate: Decimal
-
-
+    active_customers: Optional[int] = None
+    inactive_customers: Optional[int] = None
+    retained_customers: Optional[int] = None
+    retention_rate: float
 
 
 class LifetimeValueResponse(BaseModel):
     customer_id: int
     customer_name: str
-    lifetime_value: Decimal
-    total_orders: int
+    total_spend: Optional[float] = None
+    loyalty_points: Optional[int] = None
+    lifetime_value: Optional[Decimal] = None
+    total_orders: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class LoyaltyReportResponse(BaseModel):
-    total_customers: int
-    total_points_earned: int
-    total_points_redeemed: int
-    total_points_balance: int
+    customer_id: Optional[int] = None
+    customer_name: Optional[str] = None
+    points_earned: Optional[int] = None
+    points_redeemed: Optional[int] = None
+    balance_points: Optional[int] = None
+    total_customers: Optional[int] = None
+    total_points_earned: Optional[int] = None
+    total_points_redeemed: Optional[int] = None
+    total_points_balance: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 
