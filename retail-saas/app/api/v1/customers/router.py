@@ -1,17 +1,8 @@
-from fastapi import APIRouter, Depends,Query
-from sqlalchemy.orm import Session
 from datetime import date
-from fastapi import Path
-from fastapi.responses import StreamingResponse
-
 from typing import Optional
-from fastapi import Query
-from app.services.customer_service import (
-    fetch_customers,
-    fetch_customer_stats,
-)
-from app.services.order_service import CustomerService, OrderService
-
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import require_permission
@@ -28,6 +19,7 @@ from app.schemas.customer import (
     WalletDebitRequest,
     WalletResponse,
     WalletTransactionResponse,
+    WalletOperationResponse,
     LoyaltyEarnRequest,
     LoyaltyRedeemRequest,
     LoyaltyResponse,
@@ -45,6 +37,11 @@ from app.schemas.customer import (
     LoyaltyReportResponse,
     CustomerStatusUpdate,
 )
+from app.services.customer_service import (
+    fetch_customers,
+    fetch_customer_stats,
+)
+from app.services.order_service import CustomerService, OrderService
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 
@@ -55,18 +52,48 @@ def list_customers(
     mobile: Optional[str] = Query(None, pattern=r"^[6-9]\d{9}$"),
     segment: Optional[str] = Query(
         None,
-        pattern="^(new|regular|vip|inactive)$"
+        pattern=r"^(new|regular|vip|inactive)$"
     ),
+    status: Optional[str] = Query(
+        None,
+        pattern=r"^(active|inactive|blocked)$"
+    ),
+    search: Optional[str] = Query(None),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
+    if name is not None:
+        name_clean = name.strip()
+        if not name_clean:
+            raise HTTPException(status_code=422, detail="Name filter cannot be empty or whitespace")
+        name = name_clean
+
+    if mobile is not None:
+        mobile_clean = mobile.strip()
+        if not mobile_clean:
+            raise HTTPException(status_code=422, detail="Mobile filter cannot be empty or whitespace")
+        mobile = mobile_clean
+
+    if search is not None:
+        search_clean = search.strip()
+        if not search_clean:
+            raise HTTPException(status_code=422, detail="Search query cannot be empty or whitespace")
+        search = search_clean
+
     return fetch_customers(
         db=db,
         tenant_id=user.tenant_id,
         name=name,
         mobile=mobile,
-        segment=segment
+        segment=segment,
+        status=status,
+        search=search,
+        page=page,
+        page_size=page_size,
     )
+
 
 @router.get("/stats", response_model=CustomerStatsResponse)
 def customer_stats(
@@ -78,6 +105,7 @@ def customer_stats(
         tenant_id=user.tenant_id,
     )
 
+
 @router.post("", response_model=CustomerResponse, status_code=201)
 def create_customer(
     data: CustomerCreate,
@@ -85,6 +113,7 @@ def create_customer(
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).create_customer(user.tenant_id, data)
+
 
 @router.post(
     "/feedback",
@@ -96,25 +125,39 @@ def create_feedback(
     user: User = Depends(require_permission("customers:write")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).create_feedback(data)
+    return CustomerService(db).create_feedback(user.tenant_id, data)
+
 
 @router.get(
     "/feedback",
     response_model=list[CustomerFeedbackResponse],
 )
 def get_feedback(
-    customer_id: int | None = Query(None),
+    customer_id: Optional[int] = Query(None, gt=0),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_feedback(customer_id)
+    return CustomerService(db).get_feedback(user.tenant_id, customer_id)
+
+
+@router.get(
+    "/feedback/{customer_id}",
+    response_model=list[CustomerFeedbackResponse],
+)
+def get_feedback_by_customer_id(
+    customer_id: int = Path(..., gt=0),
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).get_feedback(user.tenant_id, customer_id)
+
 
 @router.get(
     "/wallet/{customer_id}",
     response_model=WalletResponse,
 )
 def get_wallet(
-    customer_id: int,
+    customer_id: int = Path(..., gt=0),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
@@ -123,9 +166,10 @@ def get_wallet(
         customer_id,
     )
 
+
 @router.post(
     "/wallet/credit",
-    response_model=WalletResponse,
+    response_model=WalletOperationResponse,
 )
 def credit_wallet(
     data: WalletCreditRequest,
@@ -137,9 +181,10 @@ def credit_wallet(
         data,
     )
 
+
 @router.post(
     "/wallet/debit",
-    response_model=WalletResponse,
+    response_model=WalletOperationResponse,
 )
 def debit_wallet(
     data: WalletDebitRequest,
@@ -151,12 +196,13 @@ def debit_wallet(
         data,
     )
 
+
 @router.get(
     "/wallet/transactions/{customer_id}",
     response_model=list[WalletTransactionResponse],
 )
 def wallet_transactions(
-    customer_id: int,
+    customer_id: int = Path(..., gt=0),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
@@ -164,6 +210,7 @@ def wallet_transactions(
         user.tenant_id,
         customer_id,
     )
+
 
 @router.get(
     "/birthdays",
@@ -181,6 +228,7 @@ def birthday_customers(
         day=today.day,
     )
 
+
 @router.post(
     "/referrals",
     response_model=ReferralResponse,
@@ -195,6 +243,7 @@ def create_referral(
         data,
     )
 
+
 @router.get(
     "/referrals",
     response_model=list[ReferralResponse],
@@ -207,6 +256,7 @@ def get_referrals(
         user.tenant_id,
     )
 
+
 @router.get(
     "/communications",
     response_model=list[CommunicationResponse],
@@ -218,6 +268,8 @@ def get_communications(
     return CustomerService(db).get_communications(
         user.tenant_id,
     )
+
+
 @router.post(
     "/notes",
     response_model=CustomerNoteResponse,
@@ -230,14 +282,16 @@ def create_note(
     return CustomerService(db).create_note(
         user.tenant_id,
         data,
+        user_id=user.id,
     )
+
 
 @router.get(
     "/notes",
     response_model=list[CustomerNoteResponse],
 )
 def get_notes(
-    customer_id: int | None = Query(None),
+    customer_id: Optional[int] = Query(None, gt=0),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
@@ -246,19 +300,51 @@ def get_notes(
         customer_id,
     )
 
+
+@router.get(
+    "/notes/{customer_id}",
+    response_model=list[CustomerNoteResponse],
+)
+def get_notes_by_customer_id(
+    customer_id: int = Path(..., gt=0),
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).get_notes(
+        user.tenant_id,
+        customer_id,
+    )
+
+
 @router.get("/export-directory")
 def export_directory(
-    status: str = Query(
+    status: Optional[str] = Query(
         "all",
-        pattern="^(all|active|inactive)$"
+        pattern=r"^(all|active|inactive)$"
     ),
-    format: str = Query(
+    format: Optional[str] = Query(
         "excel",
-        pattern="^(excel|pdf)$"
+        pattern=r"^(excel|pdf)$"
     ),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db)
 ):
+    if status is not None:
+        status_clean = status.strip().lower()
+        if not status_clean or status_clean not in ("all", "active", "inactive"):
+            raise HTTPException(status_code=422, detail="Invalid status parameter")
+        status = status_clean
+    else:
+        status = "all"
+
+    if format is not None:
+        format_clean = format.strip().lower()
+        if not format_clean or format_clean not in ("excel", "pdf"):
+            raise HTTPException(status_code=422, detail="Invalid format parameter")
+        format = format_clean
+    else:
+        format = "excel"
+
     service = CustomerService(db)
 
     file = service.export_directory(
@@ -285,10 +371,14 @@ def export_directory(
             "attachment; filename=customer_directory.pdf"
         }
     )
+<<<<<<< HEAD
+=======
+
+>>>>>>> d3c5a69 (Improve customer APIs)
 
 @router.get("/{customer_id}", response_model=CustomerResponse)
 def get_customer(
-    customer_id: int,
+    customer_id: int = Path(..., gt=0),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
@@ -297,8 +387,8 @@ def get_customer(
 
 @router.put("/{customer_id}", response_model=CustomerResponse)
 def update_customer(
-    customer_id: int,
-    data: CustomerUpdate,
+    customer_id: int = Path(..., gt=0),
+    data: CustomerUpdate = ...,
     user: User = Depends(require_permission("customers:write")),
     db: Session = Depends(get_db),
 ):
@@ -314,7 +404,7 @@ def customer_orders(
     return OrderService(db).get_customer_history(user.tenant_id, customer_id)
 
 
-@router.post("/{customer_id}/loyalty",response_model=LoyaltyResponse)
+@router.post("/{customer_id}/loyalty", response_model=LoyaltyResponse)
 def add_loyalty(
     customer_id: int = Path(..., gt=0),
     points: int = Query(..., gt=0, le=10000),
@@ -322,6 +412,7 @@ def add_loyalty(
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).add_loyalty_points(user.tenant_id, customer_id, points)
+
 
 @router.post(
     "/loyalty/earn",
@@ -337,6 +428,7 @@ def earn_loyalty(
         data,
     )
 
+
 @router.post(
     "/loyalty/redeem",
     response_model=LoyaltyResponse,
@@ -351,12 +443,13 @@ def redeem_loyalty(
         data,
     )
 
+
 @router.get(
     "/{customer_id}/loyalty",
     response_model=LoyaltyResponse,
 )
 def get_loyalty(
-    customer_id: int,
+    customer_id: int = Path(..., gt=0),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
@@ -365,12 +458,13 @@ def get_loyalty(
         customer_id,
     )
 
+
 @router.get(
     "/{customer_id}/loyalty/history",
     response_model=list[LoyaltyResponse],
 )
 def get_loyalty_history(
-    customer_id: int,
+    customer_id: int = Path(..., gt=0),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
@@ -379,13 +473,14 @@ def get_loyalty_history(
         customer_id,
     )
 
+
 @router.patch(
     "/{customer_id}/status",
     response_model=CustomerResponse,
 )
 def update_customer_status(
-    customer_id: int,
-    data: CustomerStatusUpdate,
+    customer_id: int = Path(..., gt=0),
+    data: CustomerStatusUpdate = ...,
     user: User = Depends(require_permission("customers:write")),
     db: Session = Depends(get_db),
 ):
@@ -395,16 +490,6 @@ def update_customer_status(
         data.status
     )
 
-# @router.delete("/{customer_id}", response_model=MessageResponse)
-# def delete_customer(
-#     customer_id: int,
-#     user: User = Depends(require_permission("customers:write")),
-#     db: Session = Depends(get_db),
-# ):
-#     return CustomerService(db).delete_customer(
-#         user.tenant_id,
-#         customer_id
-#     )
 
 @router.post(
     "/notifications/sms",
@@ -415,10 +500,31 @@ def send_sms(
     user: User = Depends(require_permission("customers:write")),
     db: Session = Depends(get_db),
 ):
+    if data.communication_type != "SMS":
+        raise HTTPException(
+            status_code=422,
+            detail="Only SMS communication type is allowed for this endpoint",
+        )
+
     return CustomerService(db).send_communication(
         user.tenant_id,
         data,
     )
+
+
+@router.get(
+    "/notifications/sms",
+    response_model=list[CommunicationResponse],
+)
+def get_sms_notifications(
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).get_communications_by_type(
+        user.tenant_id,
+        "SMS",
+    )
+
 
 @router.post(
     "/notifications/whatsapp",
@@ -429,12 +535,31 @@ def send_whatsapp(
     user: User = Depends(require_permission("customers:write")),
     db: Session = Depends(get_db),
 ):
-    data.communication_type = "WHATSAPP"
+    if data.communication_type != "WHATSAPP":
+        raise HTTPException(
+            status_code=422,
+            detail="Only WHATSAPP communication type is allowed for this endpoint",
+        )
 
     return CustomerService(db).send_communication(
         user.tenant_id,
         data,
     )
+
+
+@router.get(
+    "/notifications/whatsapp",
+    response_model=list[CommunicationResponse],
+)
+def get_whatsapp_notifications(
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).get_communications_by_type(
+        user.tenant_id,
+        "WHATSAPP",
+    )
+
 
 @router.post(
     "/campaigns/send",
@@ -450,6 +575,7 @@ def send_campaign(
         data,
     )
 
+
 @router.get(
     "/customer-analytics/top-customers",
     response_model=list[TopCustomerResponse]
@@ -459,6 +585,10 @@ def top_customers(
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_top_customers(user.tenant_id)
+<<<<<<< HEAD
+=======
+
+>>>>>>> d3c5a69 (Improve customer APIs)
 
 @router.get(
     "/customer-analytics/retention",
@@ -485,6 +615,7 @@ def lifetime_value(
         user.tenant_id
     )
 
+
 @router.get(
     "/customer-analytics/loyalty-report",
     response_model=list[LoyaltyReportResponse],
@@ -496,4 +627,3 @@ def loyalty_report(
     return CustomerService(db).get_loyalty_report(
         user.tenant_id
     )
-
