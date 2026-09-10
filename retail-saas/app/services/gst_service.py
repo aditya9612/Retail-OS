@@ -74,9 +74,9 @@ class GstService:
             tenant_id=tenant_id,
             hsn_code=data.hsn_code,
             gst_rate=gst_rate,
-            cgst_rate=cgst,
-            sgst_rate=sgst,
-            igst_rate=igst,
+            cgst=cgst,
+            sgst=sgst,
+            igst=igst,
             status=True,
         )
 
@@ -121,6 +121,35 @@ class GstService:
             for rate in rates
         ]
 
+    def list_rate_views(
+        self,
+        tenant_id: int,
+        supply_type: SupplyType | None = None,
+    ) -> list[GstRateResponse]:
+        rates = self.list_rates(tenant_id)
+        if supply_type is None:
+            return rates
+
+        views = []
+        for rate in rates:
+            if supply_type == "intra_state":
+                views.append(
+                    rate.model_copy(
+                        update={"igst": Decimal("0.00"), "supply_type": supply_type}
+                    )
+                )
+            else:
+                views.append(
+                    rate.model_copy(
+                        update={
+                            "cgst": Decimal("0.00"),
+                            "sgst": Decimal("0.00"),
+                            "supply_type": supply_type,
+                        }
+                    )
+                )
+        return views
+
     def update_rate(
         self,
         tenant_id: int,
@@ -162,9 +191,9 @@ class GstService:
             cgst, sgst, igst = self._split_rate(gst_rate)
 
             rate.gst_rate = gst_rate
-            rate.cgst_rate = cgst
-            rate.sgst_rate = sgst
-            rate.igst_rate = igst
+            rate.cgst = cgst
+            rate.sgst = sgst
+            rate.igst = igst
 
         if data.status is not None:
             rate.status = data.status
