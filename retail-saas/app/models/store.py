@@ -6,6 +6,11 @@ from app.core.database import Base, TimestampMixin
 
 class Store(Base, TimestampMixin):
     __tablename__ = "stores"
+    expenses: Mapped[list["StoreExpense"]] = relationship(
+        "StoreExpense",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(

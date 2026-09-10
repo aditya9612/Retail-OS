@@ -24,6 +24,7 @@ from app.models.store import Store
 from app.models.store_transfer import StoreTransfer
 from app.models.store_transfer_item import StoreTransferItem
 from app.models.store_target import StoreTarget
+from app.models.store_expense import StoreExpense
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.staff import Staff
