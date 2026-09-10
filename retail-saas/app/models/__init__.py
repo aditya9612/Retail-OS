@@ -1,4 +1,4 @@
-﻿from app.models.audit_log import AuditLog
+from app.models.audit_log import AuditLog
 from app.models.category import Category
 from app.models.credit_note import CreditNote
 from app.models.customer import Customer
@@ -23,6 +23,8 @@ from app.models.role import Role
 from app.models.store import Store
 from app.models.store_transfer import StoreTransfer
 from app.models.store_transfer_item import StoreTransferItem
+from app.models.store_target import StoreTarget
+from app.models.store_expense import StoreExpense
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.staff import Staff
@@ -62,11 +64,13 @@ __all__ = [
     "Refund",
     "Role",
     "Store",
+    "StoreTarget",
+    "StoreTransfer",
+    "StoreTransferItem",
     "Tenant",
     "User",
     "Staff",
     "Warehouse",
-    "Staff",
     "GRN",
     "GRNItem",
     "Coupon",

@@ -285,9 +285,7 @@ class PaymentGatewayCreate(BaseModel):
             raise ValueError("Merchant ID cannot be empty")
 
         if not MERCHANT_ID_PATTERN.fullmatch(value):
-            raise ValueError(
-                "Invalid merchant ID format"
-            )
+            raise ValueError("Invalid merchant ID format")
 
         return value
 
@@ -543,9 +541,7 @@ class SettlementCreate(BaseModel):
     @classmethod
     def validate_settlement_date(cls, value: date) -> date:
         if value < date.today():
-            raise ValueError(
-                "Settlement date cannot be in the past"
-            )
+            raise ValueError("Settlement date cannot be in the past")
 
         return value
 

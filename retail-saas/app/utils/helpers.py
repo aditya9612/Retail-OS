@@ -5,6 +5,8 @@ from app.models.gst_rate import GstRate
 from app.models.product import Product
 from app.core.redis_client import get_redis
 
+get_redis_client = get_redis
+
 
 MONEY = Decimal("0.01")
 ZERO = Decimal("0.00")
