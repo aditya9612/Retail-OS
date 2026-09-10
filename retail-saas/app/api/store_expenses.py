@@ -1,8 +1,11 @@
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.security import require_permission
+from app.models.user import User
 from app.schemas.store_expense import (
     StoreExpenseCreate,
     StoreExpenseResponse,
@@ -24,6 +27,9 @@ router = APIRouter(
 )
 def create_store_expense(
     expense: StoreExpenseCreate,
+    user: User = Depends(
+        require_permission("store_expenses:write")
+    ),
     db: Session = Depends(get_db),
 ):
     service = StoreExpenseService(db)
@@ -37,6 +43,9 @@ def create_store_expense(
 )
 def get_store_expenses(
     store_id: int | None = Query(default=None, gt=0),
+    user: User = Depends(
+        require_permission("store_expenses:read")
+    ),
     db: Session = Depends(get_db),
 ):
     service = StoreExpenseService(db)
@@ -50,6 +59,9 @@ def get_store_expenses(
 )
 def get_store_expense(
     expense_id: int,
+    user: User = Depends(
+        require_permission("store_expenses:read")
+    ),
     db: Session = Depends(get_db),
 ):
     if expense_id <= 0:
@@ -70,6 +82,9 @@ def get_store_expense(
 def update_store_expense(
     expense_id: int,
     expense: StoreExpenseUpdate,
+    user: User = Depends(
+        require_permission("store_expenses:write")
+    ),
     db: Session = Depends(get_db),
 ):
     if expense_id <= 0:
@@ -89,6 +104,9 @@ def update_store_expense(
 )
 def delete_store_expense(
     expense_id: int,
+    user: User = Depends(
+        require_permission("store_expenses:write")
+    ),
     db: Session = Depends(get_db),
 ):
     if expense_id <= 0:
