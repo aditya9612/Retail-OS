@@ -29,6 +29,7 @@ from app.api.v1.stores.router import router as stores_router
 from app.api.v1.sales import router as sales_router
 from app.api.v1.store_transfers import router as store_transfers_router
 from app.api.v1.store_target import router as store_target_router
+from app.api.store_expenses import router as store_expenses_router
 from app.api.v1.suppliers.router import router as suppliers_router
 from app.api.v1.users.router import router as users_router
 from app.api.v1.warehouses.router import router as warehouses_router
@@ -107,6 +108,7 @@ app.include_router(users_router, prefix=API_PREFIX)
 app.include_router(stores_router, prefix=API_PREFIX)
 app.include_router(store_target_router, prefix=API_PREFIX)
 app.include_router(store_transfers_router, prefix=API_PREFIX)
+app.include_router(store_expenses_router, prefix=API_PREFIX)
 app.include_router(sales_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
 app.include_router(inventory_router, prefix=API_PREFIX)
