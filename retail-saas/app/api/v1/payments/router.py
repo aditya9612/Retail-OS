@@ -19,6 +19,7 @@ from app.schemas.payment import (
     PaymentWebhookLogCreate,
     PaymentWebhookLogResponse,
     PaymentWebhookRequest,
+    PaymentMethodValue,
 )
 from app.services.payment_service import PaymentService
 
@@ -47,7 +48,7 @@ def create_payment(
 @router.get("", response_model=list[PaymentResponse])
 def list_payments(
     order_id: int | None = Query(default=None),
-    payment_method: str | None = Query(default=None),
+    payment_method: PaymentMethodValue | None = Query(default=None),
     status: PaymentStatusValue | None = Query(default=None),
     service: PaymentService = Depends(get_payment_service),
 ):
@@ -61,7 +62,7 @@ def list_payments(
 @router.get("/history", response_model=list[PaymentResponse])
 def payment_history(
     status: PaymentStatusValue | None = Query(default=None),
-    payment_method: str | None = Query(default=None),
+    payment_method: PaymentMethodValue | None = Query(default=None),
     service: PaymentService = Depends(get_payment_service),
 ):
     return service.payment_history(

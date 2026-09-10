@@ -75,6 +75,9 @@ def validate_transaction_id(value: str) -> str:
     if not value:
         raise ValueError("Transaction ID cannot be empty")
 
+    if value.lstrip("0") == "":
+        raise ValueError("Transaction ID cannot be zero")
+
     if not TRANSACTION_ID_PATTERN.fullmatch(value):
         raise ValueError(
             "Transaction ID may contain only letters, numbers, hyphens and underscores"
@@ -619,6 +622,13 @@ class PaymentWebhookRequest(BaseModel):
 
         if not value:
             raise ValueError("Event type cannot be empty")
+
+        if value not in {
+            "payment.completed",
+            "payment.failed",
+            "payment.refunded",
+        }:
+            raise ValueError("Unsupported payment event type")
 
         return value
 
