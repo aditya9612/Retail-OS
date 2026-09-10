@@ -97,6 +97,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         "customers:write",
         "reports:read",
         "analytics:read",
+        "purchase_orders:read",
+        "purchase_orders:write",
     ],
 
     UserRole.MANAGER: [
@@ -109,6 +111,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         "payments:read",
         "customers:read",
         "reports:read",
+        "purchase_orders:read",
+        "purchase_orders:write",
     ],
 
     UserRole.STAFF: [
@@ -121,5 +125,6 @@ DEFAULT_ROLE_PERMISSIONS = {
         "payments:read",
         "payments:write",
         "customers:read",
+        "purchase_orders:read",
     ],
 }

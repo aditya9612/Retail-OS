@@ -58,4 +58,3 @@ class StoreTargetRepository:
         db.refresh(target)
 
         return target
-    

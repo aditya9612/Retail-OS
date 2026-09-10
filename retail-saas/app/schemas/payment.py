@@ -75,6 +75,9 @@ def validate_transaction_id(value: str) -> str:
     if not value:
         raise ValueError("Transaction ID cannot be empty")
 
+    if value.lstrip("0") == "":
+        raise ValueError("Transaction ID cannot be zero")
+
     if not TRANSACTION_ID_PATTERN.fullmatch(value):
         raise ValueError(
             "Transaction ID may contain only letters, numbers, hyphens and underscores"
@@ -282,9 +285,7 @@ class PaymentGatewayCreate(BaseModel):
             raise ValueError("Merchant ID cannot be empty")
 
         if not MERCHANT_ID_PATTERN.fullmatch(value):
-            raise ValueError(
-                "Invalid merchant ID format"
-            )
+            raise ValueError("Invalid merchant ID format")
 
         return value
 
@@ -540,9 +541,7 @@ class SettlementCreate(BaseModel):
     @classmethod
     def validate_settlement_date(cls, value: date) -> date:
         if value < date.today():
-            raise ValueError(
-                "Settlement date cannot be in the past"
-            )
+            raise ValueError("Settlement date cannot be in the past")
 
         return value
 
@@ -619,6 +618,13 @@ class PaymentWebhookRequest(BaseModel):
 
         if not value:
             raise ValueError("Event type cannot be empty")
+
+        if value not in {
+            "payment.completed",
+            "payment.failed",
+            "payment.refunded",
+        }:
+            raise ValueError("Unsupported payment event type")
 
         return value
 

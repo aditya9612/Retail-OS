@@ -1,10 +1,11 @@
 import hashlib
 import secrets
+import re
 from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import UnauthorizedException, NotFoundException
+from app.core.exceptions import AppException, NotFoundException, UnauthorizedException
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -27,6 +28,26 @@ from app.utils.constants import (
     DEFAULT_ROLE_PERMISSIONS,
     UserRole,
 )
+
+_SLUG_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,98}[a-z0-9])?$")
+_PHONE_PATTERN = re.compile(r"^\d{10,15}$")
+
+
+def _validate_password(password: str) -> str:
+    if len(password) < 8 or len(password) > 100:
+        raise AppException("Password must be between 8 and 100 characters")
+    if not all(
+        (
+            any(character.isupper() for character in password),
+            any(character.islower() for character in password),
+            any(character.isdigit() for character in password),
+            any(not character.isalnum() for character in password),
+        )
+    ):
+        raise AppException(
+            "Password must contain uppercase, lowercase, number, and special character"
+        )
+    return password
 
 
 class AuthService:
@@ -107,7 +128,21 @@ class AuthService:
         phone: str | None = None,
     ) -> User:
 
-        email = email.strip()
+        tenant_name = tenant_name.strip()
+        slug = slug.strip().lower()
+        email = email.strip().lower()
+        admin_name = admin_name.strip()
+        if len(tenant_name) < 2 or len(tenant_name) > 255:
+            raise AppException("Tenant name must be between 2 and 255 characters")
+        if not _SLUG_PATTERN.fullmatch(slug):
+            raise AppException("Slug must contain lowercase letters, numbers, and hyphens")
+        if not admin_name or len(admin_name) > 255:
+            raise AppException("Admin name is required and must be at most 255 characters")
+        if phone is not None:
+            phone = phone.strip()
+            if not _PHONE_PATTERN.fullmatch(phone):
+                raise AppException("Phone must contain 10 to 15 digits")
+        _validate_password(password)
 
         existing = (
             self.db.query(Tenant)
@@ -219,6 +254,7 @@ class AuthService:
         self,
         data: ResetPasswordRequest,
     ) -> str:
+        _validate_password(data.new_password)
 
         token_hash = hashlib.sha256(
             data.token.encode("utf-8")
