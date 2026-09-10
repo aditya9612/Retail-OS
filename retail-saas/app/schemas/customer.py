@@ -23,10 +23,64 @@ def validate_customer_name(v: str) -> str:
     v = v.strip()
     if len(v) < 2 or len(v) > 255:
         raise ValueError("Name must be between 2 and 255 characters")
-    if not any(c.isalpha() for c in v):
-        raise ValueError("Name must contain at least one alphabetic character")
-    if v.isdigit():
-        raise ValueError("Name cannot consist only of digits")
+    alpha_count = sum(1 for c in v if c.isalpha())
+    if alpha_count < 2:
+        raise ValueError("Name must contain at least two alphabetic characters")
+    for c in v:
+        if not (c.isalpha() or c in " '-."):
+            raise ValueError("Name contains invalid characters. Only letters, spaces, apostrophes, hyphens, and periods are allowed")
+    return v
+
+
+def validate_meaningful_text(
+    v: Optional[str],
+    field_name: str = "Field",
+    min_length: int = 1,
+    max_length: int = 2000,
+    required: bool = True,
+) -> Optional[str]:
+    if v is None:
+        if required:
+            raise ValueError(f"{field_name} cannot be null")
+        return None
+    if not isinstance(v, str):
+        raise ValueError(f"{field_name} must be a string")
+    v = v.strip()
+    if not v:
+        if required:
+            raise ValueError(f"{field_name} cannot be empty or whitespace")
+        return None
+    if len(v) < min_length or len(v) > max_length:
+        raise ValueError(f"{field_name} must be between {min_length} and {max_length} characters")
+
+    if v.lower() == "string":
+        raise ValueError(f"{field_name} cannot be placeholder 'string'")
+
+    dangerous_patterns = [
+        r"<\s*script",
+        r"<\s*/\s*script",
+        r"<\s*iframe",
+        r"<\s*style",
+        r"javascript\s*:",
+        r"onload\s*=",
+        r"onerror\s*=",
+        r"<\s*img",
+        r"<\s*a\s+",
+        r"alert\s*\(",
+    ]
+    for pattern in dangerous_patterns:
+        if re.search(pattern, v, re.IGNORECASE):
+            raise ValueError(f"{field_name} contains invalid or dangerous HTML/script content")
+
+    if "<" in v and ">" in v:
+        raise ValueError(f"HTML tags are not allowed in {field_name.lower()}")
+
+    alpha_count = sum(1 for c in v if c.isalpha())
+    if alpha_count == 0:
+        if v.isdigit():
+            raise ValueError(f"{field_name} cannot be numeric-only")
+        raise ValueError(f"{field_name} must contain meaningful text with letters, not only numbers or symbols")
+
     return v
 
 
@@ -45,6 +99,12 @@ def validate_birthday(v: Optional[date]) -> Optional[date]:
     if v > date.today():
         raise ValueError("Birthday cannot be in the future")
     return v
+
+
+class SubResourceNoDataResponse(BaseModel):
+    success: bool = True
+    message: str
+    data: list = Field(default_factory=list)
 
 
 class CustomerBase(BaseModel):
@@ -115,21 +175,35 @@ class CustomerCreate(CustomerBase):
     address: str = Field(..., max_length=500, description="Address is required")
     birthday: date = Field(..., description="Birthday is required")
 
+    @field_validator("address", mode="before")
+    @classmethod
+    def check_create_address_before(cls, v):
+        if v is None:
+            raise ValueError("Address is required and cannot be null")
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("Address cannot be empty or whitespace")
+        return v
+
     @field_validator("address")
     @classmethod
     def check_create_address(cls, v: str) -> str:
-        if v is None:
-            raise ValueError("Address is required")
         v = v.strip()
         if not v:
             raise ValueError("Address cannot be empty or whitespace")
         return v
 
+    @field_validator("birthday", mode="before")
+    @classmethod
+    def check_create_birthday_before(cls, v):
+        if v is None:
+            raise ValueError("Birthday is required and cannot be null")
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("Birthday cannot be empty")
+        return v
+
     @field_validator("birthday")
     @classmethod
     def check_create_birthday(cls, v: date) -> date:
-        if v is None:
-            raise ValueError("Birthday is required")
         if v > date.today():
             raise ValueError("Birthday cannot be in the future")
         return v
@@ -251,6 +325,44 @@ class CustomerResponse(CustomerBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("status", mode="before")
+    @classmethod
+    def sanitize_status(cls, v):
+        if v is None or not str(v).strip():
+            return "active"
+        s = str(v).strip().lower()
+        return s if s in ("active", "inactive", "blocked") else "active"
+
+    @field_validator("segment", mode="before")
+    @classmethod
+    def sanitize_segment(cls, v):
+        if v is None or not str(v).strip():
+            return "new"
+        s = str(v).strip().lower()
+        return s if s in ("new", "regular", "vip", "inactive") else "new"
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def sanitize_email(cls, v):
+        if v is None or not str(v).strip():
+            return None
+        s = str(v).strip()
+        return s if ("@" in s and "." in s) else None
+
+    @field_validator("gstin", mode="before")
+    @classmethod
+    def sanitize_gstin(cls, v):
+        if v is None or not str(v).strip():
+            return None
+        return str(v).strip().upper()
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def sanitize_phone(cls, v):
+        if v is None:
+            return ""
+        return str(v).strip()
+
 
 class MessageResponse(BaseModel):
     message: str
@@ -280,24 +392,21 @@ class CustomerFeedbackCreate(BaseModel):
     @classmethod
     def validate_comments(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
-            v = v.strip()
-            return v if v else None
+            return validate_meaningful_text(v, "Comments", 1, 2000, required=False)
         return v
 
     @field_validator("suggestions")
     @classmethod
     def validate_suggestions(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
-            v = v.strip()
-            return v if v else None
+            return validate_meaningful_text(v, "Suggestions", 1, 2000, required=False)
         return v
 
     @field_validator("feedback")
     @classmethod
     def validate_feedback(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
-            v = v.strip()
-            return v if v else None
+            return validate_meaningful_text(v, "Feedback", 1, 2000, required=False)
         return v
 
     @model_validator(mode="after")
@@ -347,9 +456,7 @@ class WalletCreditRequest(BaseModel):
     @field_validator("remarks")
     @classmethod
     def validate_remarks(cls, v: str):
-        if not v or not v.strip():
-            raise ValueError("Remarks cannot be empty or whitespace")
-        return v.strip()
+        return validate_meaningful_text(v, "Remarks", 1, 255, required=True)
 
 
 class WalletDebitRequest(BaseModel):
@@ -371,9 +478,7 @@ class WalletDebitRequest(BaseModel):
     @field_validator("remarks")
     @classmethod
     def validate_remarks(cls, v: str):
-        if not v or not v.strip():
-            raise ValueError("Remarks cannot be empty or whitespace")
-        return v.strip()
+        return validate_meaningful_text(v, "Remarks", 1, 255, required=True)
 
 
 class WalletResponse(BaseModel):
@@ -426,7 +531,12 @@ class LoyaltyEarnRequest(BaseModel):
     customer_id: int = Field(gt=0)
     points: int = Field(gt=0)
     invoice_id: Optional[int] = Field(default=None, gt=0)
-    reason: Optional[str] = Field(default=None, max_length=500)
+    reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, v: str):
+        return validate_meaningful_text(v, "Reason", 1, 500, required=True)
 
 
 class LoyaltyRedeemRequest(BaseModel):
@@ -472,9 +582,7 @@ class CommunicationCreate(BaseModel):
     @field_validator("message")
     @classmethod
     def validate_message(cls, v: str):
-        if not v or not v.strip():
-            raise ValueError("Message cannot be empty or whitespace")
-        return v.strip()
+        return validate_meaningful_text(v, "Message", 1, 500, required=True)
 
 
 class CommunicationResponse(BaseModel):
@@ -529,27 +637,7 @@ class CustomerNoteCreate(BaseModel):
     @field_validator("note")
     @classmethod
     def validate_note(cls, v: str):
-        if not v or not v.strip():
-            raise ValueError("Note cannot be empty or whitespace")
-        v = v.strip()
-        # Prevent dangerous HTML/script injection
-        dangerous_patterns = [
-            r"<\s*script",
-            r"<\s*/\s*script",
-            r"<\s*iframe",
-            r"<\s*style",
-            r"javascript\s*:",
-            r"onload\s*=",
-            r"onerror\s*=",
-            r"<\s*img",
-            r"<\s*a\s+",
-        ]
-        for pattern in dangerous_patterns:
-            if re.search(pattern, v, re.IGNORECASE):
-                raise ValueError("Note contains invalid or dangerous HTML/script content")
-        if "<" in v and ">" in v:
-            raise ValueError("HTML tags are not allowed in customer notes")
-        return v
+        return validate_meaningful_text(v, "Note", 1, 500, required=True)
 
 
 class CustomerNoteResponse(BaseModel):
@@ -590,9 +678,7 @@ class CampaignSendRequest(BaseModel):
     @field_validator("message")
     @classmethod
     def validate_message(cls, v: str):
-        if not v or not v.strip():
-            raise ValueError("Message cannot be empty or whitespace")
-        return v.strip()
+        return validate_meaningful_text(v, "Message", 1, 1000, required=True)
 
 
 class CampaignSendResponse(BaseModel):

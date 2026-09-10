@@ -1,5 +1,6 @@
 from datetime import date
-from typing import Optional
+import re
+from typing import Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -15,6 +16,8 @@ from app.schemas.customer import (
     MessageResponse,
     CustomerFeedbackCreate,
     CustomerFeedbackResponse,
+    SubResourceNoDataResponse,
+    validate_customer_name,
     WalletCreditRequest,
     WalletDebitRequest,
     WalletResponse,
@@ -68,12 +71,18 @@ def list_customers(
         name_clean = name.strip()
         if not name_clean:
             raise HTTPException(status_code=422, detail="Name filter cannot be empty or whitespace")
+        try:
+            validate_customer_name(name_clean)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
         name = name_clean
 
     if mobile is not None:
         mobile_clean = mobile.strip()
         if not mobile_clean:
             raise HTTPException(status_code=422, detail="Mobile filter cannot be empty or whitespace")
+        if not re.fullmatch(r"^[6-9]\d{9}$", mobile_clean):
+            raise HTTPException(status_code=422, detail="Mobile number must follow ^[6-9]\\d{9}$")
         mobile = mobile_clean
 
     if search is not None:
@@ -82,7 +91,23 @@ def list_customers(
             raise HTTPException(status_code=422, detail="Search query cannot be empty or whitespace")
         search = search_clean
 
-    return fetch_customers(
+    if status is not None:
+        status_clean = status.strip()
+        if not status_clean:
+            raise HTTPException(status_code=422, detail="Status filter cannot be empty or whitespace")
+        if status_clean not in ("active", "inactive", "blocked"):
+            raise HTTPException(status_code=422, detail="Invalid status filter")
+        status = status_clean
+
+    if segment is not None:
+        segment_clean = segment.strip()
+        if not segment_clean:
+            raise HTTPException(status_code=422, detail="Segment filter cannot be empty or whitespace")
+        if segment_clean not in ("new", "regular", "vip", "inactive"):
+            raise HTTPException(status_code=422, detail="Invalid segment filter")
+        segment = segment_clean
+
+    customers = fetch_customers(
         db=db,
         tenant_id=user.tenant_id,
         name=name,
@@ -93,6 +118,15 @@ def list_customers(
         page=page,
         page_size=page_size,
     )
+
+    if (name is not None or search is not None) and not customers:
+        term = name if name is not None else search
+        raise HTTPException(
+            status_code=404,
+            detail=f"No customer found matching '{term}'"
+        )
+
+    return customers
 
 
 @router.get("/stats", response_model=CustomerStatsResponse)
@@ -130,10 +164,10 @@ def create_feedback(
 
 @router.get(
     "/feedback",
-    response_model=list[CustomerFeedbackResponse],
+    response_model=Union[list[CustomerFeedbackResponse], SubResourceNoDataResponse],
 )
 def get_feedback(
-    customer_id: Optional[int] = Query(None, gt=0),
+    customer_id: Optional[int] = Query(None, gt=0, deprecated=True, description="Deprecated: Use GET /customers/feedback/{customer_id} instead"),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
@@ -142,7 +176,7 @@ def get_feedback(
 
 @router.get(
     "/feedback/{customer_id}",
-    response_model=list[CustomerFeedbackResponse],
+    response_model=Union[list[CustomerFeedbackResponse], SubResourceNoDataResponse],
 )
 def get_feedback_by_customer_id(
     customer_id: int = Path(..., gt=0),
@@ -199,7 +233,7 @@ def debit_wallet(
 
 @router.get(
     "/wallet/transactions/{customer_id}",
-    response_model=list[WalletTransactionResponse],
+    response_model=Union[list[WalletTransactionResponse], SubResourceNoDataResponse],
 )
 def wallet_transactions(
     customer_id: int = Path(..., gt=0),
@@ -214,7 +248,7 @@ def wallet_transactions(
 
 @router.get(
     "/birthdays",
-    response_model=list[CustomerResponse],
+    response_model=Union[list[CustomerResponse], SubResourceNoDataResponse],
 )
 def birthday_customers(
     user: User = Depends(require_permission("customers:read")),
@@ -288,10 +322,10 @@ def create_note(
 
 @router.get(
     "/notes",
-    response_model=list[CustomerNoteResponse],
+    response_model=Union[list[CustomerNoteResponse], SubResourceNoDataResponse],
 )
 def get_notes(
-    customer_id: Optional[int] = Query(None, gt=0),
+    customer_id: Optional[int] = Query(None, gt=0, deprecated=True, description="Deprecated: Use GET /customers/notes/{customer_id} instead"),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
@@ -303,7 +337,7 @@ def get_notes(
 
 @router.get(
     "/notes/{customer_id}",
-    response_model=list[CustomerNoteResponse],
+    response_model=Union[list[CustomerNoteResponse], SubResourceNoDataResponse],
 )
 def get_notes_by_customer_id(
     customer_id: int = Path(..., gt=0),
@@ -392,7 +426,10 @@ def update_customer(
     return CustomerService(db).update_customer(user.tenant_id, customer_id, data)
 
 
-@router.get("/{customer_id}/orders")
+@router.get(
+    "/{customer_id}/orders",
+    response_model=Union[list[dict], SubResourceNoDataResponse, list],
+)
 def customer_orders(
     customer_id: int = Path(..., gt=0),
     user: User = Depends(require_permission("customers:read")),
@@ -458,7 +495,7 @@ def get_loyalty(
 
 @router.get(
     "/{customer_id}/loyalty/history",
-    response_model=list[LoyaltyResponse],
+    response_model=Union[list[LoyaltyResponse], SubResourceNoDataResponse],
 )
 def get_loyalty_history(
     customer_id: int = Path(..., gt=0),
