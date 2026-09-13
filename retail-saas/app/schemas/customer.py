@@ -1,4 +1,4 @@
-﻿from datetime import date, datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional, Literal
 import re
@@ -11,6 +11,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from app.schemas.order import OrderResponse
 
 def validate_phone_number(v: str) -> str:
     if not isinstance(v, str):
@@ -171,6 +172,14 @@ class SubResourceNoDataResponse(BaseModel):
     message: str
     data: list = Field(default_factory=list)
 
+class CustomerOrdersResponse(BaseModel):
+    success: bool = True
+    message: str
+    customer_id: int
+    orders: list[OrderResponse] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
 class CustomerBase(BaseModel):
 
     name: str = Field(
@@ -272,11 +281,12 @@ class CustomerBase(BaseModel):
 
 class CustomerCreate(CustomerBase):
 
-    birthday: date = Field(
+    birthday: Optional[date] = Field(
+        default=None,
         description=(
-            "Customer birthday is required "
+            "Customer birthday is optional "
             "and cannot be in the future"
-        )
+        ),
     )
 
     @field_validator("address", mode="before")
@@ -300,14 +310,10 @@ class CustomerCreate(CustomerBase):
     def check_create_birthday_before(cls, v):
 
         if v is None:
-            raise ValueError(
-                "Birthday is required and cannot be null"
-            )
+            return None
 
         if isinstance(v, str) and not v.strip():
-            raise ValueError(
-                "Birthday cannot be empty"
-            )
+            return None
 
         return v
 
@@ -315,8 +321,8 @@ class CustomerCreate(CustomerBase):
     @classmethod
     def validate_create_birthday(
         cls,
-        value: date
-    ) -> date:
+        value: Optional[date],
+    ) -> Optional[date]:
         return validate_birthday(value)
 
 
@@ -365,9 +371,21 @@ class CustomerUpdate(BaseModel):
                 "Name cannot be null"
             )
 
-        if isinstance(v, str) and not v.strip():
+        if not isinstance(v, str):
+            raise ValueError(
+                "Name must be a string"
+            )
+
+        v = v.strip()
+
+        if not v:
             raise ValueError(
                 "Name cannot be empty or whitespace"
+            )
+
+        if v.lower() == "string":
+            raise ValueError(
+                "Name cannot be placeholder 'string'"
             )
 
         return v
@@ -393,6 +411,23 @@ class CustomerUpdate(BaseModel):
                 "Phone cannot be null"
             )
 
+        if not isinstance(v, str):
+            raise ValueError(
+                "Phone must be a string"
+            )
+
+        v = v.strip()
+
+        if not v:
+            raise ValueError(
+                "Phone cannot be empty or whitespace"
+            )
+
+        if v.lower() == "string":
+            raise ValueError(
+                "Phone cannot be placeholder 'string'"
+            )
+
         return v
 
     @field_validator("phone")
@@ -416,9 +451,21 @@ class CustomerUpdate(BaseModel):
                 "Address cannot be null"
             )
 
-        if isinstance(v, str) and not v.strip():
+        if not isinstance(v, str):
+            raise ValueError(
+                "Address must be a string"
+            )
+
+        v = v.strip()
+
+        if not v:
             raise ValueError(
                 "Address cannot be empty or whitespace"
+            )
+
+        if v.lower() == "string":
+            raise ValueError(
+                "Address cannot be placeholder 'string'"
             )
 
         return v
@@ -440,14 +487,17 @@ class CustomerUpdate(BaseModel):
     def check_update_birthday_before(cls, v):
 
         if v is None:
-            raise ValueError(
-                "Birthday cannot be null"
-            )
+            return None
 
-        if isinstance(v, str) and not v.strip():
-            raise ValueError(
-                "Birthday cannot be empty"
-            )
+        if isinstance(v, str):
+            v_strip = v.strip()
+            if not v_strip:
+                return None
+            if v_strip.lower() == "string":
+                raise ValueError(
+                    "Birthday cannot be placeholder 'string'"
+                )
+            return v_strip
 
         return v
 
@@ -472,9 +522,21 @@ class CustomerUpdate(BaseModel):
                 "Email cannot be null"
             )
 
-        if isinstance(v, str) and not v.strip():
+        if not isinstance(v, str):
+            raise ValueError(
+                "Email must be a string"
+            )
+
+        v = v.strip()
+
+        if not v:
             raise ValueError(
                 "Email cannot be empty or whitespace"
+            )
+
+        if v.lower() == "string":
+            raise ValueError(
+                "Email cannot be placeholder 'string'"
             )
 
         return v
@@ -484,11 +546,25 @@ class CustomerUpdate(BaseModel):
     def check_update_gstin_before(cls, v):
 
         if v is None:
-            return None
+            raise ValueError(
+                "GSTIN cannot be null"
+            )
 
-        if isinstance(v, str) and not v.strip():
+        if not isinstance(v, str):
+            raise ValueError(
+                "GSTIN must be a string"
+            )
+
+        v = v.strip()
+
+        if not v:
             raise ValueError(
                 "GSTIN cannot be empty or whitespace"
+            )
+
+        if v.lower() == "string":
+            raise ValueError(
+                "GSTIN cannot be placeholder 'string'"
             )
 
         return v
@@ -543,16 +619,10 @@ class CustomerResponse(CustomerBase):
             return "active"
 
         s = str(v).strip().lower()
+        if s in ("active", "inactive", "blocked"):
+            return s
 
-        return (
-            s
-            if s in (
-                "active",
-                "inactive",
-                "blocked",
-            )
-            else "active"
-        )
+        return v
 
     @field_validator("segment", mode="before")
     @classmethod
@@ -562,17 +632,10 @@ class CustomerResponse(CustomerBase):
             return "new"
 
         s = str(v).strip().lower()
+        if s in ("new", "regular", "vip", "inactive"):
+            return s
 
-        return (
-            s
-            if s in (
-                "new",
-                "regular",
-                "vip",
-                "inactive",
-            )
-            else "new"
-        )
+        return v
 
     @field_validator("email", mode="before")
     @classmethod
@@ -732,70 +795,58 @@ class CustomerFeedbackResponse(BaseModel):
     feedback: Optional[str] = None
     created_at: datetime
 
-class WalletCreditRequest(BaseModel):
+class WalletOperationBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    customer_id: Optional[int] = Field(
-        default=None,
-        gt=0
+    customer_id: int = Field(
+        gt=0,
+        description="Customer ID must be a positive integer"
     )
 
     amount: Decimal = Field(
         gt=0,
         decimal_places=2,
-        max_digits=12
+        max_digits=12,
+        description="Amount must be greater than zero"
     )
 
-    reference_no: Optional[str] = Field(
-        default=None,
+    reference_no: str = Field(
+        min_length=2,
+        max_length=100,
+        description="Reference number"
+    )
+
+    remarks: str = Field(
         min_length=1,
-        max_length=100
-    )
-
-    remarks: Optional[str] = Field(
-        default=None,
-        min_length=1,
-        max_length=255
-    )
-
-    reason: Optional[str] = Field(
-        default=None,
-        max_length=500
+        max_length=255,
+        description="Remarks must be meaningful text"
     )
 
     @field_validator("reference_no")
     @classmethod
-    def validate_reference(
-        cls,
-        v: Optional[str]
-    ):
-
-        if v is None:
-            return None
+    def validate_reference(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("Reference number must be a string")
 
         v = v.strip()
 
         if not v:
-            raise ValueError(
-                "Reference number cannot be empty or whitespace"
-            )
+            raise ValueError("Reference number cannot be empty or whitespace")
 
-        if not re.fullmatch(r"^\d+$", v):
-            raise ValueError(
-                "Reference number must contain numeric digits only"
-            )
+        if v.lower() == "string":
+            raise ValueError("Reference number cannot be placeholder 'string'")
+
+        if not re.fullmatch(r"^[A-Za-z0-9_-]{2,100}$", v):
+            raise ValueError("Reference number contains invalid characters")
+
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Reference number cannot be alphabetic-only")
 
         return v
 
     @field_validator("remarks")
     @classmethod
-    def validate_remarks(
-        cls,
-        v: Optional[str]
-    ):
-
-        if v is None:
-            return None
-
+    def validate_remarks(cls, v: str) -> str:
         return validate_meaningful_text(
             v,
             "Remarks",
@@ -805,77 +856,12 @@ class WalletCreditRequest(BaseModel):
         )
 
 
-class WalletDebitRequest(BaseModel):
+class WalletCreditRequest(WalletOperationBase):
+    pass
 
-    customer_id: Optional[int] = Field(
-        default=None,
-        gt=0
-    )
 
-    amount: Decimal = Field(
-        gt=0,
-        decimal_places=2,
-        max_digits=12
-    )
-
-    reference_no: Optional[str] = Field(
-        default=None,
-        min_length=1,
-        max_length=100
-    )
-
-    remarks: Optional[str] = Field(
-        default=None,
-        min_length=1,
-        max_length=255
-    )
-
-    reason: Optional[str] = Field(
-        default=None,
-        max_length=500
-    )
-
-    @field_validator("reference_no")
-    @classmethod
-    def validate_reference(
-        cls,
-        v: Optional[str]
-    ):
-
-        if v is None:
-            return None
-
-        v = v.strip()
-
-        if not v:
-            raise ValueError(
-                "Reference number cannot be empty or whitespace"
-            )
-
-        if not re.fullmatch(r"^\d+$", v):
-            raise ValueError(
-                "Reference number must contain numeric digits only"
-            )
-
-        return v
-
-    @field_validator("remarks")
-    @classmethod
-    def validate_remarks(
-        cls,
-        v: Optional[str]
-    ):
-
-        if v is None:
-            return None
-
-        return validate_meaningful_text(
-            v,
-            "Remarks",
-            1,
-            255,
-            required=True,
-        )
+class WalletDebitRequest(WalletOperationBase):
+    pass
 
 
 class WalletResponse(BaseModel):
