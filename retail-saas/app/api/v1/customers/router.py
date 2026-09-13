@@ -17,6 +17,7 @@ from app.schemas.customer import (
     CustomerFeedbackCreate,
     CustomerFeedbackResponse,
     SubResourceNoDataResponse,
+    CustomerOrdersResponse,
     validate_customer_name,
     WalletCreditRequest,
     WalletDebitRequest,
@@ -428,7 +429,7 @@ def update_customer(
 
 @router.get(
     "/{customer_id}/orders",
-    response_model=Union[list[dict], SubResourceNoDataResponse, list],
+    response_model=CustomerOrdersResponse,
 )
 def customer_orders(
     customer_id: int = Path(..., gt=0),

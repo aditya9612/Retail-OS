@@ -31,7 +31,7 @@ from app.models.product import Product
 from app.models.delivery import Delivery
 from app.repositories.order_repo import OrderRepository
 from app.repositories.customer_repo import get_customers_for_export
-from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate
+from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate, OrderResponse
 from app.services.inventory_service import InventoryService
 from app.utils.constants import OrderStatus, StockMovementType
 
@@ -842,9 +842,15 @@ class OrderService:
             return {
                 "success": True,
                 "message": "No orders found for this customer",
-                "data": [],
+                "customer_id": customer_id,
+                "orders": [],
             }
-        return orders
+        return {
+            "success": True,
+            "message": "Orders retrieved successfully",
+            "customer_id": customer_id,
+            "orders": [OrderResponse.model_validate(o) for o in orders],
+        }
 
 
 class CustomerService:
@@ -1889,6 +1895,9 @@ class CustomerService:
                 customer_id,
             )
 
+        sent_count = 0
+        failed_count = 0
+
         for customer_id in data.customer_ids:
 
             communication = CustomerCommunication(
@@ -1899,10 +1908,14 @@ class CustomerService:
             )
 
             self.db.add(communication)
+            sent_count += 1
 
         self.db.commit()
 
         return {
+            "campaign_id": data.campaign_id,
+            "sent_count": sent_count,
+            "failed_count": failed_count,
             "message": "Campaign sent successfully",
             "total_customers": len(
                 data.customer_ids
