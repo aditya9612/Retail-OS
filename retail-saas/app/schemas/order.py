@@ -1,22 +1,48 @@
+
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict,  Field, StrictInt, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+
 
 VALID_ORDER_TYPES = ["pos", "ecommerce"]
-VALID_ORDER_STATUSES = [
-    "draft", "confirmed", "processing",
-    "shipped", "delivered", "cancelled",
-    "returned", "refunded"
-]
-VALID_PAYMENT_METHODS = ["cash", "upi", "card", "credit_card", "debit_card", "wallet", "qr"]
 
-INVALID_STRING_VALUES = ["string", "null", "none", "undefined", "test", "null value", "n/a", "na"]
+VALID_ORDER_STATUSES = [
+    "draft",
+    "confirmed",
+    "processing",
+    "shipped",
+    "delivered",
+    "cancelled",
+    "returned",
+    "refunded",
+]
+
+VALID_PAYMENT_METHODS = [
+    "cash",
+    "upi",
+    "card",
+    "credit_card",
+    "debit_card",
+    "wallet",
+    "qr",
+]
+
+INVALID_STRING_VALUES = [
+    "string",
+    "null",
+    "none",
+    "undefined",
+    "test",
+    "null value",
+    "n/a",
+    "na",
+]
 
 
 class OrderItemCreate(BaseModel):
-    
+
     model_config = ConfigDict(
         extra="forbid",
         str_strip_whitespace=True,
@@ -55,7 +81,7 @@ class OrderItemCreate(BaseModel):
         max_length=100,
         description="Variant cannot be empty",
     )
-    
+
     @field_validator("unit_price", "discount", mode="before")
     @classmethod
     def validate_decimal_values(cls, v):
@@ -114,6 +140,7 @@ class OrderItemCreate(BaseModel):
 
         return v
 
+
 class OrderItemResponse(BaseModel):
 
     id: int
@@ -132,8 +159,9 @@ class OrderItemResponse(BaseModel):
         "from_attributes": True
     }
 
+
 class OrderCreate(BaseModel):
-    
+
     model_config = ConfigDict(
         extra="forbid",
         str_strip_whitespace=True,
@@ -172,10 +200,10 @@ class OrderCreate(BaseModel):
     )
 
     delivery_address: Optional[str] = Field(
-        ...,
+        default=None,
         min_length=3,
         max_length=500,
-        description="Delivery address is required",
+        description="Delivery address is optional for POS orders",
     )
 
     notes: Optional[str] = Field(
@@ -215,19 +243,19 @@ class OrderCreate(BaseModel):
         v: Optional[str],
     ) -> Optional[str]:
 
-       if v is None:
-           return None
+        if v is None:
+            return None
 
-       v = v.strip()
+        v = v.strip()
 
-       if not v:
-           raise ValueError("Coupon code cannot be empty")
+        if not v:
+            raise ValueError("Coupon code cannot be empty")
 
-       if v.lower() in INVALID_STRING_VALUES:
+        if v.lower() in INVALID_STRING_VALUES:
             raise ValueError("Invalid coupon code")
 
-       return v.upper()
-   
+        return v.upper()
+
     @field_validator("discount_amount", mode="before")
     @classmethod
     def validate_discount_amount(cls, v):
@@ -248,11 +276,11 @@ class OrderCreate(BaseModel):
     @classmethod
     def validate_delivery_address(
         cls,
-        v: str,
-    ) -> str:
+        v: Optional[str],
+    ) -> Optional[str]:
 
         if v is None:
-            raise ValueError("Delivery address is required")
+            return None
 
         v = v.strip()
 
@@ -310,8 +338,9 @@ class OrderCreate(BaseModel):
 
         return v
 
+
 class OrderUpdate(BaseModel):
-    
+
     model_config = ConfigDict(
         extra="forbid",
         str_strip_whitespace=True,
@@ -461,18 +490,20 @@ class OrderUpdate(BaseModel):
             raise ValueError(f"status must be one of {VALID_ORDER_STATUSES}")
 
         return v
-    
+
     @model_validator(mode="after")
     def validate_update_fields(self):
 
         if not self.model_fields_set:
-           raise ValueError(
-            "At least one field is required for update"
-        )
+            raise ValueError(
+                "At least one field is required for update"
+            )
 
         return self
 
+
 class OrderResponse(BaseModel):
+
     id: int
     tenant_id: int
     store_id: int
@@ -488,13 +519,16 @@ class OrderResponse(BaseModel):
     delivery_address: Optional[str]
     delivery_status: Optional[str]
     notes: Optional[str]
-    items: List[OrderItemResponse] =  Field(default_factory=list)
+    items: List[OrderItemResponse] = Field(default_factory=list)
     created_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True
+    }
 
 
 class InvoiceResponse(BaseModel):
+
     id: int
     tenant_id: int
     order_id: int
@@ -509,7 +543,9 @@ class InvoiceResponse(BaseModel):
     pdf_url: Optional[str]
     created_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True
+    }
 
 
 class PaymentCreate(BaseModel):
@@ -589,7 +625,7 @@ class PaymentCreate(BaseModel):
                 )
 
         return v
-    
+
     @field_validator("transaction_id")
     @classmethod
     def validate_transaction_id(
@@ -614,8 +650,9 @@ class PaymentCreate(BaseModel):
 
         return v
 
-    
+
 class PaymentResponse(BaseModel):
+
     id: int
     tenant_id: int
     order_id: int
@@ -625,19 +662,24 @@ class PaymentResponse(BaseModel):
     transaction_id: Optional[str]
     created_at: datetime
 
-    model_config = {"from_attributes": True}
-    
+    model_config = {
+        "from_attributes": True
+    }
+
 
 class OrderTrackingResponse(BaseModel):
+
     id: int
     order_id: int
     status: str
     remarks: Optional[str]
     updated_at: datetime
 
-    model_config = {"from_attributes": True}
-    
-    
+    model_config = {
+        "from_attributes": True
+    }
+
+
 class OrderStatusUpdateRequest(BaseModel):
 
     model_config = ConfigDict(
@@ -656,7 +698,7 @@ class OrderStatusUpdateRequest(BaseModel):
         min_length=1,
         max_length=500,
     )
-    
+
     @field_validator("status")
     @classmethod
     def validate_status(
@@ -682,7 +724,7 @@ class OrderStatusUpdateRequest(BaseModel):
             )
 
         return v
-    
+
     @field_validator("remarks")
     @classmethod
     def validate_remarks(
