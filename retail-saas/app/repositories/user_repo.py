@@ -1,6 +1,5 @@
 from typing import Optional
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.user import User
@@ -28,7 +27,9 @@ class UserRepository:
         )
 
         if tenant_id is not None:
-            query = query.filter(User.tenant_id == tenant_id)
+            query = query.filter(
+                User.tenant_id == tenant_id
+            )
 
         return query.first()
 
@@ -37,22 +38,20 @@ class UserRepository:
         email: str,
         tenant_id: Optional[int] = None,
     ) -> Optional[User]:
+        email = email.strip().lower()
+
         query = (
             self.db.query(User)
             .options(joinedload(User.role))
-            .filter(func.binary(User.email) == email)
+            .filter(User.email == email)
         )
 
         if tenant_id is not None:
-            query = query.filter(User.tenant_id == tenant_id)
+            query = query.filter(
+                User.tenant_id == tenant_id
+            )
 
-        users = query.all()
-
-        for user in users:
-            if user.email == email:
-                return user
-
-        return None
+        return query.first()
 
     def list_users(
         self,
@@ -64,11 +63,15 @@ class UserRepository:
         query = (
             self.db.query(User)
             .options(joinedload(User.role))
-            .filter(User.tenant_id == tenant_id)
+            .filter(
+                User.tenant_id == tenant_id
+            )
         )
 
         if not include_inactive:
-            query = query.filter(User.is_active.is_(True))
+            query = query.filter(
+                User.is_active.is_(True)
+            )
 
         return (
             query
@@ -97,6 +100,8 @@ class UserRepository:
         )
 
         if not include_inactive:
-            query = query.filter(User.is_active.is_(True))
+            query = query.filter(
+                User.is_active.is_(True)
+            )
 
         return query.count()

@@ -6,7 +6,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     APP_NAME: str = "Retail SaaS"
     APP_ENV: str = "development"
@@ -39,15 +43,33 @@ class Settings(BaseSettings):
         "http://localhost:5174",
     ]
 
+    AUTH_LOGIN_MAX_ATTEMPTS: int = 5
+    AUTH_LOGIN_RATE_LIMIT_SECONDS: int = 900
+
+    AUTH_FORGOT_PASSWORD_MAX_REQUESTS: int = 3
+    AUTH_FORGOT_PASSWORD_RATE_LIMIT_SECONDS: int = 900
+
+    AUTH_OTP_MAX_ATTEMPTS: int = 5
+    AUTH_OTP_TTL_SECONDS: int = 300
+
+    AUTH_RESET_TOKEN_TTL_SECONDS: int = 600
+
+    AUTH_EXPOSE_OTP_IN_DEVELOPMENT: bool = True
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors(cls, v):
         if isinstance(v, str):
             import json
+
             try:
                 return json.loads(v)
             except json.JSONDecodeError:
-                return [origin.strip() for origin in v.split(",")]
+                return [
+                    origin.strip()
+                    for origin in v.split(",")
+                ]
+
         return v
 
 

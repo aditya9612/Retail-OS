@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+import secrets
 
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -10,12 +11,14 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.exceptions import ForbiddenException, UnauthorizedException
+from app.core.redis_client import get_redis
 from app.core.tenant import (
     set_current_store_id,
     set_current_tenant_id,
     set_current_user_id,
 )
 from app.models.user import User
+
 
 settings = get_settings()
 
@@ -65,6 +68,8 @@ def create_access_token(
     to_encode.update(
         {
             "exp": expire,
+            "iat": datetime.now(timezone.utc),
+            "jti": secrets.token_urlsafe(32),
             "type": "access",
         }
     )
@@ -88,6 +93,8 @@ def create_refresh_token(
     to_encode.update(
         {
             "exp": expire,
+            "iat": datetime.now(timezone.utc),
+            "jti": secrets.token_urlsafe(32),
             "type": "refresh",
         }
     )
@@ -115,6 +122,8 @@ def create_super_admin_access_token(
     to_encode.update(
         {
             "exp": expire,
+            "iat": datetime.now(timezone.utc),
+            "jti": secrets.token_urlsafe(32),
             "type": "super_admin_access",
         }
     )
@@ -138,6 +147,8 @@ def create_super_admin_refresh_token(
     to_encode.update(
         {
             "exp": expire,
+            "iat": datetime.now(timezone.utc),
+            "jti": secrets.token_urlsafe(32),
             "type": "super_admin_refresh",
         }
     )
@@ -164,6 +175,66 @@ def decode_token(
         ) from exc
 
 
+def is_token_blacklisted(
+    token: str,
+) -> bool:
+    payload = decode_token(token)
+
+    jti = payload.get("jti")
+
+    if not jti:
+        return False
+
+    try:
+        redis = get_redis()
+
+        return bool(
+            redis.exists(
+                f"auth:blacklist:{jti}"
+            )
+        )
+    except Exception as exc:
+        raise UnauthorizedException(
+            "Authentication service is temporarily unavailable"
+        ) from exc
+
+
+def blacklist_token(
+    token: str,
+) -> None:
+    payload = decode_token(token)
+
+    jti = payload.get("jti")
+    exp = payload.get("exp")
+
+    if not jti or not exp:
+        return
+
+    try:
+        expires_at = int(exp)
+        now = int(
+            datetime.now(timezone.utc).timestamp()
+        )
+
+        ttl = expires_at - now
+
+        if ttl <= 0:
+            return
+
+        redis = get_redis()
+
+        redis.setex(
+            f"auth:blacklist:{jti}",
+            ttl,
+            "1",
+        )
+
+    except Exception as exc:
+        raise UnauthorizedException(
+            "Authentication service is temporarily unavailable"
+        ) from exc
+
+
 def get_current_user(
     credentials: Optional[
         HTTPAuthorizationCredentials
@@ -173,16 +244,29 @@ def get_current_user(
     if not credentials:
         raise UnauthorizedException()
 
-    payload = decode_token(
-        credentials.credentials
-    )
+    token = credentials.credentials
+
+    payload = decode_token(token)
 
     if payload.get("type") != "access":
         raise UnauthorizedException(
             "Invalid token type"
         )
 
+    jti = payload.get("jti")
+
+    if not jti:
+        raise UnauthorizedException(
+            "Invalid access token"
+        )
+
+    if is_token_blacklisted(token):
+        raise UnauthorizedException(
+            "Token has been revoked"
+        )
+
     user_id = payload.get("sub")
+    tenant_id = payload.get("tenant_id")
 
     if not user_id:
         raise UnauthorizedException()
@@ -192,6 +276,14 @@ def get_current_user(
     except (TypeError, ValueError) as exc:
         raise UnauthorizedException(
             "Invalid user ID"
+        ) from exc
+
+    try:
+        if tenant_id is not None:
+            tenant_id = int(tenant_id)
+    except (TypeError, ValueError) as exc:
+        raise UnauthorizedException(
+            "Invalid tenant ID"
         ) from exc
 
     user = (
@@ -206,6 +298,16 @@ def get_current_user(
     if not user:
         raise UnauthorizedException(
             "User not found"
+        )
+
+    if user.tenant_id != tenant_id:
+        raise UnauthorizedException(
+            "Invalid tenant context"
+        )
+
+    if user.tenant_id is None:
+        raise UnauthorizedException(
+            "Invalid tenant user account"
         )
 
     set_current_user_id(user.id)
@@ -228,13 +330,18 @@ def get_current_super_admin(
             "Super Admin authentication required"
         )
 
-    payload = decode_token(
-        credentials.credentials
-    )
+    token = credentials.credentials
+
+    payload = decode_token(token)
 
     if payload.get("type") != "super_admin_access":
         raise UnauthorizedException(
             "Invalid SuperAdmin token type"
+        )
+
+    if is_token_blacklisted(token):
+        raise UnauthorizedException(
+            "SuperAdmin token has been revoked"
         )
 
     if payload.get("role") != "SUPERADMIN":

@@ -17,6 +17,7 @@ from app.models.purchase_order_return import PurchaseOrderReturn, PurchaseOrderR
 from app.models.review import Review
 from app.models.delivery import Delivery
 from app.models.password_reset_token import PasswordResetToken
+from app.models.login_activity import LoginActivity
 from app.models.product import Product, ProductImage
 from app.models.refund import Refund
 from app.models.role import Role
@@ -29,7 +30,6 @@ from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.staff import Staff
 from app.models.warehouse import Warehouse
-from app.models.staff import Staff
 from app.models.grn import GRN, GRNItem
 from app.models.coupon import Coupon
 from app.models.sale import Sale, SaleItem
@@ -59,6 +59,7 @@ __all__ = [
     "Review",
     "Delivery",
     "PasswordResetToken",
+    "LoginActivity",
     "Product",
     "ProductImage",
     "Refund",
