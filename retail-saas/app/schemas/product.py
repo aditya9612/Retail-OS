@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+
 VALID_GST_SLABS = [
     Decimal("0"),
     Decimal("5"),
@@ -347,9 +348,22 @@ class ProductUpdate(BaseModel):
         return v
 
 
-class ProductResponse(ProductBase):
+class ProductResponse(BaseModel):
     id: int
     tenant_id: int
+    name: str
+    sku: str
+    barcode: Optional[str] = None
+    description: Optional[str] = None
+    category_id: Optional[int] = None
+    hsn_code: Optional[str] = None
+    gst_rate: Decimal
+    price: Decimal
+    cost_price: Decimal
+    variants: Optional[Dict[str, Any]] = None
+    track_batch: bool
+    track_expiry: bool
+    image_url: Optional[str] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
