@@ -231,31 +231,70 @@ def test_create_customer_birthday_validation(tenant_a):
     headers, _ = tenant_a
     base_payload = {
         "name": "Pooja Verma",
-        "phone": random_phone(),
         "address": "Bandra West, Mumbai",
     }
 
-    # Missing birthday rejected
-    resp = client.post("/api/v1/customers", json=base_payload, headers=headers)
-    assert resp.status_code == 422
+    # 1. Missing / omitted birthday accepted -> 201 + null
+    resp_omitted = client.post(
+        "/api/v1/customers",
+        json={**base_payload, "phone": random_phone()},
+        headers=headers,
+    )
+    assert resp_omitted.status_code == 201, resp_omitted.text
+    assert resp_omitted.json()["birthday"] is None
 
-    # Null birthday rejected
-    resp = client.post("/api/v1/customers", json={**base_payload, "birthday": None}, headers=headers)
-    assert resp.status_code == 422
+    # 2. Explicit empty string birthday "" accepted -> 201 + null
+    resp_empty = client.post(
+        "/api/v1/customers",
+        json={**base_payload, "phone": random_phone(), "birthday": ""},
+        headers=headers,
+    )
+    assert resp_empty.status_code == 201, resp_empty.text
+    assert resp_empty.json()["birthday"] is None
 
-    # Invalid date format
-    resp = client.post("/api/v1/customers", json={**base_payload, "birthday": "invalid-date"}, headers=headers)
-    assert resp.status_code == 422
+    # 3. Explicit whitespace-only birthday "   " accepted -> 201 + null
+    resp_ws = client.post(
+        "/api/v1/customers",
+        json={**base_payload, "phone": random_phone(), "birthday": "   "},
+        headers=headers,
+    )
+    assert resp_ws.status_code == 201, resp_ws.text
+    assert resp_ws.json()["birthday"] is None
 
-    # Future birthdate rejected
+    # 4. Explicit null birthday accepted -> 201 + null
+    resp_null = client.post(
+        "/api/v1/customers",
+        json={**base_payload, "phone": random_phone(), "birthday": None},
+        headers=headers,
+    )
+    assert resp_null.status_code == 201, resp_null.text
+    assert resp_null.json()["birthday"] is None
+
+    # 5. Invalid date format rejected -> 422
+    resp_inv = client.post(
+        "/api/v1/customers",
+        json={**base_payload, "phone": random_phone(), "birthday": "invalid-date"},
+        headers=headers,
+    )
+    assert resp_inv.status_code == 422
+
+    # 6. Future birthdate rejected -> 422
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
-    resp = client.post("/api/v1/customers", json={**base_payload, "birthday": tomorrow}, headers=headers)
-    assert resp.status_code == 422
+    resp_future = client.post(
+        "/api/v1/customers",
+        json={**base_payload, "phone": random_phone(), "birthday": tomorrow},
+        headers=headers,
+    )
+    assert resp_future.status_code == 422
 
-    # Valid past birthday accepted
-    resp = client.post("/api/v1/customers", json={**base_payload, "birthday": "1998-11-25"}, headers=headers)
-    assert resp.status_code == 201
-    assert resp.json()["birthday"] == "1998-11-25"
+    # 7. Valid past birthday accepted -> 201 + date string
+    resp_valid = client.post(
+        "/api/v1/customers",
+        json={**base_payload, "phone": random_phone(), "birthday": "1998-11-25"},
+        headers=headers,
+    )
+    assert resp_valid.status_code == 201, resp_valid.text
+    assert resp_valid.json()["birthday"] == "1998-11-25"
 
 
 def test_list_customers_and_tenant_isolation(tenant_a, tenant_b):
@@ -324,8 +363,8 @@ def test_customer_stats(tenant_a):
     headers, _ = tenant_a
 
     # Create customers
-    create_test_customer(headers, name="Stats Cust 1")
-    create_test_customer(headers, name="Stats Cust 2")
+    create_test_customer(headers, name="Stats Customer Alpha")
+    create_test_customer(headers, name="Stats Customer Beta")
 
     customers_resp = client.get("/api/v1/customers", headers=headers)
     customers_count = len(customers_resp.json())
@@ -336,6 +375,8 @@ def test_customer_stats(tenant_a):
 
     assert stats["total_customers"] == customers_count
     assert stats["active_customers"] >= 2
+    assert stats["active_customers"] + stats["inactive_customers"] + stats["blocked_customers"] == stats["total_customers"]
+    assert stats["new_customers"] + stats["regular_customers"] + stats["vip_customers"] == stats["total_customers"]
 
 
 def test_feedback_crud_and_tenant_isolation(tenant_a, tenant_b):
@@ -451,8 +492,72 @@ def test_wallet_credit_and_debit_response_and_validation(tenant_a, tenant_b):
     dup_resp = client.post("/api/v1/customers/wallet/credit", json=credit_payload, headers=headers_a)
     assert dup_resp.status_code == 409
 
-    # Alphabetic reference_no rejected (ABC, RANDOM, TEST, HELLO)
-    for invalid_ref in ["ABC", "RANDOM", "TEST", "HELLO", "TXN-001", "CR#12"]:
+    # Valid alphanumeric reference_no such as "REF12345" accepted
+    valid_ref_payload = {
+        "customer_id": cust["id"],
+        "amount": "150.00",
+        "reference_no": f"REF{random.randint(10000, 99999)}",
+        "remarks": "Alphanumeric ref credit",
+    }
+    valid_ref_resp = client.post("/api/v1/customers/wallet/credit", json=valid_ref_payload, headers=headers_a)
+    assert valid_ref_resp.status_code == 200, valid_ref_resp.text
+    assert valid_ref_resp.json()["reference_no"] == valid_ref_payload["reference_no"]
+
+    # Reject unwanted extra field "reason" in Credit and Debit (extra="forbid")
+    res_credit_reason = client.post(
+        "/api/v1/customers/wallet/credit",
+        json={**credit_payload, "reference_no": f"REF{random.randint(10000, 99999)}", "reason": "Bonus payout"},
+        headers=headers_a,
+    )
+    assert res_credit_reason.status_code == 422, "Credit must reject 'reason' field"
+
+    res_debit_reason = client.post(
+        "/api/v1/customers/wallet/debit",
+        json={**debit_payload, "reference_no": f"REF{random.randint(10000, 99999)}", "reason": "Bill deduction"},
+        headers=headers_a,
+    )
+    assert res_debit_reason.status_code == 422, "Debit must reject 'reason' field"
+
+    # Customer ID validation: 0, negative, non-existing
+    assert client.post(
+        "/api/v1/customers/wallet/credit",
+        json={**credit_payload, "customer_id": 0, "reference_no": f"REF{random.randint(10000, 99999)}"},
+        headers=headers_a,
+    ).status_code == 422
+
+    assert client.post(
+        "/api/v1/customers/wallet/credit",
+        json={**credit_payload, "customer_id": -1, "reference_no": f"REF{random.randint(10000, 99999)}"},
+        headers=headers_a,
+    ).status_code == 422
+
+    assert client.post(
+        "/api/v1/customers/wallet/credit",
+        json={**credit_payload, "customer_id": 999999, "reference_no": f"REF{random.randint(10000, 99999)}"},
+        headers=headers_a,
+    ).status_code == 404
+
+    # Amount validation: 0, negative, non-numeric
+    assert client.post(
+        "/api/v1/customers/wallet/credit",
+        json={**credit_payload, "amount": "0", "reference_no": f"REF{random.randint(10000, 99999)}"},
+        headers=headers_a,
+    ).status_code == 422
+
+    assert client.post(
+        "/api/v1/customers/wallet/credit",
+        json={**credit_payload, "amount": "-100.00", "reference_no": f"REF{random.randint(10000, 99999)}"},
+        headers=headers_a,
+    ).status_code == 422
+
+    assert client.post(
+        "/api/v1/customers/wallet/credit",
+        json={**credit_payload, "amount": "abc", "reference_no": f"REF{random.randint(10000, 99999)}"},
+        headers=headers_a,
+    ).status_code == 422
+
+    # Alphabetic reference_no rejected (ABC, RANDOM, TEST, HELLO, string, abc, CR#12)
+    for invalid_ref in ["ABC", "RANDOM", "TEST", "HELLO", "string", "abc", "CR#12"]:
         res = client.post(
             "/api/v1/customers/wallet/credit",
             json={**credit_payload, "reference_no": invalid_ref},
@@ -687,43 +792,95 @@ def test_export_directory_parameters(tenant_a):
     assert client.get("/api/v1/customers/export-directory", params={"format": "word"}, headers=headers).status_code == 422
 
 
-def test_update_customer_validation(tenant_a):
-    headers, _ = tenant_a
-    cust = create_test_customer(headers, name="Original Name")
+def test_update_customer_validation(tenant_a, tenant_b):
+    headers_a, _ = tenant_a
+    headers_b, _ = tenant_b
+    cust = create_test_customer(headers_a, name="Original Name", birthday="1992-02-02")
 
-    # Invalid name (digits only, special chars, whitespace)
-    assert client.put(f"/api/v1/customers/{cust['id']}", json={"name": "1234567"}, headers=headers).status_code == 422
-    assert client.put(f"/api/v1/customers/{cust['id']}", json={"name": "!@#$%^"}, headers=headers).status_code == 422
-    assert client.put(f"/api/v1/customers/{cust['id']}", json={"name": "   "}, headers=headers).status_code == 422
+    # 1. Normal string placeholder "string" rejected on all normal fields
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"name": "string"}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"email": "string"}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"phone": "string"}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"address": "string"}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"gstin": "string"}, headers=headers_a).status_code == 422
 
-    # Invalid email
-    assert client.put(f"/api/v1/customers/{cust['id']}", json={"email": "not-an-email"}, headers=headers).status_code == 422
-    assert client.put(f"/api/v1/customers/{cust['id']}", json={"email": "   "}, headers=headers).status_code == 422
+    # 2. Empty, whitespace, null rejected on normal fields
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"name": ""}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"name": "   "}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"name": None}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"name": "1234567"}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"name": "!@#$%^"}, headers=headers_a).status_code == 422
 
-    # Empty / null address
-    assert client.put(f"/api/v1/customers/{cust['id']}", json={"address": ""}, headers=headers).status_code == 422
-    assert client.put(f"/api/v1/customers/{cust['id']}", json={"address": "   "}, headers=headers).status_code == 422
-    assert client.put(f"/api/v1/customers/{cust['id']}", json={"address": None}, headers=headers).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"email": ""}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"email": "   "}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"email": None}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"email": "not-an-email"}, headers=headers_a).status_code == 422
 
-    # Future / null / empty birthday
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"phone": ""}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"phone": "   "}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"phone": None}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"phone": "abc"}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"phone": "12345"}, headers=headers_a).status_code == 422
+
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"address": ""}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"address": "   "}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"address": None}, headers=headers_a).status_code == 422
+
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"gstin": ""}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"gstin": "   "}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"gstin": None}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"gstin": "INVALIDGSTIN123"}, headers=headers_a).status_code == 422
+
+    # 3. Birthday validation: placeholder, invalid, future rejected
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
-    assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": tomorrow}, headers=headers).status_code == 422
-    assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": ""}, headers=headers).status_code == 422
-    assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": None}, headers=headers).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": "string"}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": "15-05-1995"}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": "abc"}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": "1995-99-99"}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": tomorrow}, headers=headers_a).status_code == 422
 
-    # Phone update validation
-    assert client.put(f"/api/v1/customers/{cust['id']}", json={"phone": "12345"}, headers=headers).status_code == 422
+    # 4. Birthday optional: omitted leaves existing birthday unchanged
+    resp_omit = client.put(f"/api/v1/customers/{cust['id']}", json={"name": "Omit Birthday Name"}, headers=headers_a)
+    assert resp_omit.status_code == 200
+    assert resp_omit.json()["name"] == "Omit Birthday Name"
+    assert resp_omit.json()["birthday"] == "1992-02-02"
 
-    # Valid update
-    resp = client.put(
-        f"/api/v1/customers/{cust['id']}",
-        json={"name": "Updated Valid Name", "address": "New Valid Address", "birthday": "1994-04-14"},
-        headers=headers,
-    )
-    assert resp.status_code == 200
-    assert resp.json()["name"] == "Updated Valid Name"
-    assert resp.json()["address"] == "New Valid Address"
-    assert resp.json()["birthday"] == "1994-04-14"
+    # 5. Birthday valid past and today dates accepted
+    resp_valid = client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": "1995-05-15"}, headers=headers_a)
+    assert resp_valid.status_code == 200
+    assert resp_valid.json()["birthday"] == "1995-05-15"
+
+    today_str = date.today().isoformat()
+    resp_today = client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": today_str}, headers=headers_a)
+    assert resp_today.status_code == 200
+    assert resp_today.json()["birthday"] == today_str
+
+    # 6. Birthday null, empty, whitespace clears to None
+    resp_null = client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": None}, headers=headers_a)
+    assert resp_null.status_code == 200
+    assert resp_null.json()["birthday"] is None
+
+    # Reset birthday
+    client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": "1990-01-01"}, headers=headers_a)
+
+    resp_empty = client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": ""}, headers=headers_a)
+    assert resp_empty.status_code == 200
+    assert resp_empty.json()["birthday"] is None
+
+    # Reset birthday
+    client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": "1990-01-01"}, headers=headers_a)
+
+    resp_ws = client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": "   "}, headers=headers_a)
+    assert resp_ws.status_code == 200
+    assert resp_ws.json()["birthday"] is None
+
+    # 7. Non-existing customer and cross-tenant isolation
+    assert client.put("/api/v1/customers/999999", json={"name": "Ghost User"}, headers=headers_a).status_code == 404
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"name": "Tenant Attack"}, headers=headers_b).status_code == 404
+
+    # 8. Confirm PATCH route is NOT added (returns 405 Method Not Allowed)
+    patch_res = client.patch(f"/api/v1/customers/{cust['id']}", json={"name": "Patch Name"}, headers=headers_a)
+    assert patch_res.status_code == 405, "PATCH route must not be added"
 
 
 def test_loyalty_earn_and_null_points(tenant_a, tenant_b):
@@ -735,7 +892,7 @@ def test_loyalty_earn_and_null_points(tenant_a, tenant_b):
     # Earn loyalty points (Must not 500 even when customer has initial points 0 or None!)
     resp = client.post(
         "/api/v1/customers/loyalty/earn",
-        json={"customer_id": cust["id"], "points": 150},
+        json={"customer_id": cust["id"], "points": 150, "reason": "Purchase reward"},
         headers=headers_a,
     )
     assert resp.status_code == 200, resp.text
@@ -746,7 +903,7 @@ def test_loyalty_earn_and_null_points(tenant_a, tenant_b):
     # Cross tenant customer earn rejected
     cross_resp = client.post(
         "/api/v1/customers/loyalty/earn",
-        json={"customer_id": cust["id"], "points": 50},
+        json={"customer_id": cust["id"], "points": 50, "reason": "Bonus points"},
         headers=headers_b,
     )
     assert cross_resp.status_code == 404
@@ -754,7 +911,7 @@ def test_loyalty_earn_and_null_points(tenant_a, tenant_b):
     # Non-existing invoice rejected
     assert client.post(
         "/api/v1/customers/loyalty/earn",
-        json={"customer_id": cust["id"], "points": 50, "invoice_id": 999999},
+        json={"customer_id": cust["id"], "points": 50, "invoice_id": 999999, "reason": "Invoice points"},
         headers=headers_a,
     ).status_code == 404
 
@@ -848,8 +1005,8 @@ def test_campaign_send_no_500(tenant_a, tenant_b):
     headers_a, _ = tenant_a
     headers_b, _ = tenant_b
 
-    cust1 = create_test_customer(headers_a, name="Camp Cust 1")
-    cust2 = create_test_customer(headers_a, name="Camp Cust 2")
+    cust1 = create_test_customer(headers_a, name="Camp Cust One")
+    cust2 = create_test_customer(headers_a, name="Camp Cust Two")
 
     # Valid campaign send with lowercase communication_type (Must not 500!)
     camp_resp = client.post(
@@ -898,3 +1055,380 @@ def test_campaign_send_no_500(tenant_a, tenant_b):
         json={"customer_ids": [999999], "communication_type": "sms", "message": "Offer message"},
         headers=headers_a,
     ).status_code == 404
+
+
+def test_customer_create_valid_names_and_invalid_names(tenant_a):
+    headers, _ = tenant_a
+    base_payload = {
+        "phone": random_phone(),
+        "address": "123 Main St, Pune",
+        "birthday": "1990-05-15",
+    }
+
+    # Valid natural names with letters, spaces, hyphens, apostrophes, periods
+    for valid_name in ["Rohan Desai", "O'Connor", "Mary-Jane", "Dr. Amit Patil"]:
+        resp = client.post(
+            "/api/v1/customers",
+            json={**base_payload, "name": valid_name, "phone": random_phone()},
+            headers=headers,
+        )
+        assert resp.status_code == 201, f"Failed for valid name: {valid_name}"
+        assert resp.json()["name"] == valid_name
+
+    # Invalid names rejected
+    for invalid_name in ["123456", "@@@@@", "---@#$", "!@#$%", "A", "   "]:
+        resp = client.post(
+            "/api/v1/customers",
+            json={**base_payload, "name": invalid_name, "phone": random_phone()},
+            headers=headers,
+        )
+        assert resp.status_code == 422, f"Failed to reject invalid name: {invalid_name}"
+
+
+def test_customer_list_name_filter_matching_and_unmatched_404(tenant_a):
+    headers, _ = tenant_a
+
+    # Create a distinct customer
+    cust = create_test_customer(headers, name="Unique Name Alpha")
+
+    # Match found -> 200 with matching customer
+    resp_match = client.get("/api/v1/customers", params={"name": "Unique Name Alpha"}, headers=headers)
+    assert resp_match.status_code == 200
+    results = resp_match.json()
+    assert len(results) >= 1
+    assert any(c["id"] == cust["id"] for c in results)
+
+    # Specific name filter with no match -> HTTP 404 (not bare 200 [])
+    resp_unmatched = client.get("/api/v1/customers", params={"name": "swefghyy"}, headers=headers)
+    assert resp_unmatched.status_code == 404, resp_unmatched.text
+    assert "swefghyy" in resp_unmatched.json()["detail"]
+
+    # Specific search filter with no match -> HTTP 404
+    resp_unmatched_search = client.get("/api/v1/customers", params={"search": "nonexistenttermxyz"}, headers=headers)
+    assert resp_unmatched_search.status_code == 404, resp_unmatched_search.text
+
+    # Empty / whitespace name filter -> HTTP 422
+    assert client.get("/api/v1/customers", params={"name": "   "}, headers=headers).status_code == 422
+    assert client.get("/api/v1/customers", params={"search": "   "}, headers=headers).status_code == 422
+
+
+def test_customer_subresource_structured_empty_responses(tenant_a, tenant_b):
+    headers_a, _ = tenant_a
+    headers_b, _ = tenant_b
+
+    # Fresh customer in tenant A with zero sub-resources
+    cust = create_test_customer(headers_a, name="Fresh Subresource Cust")
+    cid = cust["id"]
+
+    # 1. Orders: customer exists but 0 orders -> structured no-data response
+    orders_resp = client.get(f"/api/v1/customers/{cid}/orders", headers=headers_a)
+    assert orders_resp.status_code == 200, orders_resp.text
+    odata = orders_resp.json()
+    assert odata["success"] is True
+    assert "No orders found" in odata["message"]
+    assert odata["data"] == []
+
+    # 2. Feedback: customer exists but 0 feedback -> structured no-data response
+    fb_path_resp = client.get(f"/api/v1/customers/feedback/{cid}", headers=headers_a)
+    assert fb_path_resp.status_code == 200, fb_path_resp.text
+    fb_data = fb_path_resp.json()
+    assert fb_data["success"] is True
+    assert "No feedback found" in fb_data["message"]
+    assert fb_data["data"] == []
+
+    # Query endpoint delegates to same logic
+    fb_query_resp = client.get("/api/v1/customers/feedback", params={"customer_id": cid}, headers=headers_a)
+    assert fb_query_resp.status_code == 200
+    assert fb_query_resp.json()["data"] == []
+
+    # 3. Wallet transactions: customer exists but 0 transactions -> structured no-data response
+    wt_resp = client.get(f"/api/v1/customers/wallet/transactions/{cid}", headers=headers_a)
+    assert wt_resp.status_code == 200, wt_resp.text
+    wt_data = wt_resp.json()
+    assert wt_data["success"] is True
+    assert "No wallet transactions found" in wt_data["message"]
+    assert wt_data["data"] == []
+
+    # 4. Notes: customer exists but 0 notes -> structured no-data response
+    notes_path_resp = client.get(f"/api/v1/customers/notes/{cid}", headers=headers_a)
+    assert notes_path_resp.status_code == 200, notes_path_resp.text
+    ndata = notes_path_resp.json()
+    assert ndata["success"] is True
+    assert "No notes found" in ndata["message"]
+    assert ndata["data"] == []
+
+    notes_query_resp = client.get("/api/v1/customers/notes", params={"customer_id": cid}, headers=headers_a)
+    assert notes_query_resp.status_code == 200
+    assert notes_query_resp.json()["data"] == []
+
+    # 5. Loyalty history: customer exists but 0 history -> structured no-data response
+    lh_resp = client.get(f"/api/v1/customers/{cid}/loyalty/history", headers=headers_a)
+    assert lh_resp.status_code == 200, lh_resp.text
+    lh_data = lh_resp.json()
+    assert lh_data["success"] is True
+    assert "No loyalty history found" in lh_data["message"]
+    assert lh_data["data"] == []
+
+    # Cross-tenant and non-existing checks for all sub-resources -> 404
+    for endpoint in [
+        f"/api/v1/customers/{cid}/orders",
+        f"/api/v1/customers/feedback/{cid}",
+        f"/api/v1/customers/wallet/transactions/{cid}",
+        f"/api/v1/customers/notes/{cid}",
+        f"/api/v1/customers/{cid}/loyalty/history",
+    ]:
+        # Cross-tenant access
+        assert client.get(endpoint, headers=headers_b).status_code == 404, f"Cross-tenant leak on {endpoint}"
+
+    for endpoint in [
+        "/api/v1/customers/999999/orders",
+        "/api/v1/customers/feedback/999999",
+        "/api/v1/customers/wallet/transactions/999999",
+        "/api/v1/customers/notes/999999",
+        "/api/v1/customers/999999/loyalty/history",
+    ]:
+        # Non-existing access
+        assert client.get(endpoint, headers=headers_a).status_code == 404, f"Failed 404 on {endpoint}"
+
+
+def test_wallet_remarks_and_reference_validation(tenant_a):
+    headers, _ = tenant_a
+    cust = create_test_customer(headers, name="Wallet Remarks Cust")
+
+    valid_ref = str(random.randint(10000000, 99999999))
+
+    # Reject alphabetic-only, placeholder, empty, whitespace, and special-char reference numbers
+    for bad_ref in ["ABC", "RANDOM", "TEST", "HELLO", "string", "abc", "CR#1", "!@#$%", "   ", ""]:
+        res = client.post(
+            "/api/v1/customers/wallet/credit",
+            json={"customer_id": cust["id"], "amount": "100.00", "reference_no": bad_ref, "remarks": "Top-up balance"},
+            headers=headers,
+        )
+        assert res.status_code == 422, f"Failed to reject bad reference_no: {bad_ref}"
+
+    # Accept valid alphanumeric reference numbers (e.g. REF12345, 12345678)
+    for good_ref in ["REF12345", "ABC123", "123ABC", valid_ref]:
+        ref_unique = f"{good_ref}_{random.randint(100, 999)}"
+        res = client.post(
+            "/api/v1/customers/wallet/credit",
+            json={"customer_id": cust["id"], "amount": "10.00", "reference_no": ref_unique, "remarks": "Top-up balance"},
+            headers=headers,
+        )
+        assert res.status_code == 200, f"Failed to accept valid reference_no: {ref_unique}"
+
+    # Reject invalid remarks (numeric-only, symbol-only, placeholder "string", empty, whitespace, null)
+    for bad_remark in ["12345678", "@@@@@", "-------", "!@#$%", "string", "", "   ", None]:
+        ref_temp = str(random.randint(10000000, 99999999))
+        res = client.post(
+            "/api/v1/customers/wallet/credit",
+            json={"customer_id": cust["id"], "amount": "100.00", "reference_no": ref_temp, "remarks": bad_remark},
+            headers=headers,
+        )
+        assert res.status_code == 422, f"Failed to reject bad remarks: {bad_remark}"
+
+    # In debit: invalid remarks must fail with 422 BEFORE balance check (even if balance is 0)
+    res_debit_bad_remark = client.post(
+        "/api/v1/customers/wallet/debit",
+        json={"customer_id": cust["id"], "amount": "50000.00", "reference_no": f"REF{random.randint(10000, 99999)}", "remarks": "12345678"},
+        headers=headers,
+    )
+    assert res_debit_bad_remark.status_code == 422, "Invalid remarks should fail with 422 before insufficient balance"
+
+    # Natural-language remarks with legitimate punctuation must be accepted
+    good_remarks = [
+        "Wallet credit",
+        "Customer payment",
+        "Refund adjustment",
+        "Customer wallet top-up",
+        "Cash payment received",
+        "Refund adjustment for order #123",
+        "Manual wallet credit - approved by manager.",
+    ]
+    for remark in good_remarks:
+        ref_good = str(random.randint(10000000, 99999999))
+        res_good = client.post(
+            "/api/v1/customers/wallet/credit",
+            json={"customer_id": cust["id"], "amount": "10.00", "reference_no": ref_good, "remarks": remark},
+            headers=headers,
+        )
+        assert res_good.status_code == 200, f"Failed to accept valid remark: {remark}"
+        assert res_good.json()["remarks"] == remark
+
+
+def test_loyalty_earn_reason_validation(tenant_a):
+    headers, _ = tenant_a
+    cust = create_test_customer(headers, name="Loyalty Reason Cust")
+
+    # Reject invalid reason (numeric, symbols, "string", empty, whitespace, missing, null)
+    for bad_reason in ["12345", "@@@@", "-------", "string", "", "   ", None]:
+        res = client.post(
+            "/api/v1/customers/loyalty/earn",
+            json={"customer_id": cust["id"], "points": 100, "reason": bad_reason},
+            headers=headers,
+        )
+        assert res.status_code == 422, f"Failed to reject bad reason: {bad_reason}"
+
+    # Missing reason rejected
+    res_missing = client.post(
+        "/api/v1/customers/loyalty/earn",
+        json={"customer_id": cust["id"], "points": 100},
+        headers=headers,
+    )
+    assert res_missing.status_code == 422
+
+    # Accept valid natural reasons
+    for good_reason in ["Purchase reward", "Bonus points for customer purchase", "Promotional loyalty reward"]:
+        res_good = client.post(
+            "/api/v1/customers/loyalty/earn",
+            json={"customer_id": cust["id"], "points": 50, "reason": good_reason},
+            headers=headers,
+        )
+        assert res_good.status_code == 200, f"Failed for good reason: {good_reason}"
+
+
+def test_list_customers_status_pagination_and_legacy_serialization(tenant_a, tenant_b):
+    headers_a, user_a = tenant_a
+    headers_b, user_b = tenant_b
+
+    # Create several customers for tenant A
+    cust1 = create_test_customer(headers_a, name="Alpha Customer One")
+    cust2 = create_test_customer(headers_a, name="Beta Customer Two")
+    cust3 = create_test_customer(headers_a, name="Gamma Customer Three")
+
+    # Create a customer for tenant B
+    cust_b = create_test_customer(headers_b, name="Tenant B Only Cust")
+
+    # 1. status works independently (active, inactive, blocked) without name/mobile/segment
+    res_active = client.get("/api/v1/customers", params={"status": "active"}, headers=headers_a)
+    assert res_active.status_code == 200
+    active_ids = [c["id"] for c in res_active.json()]
+    assert cust1["id"] in active_ids
+    assert cust2["id"] in active_ids
+    assert cust_b["id"] not in active_ids
+
+    res_inactive = client.get("/api/v1/customers", params={"status": "inactive"}, headers=headers_a)
+    assert res_inactive.status_code == 200
+    assert isinstance(res_inactive.json(), list)
+
+    res_blocked = client.get("/api/v1/customers", params={"status": "blocked"}, headers=headers_a)
+    assert res_blocked.status_code == 200
+    assert res_blocked.json() == []  # Empty result returns [] (200 OK), not 404 or 500
+
+    # 2. page works independently
+    res_p1 = client.get("/api/v1/customers", params={"page": 1}, headers=headers_a)
+    assert res_p1.status_code == 200
+    assert len(res_p1.json()) >= 3
+
+    res_p2 = client.get("/api/v1/customers", params={"page": 2}, headers=headers_a)
+    assert res_p2.status_code == 200
+    assert isinstance(res_p2.json(), list)
+
+    # 3. page_size works independently
+    res_ps1 = client.get("/api/v1/customers", params={"page_size": 1}, headers=headers_a)
+    assert res_ps1.status_code == 200
+    assert len(res_ps1.json()) == 1
+
+    res_ps10 = client.get("/api/v1/customers", params={"page_size": 10}, headers=headers_a)
+    assert res_ps10.status_code == 200
+    assert len(res_ps10.json()) >= 3
+
+    res_ps100 = client.get("/api/v1/customers", params={"page_size": 100}, headers=headers_a)
+    assert res_ps100.status_code == 200
+
+    # 4. Combinations work
+    res_comb1 = client.get("/api/v1/customers", params={"page": 1, "page_size": 2}, headers=headers_a)
+    assert res_comb1.status_code == 200
+    assert len(res_comb1.json()) == 2
+
+    res_comb2 = client.get("/api/v1/customers", params={"status": "active", "page": 1, "page_size": 10}, headers=headers_a)
+    assert res_comb2.status_code == 200
+    assert len(res_comb2.json()) >= 3
+
+    # 5. Invalid parameters return HTTP 422, NEVER 500
+    for bad_status in ["test", "invalid_status", "ACTIVE", "", "   "]:
+        res_bad_s = client.get("/api/v1/customers", params={"status": bad_status}, headers=headers_a)
+        assert res_bad_s.status_code == 422, f"Expected 422 for status={bad_status}, got {res_bad_s.status_code}"
+
+    for bad_page in [0, -1, "abc", ""]:
+        res_bad_p = client.get("/api/v1/customers", params={"page": bad_page}, headers=headers_a)
+        assert res_bad_p.status_code == 422, f"Expected 422 for page={bad_page}, got {res_bad_p.status_code}"
+
+    for bad_ps in [0, -1, 101, 150, "abc", ""]:
+        res_bad_ps = client.get("/api/v1/customers", params={"page_size": bad_ps}, headers=headers_a)
+        assert res_bad_ps.status_code == 422, f"Expected 422 for page_size={bad_ps}, got {res_bad_ps.status_code}"
+
+    # 6. Legacy database record resilience (simulate record with empty segment="")
+    from app.core.database import SessionLocal
+    from app.models.customer import Customer
+    db = SessionLocal()
+    try:
+        legacy_cust = Customer(
+            tenant_id=user_a["tenant_id"],
+            name="Legacy Customer Empty Seg",
+            phone=random_phone(),
+            address="Legacy Address",
+            status="active",
+            segment="",  # Empty string in database (causes 500 without our fix)
+            loyalty_points=0,
+            total_spend=0,
+        )
+        db.add(legacy_cust)
+        db.commit()
+        db.refresh(legacy_cust)
+
+        # GET with status=active must succeed with 200 (not 500)
+        res_legacy_status = client.get("/api/v1/customers", params={"status": "active"}, headers=headers_a)
+        assert res_legacy_status.status_code == 200, f"Failed on legacy record with status=active: {res_legacy_status.text}"
+        data = res_legacy_status.json()
+        leg_entry = next((c for c in data if c["id"] == legacy_cust.id), None)
+        assert leg_entry is not None
+        assert leg_entry["segment"] in ("new", "regular", "vip", "inactive")
+
+        # GET with page=1 must succeed with 200 (not 500)
+        res_legacy_page = client.get("/api/v1/customers", params={"page": 1, "page_size": 10}, headers=headers_a)
+        assert res_legacy_page.status_code == 200
+
+        # Legacy database record with empty status=""
+        legacy_cust2 = Customer(
+            tenant_id=user_a["tenant_id"],
+            name="Legacy Customer Empty Status",
+            phone=random_phone(),
+            address="Legacy Address 2",
+            status="",  # Empty string in database
+            segment="regular",
+            loyalty_points=0,
+            total_spend=0,
+        )
+        db.add(legacy_cust2)
+        db.commit()
+        db.refresh(legacy_cust2)
+
+        res_legacy_status2 = client.get("/api/v1/customers", headers=headers_a)
+        assert res_legacy_status2.status_code == 200
+        data2 = res_legacy_status2.json()
+        leg_entry2 = next((c for c in data2 if c["id"] == legacy_cust2.id), None)
+        assert leg_entry2 is not None
+        assert leg_entry2["status"] in ("active", "inactive", "blocked")
+
+        # 7. Mobile filtering
+        res_mobile = client.get("/api/v1/customers", params={"mobile": cust1["phone"]}, headers=headers_a)
+        assert res_mobile.status_code == 200
+        assert any(c["id"] == cust1["id"] for c in res_mobile.json())
+
+        # 8. Segment filtering
+        res_seg_new = client.get("/api/v1/customers", params={"segment": "new"}, headers=headers_a)
+        assert res_seg_new.status_code == 200
+        assert isinstance(res_seg_new.json(), list)
+
+        res_seg_reg = client.get("/api/v1/customers", params={"segment": "regular"}, headers=headers_a)
+        assert res_seg_reg.status_code == 200
+        assert isinstance(res_seg_reg.json(), list)
+
+        # 9. No matching records on filters (status/segment) returns 200 with [] (never 404/500)
+        res_seg_empty = client.get("/api/v1/customers", params={"segment": "inactive"}, headers=headers_a)
+        assert res_seg_empty.status_code == 200
+        assert res_seg_empty.json() == []
+
+    finally:
+        db.close()
+

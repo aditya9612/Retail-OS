@@ -31,7 +31,7 @@ from app.models.product import Product
 from app.models.delivery import Delivery
 from app.repositories.order_repo import OrderRepository
 from app.repositories.customer_repo import get_customers_for_export
-from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate
+from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate, OrderResponse
 from app.services.inventory_service import InventoryService
 from app.utils.constants import OrderStatus, StockMovementType
 
@@ -820,14 +820,14 @@ class OrderService:
         self,
         tenant_id: int,
         customer_id: int,
-    ) -> list[Order]:
+    ):
 
         self._get_customer(
             tenant_id,
             customer_id,
         )
 
-        return (
+        orders = (
             self.db.query(Order)
             .filter(
                 Order.tenant_id == tenant_id,
@@ -838,6 +838,19 @@ class OrderService:
             )
             .all()
         )
+        if not orders:
+            return {
+                "success": True,
+                "message": "No orders found for this customer",
+                "customer_id": customer_id,
+                "orders": [],
+            }
+        return {
+            "success": True,
+            "message": "Orders retrieved successfully",
+            "customer_id": customer_id,
+            "orders": [OrderResponse.model_validate(o) for o in orders],
+        }
 
 
 class CustomerService:
@@ -1106,9 +1119,9 @@ class CustomerService:
         tenant_id: int,
         month: int,
         day: int,
-    ) -> list[Customer]:
+    ):
 
-        return (
+        customers = (
             self.db.query(Customer)
             .filter(
                 Customer.tenant_id == tenant_id,
@@ -1124,6 +1137,13 @@ class CustomerService:
             )
             .all()
         )
+        if not customers:
+            return {
+                "success": True,
+                "message": "No customers with birthdays found",
+                "data": [],
+            }
+        return customers
 
     def create_feedback(
         self,
@@ -1197,13 +1217,22 @@ class CustomerService:
                 == customer_id
             )
 
-        return (
+        feedbacks = (
             query
             .order_by(
                 CustomerFeedback.created_at.desc()
             )
             .all()
         )
+
+        if customer_id is not None and not feedbacks:
+            return {
+                "success": True,
+                "message": "No feedback found for this customer",
+                "data": [],
+            }
+
+        return feedbacks
 
     def get_wallet(
         self,
@@ -1410,7 +1439,7 @@ class CustomerService:
             customer_id,
         )
 
-        return (
+        transactions = (
             self.db.query(WalletTransaction)
             .filter(
                 WalletTransaction.wallet_id
@@ -1421,6 +1450,13 @@ class CustomerService:
             )
             .all()
         )
+        if not transactions:
+            return {
+                "success": True,
+                "message": "No wallet transactions found for this customer",
+                "data": [],
+            }
+        return transactions
 
     def earn_loyalty_points(
         self,
@@ -1437,6 +1473,7 @@ class CustomerService:
 
             invoice = (
                 self.db.query(Invoice)
+                .join(Order, Order.id == Invoice.order_id)
                 .filter(
                     Invoice.id == data.invoice_id,
                     Invoice.tenant_id == tenant_id,
@@ -1447,6 +1484,12 @@ class CustomerService:
             if not invoice:
                 raise NotFoundException(
                     "Invoice not found"
+                )
+
+            if invoice.order and invoice.order.customer_id is not None and invoice.order.customer_id != data.customer_id:
+                raise AppException(
+                    "Invoice belongs to a different customer",
+                    status_code=422,
                 )
 
         current_points = (
@@ -1553,7 +1596,7 @@ class CustomerService:
             customer_id,
         )
 
-        return (
+        history = (
             self.db.query(LoyaltyPoint)
             .filter(
                 LoyaltyPoint.customer_id
@@ -1564,6 +1607,15 @@ class CustomerService:
             )
             .all()
         )
+
+        if not history:
+            return {
+                "success": True,
+                "message": "No loyalty history found for this customer",
+                "data": [],
+            }
+
+        return history
 
     def send_communication(
         self,
@@ -1794,13 +1846,22 @@ class CustomerService:
                 == customer_id
             )
 
-        return (
+        notes = (
             query
             .order_by(
                 CustomerNote.created_at.desc()
             )
             .all()
         )
+
+        if customer_id is not None and not notes:
+            return {
+                "success": True,
+                "message": "No notes found for this customer",
+                "data": [],
+            }
+
+        return notes
 
     def send_campaign(
         self,
@@ -1834,6 +1895,9 @@ class CustomerService:
                 customer_id,
             )
 
+        sent_count = 0
+        failed_count = 0
+
         for customer_id in data.customer_ids:
 
             communication = CustomerCommunication(
@@ -1844,10 +1908,14 @@ class CustomerService:
             )
 
             self.db.add(communication)
+            sent_count += 1
 
         self.db.commit()
 
         return {
+            "campaign_id": data.campaign_id,
+            "sent_count": sent_count,
+            "failed_count": failed_count,
             "message": "Campaign sent successfully",
             "total_customers": len(
                 data.customer_ids

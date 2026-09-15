@@ -22,7 +22,7 @@ def get_filtered_customers(
     query = db.query(Customer).filter(Customer.tenant_id == tenant_id)
 
     if status:
-        query = query.filter(Customer.status == status)
+        query = query.filter(func.lower(Customer.status) == status.strip().lower())
 
     if name:
         name_clean = name.strip()
@@ -46,23 +46,26 @@ def get_filtered_customers(
             )
 
     if segment:
-        if segment == "vip":
+        seg_lower = segment.strip().lower()
+        if seg_lower == "vip":
             query = query.filter(Customer.total_spend > 50000)
-        elif segment == "active":
-            query = query.filter(Customer.status == "active")
-        elif segment == "inactive":
-            query = query.filter(Customer.status == "inactive")
-        elif segment == "new":
+        elif seg_lower == "active":
+            query = query.filter(func.lower(Customer.status) == "active")
+        elif seg_lower == "inactive":
+            query = query.filter(func.lower(Customer.status) == "inactive")
+        elif seg_lower == "new":
             last_30_days = datetime.utcnow() - timedelta(days=30)
             query = query.filter(Customer.created_at >= last_30_days)
-        elif segment == "regular":
-            query = query.filter(Customer.segment == "regular")
+        elif seg_lower == "regular":
+            query = query.filter(func.lower(Customer.segment) == "regular")
 
     query = query.order_by(Customer.id.desc())
 
-    if page is not None and page_size is not None and page > 0 and page_size > 0:
-        skip = (page - 1) * page_size
-        query = query.offset(skip).limit(page_size)
+    if page is not None or page_size is not None:
+        p = page if (page is not None and page >= 1) else 1
+        ps = page_size if (page_size is not None and page_size >= 1) else 20
+        skip = (p - 1) * ps
+        query = query.offset(skip).limit(ps)
 
     return query.all()
 
@@ -104,6 +107,24 @@ def get_customer_stats(db: Session, tenant_id: int):
         .scalar()
     ) or 0
 
+    inactive_customers = (
+        db.query(func.count(Customer.id))
+        .filter(
+            Customer.tenant_id == tenant_id,
+            Customer.status == "inactive"
+        )
+        .scalar()
+    ) or 0
+
+    blocked_customers = (
+        db.query(func.count(Customer.id))
+        .filter(
+            Customer.tenant_id == tenant_id,
+            Customer.status == "blocked"
+        )
+        .scalar()
+    ) or 0
+
     now = datetime.utcnow()
     start_of_month = datetime(now.year, now.month, 1)
 
@@ -120,7 +141,30 @@ def get_customer_stats(db: Session, tenant_id: int):
         db.query(func.count(Customer.id))
         .filter(
             Customer.tenant_id == tenant_id,
-            Customer.total_spend > 50000,
+            or_(
+                Customer.segment == "vip",
+                Customer.total_spend > 50000,
+            ),
+        )
+        .scalar()
+    ) or 0
+
+    regular_customers = (
+        db.query(func.count(Customer.id))
+        .filter(
+            Customer.tenant_id == tenant_id,
+            Customer.segment == "regular",
+            Customer.total_spend <= 50000,
+        )
+        .scalar()
+    ) or 0
+
+    new_customers = (
+        db.query(func.count(Customer.id))
+        .filter(
+            Customer.tenant_id == tenant_id,
+            Customer.segment == "new",
+            Customer.total_spend <= 50000,
         )
         .scalar()
     ) or 0
@@ -134,9 +178,13 @@ def get_customer_stats(db: Session, tenant_id: int):
     return {
         "total_customers": int(total_customers),
         "active_customers": int(active_customers),
-        "total_revenue": int(total_revenue),
-        "new_this_month": int(new_this_month),
+        "inactive_customers": int(inactive_customers),
+        "blocked_customers": int(blocked_customers),
+        "new_customers": int(new_customers),
+        "regular_customers": int(regular_customers),
         "vip_customers": int(vip_customers),
+        "new_this_month": int(new_this_month),
+        "total_revenue": int(total_revenue),
     }
 
 
