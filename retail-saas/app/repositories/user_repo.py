@@ -1,5 +1,7 @@
+
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.user import User
@@ -11,8 +13,7 @@ class UserRepository:
 
     def create(self, user: User) -> User:
         self.db.add(user)
-        self.db.commit()
-        self.db.refresh(user)
+        self.db.flush()
         return user
 
     def get_by_id(
@@ -27,9 +28,7 @@ class UserRepository:
         )
 
         if tenant_id is not None:
-            query = query.filter(
-                User.tenant_id == tenant_id
-            )
+            query = query.filter(User.tenant_id == tenant_id)
 
         return query.first()
 
@@ -38,18 +37,18 @@ class UserRepository:
         email: str,
         tenant_id: Optional[int] = None,
     ) -> Optional[User]:
-        email = email.strip().lower()
+        email = email.strip()
 
         query = (
             self.db.query(User)
             .options(joinedload(User.role))
-            .filter(User.email == email)
+            .filter(
+                func.binary(User.email) == func.binary(email)
+            )
         )
 
         if tenant_id is not None:
-            query = query.filter(
-                User.tenant_id == tenant_id
-            )
+            query = query.filter(User.tenant_id == tenant_id)
 
         return query.first()
 
@@ -57,51 +56,29 @@ class UserRepository:
         self,
         tenant_id: int,
         skip: int = 0,
-        limit: int = 20,
-        include_inactive: bool = False,
-    ) -> list[User]:
-        query = (
+        limit: int = 100,
+    ):
+        return (
             self.db.query(User)
             .options(joinedload(User.role))
-            .filter(
-                User.tenant_id == tenant_id
-            )
-        )
-
-        if not include_inactive:
-            query = query.filter(
-                User.is_active.is_(True)
-            )
-
-        return (
-            query
-            .order_by(User.id.desc())
+            .filter(User.tenant_id == tenant_id)
             .offset(skip)
             .limit(limit)
             .all()
         )
 
     def update(self, user: User) -> User:
-        self.db.commit()
-        self.db.refresh(user)
+        self.db.add(user)
+        self.db.flush()
         return user
 
     def delete(self, user: User) -> None:
-        user.is_active = False
-        self.db.commit()
+        self.db.delete(user)
+        self.db.flush()
 
-    def count(
-        self,
-        tenant_id: int,
-        include_inactive: bool = False,
-    ) -> int:
-        query = self.db.query(User).filter(
-            User.tenant_id == tenant_id
+    def count(self, tenant_id: int) -> int:
+        return (
+            self.db.query(User)
+            .filter(User.tenant_id == tenant_id)
+            .count()
         )
-
-        if not include_inactive:
-            query = query.filter(
-                User.is_active.is_(True)
-            )
-
-        return query.count()
