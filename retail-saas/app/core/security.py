@@ -185,18 +185,13 @@ def is_token_blacklisted(
     if not jti:
         return False
 
-    try:
-        redis = get_redis()
+    redis = get_redis()
 
-        return bool(
-            redis.exists(
-                f"auth:blacklist:{jti}"
-            )
+    return bool(
+        redis.exists(
+            f"auth:blacklist:{jti}"
         )
-    except Exception as exc:
-        raise UnauthorizedException(
-            "Authentication service is temporarily unavailable"
-        ) from exc
+    )
 
 
 def blacklist_token(
@@ -210,29 +205,23 @@ def blacklist_token(
     if not jti or not exp:
         return
 
-    try:
-        expires_at = int(exp)
-        now = int(
-            datetime.now(timezone.utc).timestamp()
-        )
+    expires_at = int(exp)
+    now = int(
+        datetime.now(timezone.utc).timestamp()
+    )
 
-        ttl = expires_at - now
+    ttl = expires_at - now
 
-        if ttl <= 0:
-            return
+    if ttl <= 0:
+        return
 
-        redis = get_redis()
+    redis = get_redis()
 
-        redis.setex(
-            f"auth:blacklist:{jti}",
-            ttl,
-            "1",
-        )
-
-    except Exception as exc:
-        raise UnauthorizedException(
-            "Authentication service is temporarily unavailable"
-        ) from exc
+    redis.setex(
+        f"auth:blacklist:{jti}",
+        ttl,
+        "1",
+    )
 
 
 def get_current_user(
