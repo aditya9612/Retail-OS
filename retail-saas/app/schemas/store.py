@@ -1,5 +1,6 @@
 import re
 from typing import Optional
+
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
@@ -19,8 +20,8 @@ class StoreCreate(BaseModel):
     def validate_name(cls, v: str) -> str:
         clean_name = v.strip()
 
-        if not re.fullmatch(r"^[a-zA-Z0-9\s]+$", clean_name):
-            raise ValueError("Name must contain only letters and numbers")
+        if not re.fullmatch(r"^[a-zA-Z\s]+$", clean_name):
+            raise ValueError("Name must contain only letters")
 
         return clean_name
 
@@ -95,7 +96,9 @@ class StoreCreate(BaseModel):
         clean_code = v.strip().upper()
 
         if not re.fullmatch(r"^[A-Z0-9_-]+$", clean_code):
-            raise ValueError("Store code must contain only letters and numbers")
+            raise ValueError(
+                "Store code must contain only letters and numbers"
+            )
 
         return clean_code
 
@@ -109,7 +112,7 @@ class StoreCreate(BaseModel):
 
         if not re.fullmatch(
             r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$",
-            clean_gst
+            clean_gst,
         ):
             raise ValueError("Invalid GSTIN format")
 
@@ -127,25 +130,12 @@ class StoreUpdate(BaseModel):
     is_active: Optional[bool] = None
     is_warehouse: Optional[bool] = None
 
-    @field_validator("phone")
-    @classmethod
-    def validate_update_phone(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return None
-        return StoreCreate.validate_phone(v)
-
-    @field_validator("pincode")
-    @classmethod
-    def validate_update_pincode(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return None
-        return StoreCreate.validate_pincode(v)
-
     @field_validator("name")
     @classmethod
     def validate_update_name(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return None
+
         return StoreCreate.validate_name(v)
 
     @field_validator("address")
@@ -153,7 +143,49 @@ class StoreUpdate(BaseModel):
     def validate_update_address(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return None
+
         return StoreCreate.validate_address(v)
+
+    @field_validator("phone")
+    @classmethod
+    def validate_update_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+
+        return StoreCreate.validate_phone(v)
+
+    @field_validator("pincode")
+    @classmethod
+    def validate_update_pincode(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+
+        return StoreCreate.validate_pincode(v)
+
+    @field_validator("city", "state")
+    @classmethod
+    def validate_update_text(cls, v: Optional[str], info) -> Optional[str]:
+        if v is None:
+            return None
+
+        clean_val = v.strip()
+
+        if not re.fullmatch(r"^[a-zA-Z\s]+$", clean_val):
+            raise ValueError(
+                f"{info.field_name.capitalize()} must contain only letters"
+            )
+
+        return clean_val
+
+    @field_validator("gstin")
+    @classmethod
+    def validate_update_gstin(
+        cls, v: Optional[str]
+    ) -> Optional[str]:
+        if v is None:
+            return None
+
+        return StoreCreate.validate_gstin(v)
 
 
 class StoreResponse(BaseModel):
