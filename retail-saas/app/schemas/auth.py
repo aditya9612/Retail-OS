@@ -1,114 +1,51 @@
-from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, TypeAdapter, field_validator
-
-
-email_adapter = TypeAdapter(EmailStr)
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 def normalize_email(value: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError(
-            "Email must be a string"
-        )
-
     value = value.strip()
 
     if not value:
-        raise ValueError(
-            "Email is required"
-        )
-
-    if len(value) > 254:
-        raise ValueError(
-            "Email must not exceed 254 characters"
-        )
+        raise ValueError("Email address is required")
 
     try:
-        normalized = str(
-            email_adapter.validate_python(value)
-        )
+        normalized = str(EmailStr(value))
     except Exception as exc:
-        raise ValueError(
-            "Invalid email address"
-        ) from exc
+        raise ValueError("Invalid email address") from exc
 
-    return normalized.lower()
+    return normalized
 
 
 def validate_password_value(value: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError(
-            "Password must be a string"
-        )
-
     if not value:
-        raise ValueError(
-            "Password is required"
-        )
-
-    if not value.strip():
-        raise ValueError(
-            "Password cannot contain only whitespace"
-        )
+        raise ValueError("Password is required")
 
     if len(value) < 8:
-        raise ValueError(
-            "Password must be at least 8 characters"
-        )
+        raise ValueError("Password must be at least 8 characters")
 
-    if len(value) > 100:
-        raise ValueError(
-            "Password must not exceed 100 characters"
-        )
+    if len(value) > 128:
+        raise ValueError("Password must not exceed 128 characters")
 
-    if not any(
-        character.isupper()
-        for character in value
-    ):
-        raise ValueError(
-            "Password must contain at least one uppercase letter"
-        )
+    if not any(char.isupper() for char in value):
+        raise ValueError("Password must contain at least one uppercase letter")
 
-    if not any(
-        character.islower()
-        for character in value
-    ):
-        raise ValueError(
-            "Password must contain at least one lowercase letter"
-        )
+    if not any(char.islower() for char in value):
+        raise ValueError("Password must contain at least one lowercase letter")
 
-    if not any(
-        character.isdigit()
-        for character in value
-    ):
-        raise ValueError(
-            "Password must contain at least one number"
-        )
+    if not any(char.isdigit() for char in value):
+        raise ValueError("Password must contain at least one digit")
 
-    if not any(
-        not character.isalnum()
-        for character in value
-    ):
-        raise ValueError(
-            "Password must contain at least one special character"
-        )
+    if not any(not char.isalnum() for char in value):
+        raise ValueError("Password must contain at least one special character")
 
     return value
 
 
 class LoginRequest(BaseModel):
-    email: str = Field(
-        min_length=5,
-        max_length=254,
-        description="Email address.",
-    )
+    model_config = ConfigDict(str_strip_whitespace=True)
 
-    password: str = Field(
-        min_length=8,
-        max_length=100,
-        description="Password.",
-    )
+    email: str
+    password: str
 
     @field_validator("email")
     @classmethod
@@ -121,114 +58,32 @@ class LoginRequest(BaseModel):
         return validate_password_value(value)
 
 
+class RefreshRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    refresh_token: str
+
+    @field_validator("refresh_token")
+    @classmethod
+    def validate_refresh_token(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Refresh token is required")
+
+        return value
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
 
 
-class RefreshRequest(BaseModel):
-    refresh_token: str = Field(
-        min_length=10,
-        description="Refresh token is required.",
-    )
-
-    @field_validator("refresh_token")
-    @classmethod
-    def validate_refresh_token(
-        cls,
-        value: str,
-    ) -> str:
-        value = value.strip()
-
-        if not value:
-            raise ValueError(
-                "Refresh token is required"
-            )
-
-        return value
-
-
-class TokenPayload(BaseModel):
-    sub: int
-    tenant_id: int | None
-    role: str
-    exp: datetime
-
-
-class LogoutRequest(BaseModel):
-    token: str = Field(
-        min_length=20,
-        max_length=500,
-        description="Access or refresh token.",
-    )
-
-    @field_validator("token")
-    @classmethod
-    def validate_token(cls, value: str) -> str:
-        value = value.strip()
-
-        if not value:
-            raise ValueError(
-                "Token is required"
-            )
-
-        return value
-
-
-class ChangePasswordRequest(BaseModel):
-    old_password: str = Field(
-        min_length=8,
-        max_length=100,
-    )
-
-    new_password: str = Field(
-        min_length=8,
-        max_length=100,
-    )
-
-    confirm_password: str = Field(
-        min_length=8,
-        max_length=100,
-    )
-
-    @field_validator(
-        "old_password",
-        "new_password",
-        "confirm_password",
-    )
-    @classmethod
-    def validate_password(cls, value: str) -> str:
-        return validate_password_value(value)
-
-    @field_validator("confirm_password")
-    @classmethod
-    def validate_confirmation(
-        cls,
-        value: str,
-        info,
-    ) -> str:
-        new_password = info.data.get(
-            "new_password"
-        )
-
-        if (
-            new_password is not None
-            and value != new_password
-        ):
-            raise ValueError(
-                "New password and confirm password must match"
-            )
-
-        return value
-
-
 class ForgotPasswordRequest(BaseModel):
-    email: str = Field(
-        min_length=5,
-        max_length=254,
-        description="Registered user email address.",
-    )
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    email: str
 
     @field_validator("email")
     @classmethod
@@ -237,15 +92,10 @@ class ForgotPasswordRequest(BaseModel):
 
 
 class VerifyOTPRequest(BaseModel):
-    email: str = Field(
-        min_length=5,
-        max_length=254,
-    )
+    model_config = ConfigDict(str_strip_whitespace=True)
 
-    otp: str = Field(
-        min_length=6,
-        max_length=6,
-    )
+    email: str
+    otp: str = Field(min_length=6, max_length=6)
 
     @field_validator("email")
     @classmethod
@@ -255,31 +105,17 @@ class VerifyOTPRequest(BaseModel):
     @field_validator("otp")
     @classmethod
     def validate_otp(cls, value: str) -> str:
-        value = value.strip()
-
         if not value.isdigit():
-            raise ValueError(
-                "OTP must contain only digits"
-            )
-
-        if len(value) != 6:
-            raise ValueError(
-                "OTP must be exactly 6 digits"
-            )
+            raise ValueError("OTP must contain only digits")
 
         return value
 
 
 class ResetPasswordRequest(BaseModel):
-    token: str = Field(
-        min_length=20,
-        max_length=500,
-    )
+    model_config = ConfigDict(str_strip_whitespace=True)
 
-    new_password: str = Field(
-        min_length=8,
-        max_length=100,
-    )
+    token: str
+    new_password: str
 
     @field_validator("token")
     @classmethod
@@ -287,13 +123,40 @@ class ResetPasswordRequest(BaseModel):
         value = value.strip()
 
         if not value:
-            raise ValueError(
-                "Reset token is required"
-            )
+            raise ValueError("Reset token is required")
 
         return value
 
     @field_validator("new_password")
     @classmethod
-    def validate_password(cls, value: str) -> str:
+    def validate_new_password(cls, value: str) -> str:
         return validate_password_value(value)
+
+
+class ChangePasswordRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    old_password: str
+    new_password: str
+    confirm_password: str
+
+    @field_validator("old_password")
+    @classmethod
+    def validate_old_password(cls, value: str) -> str:
+        if not value:
+            raise ValueError("Current password is required")
+
+        return value
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        return validate_password_value(value)
+
+    @field_validator("confirm_password")
+    @classmethod
+    def validate_confirm_password(cls, value: str) -> str:
+        if not value:
+            raise ValueError("Confirm password is required")
+
+        return value
