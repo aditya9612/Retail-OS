@@ -172,7 +172,7 @@ def create_staff(
     ),
     db: Session = Depends(get_db),
 ):
-    return create_employee_service(
+    return create_staff_service(
         db,
         store_id,
         data,
@@ -190,7 +190,7 @@ def list_staff(
     ),
     db: Session = Depends(get_db),
 ):
-    return list_employee_service(
+    return list_staff_service(
         db,
         store_id,
     )
@@ -208,7 +208,7 @@ def get_staff(
     ),
     db: Session = Depends(get_db),
 ):
-    return get_employee_service(
+    return get_staff_service(
         db,
         store_id,
         staff_id,
@@ -228,7 +228,7 @@ def patch_staff(
     ),
     db: Session = Depends(get_db),
 ):
-    return update_employee_service(
+    return update_staff_service(
         db,
         store_id,
         staff_id,
@@ -247,7 +247,7 @@ def delete_staff(
     ),
     db: Session = Depends(get_db),
 ):
-    return delete_employee_service(
+    return delete_staff_service(
         db,
         store_id,
         staff_id,
