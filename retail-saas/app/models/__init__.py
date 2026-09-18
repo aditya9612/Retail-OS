@@ -16,6 +16,9 @@ from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
 from app.models.purchase_order_return import PurchaseOrderReturn, PurchaseOrderReturnItem
 from app.models.review import Review
 from app.models.delivery import Delivery
+from app.models.delivery_method import DeliveryMethod
+from app.models.delivery_zone import DeliveryZone
+from app.models.delivery_partner import DeliveryPartner
 from app.models.password_reset_token import PasswordResetToken
 from app.models.product import Product, ProductImage
 from app.models.refund import Refund
@@ -58,6 +61,9 @@ __all__ = [
     "PurchaseOrderReturnItem",
     "Review",
     "Delivery",
+    "DeliveryMethod",
+    "DeliveryZone",
+    "DeliveryPartner",
     "PasswordResetToken",
     "Product",
     "ProductImage",
