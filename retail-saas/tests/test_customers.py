@@ -763,33 +763,44 @@ def test_customer_notes_and_created_by(tenant_a, tenant_b):
 def test_export_directory_parameters(tenant_a):
     headers, _ = tenant_a
 
-    # Default request succeeds
-    resp = client.get("/api/v1/customers/export-directory", headers=headers)
-    assert resp.status_code == 200
-    assert resp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    # Missing parameters must return 422
+    assert client.get("/api/v1/customers/export-directory", headers=headers).status_code == 422
+    assert client.get("/api/v1/customers/export-directory", params={"status": "all"}, headers=headers).status_code == 422
+    assert client.get("/api/v1/customers/export-directory", params={"format": "excel"}, headers=headers).status_code == 422
+    assert client.get("/api/v1/customers/export-directory", params={"format": "pdf"}, headers=headers).status_code == 422
 
-    # PDF format succeeds
-    resp_pdf = client.get("/api/v1/customers/export-directory", params={"format": "pdf"}, headers=headers)
-    assert resp_pdf.status_code == 200
-    assert resp_pdf.headers["content-type"] == "application/pdf"
+    # Valid combinations succeed
+    resp_all_excel = client.get("/api/v1/customers/export-directory", params={"status": "all", "format": "excel"}, headers=headers)
+    assert resp_all_excel.status_code == 200
+    assert resp_all_excel.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    resp_act_excel = client.get("/api/v1/customers/export-directory", params={"status": "active", "format": "excel"}, headers=headers)
+    assert resp_act_excel.status_code == 200
+    assert resp_act_excel.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    resp_inact_pdf = client.get("/api/v1/customers/export-directory", params={"status": "inactive", "format": "pdf"}, headers=headers)
+    assert resp_inact_pdf.status_code == 200
+    assert resp_inact_pdf.headers["content-type"] == "application/pdf"
 
     # Explicit empty parameter rejected
-    resp_empty = client.get("/api/v1/customers/export-directory", params={"status": ""}, headers=headers)
+    resp_empty = client.get("/api/v1/customers/export-directory", params={"status": "", "format": "excel"}, headers=headers)
     assert resp_empty.status_code == 422
 
-    resp_ws = client.get("/api/v1/customers/export-directory", params={"status": "   "}, headers=headers)
+    resp_ws = client.get("/api/v1/customers/export-directory", params={"status": "   ", "format": "excel"}, headers=headers)
     assert resp_ws.status_code == 422
 
-    resp_fmt_empty = client.get("/api/v1/customers/export-directory", params={"format": ""}, headers=headers)
+    resp_fmt_empty = client.get("/api/v1/customers/export-directory", params={"status": "all", "format": ""}, headers=headers)
     assert resp_fmt_empty.status_code == 422
 
-    resp_fmt_ws = client.get("/api/v1/customers/export-directory", params={"format": "   "}, headers=headers)
+    resp_fmt_ws = client.get("/api/v1/customers/export-directory", params={"status": "all", "format": "   "}, headers=headers)
     assert resp_fmt_ws.status_code == 422
 
     # Invalid status & format
-    assert client.get("/api/v1/customers/export-directory", params={"status": "abc"}, headers=headers).status_code == 422
-    assert client.get("/api/v1/customers/export-directory", params={"format": "csv"}, headers=headers).status_code == 422
-    assert client.get("/api/v1/customers/export-directory", params={"format": "word"}, headers=headers).status_code == 422
+    assert client.get("/api/v1/customers/export-directory", params={"status": "abc", "format": "excel"}, headers=headers).status_code == 422
+    assert client.get("/api/v1/customers/export-directory", params={"status": "pending", "format": "excel"}, headers=headers).status_code == 422
+    assert client.get("/api/v1/customers/export-directory", params={"status": "all", "format": "csv"}, headers=headers).status_code == 422
+    assert client.get("/api/v1/customers/export-directory", params={"status": "all", "format": "word"}, headers=headers).status_code == 422
+    assert client.get("/api/v1/customers/export-directory", params={"status": "all", "format": "xlsx"}, headers=headers).status_code == 422
 
 
 def test_update_customer_validation(tenant_a, tenant_b):

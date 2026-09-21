@@ -5,6 +5,7 @@ from io import BytesIO
 
 from openpyxl import Workbook
 from sqlalchemy import extract, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
@@ -844,12 +845,14 @@ class OrderService:
                 "message": "No orders found for this customer",
                 "customer_id": customer_id,
                 "orders": [],
+                "data": [],
             }
         return {
             "success": True,
             "message": "Orders retrieved successfully",
             "customer_id": customer_id,
             "orders": [OrderResponse.model_validate(o) for o in orders],
+            "data": [OrderResponse.model_validate(o) for o in orders],
         }
 
 
@@ -876,28 +879,26 @@ class CustomerService:
                 self.db.query(Customer)
                 .filter(
                     Customer.email == email_val,
-                    Customer.tenant_id == tenant_id,
                 )
                 .first()
             )
 
             if existing_email:
                 raise ConflictException(
-                    "Email already exists"
+                    "Customer with this email already exists"
                 )
 
         existing_phone = (
             self.db.query(Customer)
             .filter(
                 Customer.phone == data.phone,
-                Customer.tenant_id == tenant_id,
             )
             .first()
         )
 
         if existing_phone:
             raise ConflictException(
-                "Phone number already exists"
+                "Customer with this phone number already exists"
             )
 
         if data.gstin:
@@ -932,9 +933,26 @@ class CustomerService:
             **customer_data,
         )
 
-        self.db.add(customer)
-        self.db.commit()
-        self.db.refresh(customer)
+        try:
+            self.db.add(customer)
+            self.db.commit()
+            self.db.refresh(customer)
+        except IntegrityError as exc:
+            self.db.rollback()
+            err_msg = str(exc).lower()
+            if "ix_customers_phone" in err_msg or "customers.phone" in err_msg or "phone" in err_msg:
+                raise ConflictException(
+                    "Customer with this phone number already exists"
+                )
+            if "ix_customers_email" in err_msg or "customers.email" in err_msg or "email" in err_msg:
+                raise ConflictException(
+                    "Customer with this email already exists"
+                )
+            if "gstin" in err_msg:
+                raise ConflictException(
+                    "GSTIN already exists"
+                )
+            raise
 
         return customer
 
@@ -1001,7 +1019,6 @@ class CustomerService:
                 self.db.query(Customer)
                 .filter(
                     Customer.email == email_val,
-                    Customer.tenant_id == tenant_id,
                     Customer.id != customer_id,
                 )
                 .first()
@@ -1009,7 +1026,7 @@ class CustomerService:
 
             if existing_email:
                 raise ConflictException(
-                    "Email already exists"
+                    "Customer with this email already exists"
                 )
 
             dump_data["email"] = email_val
@@ -1020,7 +1037,6 @@ class CustomerService:
                 self.db.query(Customer)
                 .filter(
                     Customer.phone == dump_data["phone"],
-                    Customer.tenant_id == tenant_id,
                     Customer.id != customer_id,
                 )
                 .first()
@@ -1028,7 +1044,7 @@ class CustomerService:
 
             if existing_phone:
                 raise ConflictException(
-                    "Phone number already exists"
+                    "Customer with this phone number already exists"
                 )
 
         if "gstin" in dump_data and dump_data["gstin"]:
@@ -1055,8 +1071,25 @@ class CustomerService:
                 value,
             )
 
-        self.db.commit()
-        self.db.refresh(customer)
+        try:
+            self.db.commit()
+            self.db.refresh(customer)
+        except IntegrityError as exc:
+            self.db.rollback()
+            err_msg = str(exc).lower()
+            if "ix_customers_phone" in err_msg or "customers.phone" in err_msg or "phone" in err_msg:
+                raise ConflictException(
+                    "Customer with this phone number already exists"
+                )
+            if "ix_customers_email" in err_msg or "customers.email" in err_msg or "email" in err_msg:
+                raise ConflictException(
+                    "Customer with this email already exists"
+                )
+            if "gstin" in err_msg:
+                raise ConflictException(
+                    "GSTIN already exists"
+                )
+            raise
 
         return customer
 
@@ -1180,9 +1213,13 @@ class CustomerService:
             suggestions=data.suggestions,
         )
 
-        self.db.add(feedback)
-        self.db.commit()
-        self.db.refresh(feedback)
+        try:
+            self.db.add(feedback)
+            self.db.commit()
+            self.db.refresh(feedback)
+        except IntegrityError:
+            self.db.rollback()
+            raise
 
         return feedback
 
@@ -1261,9 +1298,20 @@ class CustomerService:
                 current_balance=Decimal("0.00"),
             )
 
-            self.db.add(wallet)
-            self.db.commit()
-            self.db.refresh(wallet)
+            try:
+                self.db.add(wallet)
+                self.db.commit()
+                self.db.refresh(wallet)
+            except IntegrityError:
+                self.db.rollback()
+                wallet = (
+                    self.db.query(CustomerWallet)
+                    .filter(
+                        CustomerWallet.customer_id
+                        == customer.id
+                    )
+                    .first()
+                )
 
         return wallet
 
@@ -1324,11 +1372,19 @@ class CustomerService:
             remarks=data.remarks,
         )
 
-        self.db.add(transaction)
-        self.db.commit()
-
-        self.db.refresh(wallet)
-        self.db.refresh(transaction)
+        try:
+            self.db.add(transaction)
+            self.db.commit()
+            self.db.refresh(wallet)
+            self.db.refresh(transaction)
+        except IntegrityError as exc:
+            self.db.rollback()
+            err_msg = str(exc).lower()
+            if "reference_no" in err_msg or "unique" in err_msg:
+                raise ConflictException(
+                    "Reference number already exists"
+                )
+            raise
 
         return {
             "id": transaction.id,
@@ -1408,10 +1464,19 @@ class CustomerService:
             remarks=data.remarks,
         )
 
-        self.db.add(transaction)
-        self.db.commit()
-
-        self.db.refresh(wallet)
+        try:
+            self.db.add(transaction)
+            self.db.commit()
+            self.db.refresh(wallet)
+            self.db.refresh(transaction)
+        except IntegrityError as exc:
+            self.db.rollback()
+            err_msg = str(exc).lower()
+            if "reference_no" in err_msg or "unique" in err_msg:
+                raise ConflictException(
+                    "Reference number already exists"
+                )
+            raise
         self.db.refresh(transaction)
 
         return {
@@ -1510,9 +1575,13 @@ class CustomerService:
             balance_points=new_balance,
         )
 
-        self.db.add(loyalty)
-        self.db.commit()
-        self.db.refresh(loyalty)
+        try:
+            self.db.add(loyalty)
+            self.db.commit()
+            self.db.refresh(loyalty)
+        except IntegrityError:
+            self.db.rollback()
+            raise
 
         return loyalty
 
@@ -1549,9 +1618,13 @@ class CustomerService:
             balance_points=new_balance,
         )
 
-        self.db.add(loyalty)
-        self.db.commit()
-        self.db.refresh(loyalty)
+        try:
+            self.db.add(loyalty)
+            self.db.commit()
+            self.db.refresh(loyalty)
+        except IntegrityError:
+            self.db.rollback()
+            raise
 
         return loyalty
 
@@ -1641,9 +1714,13 @@ class CustomerService:
             delivery_status="SENT",
         )
 
-        self.db.add(communication)
-        self.db.commit()
-        self.db.refresh(communication)
+        try:
+            self.db.add(communication)
+            self.db.commit()
+            self.db.refresh(communication)
+        except IntegrityError:
+            self.db.rollback()
+            raise
 
         return communication
 
@@ -1768,9 +1845,18 @@ class CustomerService:
             ),
         )
 
-        self.db.add(referral)
-        self.db.commit()
-        self.db.refresh(referral)
+        try:
+            self.db.add(referral)
+            self.db.commit()
+            self.db.refresh(referral)
+        except IntegrityError as exc:
+            self.db.rollback()
+            err_msg = str(exc).lower()
+            if "referral_code" in err_msg or "unique" in err_msg:
+                raise ConflictException(
+                    "Referral already exists for this customer"
+                )
+            raise
 
         return referral
 
@@ -1810,9 +1896,13 @@ class CustomerService:
             created_by=user_id,
         )
 
-        self.db.add(note)
-        self.db.commit()
-        self.db.refresh(note)
+        try:
+            self.db.add(note)
+            self.db.commit()
+            self.db.refresh(note)
+        except IntegrityError:
+            self.db.rollback()
+            raise
 
         return note
 

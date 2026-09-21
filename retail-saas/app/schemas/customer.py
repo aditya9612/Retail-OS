@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, Literal
+from enum import Enum
+from typing import Optional, Literal, Any
 import re
 
 from pydantic import (
@@ -12,6 +13,18 @@ from pydantic import (
     model_validator,
 )
 from app.schemas.order import OrderResponse
+
+
+class CustomerExportStatus(str, Enum):
+    all = "all"
+    active = "active"
+    inactive = "inactive"
+
+
+class CustomerExportFormat(str, Enum):
+    excel = "excel"
+    pdf = "pdf"
+
 
 def validate_phone_number(v: str) -> str:
     if not isinstance(v, str):
@@ -39,6 +52,9 @@ def validate_customer_name(v: str) -> str:
 
     if len(v) < 2 or len(v) > 255:
         raise ValueError("Name must be between 2 and 255 characters")
+
+    if v.lower() in {"string", "null", "none", "undefined", "-----", "@#$%%"}:
+        raise ValueError(f"Name cannot be placeholder '{v}'")
 
     if not any(c.isalpha() for c in v):
         raise ValueError(
@@ -96,9 +112,9 @@ def validate_meaningful_text(
             f"{min_length} and {max_length} characters"
         )
 
-    if v.lower() == "string":
+    if v.lower() in {"string", "null", "none", "undefined", "-----", "@#$%%"}:
         raise ValueError(
-            f"{field_name} cannot be placeholder 'string'"
+            f"{field_name} cannot be placeholder '{v}'"
         )
 
     dangerous_patterns = [
@@ -153,6 +169,9 @@ def validate_address(v: Optional[str]) -> Optional[str]:
             "Address cannot be empty or whitespace"
         )
 
+    if v.lower() in {"string", "null", "none", "undefined", "-----", "@#$%%"}:
+        raise ValueError(f"Address cannot be placeholder '{v}'")
+
     return v
 
 
@@ -177,6 +196,7 @@ class CustomerOrdersResponse(BaseModel):
     message: str
     customer_id: int
     orders: list[OrderResponse] = Field(default_factory=list)
+    data: list[OrderResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -281,6 +301,12 @@ class CustomerBase(BaseModel):
 
 class CustomerCreate(CustomerBase):
 
+    address: str = Field(
+        ...,
+        max_length=500,
+        description="Address is required and cannot be null",
+    )
+
     birthday: Optional[date] = Field(
         default=None,
         description=(
@@ -298,10 +324,17 @@ class CustomerCreate(CustomerBase):
                 "Address is required and cannot be null"
             )
 
-        if isinstance(v, str) and not v.strip():
-            raise ValueError(
-                "Address cannot be empty or whitespace"
-            )
+        if isinstance(v, str):
+            v_strip = v.strip()
+            if not v_strip:
+                raise ValueError(
+                    "Address cannot be empty or whitespace"
+                )
+            if v_strip.lower() in {"string", "null", "none", "undefined", "-----", "@#$%%"}:
+                raise ValueError(
+                    f"Address cannot be placeholder '{v}'"
+                )
+            return v_strip
 
         return v
 
@@ -312,8 +345,15 @@ class CustomerCreate(CustomerBase):
         if v is None:
             return None
 
-        if isinstance(v, str) and not v.strip():
-            return None
+        if isinstance(v, str):
+            v_strip = v.strip()
+            if not v_strip:
+                return None
+            if v_strip.lower() in {"string", "null", "none", "undefined", "-----", "@#$%%"}:
+                raise ValueError(
+                    f"Birthday cannot be placeholder '{v}'"
+                )
+            return v_strip
 
         return v
 
@@ -383,9 +423,9 @@ class CustomerUpdate(BaseModel):
                 "Name cannot be empty or whitespace"
             )
 
-        if v.lower() == "string":
+        if v.lower() in {"string", "null", "none", "undefined", "-----", "@#$%%"}:
             raise ValueError(
-                "Name cannot be placeholder 'string'"
+                f"Name cannot be placeholder '{v}'"
             )
 
         return v
@@ -423,9 +463,9 @@ class CustomerUpdate(BaseModel):
                 "Phone cannot be empty or whitespace"
             )
 
-        if v.lower() == "string":
+        if v.lower() in {"string", "null", "none", "undefined", "-----", "@#$%%"}:
             raise ValueError(
-                "Phone cannot be placeholder 'string'"
+                f"Phone cannot be placeholder '{v}'"
             )
 
         return v
@@ -463,9 +503,9 @@ class CustomerUpdate(BaseModel):
                 "Address cannot be empty or whitespace"
             )
 
-        if v.lower() == "string":
+        if v.lower() in {"string", "null", "none", "undefined", "-----", "@#$%%"}:
             raise ValueError(
-                "Address cannot be placeholder 'string'"
+                f"Address cannot be placeholder '{v}'"
             )
 
         return v
@@ -493,9 +533,9 @@ class CustomerUpdate(BaseModel):
             v_strip = v.strip()
             if not v_strip:
                 return None
-            if v_strip.lower() == "string":
+            if v_strip.lower() in {"string", "null", "none", "undefined", "-----", "@#$%%"}:
                 raise ValueError(
-                    "Birthday cannot be placeholder 'string'"
+                    f"Birthday cannot be placeholder '{v}'"
                 )
             return v_strip
 
@@ -534,9 +574,9 @@ class CustomerUpdate(BaseModel):
                 "Email cannot be empty or whitespace"
             )
 
-        if v.lower() == "string":
+        if v.lower() in {"string", "null", "none", "undefined", "-----", "@#$%%"}:
             raise ValueError(
-                "Email cannot be placeholder 'string'"
+                f"Email cannot be placeholder '{v}'"
             )
 
         return v
@@ -562,9 +602,9 @@ class CustomerUpdate(BaseModel):
                 "GSTIN cannot be empty or whitespace"
             )
 
-        if v.lower() == "string":
+        if v.lower() in {"string", "null", "none", "undefined", "-----", "@#$%%"}:
             raise ValueError(
-                "GSTIN cannot be placeholder 'string'"
+                f"GSTIN cannot be placeholder '{v}'"
             )
 
         return v
@@ -822,9 +862,12 @@ class WalletOperationBase(BaseModel):
         description="Remarks must be meaningful text"
     )
 
-    @field_validator("reference_no")
+    @field_validator("reference_no", mode="before")
     @classmethod
-    def validate_reference(cls, v: str) -> str:
+    def validate_reference(cls, v: Any) -> str:
+        if v is None:
+            raise ValueError("Reference number is required and cannot be null")
+
         if not isinstance(v, str):
             raise ValueError("Reference number must be a string")
 
@@ -833,8 +876,11 @@ class WalletOperationBase(BaseModel):
         if not v:
             raise ValueError("Reference number cannot be empty or whitespace")
 
-        if v.lower() == "string":
-            raise ValueError("Reference number cannot be placeholder 'string'")
+        if v.lower() in {"string", "null", "none", "undefined"}:
+            raise ValueError(f"Reference number cannot be placeholder '{v}'")
+
+        if re.fullmatch(r"^0+$", v) or (re.fullmatch(r"^[0_-]+$", v) and not any(c.isalpha() or c in '123456789' for c in v)):
+            raise ValueError("Reference number cannot be zero or all zeros")
 
         if not re.fullmatch(r"^[A-Za-z0-9_-]{2,100}$", v):
             raise ValueError("Reference number contains invalid characters")
@@ -1419,3 +1465,39 @@ class CustomerStatusUpdate(BaseModel):
         "inactive",
         "blocked"
     ]
+
+
+class CustomerListResponse(BaseModel):
+    success: bool = True
+    message: str
+    data: list[CustomerResponse] = Field(default_factory=list)
+
+
+class CustomerReferralListResponse(BaseModel):
+    success: bool = True
+    message: str
+    data: list[ReferralResponse] = Field(default_factory=list)
+
+
+class CustomerCommunicationListResponse(BaseModel):
+    success: bool = True
+    message: str
+    data: list[CommunicationResponse] = Field(default_factory=list)
+
+
+class TopCustomerListResponse(BaseModel):
+    success: bool = True
+    message: str
+    data: list[TopCustomerResponse] = Field(default_factory=list)
+
+
+class LifetimeValueListResponse(BaseModel):
+    success: bool = True
+    message: str
+    data: list[LifetimeValueResponse] = Field(default_factory=list)
+
+
+class LoyaltyReportListResponse(BaseModel):
+    success: bool = True
+    message: str
+    data: list[LoyaltyReportResponse] = Field(default_factory=list)

@@ -13,6 +13,8 @@ from app.schemas.customer import (
     CustomerResponse,
     CustomerStatsResponse,
     CustomerUpdate,
+    CustomerExportStatus,
+    CustomerExportFormat,
     MessageResponse,
     CustomerFeedbackCreate,
     CustomerFeedbackResponse,
@@ -40,6 +42,12 @@ from app.schemas.customer import (
     LifetimeValueResponse,
     LoyaltyReportResponse,
     CustomerStatusUpdate,
+    CustomerListResponse,
+    CustomerReferralListResponse,
+    CustomerCommunicationListResponse,
+    TopCustomerListResponse,
+    LifetimeValueListResponse,
+    LoyaltyReportListResponse,
 )
 from app.services.customer_service import (
     fetch_customers,
@@ -281,28 +289,38 @@ def create_referral(
 
 @router.get(
     "/referrals",
-    response_model=list[ReferralResponse],
+    response_model=CustomerReferralListResponse,
 )
 def get_referrals(
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_referrals(
+    referrals = CustomerService(db).get_referrals(
         user.tenant_id,
     )
+    return {
+        "success": True,
+        "message": "Referrals retrieved successfully" if referrals else "No referrals found",
+        "data": referrals,
+    }
 
 
 @router.get(
     "/communications",
-    response_model=list[CommunicationResponse],
+    response_model=CustomerCommunicationListResponse,
 )
 def get_communications(
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_communications(
+    comms = CustomerService(db).get_communications(
         user.tenant_id,
     )
+    return {
+        "success": True,
+        "message": "Communications retrieved successfully" if comms else "No communications found",
+        "data": comms,
+    }
 
 
 @router.post(
@@ -353,42 +371,26 @@ def get_notes_by_customer_id(
 
 @router.get("/export-directory")
 def export_directory(
-    status: Optional[str] = Query(
-        "all",
-        pattern=r"^(all|active|inactive)$"
+    status: CustomerExportStatus = Query(
+        ...,
+        description="Customer status filter (required: 'all', 'active', 'inactive')"
     ),
-    format: Optional[str] = Query(
-        "excel",
-        pattern=r"^(excel|pdf)$"
+    format: CustomerExportFormat = Query(
+        ...,
+        description="Export format (required: 'excel', 'pdf')"
     ),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db)
 ):
-    if status is not None:
-        status_clean = status.strip().lower()
-        if not status_clean or status_clean not in ("all", "active", "inactive"):
-            raise HTTPException(status_code=422, detail="Invalid status parameter")
-        status = status_clean
-    else:
-        status = "all"
-
-    if format is not None:
-        format_clean = format.strip().lower()
-        if not format_clean or format_clean not in ("excel", "pdf"):
-            raise HTTPException(status_code=422, detail="Invalid format parameter")
-        format = format_clean
-    else:
-        format = "excel"
-
     service = CustomerService(db)
 
     file = service.export_directory(
         tenant_id=user.tenant_id,
-        status=status,
-        format=format
+        status=status.value,
+        format=format.value
     )
 
-    if format == "excel":
+    if format.value == "excel":
         return StreamingResponse(
             file,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -397,6 +399,15 @@ def export_directory(
                 "attachment; filename=customer_directory.xlsx"
             }
         )
+
+    return StreamingResponse(
+        file,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition":
+            "attachment; filename=customer_directory.pdf"
+        }
+    )
 
     return StreamingResponse(
         file,
@@ -549,16 +560,21 @@ def send_sms(
 
 @router.get(
     "/notifications/sms",
-    response_model=list[CommunicationResponse],
+    response_model=CustomerCommunicationListResponse,
 )
 def get_sms_notifications(
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_communications_by_type(
+    sms_list = CustomerService(db).get_communications_by_type(
         user.tenant_id,
         "SMS",
     )
+    return {
+        "success": True,
+        "message": "SMS notifications retrieved successfully" if sms_list else "No SMS notifications found",
+        "data": sms_list,
+    }
 
 
 @router.post(
@@ -584,16 +600,21 @@ def send_whatsapp(
 
 @router.get(
     "/notifications/whatsapp",
-    response_model=list[CommunicationResponse],
+    response_model=CustomerCommunicationListResponse,
 )
 def get_whatsapp_notifications(
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_communications_by_type(
+    wa_list = CustomerService(db).get_communications_by_type(
         user.tenant_id,
         "WHATSAPP",
     )
+    return {
+        "success": True,
+        "message": "WhatsApp notifications retrieved successfully" if wa_list else "No WhatsApp notifications found",
+        "data": wa_list,
+    }
 
 
 @router.post(
@@ -613,7 +634,7 @@ def send_campaign(
 
 @router.get(
     "/customer-analytics/top-customers",
-    response_model=list[TopCustomerResponse]
+    response_model=list[TopCustomerResponse],
 )
 def top_customers(
     user: User = Depends(require_permission("customers:read")),
