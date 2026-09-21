@@ -152,7 +152,7 @@ class PurchaseOrderService:
 
         if purchase_order.status != "draft":
            raise NotFoundException(
-               "Only draft purchase orders can be updated"
+               "This purchase order is already received and can't be updated"
             )
 
         if data.supplier_id is not None:
