@@ -6,7 +6,7 @@ from app.models.role import Role
 from app.models.store import Store
 from app.models.user import User
 from app.repositories.user_repo import UserRepository
-from app.schemas.user import UserCreate, UserUpdate
+from app.schemas.user import MyProfileUpdate, UserCreate, UserUpdate
 
 
 class UserService:
@@ -60,6 +60,7 @@ class UserService:
             role_id=data.role_id,
             hashed_password=get_password_hash(data.password),
             is_active=True,
+            is_deleted=False,
         )
 
         return self.repo.create(user)
@@ -68,7 +69,11 @@ class UserService:
         if user_id <= 0:
             raise NotFoundException("User not found")
 
-        user = self.repo.get_by_id(user_id, tenant_id)
+        user = self.repo.get_by_id(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            include_deleted=False,
+        )
 
         if not user:
             raise NotFoundException("User not found")
@@ -149,22 +154,6 @@ class UserService:
 
             update_data["full_name"] = full_name
 
-        if "phone" in update_data:
-            phone = update_data["phone"]
-
-            if phone is not None:
-                phone = phone.strip()
-
-                if not phone.isdigit():
-                    raise ConflictException("Phone must contain digits only")
-
-                if len(phone) < 10 or len(phone) > 15:
-                    raise ConflictException(
-                        "Phone must contain 10 to 15 digits"
-                    )
-
-                update_data["phone"] = phone
-
         if "password" in update_data:
             password = update_data.pop("password")
 
@@ -176,8 +165,44 @@ class UserService:
 
         return self.repo.update(user)
 
-    def activate_user(self, tenant_id: int, user_id: int) -> User:
+    def update_my_profile(
+        self,
+        tenant_id: int,
+        user_id: int,
+        data: MyProfileUpdate,
+    ) -> User:
         user = self.get_user(tenant_id, user_id)
+
+        update_data = data.model_dump(exclude_unset=True)
+
+        if not update_data:
+            raise ConflictException("No fields provided for update")
+
+        if "full_name" in update_data:
+            full_name = update_data["full_name"].strip()
+
+            if not full_name:
+                raise ConflictException("Full name cannot be empty")
+
+            update_data["full_name"] = full_name
+
+        for key, value in update_data.items():
+            setattr(user, key, value)
+
+        return self.repo.update(user)
+
+    def activate_user(self, tenant_id: int, user_id: int) -> User:
+        user = self.repo.get_by_id(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            include_deleted=True,
+        )
+
+        if not user:
+            raise NotFoundException("User not found")
+
+        if user.is_deleted:
+            raise ConflictException("Deleted user cannot be activated")
 
         if user.is_active:
             raise ConflictException("User is already active")
@@ -212,16 +237,24 @@ class UserService:
         user_id: int,
         current_user_id: int,
     ) -> None:
-        user = self.get_user(tenant_id, user_id)
+        user = self.repo.get_by_id(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            include_deleted=True,
+        )
+
+        if not user:
+            raise NotFoundException("User not found")
 
         if user.id == current_user_id:
             raise ConflictException(
                 "You cannot delete your own account"
             )
 
-        if not user.is_active:
-            raise ConflictException("User is already inactive")
+        if user.is_deleted:
+            raise ConflictException("User is already deleted")
 
+        user.is_deleted = True
         user.is_active = False
 
         self.repo.update(user)

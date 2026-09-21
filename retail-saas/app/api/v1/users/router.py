@@ -4,8 +4,14 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import require_permission
 from app.models.user import User
-from app.schemas.user import UserCreate, UserResponse, UserUpdate
+from app.schemas.user import (
+    MyProfileUpdate,
+    UserCreate,
+    UserResponse,
+    UserUpdate,
+)
 from app.services.user_service import UserService
+
 
 router = APIRouter(
     prefix="/users",
@@ -69,11 +75,11 @@ def get_my_profile(
     response_model=UserResponse,
 )
 def update_my_profile(
-    data: UserUpdate,
+    data: MyProfileUpdate,
     current_user: User = Depends(require_permission("users:read")),
     db: Session = Depends(get_db),
 ):
-    return UserService(db).update_user(
+    return UserService(db).update_my_profile(
         current_user.tenant_id,
         current_user.id,
         data,
