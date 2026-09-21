@@ -32,9 +32,11 @@ def create_store_expense(
     ),
     db: Session = Depends(get_db),
 ):
-    service = StoreExpenseService(db)
-
-    return service.create_expense(expense)
+    return StoreExpenseService.create_expense(
+        db=db,
+        data=expense,
+        created_by=user.id,
+    )
 
 
 @router.get(
@@ -48,9 +50,7 @@ def get_store_expenses(
     ),
     db: Session = Depends(get_db),
 ):
-    service = StoreExpenseService(db)
-
-    return service.get_expenses(store_id=store_id)
+    return StoreExpenseService.get_expenses(db=db, store_id=store_id)
 
 
 @router.get(
@@ -70,9 +70,7 @@ def get_store_expense(
             detail="Expense ID must be greater than 0",
         )
 
-    service = StoreExpenseService(db)
-
-    return service.get_expense(expense_id)
+    return StoreExpenseService.get_expense(db=db, expense_id=expense_id)
 
 
 @router.put(
@@ -93,9 +91,11 @@ def update_store_expense(
             detail="Expense ID must be greater than 0",
         )
 
-    service = StoreExpenseService(db)
-
-    return service.update_expense(expense_id, expense)
+    return StoreExpenseService.update_expense(
+        db=db,
+        expense_id=expense_id,
+        data=expense,
+    )
 
 
 @router.delete(
@@ -115,8 +115,6 @@ def delete_store_expense(
             detail="Expense ID must be greater than 0",
         )
 
-    service = StoreExpenseService(db)
-
-    service.delete_expense(expense_id)
+    StoreExpenseService.delete_expense(db=db, expense_id=expense_id)
 
     return None
