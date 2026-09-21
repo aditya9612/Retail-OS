@@ -48,7 +48,7 @@ class StoreTransferService:
             transfer_number=transfer_number,
             source_store_id=source_store_id,
             destination_store_id=destination_store_id,
-            status="Draft"
+            status="Pending"
         )
 
         for item in items:
@@ -101,7 +101,7 @@ class StoreTransferService:
             transfer_id
         )
 
-        if transfer.status != "Pending":
+        if transfer.status not in ["Pending", "Draft"]:
             raise ValueError(
                 "Only pending transfers can be approved"
             )
@@ -124,7 +124,7 @@ class StoreTransferService:
             transfer_id
         )
 
-        if transfer.status != "Pending":
+        if transfer.status not in ["Pending", "Draft"]:
             raise ValueError(
                 "Only pending transfers can be rejected"
             )

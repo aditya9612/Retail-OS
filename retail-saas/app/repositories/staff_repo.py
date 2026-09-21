@@ -7,9 +7,17 @@ def create_staff(
     db: Session,
     data
 ):
-    staff = Staff(
-        **data.model_dump(),
-    )
+    from app.models.role import Role
+
+    data_dict = data.model_dump() if hasattr(data, "model_dump") else dict(data)
+    role_name = data_dict.pop("role", None)
+
+    if role_name and not data_dict.get("role_id"):
+        role_obj = db.query(Role).filter(Role.name.ilike(role_name)).first()
+        if role_obj:
+            data_dict["role_id"] = role_obj.id
+
+    staff = Staff(**data_dict)
 
     db.add(staff)
     db.commit()
@@ -43,9 +51,17 @@ def update_staff(
     staff: Staff,
     data
 ):
-    for key, value in data.model_dump(
-        exclude_unset=True
-    ).items():
+    from app.models.role import Role
+
+    data_dict = data.model_dump(exclude_unset=True) if hasattr(data, "model_dump") else dict(data)
+    role_name = data_dict.pop("role", None)
+
+    if role_name is not None:
+        role_obj = db.query(Role).filter(Role.name.ilike(role_name)).first()
+        if role_obj:
+            staff.role_id = role_obj.id
+
+    for key, value in data_dict.items():
         setattr(staff, key, value)
 
     db.commit()

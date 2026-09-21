@@ -94,6 +94,61 @@ def create_store(
     )
 
 
+# ============================================================
+# STAFF ASSIGN / TRANSFER / ALL (must precede /{store_id})
+# ============================================================
+
+@router.get(
+    "/all",
+    response_model=list[StaffResponse],
+)
+def list_all_staff(
+    user: User = Depends(
+        require_permission("employees:read")
+    ),
+    db: Session = Depends(get_db),
+):
+    return list_all_staff_service(db)
+
+
+@router.patch(
+    "/assign/{staff_id}/{store_id}",
+    response_model=StaffResponse,
+)
+def assign_staff(
+    staff_id: int,
+    store_id: int,
+    user: User = Depends(
+        require_permission("employees:write")
+    ),
+    db: Session = Depends(get_db),
+):
+    return assign_staff_service(
+        db,
+        staff_id,
+        store_id,
+    )
+
+
+@router.patch(
+    "/transfer/{staff_id}/{store_id}",
+    response_model=StaffResponse,
+)
+def transfer_staff(
+    staff_id: int,
+    store_id: int,
+    user: User = Depends(
+        require_permission("employees:write")
+    ),
+    db: Session = Depends(get_db),
+):
+    return transfer_staff_service(
+        db,
+        staff_id,
+        store_id,
+    )
+
+
 @router.get(
     "/{store_id}",
     response_model=StoreResponse,
@@ -253,47 +308,3 @@ def delete_staff(
         staff_id,
     )
 
-# ============================================================
-# STAFF ASSIGN / TRANSFER / ALL
-# ============================================================
-
-@router.patch("/assign/{staff_id}/{store_id}")
-def assign_staff(
-    staff_id: int,
-    store_id: int,
-    user: User = Depends(
-        require_permission("employees:write")
-    ),
-    db: Session = Depends(get_db),
-):
-    return assign_staff_service(
-        db,
-        staff_id,
-        store_id,
-    )
-
-
-@router.patch("/transfer/{staff_id}/{store_id}")
-def transfer_staff(
-    staff_id: int,
-    store_id: int,
-    user: User = Depends(
-        require_permission("employees:write")
-    ),
-    db: Session = Depends(get_db),
-):
-    return transfer_staff_service(
-        db,
-        staff_id,
-        store_id,
-    )
-
-
-@router.get("/all")
-def list_all_staff(
-    user: User = Depends(
-        require_permission("employees:read")
-    ),
-    db: Session = Depends(get_db),
-):
-    return list_all_staff_service(db)

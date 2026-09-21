@@ -16,6 +16,9 @@ from app.schemas.store_expense import (
 
 class StoreExpenseService:
 
+    def __init__(self, db: Optional[Session] = None):
+        self.db = db
+
     @staticmethod
     def create_expense(
         db: Session,

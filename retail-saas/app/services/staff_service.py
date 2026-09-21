@@ -11,11 +11,6 @@ from app.repositories.staff_repo import (
     delete_staff
 )
 
-
-# ============================================================
-# EXISTING STAFF SERVICES
-# ============================================================
-
 def create_staff_service(db, store_id, data):
 
     store = db.query(Store).filter(
@@ -41,13 +36,9 @@ def create_staff_service(db, store_id, data):
     data_dict = data.model_dump()
     data_dict["store_id"] = store_id
 
-    from app.schemas.staff import StaffCreate
-
-    staff_data = StaffCreate(**data_dict)
-
     return create_staff(
         db,
-        staff_data
+        data_dict
     )
 
 
@@ -72,12 +63,12 @@ def list_staff_service(db, store_id):
 def get_staff_service(
     db,
     store_id,
-    employee_id
+    staff_id
 ):
 
     staff = get_staff_by_id(
         db,
-        employee_id,
+        staff_id,
         store_id
     )
 
@@ -93,13 +84,13 @@ def get_staff_service(
 def update_staff_service(
     db,
     store_id,
-    employee_id,
+    staff_id,
     data
 ):
 
     staff = get_staff_by_id(
         db,
-        employee_id,
+        staff_id,
         store_id
     )
 
@@ -109,12 +100,11 @@ def update_staff_service(
             detail="Staff not found in this store"
         )
 
-    # Duplicate email check
     if data.email is not None:
 
         existing = db.query(Staff).filter(
             Staff.email == data.email,
-            Staff.id != employee_id
+            Staff.id != staff_id
         ).first()
 
         if existing:
@@ -133,12 +123,12 @@ def update_staff_service(
 def delete_staff_service(
     db,
     store_id,
-    employee_id
+    staff_id
 ):
 
     staff = get_staff_by_id(
         db,
-        employee_id,
+        staff_id,
         store_id
     )
 
@@ -157,11 +147,6 @@ def delete_staff_service(
         "message": "Staff deleted successfully"
     }
 
-
-# ============================================================
-# NEW CENTRALIZED STAFF SERVICES
-# ============================================================
-
 def assign_staff_service(
     db,
     staff_id,
@@ -178,8 +163,6 @@ def assign_staff_service(
             status_code=404,
             detail="Staff not found"
         )
-
-    # Check store exists
     store = db.query(Store).filter(
         Store.id == store_id
     ).first()
@@ -190,14 +173,12 @@ def assign_staff_service(
             detail="Store not found"
         )
 
-    # Already assigned
     if staff.store_id == store_id:
         raise HTTPException(
             status_code=400,
             detail="Staff is already assigned to this store"
         )
 
-    # Assign staff
     staff.store_id = store_id
 
     db.commit()

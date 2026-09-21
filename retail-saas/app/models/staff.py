@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, ForeignKey, Boolean
+from sqlalchemy.orm import relationship
 from app.core.database import Base
 
 
@@ -20,15 +21,33 @@ class Staff(Base):
 
     role_id = Column(
         Integer,
-        ForeignKey("roles.id")
+        ForeignKey("roles.id"),
+        nullable=True
     )
 
     store_id = Column(
         Integer,
-        ForeignKey("stores.id")
+        ForeignKey("stores.id"),
+        nullable=True
     )
 
     is_active = Column(
         Boolean,
         default=True
     )
+
+    role_rel = relationship(
+        "Role",
+        foreign_keys=[role_id],
+        lazy="joined"
+    )
+
+    @property
+    def role(self) -> str:
+        if self.role_rel and hasattr(self.role_rel, "name") and self.role_rel.name:
+            return self.role_rel.name
+        return "staff"
+
+    @role.setter
+    def role(self, value: str) -> None:
+        pass
