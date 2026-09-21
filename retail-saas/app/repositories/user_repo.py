@@ -1,4 +1,3 @@
-
 from typing import Optional
 
 from sqlalchemy import func
@@ -20,6 +19,7 @@ class UserRepository:
         self,
         user_id: int,
         tenant_id: Optional[int] = None,
+        include_deleted: bool = False,
     ) -> Optional[User]:
         query = (
             self.db.query(User)
@@ -30,25 +30,30 @@ class UserRepository:
         if tenant_id is not None:
             query = query.filter(User.tenant_id == tenant_id)
 
+        if not include_deleted:
+            query = query.filter(User.is_deleted.is_(False))
+
         return query.first()
 
     def get_by_email(
         self,
         email: str,
         tenant_id: Optional[int] = None,
+        include_deleted: bool = False,
     ) -> Optional[User]:
-        email = email.strip()
+        email = email.strip().lower()
 
         query = (
             self.db.query(User)
             .options(joinedload(User.role))
-            .filter(
-                func.binary(User.email) == func.binary(email)
-            )
+            .filter(func.lower(User.email) == email)
         )
 
         if tenant_id is not None:
             query = query.filter(User.tenant_id == tenant_id)
+
+        if not include_deleted:
+            query = query.filter(User.is_deleted.is_(False))
 
         return query.first()
 
@@ -57,11 +62,23 @@ class UserRepository:
         tenant_id: int,
         skip: int = 0,
         limit: int = 100,
-    ):
-        return (
+        include_inactive: bool = False,
+    ) -> list[User]:
+        query = (
             self.db.query(User)
             .options(joinedload(User.role))
-            .filter(User.tenant_id == tenant_id)
+            .filter(
+                User.tenant_id == tenant_id,
+                User.is_deleted.is_(False),
+            )
+        )
+
+        if not include_inactive:
+            query = query.filter(User.is_active.is_(True))
+
+        return (
+            query
+            .order_by(User.id.desc())
             .offset(skip)
             .limit(limit)
             .all()
@@ -79,6 +96,9 @@ class UserRepository:
     def count(self, tenant_id: int) -> int:
         return (
             self.db.query(User)
-            .filter(User.tenant_id == tenant_id)
+            .filter(
+                User.tenant_id == tenant_id,
+                User.is_deleted.is_(False),
+            )
             .count()
         )
