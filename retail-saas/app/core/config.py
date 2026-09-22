@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Retail SaaS"
     APP_ENV: str = "development"
     DEBUG: bool = True
-    SECRET_KEY: str
+    SECRET_KEY: str = "change-me-generate-a-long-random-string"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7

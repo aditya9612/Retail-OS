@@ -9,6 +9,7 @@ class StoreTransferItem(Base):
     id = Column(Integer, primary_key=True)
 
     transfer_id = Column(
+      
         Integer,
         ForeignKey("store_transfers.id"),
         nullable=False

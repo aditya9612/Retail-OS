@@ -12,7 +12,6 @@ class User(Base, TimestampMixin):
         autoincrement=True,
     )
 
-    # NULL for SuperAdmin, required for tenant users
     tenant_id: Mapped[int | None] = mapped_column(
         ForeignKey("tenants.id"),
         nullable=True,
@@ -54,6 +53,14 @@ class User(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
+        nullable=False,
+    )
+
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        index=True,
     )
 
     tenant: Mapped["Tenant | None"] = relationship(

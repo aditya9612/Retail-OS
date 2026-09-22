@@ -13,7 +13,6 @@ class StoreService:
         self.db = db
         self.repo = StoreRepository(db)
 
-    # ---------------- CREATE STORE ----------------
     def create_store(self, tenant_id: int, data: StoreCreate) -> Store:
 
         if self.repo.get_by_name(data.name, tenant_id):
@@ -29,7 +28,6 @@ class StoreService:
 
         return self.repo.create(store)
 
-    # ---------------- GET STORE ----------------
     def get_store(self, tenant_id: int, store_id: int) -> Store:
 
         store = self.repo.get_by_id(store_id, tenant_id)
@@ -39,12 +37,11 @@ class StoreService:
 
         return store
 
-    # ---------------- LIST STORES ----------------
     def list_stores(self, tenant_id: int) -> list[Store]:
 
         return self.repo.list_stores(tenant_id)
 
-    # ---------------- UPDATE STORE ----------------
+    
     def update_store(self, tenant_id: int, store_id: int, data: StoreUpdate) -> Store:
 
         store = self.get_store(tenant_id, store_id)
@@ -66,7 +63,7 @@ class StoreService:
 
         return self.repo.update(store)
 
-    # ---------------- DELETE STORE ----------------
+
     def delete_store(self, tenant_id: int, store_id: int) -> Store:
 
         store = self.get_store(tenant_id, store_id)
