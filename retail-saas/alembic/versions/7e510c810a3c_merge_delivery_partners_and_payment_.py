@@ -1,8 +1,8 @@
-"""add password reset tokens
+"""merge delivery partners and payment heads
 
-Revision ID: eb1d473977a5
-Revises: 349e9237cc4e
-Create Date: 2026-08-13 16:40:02.226767
+Revision ID: 7e510c810a3c
+Revises: 6e5d4c3b2a1f, a8217dfae6d5
+Create Date: 2026-09-21 15:19:57.585325
 
 """
 from typing import Sequence, Union
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'eb1d473977a5'
-down_revision: Union[str, None] = '349e9237cc4e'
+revision: str = '7e510c810a3c'
+down_revision: Union[str, None] = ('6e5d4c3b2a1f', 'a8217dfae6d5')
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

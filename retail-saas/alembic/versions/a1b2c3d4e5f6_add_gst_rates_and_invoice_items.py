@@ -15,7 +15,7 @@ def upgrade() -> None:
     op.create_table(
         "gst_rates",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("tenant_id", sa.BigInteger(), nullable=False),
+        sa.Column("tenant_id", sa.Integer(), nullable=False),
         sa.Column("hsn_code", sa.String(length=20), nullable=False),
         sa.Column("gst_rate", sa.Numeric(precision=5, scale=2), nullable=False),
         sa.Column("cgst", sa.Numeric(precision=5, scale=2), nullable=False),
@@ -34,8 +34,8 @@ def upgrade() -> None:
     op.create_table(
         "invoice_items",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("invoice_id", sa.BigInteger(), nullable=False),
-        sa.Column("product_id", sa.BigInteger(), nullable=False),
+        sa.Column("invoice_id", sa.Integer(), nullable=False),
+        sa.Column("product_id", sa.Integer(), nullable=False),
         sa.Column("quantity", sa.Numeric(precision=10, scale=2), nullable=False),
         sa.Column("unit_price", sa.Numeric(precision=12, scale=2), nullable=False),
         sa.Column("discount_amount", sa.Numeric(precision=12, scale=2), nullable=False),
