@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.store_transfer import (
+    StoreTransferApprove,
     StoreTransferCreate,
     StoreTransferResponse
 )
@@ -88,15 +89,16 @@ def get_transfer(
 )
 def approve_transfer(
     transfer_id: int,
-    approved_by: int,
+    data: StoreTransferApprove = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    approver_id = data.approved_by if (data and data.approved_by) else current_user.id
     try:
         return StoreTransferService.approve_transfer(
             db=db,
             transfer_id=transfer_id,
-            approved_by=approved_by
+            approved_by=approver_id
         )
     except ValueError as e:
         raise HTTPException(

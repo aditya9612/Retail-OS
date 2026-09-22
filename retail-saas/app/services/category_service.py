@@ -17,8 +17,8 @@ class CategoryService:
         return self.repository.create(
             tenant_id=tenant_id,
             name=data.name,
-            description=data.description,
             parent_id=data.parent_id,
+            is_active=data.is_active,
         )
 
     def list_categories(
@@ -54,8 +54,8 @@ class CategoryService:
         return self.repository.update(
             category=category,
             name=data.name,
-            description=data.description,
             parent_id=data.parent_id,
+            is_active=data.is_active,
         )    
 
     def delete_category(

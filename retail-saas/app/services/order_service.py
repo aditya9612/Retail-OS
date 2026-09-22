@@ -686,9 +686,9 @@ class OrderService:
                 order.customer_id,
             )
 
-            customer.total_spend = (
-                customer.total_spend
-                + order.total_amount
+            customer.total_spend = int(
+                (customer.total_spend or 0)
+                + round(order.total_amount)
             )
 
         return self.repo.update(order)

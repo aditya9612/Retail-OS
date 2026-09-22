@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Request
+from typing import Optional
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -13,6 +15,8 @@ from app.schemas.auth import (
     ForgotPasswordRequest,
     LoginRequest,
     RefreshRequest,
+    RegisterRequest,
+    RegisterResponse,
     ResetPasswordRequest,
     TokenResponse,
     VerifyOTPRequest,
@@ -117,24 +121,31 @@ def logout(
     )
 
 
-@router.post("/register")
+@router.post("/register", response_model=RegisterResponse, status_code=200)
 def register(
-    tenant_name: str,
-    slug: str,
-    email: str,
-    admin_name: str,
-    password: str,
-    phone: str | None = None,
+    data: Optional[RegisterRequest] = Body(None),
+    tenant_name: Optional[str] = Query(None, include_in_schema=False),
+    slug: Optional[str] = Query(None, include_in_schema=False),
+    domain: Optional[str] = Query(None, include_in_schema=False),
+    email: Optional[str] = Query(None, include_in_schema=False),
+    admin_name: Optional[str] = Query(None, include_in_schema=False),
+    password: Optional[str] = Query(None, include_in_schema=False),
+    phone: Optional[str] = Query(None, include_in_schema=False),
     db: Session = Depends(get_db),
 ):
-    user = AuthService(db).register_tenant(
-        tenant_name,
-        slug,
-        email,
-        admin_name,
-        password,
-        phone,
-    )
+    if data is None:
+        if not tenant_name or not (domain or slug) or not email or not admin_name or not password:
+            raise HTTPException(status_code=422, detail="Missing required registration fields")
+        data = RegisterRequest(
+            tenant_name=tenant_name,
+            domain=domain or slug,
+            email=email,
+            admin_name=admin_name,
+            password=password,
+            phone=phone,
+        )
+
+    user = AuthService(db).register_tenant(data)
 
     return {
         "message": "Tenant registered",

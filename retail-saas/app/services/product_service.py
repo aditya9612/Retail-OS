@@ -24,27 +24,25 @@ class ProductService:
 
     def create_product(self, tenant_id: int, data: ProductCreate) -> Product:
         sku = data.sku.strip().upper()
-        barcode = data.barcode.strip()
+        barcode = data.barcode.strip() if data.barcode else None
 
         if not sku:
             raise ConflictException("SKU cannot be empty")
 
-        if not barcode:
-            raise ConflictException("Barcode cannot be empty")
+        if barcode:
+            if not barcode.isdigit():
+                raise ConflictException("Barcode must contain digits only")
 
-        if not barcode.isdigit():
-            raise ConflictException("Barcode must contain digits only")
+            if len(barcode) < 8 or len(barcode) > 50:
+                raise ConflictException(
+                    "Barcode must contain between 8 and 50 digits"
+                )
 
-        if len(barcode) < 8 or len(barcode) > 50:
-            raise ConflictException(
-                "Barcode must contain between 8 and 50 digits"
-            )
+            if self.repo.get_by_barcode(barcode, tenant_id):
+                raise ConflictException("Barcode already exists")
 
         if self.repo.get_by_sku(sku, tenant_id):
             raise ConflictException("SKU already exists")
-
-        if self.repo.get_by_barcode(barcode, tenant_id):
-            raise ConflictException("Barcode already exists")
 
         product_data = data.model_dump()
         product_data["sku"] = sku

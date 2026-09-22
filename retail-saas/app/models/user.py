@@ -35,10 +35,18 @@ class User(Base, TimestampMixin):
         index=True,
     )
 
-    hashed_password: Mapped[str] = mapped_column(
+    password_hash: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
     )
+
+    @property
+    def hashed_password(self) -> str:
+        return self.password_hash
+
+    @hashed_password.setter
+    def hashed_password(self, val: str) -> None:
+        self.password_hash = val
 
     full_name: Mapped[str] = mapped_column(
         String(255),

@@ -105,7 +105,7 @@ class PurchaseOrderReturnService:
         po_items = (
             self.db.query(PurchaseOrderItem)
             .filter(
-                PurchaseOrderItem.purchase_order_id
+                PurchaseOrderItem.po_id
                 == purchase_order.id,
                 PurchaseOrderItem.id.in_(return_item_ids),
             )

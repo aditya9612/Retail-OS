@@ -977,6 +977,10 @@ class WalletOperationResponse(BaseModel):
         from_attributes=True
     )
 
+class LoyaltyAddPointsRequest(BaseModel):
+    points: int = Field(..., gt=0, le=10000, description="Loyalty points to add")
+
+
 class LoyaltyEarnRequest(BaseModel):
 
     customer_id: Optional[int] = Field(

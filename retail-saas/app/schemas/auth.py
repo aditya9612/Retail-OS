@@ -19,19 +19,46 @@ def normalize_email(value: str) -> str:
 def validate_password_value(value: str) -> str:
     if not value:
         raise ValueError("Password is required")
-    if len(value) < 8:
-        raise ValueError("Password must be at least 8 characters")
+    if len(value) < 6:
+        raise ValueError("Password must be at least 6 characters")
     if len(value) > 128:
         raise ValueError("Password must not exceed 128 characters")
-    if not any(char.isupper() for char in value):
-        raise ValueError("Password must contain at least one uppercase letter")
-    if not any(char.islower() for char in value):
-        raise ValueError("Password must contain at least one lowercase letter")
-    if not any(char.isdigit() for char in value):
-        raise ValueError("Password must contain at least one digit")
-    if not any(not char.isalnum() for char in value):
-        raise ValueError("Password must contain at least one special character")
     return value
+
+
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, populate_by_name=True)
+
+    tenant_name: str = Field(..., min_length=2, max_length=255, description="Tenant name")
+    domain: str = Field(..., min_length=2, max_length=255, description="Tenant unique domain identifier")
+    email: str = Field(..., description="Administrator email address")
+    admin_name: str = Field(..., min_length=2, max_length=255, description="Administrator full name")
+    password: str = Field(..., description="Administrator password")
+    phone: str | None = Field(default=None, description="Administrator phone number")
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return normalize_email(value)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        return validate_password_value(value)
+
+    @field_validator("domain")
+    @classmethod
+    def validate_domain(cls, value: str) -> str:
+        val = value.strip().lower()
+        if not re.match(r"^[a-z0-9-]+$", val):
+            raise ValueError("Domain must contain only lowercase alphanumeric characters and hyphens")
+        return val
+
+
+class RegisterResponse(BaseModel):
+    message: str = "Tenant registered"
+    user_id: int
+    tenant_id: int
 
 
 class LoginRequest(BaseModel):

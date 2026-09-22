@@ -1,6 +1,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -10,6 +11,16 @@ from app.services.report_service import ReportService
 from app.tasks.report_tasks import generate_gst_report_task, generate_monthly_report_task
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+
+class MonthlyReportAsyncRequest(BaseModel):
+    year: int = Field(..., ge=2000, le=2100)
+    month: int = Field(..., ge=1, le=12)
+
+
+class GSTReportAsyncRequest(BaseModel):
+    start_date: date
+    end_date: date
 
 
 @router.get("/daily-billing")
@@ -72,19 +83,17 @@ def gst_report(
 
 @router.post("/monthly/async")
 def monthly_report_async(
-    year: int,
-    month: int,
+    data: MonthlyReportAsyncRequest,
     user: User = Depends(require_permission("reports:read")),
 ):
-    task = generate_monthly_report_task.delay(user.tenant_id, year, month)
+    task = generate_monthly_report_task.delay(user.tenant_id, data.year, data.month)
     return {"task_id": task.id}
 
 
 @router.post("/gst/async")
 def gst_report_async(
-    start_date: date,
-    end_date: date,
+    data: GSTReportAsyncRequest,
     user: User = Depends(require_permission("reports:read")),
 ):
-    task = generate_gst_report_task.delay(user.tenant_id, start_date.isoformat(), end_date.isoformat())
+    task = generate_gst_report_task.delay(user.tenant_id, data.start_date.isoformat(), data.end_date.isoformat())
     return {"task_id": task.id}

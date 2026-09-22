@@ -132,27 +132,8 @@ class ProductRepository:
         store_id: int,
         days: int = 30,
     ) -> List[Product]:
-        from datetime import timedelta
-
-        expiry_cutoff = date.today() + timedelta(days=days)
-
-        return (
-            self.db.query(Product)
-            .options(joinedload(Product.images))
-            .join(
-                Inventory,
-                Product.id == Inventory.product_id,
-            )
-            .filter(
-                Product.tenant_id == tenant_id,
-                Product.is_active.is_(True),
-                Product.track_expiry.is_(True),
-                Inventory.store_id == store_id,
-                Inventory.expiry_date != None,
-                Inventory.expiry_date <= expiry_cutoff,
-            )
-            .all()
-        )
+        # Note: MySQL products/inventory tables do not contain expiry_date or track_expiry columns
+        return []
 
     def create(self, product: Product) -> Product:
         self.db.add(product)

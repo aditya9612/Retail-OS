@@ -32,11 +32,18 @@ class PasswordResetToken(Base):
         nullable=False,
     )
 
-    used: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        nullable=False,
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
     )
+
+    @property
+    def used(self) -> bool:
+        return self.used_at is not None
+
+    @used.setter
+    def used(self, value: bool) -> None:
+        self.used_at = datetime.utcnow() if value else None
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

@@ -66,7 +66,7 @@ class DashboardRepository:
             self.db.query(Inventory)
             .filter(
                 Inventory.tenant_id == tenant_id,
-                Inventory.quantity <= Inventory.low_stock_threshold
+                Inventory.quantity <= Inventory.min_stock_level
             )
             .count()
         )
@@ -142,13 +142,14 @@ class DashboardRepository:
 
         result = (
             self.db.query(
-                OrderItem.product_name.label("product_name"),
+                Product.name.label("product_name"),
                 func.sum(OrderItem.quantity).label("quantity_sold"),
-                func.sum(OrderItem.total).label("revenue"),
+                func.sum(OrderItem.total_amount).label("revenue"),
             )
             .join(Order, Order.id == OrderItem.order_id)
+            .join(Product, Product.id == OrderItem.product_id)
             .filter(Order.tenant_id == tenant_id)
-            .group_by(OrderItem.product_name)
+            .group_by(Product.name)
             .order_by(desc(func.sum(OrderItem.quantity)))
             .limit(10)
             .all()

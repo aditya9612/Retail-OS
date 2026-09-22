@@ -16,6 +16,10 @@ VALID_PAYMENT_MODES = [
 ]
 
 
+class InvoiceReprintRequest(BaseModel):
+    printer_type: str = Field(default="generic", min_length=1, max_length=50)
+
+
 class RefundCreate(BaseModel):
     invoice_id: int = Field(gt=0, description="Invoice ID must be positive")
     refund_amount: Decimal = Field(

@@ -200,14 +200,15 @@ class ReportService:
         rows = (
             self.db.query(
                 OrderItem.product_id,
-                OrderItem.product_name,
+                Product.name.label("product_name"),
                 func.sum(OrderItem.quantity).label("qty"),
-                func.sum(OrderItem.total).label("revenue"),
+                func.sum(OrderItem.total_amount).label("revenue"),
             )
-            .join(Order)
+            .join(Order, Order.id == OrderItem.order_id)
+            .join(Product, Product.id == OrderItem.product_id)
             .filter(Order.tenant_id == tenant_id, Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.DELIVERED.value]))
-            .group_by(OrderItem.product_id, OrderItem.product_name)
-            .order_by(func.sum(OrderItem.total).desc())
+            .group_by(OrderItem.product_id, Product.name)
+            .order_by(func.sum(OrderItem.total_amount).desc())
             .limit(limit)
             .all()
         )

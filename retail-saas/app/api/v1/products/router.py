@@ -8,6 +8,8 @@ from app.models.product import ProductImage
 from app.models.user import User
 from app.schemas.product import (
     ProductCreate,
+    ProductImageCreate,
+    ProductImageResponse,
     ProductResponse,
     ProductUpdate,
 )
@@ -297,15 +299,12 @@ def delete_product(
 
 @router.post(
     "/{product_id}/images",
+    response_model=ProductImageResponse,
     status_code=201,
 )
 def add_product_image(
     product_id: int,
-    image_url: str,
-    display_order: int = Query(
-        default=0,
-        ge=0,
-    ),
+    data: ProductImageCreate,
     user: User = Depends(
         require_permission("products:write")
     ),
@@ -318,8 +317,8 @@ def add_product_image(
 
     image = ProductImage(
         product_id=product.id,
-        image_url=image_url,
-        display_order=display_order,
+        image_url=data.image_url,
+        is_primary=data.is_primary,
     )
 
     db.add(image)
@@ -331,6 +330,7 @@ def add_product_image(
 
 @router.get(
     "/{product_id}/images",
+    response_model=list[ProductImageResponse],
 )
 def list_product_images(
     product_id: int,
@@ -350,7 +350,8 @@ def list_product_images(
             ProductImage.product_id == product.id
         )
         .order_by(
-            ProductImage.display_order.asc()
+            ProductImage.is_primary.desc(),
+            ProductImage.id.asc(),
         )
         .all()
     )

@@ -104,26 +104,30 @@ class SaleService:
                     product_id=item.product_id,
                     quantity=item.stock,
                     unit_price=product.price,
-                    discount=item_discount,
-                    tax=item_tax,
-                    total_price=item_total
+                    tax_rate=gst_rate,
+                    tax_amount=item_tax,
+                    total_price=item_total,
                 )
             )
 
             inventory.quantity -= item.stock
 
-        invoice_number = f"INV-{data.store_id}-{db.query(Sale).count() + 1:06d}"
+        store = db.query(Store).filter(Store.id == data.store_id).first()
+        tenant_id = store.tenant_id if store else 1
+
+        sale_num = getattr(data, "sale_number", None) or getattr(data, "invoice_number", None)
+        if not sale_num:
+            sale_num = f"INV-{data.store_id}-{db.query(Sale).count() + 1:06d}"
 
         sale = Sale(
+            tenant_id=tenant_id,
             store_id=data.store_id,
-            customer_id=data.customer_id,
-            invoice_number=invoice_number,
+            sale_number=sale_num,
             subtotal=subtotal,
-            discount=total_discount,
-            tax=tax_amount,
+            tax_amount=tax_amount,
             total_amount=subtotal + tax_amount,
             payment_method=data.payment_method,
-            status="completed"
+            payment_status=getattr(data, "payment_status", "paid") or "paid",
         )
 
         sale.items = sale_items

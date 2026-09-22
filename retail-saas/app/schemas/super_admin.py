@@ -10,6 +10,10 @@ from pydantic import (
 )
 
 
+class SuperAdminRefreshToken(BaseModel):
+    refresh_token: str = Field(..., min_length=1, description="Super Admin refresh token")
+
+
 class SuperAdminCreate(BaseModel):
     email: EmailStr
     full_name: str = Field(

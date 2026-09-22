@@ -10,9 +10,12 @@ class InventoryResponse(BaseModel):
     store_id: int
     product_id: int
     quantity: int
-    low_stock_threshold: int
-    batch_number: Optional[str]
-    expiry_date: Optional[date]
+    min_stock_level: int = 0
+    max_stock_level: int = 0
+    reorder_point: int = 0
+    low_stock_threshold: int = 10
+    batch_number: Optional[str] = None
+    expiry_date: Optional[date] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -70,8 +73,12 @@ class StockMovementResponse(BaseModel):
     product_id: int
     movement_type: str
     quantity: int
-    reference: Optional[str]
-    notes: Optional[str]
+    previous_stock: int = 0
+    new_stock: int = 0
+    reference_id: Optional[int] = None
+    reference_type: Optional[str] = None
+    reference: Optional[str] = None
+    notes: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

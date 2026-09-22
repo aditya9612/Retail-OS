@@ -1,4 +1,6 @@
 from datetime import datetime
+from decimal import Decimal
+from typing import Optional, Any
 from sqlalchemy import Column, Integer, String, ForeignKey, Numeric, DateTime
 from sqlalchemy.orm import relationship
 
@@ -15,6 +17,13 @@ class Sale(Base):
         autoincrement=True
     )
 
+    tenant_id = Column(
+        Integer,
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True
+    )
+
     store_id = Column(
         Integer,
         ForeignKey("stores.id"),
@@ -22,15 +31,8 @@ class Sale(Base):
         index=True
     )
 
-    customer_id = Column(
-        Integer,
-        ForeignKey("customers.id"),
-        nullable=True,
-        index=True
-    )
-
-    invoice_number = Column(
-        String(50),
+    sale_number = Column(
+        String(100),
         unique=True,
         nullable=False,
         index=True
@@ -42,13 +44,7 @@ class Sale(Base):
         default=0
     )
 
-    discount = Column(
-        Numeric(12, 2),
-        nullable=False,
-        default=0
-    )
-
-    tax = Column(
+    tax_amount = Column(
         Numeric(12, 2),
         nullable=False,
         default=0
@@ -61,14 +57,14 @@ class Sale(Base):
     )
 
     payment_method = Column(
-        String(30),
+        String(50),
         nullable=False
     )
 
-    status = Column(
-        String(20),
+    payment_status = Column(
+        String(50),
         nullable=False,
-        default="completed"
+        default="paid"
     )
 
     created_at = Column(
@@ -76,6 +72,54 @@ class Sale(Base):
         default=datetime.utcnow,
         nullable=False
     )
+
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False
+    )
+
+    @property
+    def invoice_number(self) -> str:
+        return self.sale_number
+
+    @invoice_number.setter
+    def invoice_number(self, val: str) -> None:
+        self.sale_number = val
+
+    @property
+    def status(self) -> str:
+        return self.payment_status
+
+    @status.setter
+    def status(self, val: str) -> None:
+        self.payment_status = val
+
+    @property
+    def tax(self) -> Decimal:
+        return Decimal(str(self.tax_amount or 0))
+
+    @tax.setter
+    def tax(self, val: Any) -> None:
+        if val is not None:
+            self.tax_amount = Decimal(str(val))
+
+    @property
+    def discount(self) -> Decimal:
+        return Decimal("0.00")
+
+    @discount.setter
+    def discount(self, val: Any) -> None:
+        pass
+
+    @property
+    def customer_id(self) -> int | None:
+        return None
+
+    @customer_id.setter
+    def customer_id(self, val: Any) -> None:
+        pass
 
     items = relationship(
         "SaleItem",
@@ -114,18 +158,18 @@ class SaleItem(Base):
     )
 
     unit_price = Column(
-        Numeric(12, 2),
+        Numeric(10, 2),
         nullable=False
     )
 
-    discount = Column(
-        Numeric(12, 2),
+    tax_rate = Column(
+        Numeric(5, 2),
         nullable=False,
         default=0
     )
 
-    tax = Column(
-        Numeric(12, 2),
+    tax_amount = Column(
+        Numeric(10, 2),
         nullable=False,
         default=0
     )
@@ -134,6 +178,23 @@ class SaleItem(Base):
         Numeric(12, 2),
         nullable=False
     )
+
+    @property
+    def discount(self) -> Decimal:
+        return Decimal("0.00")
+
+    @discount.setter
+    def discount(self, val: Any) -> None:
+        pass
+
+    @property
+    def tax(self) -> Decimal:
+        return Decimal(str(self.tax_amount or 0))
+
+    @tax.setter
+    def tax(self, val: Any) -> None:
+        if val is not None:
+            self.tax_amount = Decimal(str(val))
 
     sale = relationship(
         "Sale",

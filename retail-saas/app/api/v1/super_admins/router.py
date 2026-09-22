@@ -15,6 +15,7 @@ from app.schemas.super_admin import (
     SuperAdminCreate,
     SuperAdminDashboardResponse,
     SuperAdminLogin,
+    SuperAdminRefreshToken,
     SuperAdminResponse,
     SuperAdminStatusUpdate,
     SuperAdminTenantResponse,
@@ -63,9 +64,10 @@ def super_admin_login(
     summary="Refresh Super Admin Token",
 )
 def refresh_super_admin_token(
-    refresh_token: str,
+    data: SuperAdminRefreshToken,
     db: Session = Depends(get_db),
 ):
+    refresh_token = data.refresh_token
     payload = decode_token(refresh_token)
 
     if payload.get("type") != "super_admin_refresh":

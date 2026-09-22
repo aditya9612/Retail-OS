@@ -145,15 +145,21 @@ class OrderItemResponse(BaseModel):
 
     id: int
     product_id: int
-    product_name: str
-    sku: str
+    product_name: str = ""
+    sku: str = ""
     quantity: int
     unit_price: Decimal
-    discount: Decimal
-    tax_rate: Decimal
-    tax_amount: Decimal
-    total: Decimal
-    variant: Optional[str]
+    discount: Decimal = Decimal("0.00")
+    discount_amount: Decimal = Decimal("0.00")
+    tax_rate: Decimal = Decimal("0.00")
+    tax_amount: Decimal = Decimal("0.00")
+    total: Decimal = Decimal("0.00")
+    total_amount: Decimal = Decimal("0.00")
+    cgst_amount: Decimal = Decimal("0.00")
+    sgst_amount: Decimal = Decimal("0.00")
+    igst_amount: Decimal = Decimal("0.00")
+    notes: Optional[str] = None
+    variant: Optional[str] = None
 
     model_config = {
         "from_attributes": True
@@ -511,14 +517,16 @@ class OrderResponse(BaseModel):
     order_number: str
     order_type: str
     status: str
-    coupon_code: Optional[str]
+    coupon_code: Optional[str] = None
     discount_amount: Decimal
     subtotal: Decimal
     tax_amount: Decimal
     total_amount: Decimal
-    delivery_address: Optional[str]
-    delivery_status: Optional[str]
-    notes: Optional[str]
+    payment_status: Optional[str] = "pending"
+    delivery_address: Optional[str] = None
+    delivery_pincode: Optional[str] = None
+    delivery_status: Optional[str] = None
+    notes: Optional[str] = None
     items: List[OrderItemResponse] = Field(default_factory=list)
     created_at: datetime
 
