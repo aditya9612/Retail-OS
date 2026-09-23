@@ -131,6 +131,8 @@ def register(
     admin_name: Optional[str] = Query(None, include_in_schema=False),
     password: Optional[str] = Query(None, include_in_schema=False),
     phone: Optional[str] = Query(None, include_in_schema=False),
+    plan_id: Optional[int] = Query(None, include_in_schema=False),
+    plan_code: Optional[str] = Query(None, include_in_schema=False),
     db: Session = Depends(get_db),
 ):
     if data is None:
@@ -143,6 +145,8 @@ def register(
             admin_name=admin_name,
             password=password,
             phone=phone,
+            plan_id=plan_id,
+            plan_code=plan_code,
         )
 
     user = AuthService(db).register_tenant(data)

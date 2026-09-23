@@ -1,5 +1,6 @@
 from datetime import datetime
 import re
+from typing import Any
 
 from pydantic import (
     BaseModel,
@@ -293,6 +294,14 @@ class SuperAdminResponse(BaseModel):
     updated_at: datetime
 
 
+class SuperAdminListResponse(BaseModel):
+    items: list[SuperAdminResponse]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
 class SuperAdminTokenResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -306,10 +315,90 @@ class SuperAdminTenantResponse(BaseModel):
     email: str | None = None
     phone: str | None = None
     is_active: bool | None = None
+    plan: str | None = None
+    subscription_status: str | None = None
+    subscription_end_date: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(
         from_attributes=True
     )
+
+
+class SuperAdminTenantListResponse(BaseModel):
+    items: list[SuperAdminTenantResponse]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+class SuperAdminTenantOwnerResponse(BaseModel):
+    id: int
+    email: EmailStr
+    full_name: str
+    phone: str | None = None
+    role: str | None = None
+    is_active: bool
+    created_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )
+
+
+class SuperAdminStoreSummaryResponse(BaseModel):
+    id: int
+    name: str
+    code: str | None = None
+    city: str | None = None
+    state: str | None = None
+    is_main: bool
+    is_active: bool
+    created_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )
+
+
+class SuperAdminStoreResponse(BaseModel):
+    id: int
+    tenant_id: int
+    name: str
+    code: str | None = None
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    pincode: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    is_main: bool
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )
+
+
+class SuperAdminStoreListResponse(BaseModel):
+    items: list[SuperAdminStoreResponse]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+class SuperAdminTenantDetailResponse(SuperAdminTenantResponse):
+    owner: SuperAdminTenantOwnerResponse | None = None
+    total_stores: int = 0
+    active_stores: int = 0
+    total_users: int = 0
+    active_users: int = 0
+    stores: list[SuperAdminStoreSummaryResponse] = []
 
 
 class TenantStatusUpdate(BaseModel):
@@ -322,11 +411,30 @@ class SuperAdminTenantUserResponse(BaseModel):
     email: EmailStr
     full_name: str
     phone: str | None = None
+    role: str | None = None
     is_active: bool
+    created_at: datetime | None = None
 
     model_config = ConfigDict(
         from_attributes=True
     )
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def extract_role_name(cls, value: Any) -> str | None:
+        if hasattr(value, "name"):
+            return value.name
+        if isinstance(value, str):
+            return value
+        return None
+
+
+class SuperAdminTenantUserListResponse(BaseModel):
+    items: list[SuperAdminTenantUserResponse]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
 
 
 class SuperAdminDashboardResponse(BaseModel):

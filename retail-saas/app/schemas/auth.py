@@ -35,6 +35,8 @@ class RegisterRequest(BaseModel):
     admin_name: str = Field(..., min_length=2, max_length=255, description="Administrator full name")
     password: str = Field(..., description="Administrator password")
     phone: str | None = Field(default=None, description="Administrator phone number")
+    plan_id: int | None = Field(default=None, description="Optional subscription plan ID")
+    plan_code: str | None = Field(default=None, description="Optional subscription plan code")
 
     @field_validator("email")
     @classmethod

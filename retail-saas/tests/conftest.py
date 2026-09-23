@@ -14,7 +14,9 @@ get_settings.cache_clear()
 
 @pytest.fixture(scope="session", autouse=True)
 def init_test_database():
-    from app.core.database import Base, engine
+    from decimal import Decimal
+    from app.core.database import Base, engine, SessionLocal
+    from app.models.saas_billing import SaaSPlan
     from sqlalchemy import event
 
     @event.listens_for(engine, "connect")
@@ -24,6 +26,44 @@ def init_test_database():
 
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+
+    session = SessionLocal()
+    try:
+        session.add_all([
+            SaaSPlan(
+                name="Basic",
+                code="basic",
+                description="Essential retail management for single store operations.",
+                price=Decimal("999.00"),
+                currency="INR",
+                billing_interval="monthly",
+                trial_days=14,
+                is_active=True,
+            ),
+            SaaSPlan(
+                name="Pro",
+                code="pro",
+                description="Advanced multi-store management, analytics, and delivery integrations.",
+                price=Decimal("2499.00"),
+                currency="INR",
+                billing_interval="monthly",
+                trial_days=14,
+                is_active=True,
+            ),
+            SaaSPlan(
+                name="Enterprise",
+                code="enterprise",
+                description="Full platform capabilities with custom store limits and dedicated support.",
+                price=Decimal("4999.00"),
+                currency="INR",
+                billing_interval="monthly",
+                trial_days=0,
+                is_active=True,
+            ),
+        ])
+        session.commit()
+    finally:
+        session.close()
 
 
 class FakeRedis:

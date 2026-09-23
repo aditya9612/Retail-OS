@@ -37,6 +37,13 @@ from app.models.grn import GRN, GRNItem
 from app.models.coupon import Coupon
 from app.models.sale import Sale, SaleItem
 from app.models.super_admin import SuperAdmin
+from app.models.saas_billing import (
+    SaaSPlan,
+    SaaSSubscription,
+    SaaSInvoice,
+    SaaSUPITransaction,
+    SaaSInvoiceSequence,
+)
 
 
 __all__ = [
@@ -84,4 +91,9 @@ __all__ = [
     "Sale",
     "SaleItem",
     "SuperAdmin",
+    "SaaSPlan",
+    "SaaSSubscription",
+    "SaaSInvoice",
+    "SaaSUPITransaction",
+    "SaaSInvoiceSequence",
 ]

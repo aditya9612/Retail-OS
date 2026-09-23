@@ -29,6 +29,7 @@ from app.models.role import Role
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.repositories.user_repo import UserRepository
+from app.services.saas_subscription_service import SaaSSubscriptionService
 from app.schemas.auth import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
@@ -418,6 +419,8 @@ class AuthService:
         password: str | None = None,
         phone: str | None = None,
     ) -> User:
+        plan_id = None
+        plan_code = None
         if hasattr(data_or_name, "tenant_name"):
             tenant_name = data_or_name.tenant_name
             domain_val = getattr(data_or_name, "domain", None) or getattr(data_or_name, "slug", None)
@@ -425,6 +428,8 @@ class AuthService:
             admin_name = data_or_name.admin_name
             password = data_or_name.password
             phone = data_or_name.phone
+            plan_id = getattr(data_or_name, "plan_id", None)
+            plan_code = getattr(data_or_name, "plan_code", None)
         elif isinstance(data_or_name, dict):
             tenant_name = data_or_name.get("tenant_name", "")
             domain_val = data_or_name.get("domain") or data_or_name.get("slug", "")
@@ -432,6 +437,8 @@ class AuthService:
             admin_name = data_or_name.get("admin_name", "")
             password = data_or_name.get("password", "")
             phone = data_or_name.get("phone")
+            plan_id = data_or_name.get("plan_id")
+            plan_code = data_or_name.get("plan_code")
         else:
             tenant_name = data_or_name
             domain_val = domain
@@ -509,8 +516,6 @@ class AuthService:
                 name=tenant_name,
                 domain=domain_val,
                 is_active=True,
-                plan="basic",
-                subscription_status="trial",
             )
 
             self.db.add(tenant)
@@ -563,6 +568,13 @@ class AuthService:
 
             self.db.add(user)
             self.db.flush()
+
+            # Create initial SaaSSubscription and synchronize legacy tenant projection
+            SaaSSubscriptionService(self.db).create_initial_subscription(
+                tenant_id=tenant.id,
+                plan_id=plan_id,
+                plan_code=plan_code,
+            )
 
             self.db.commit()
             self.db.refresh(user)
