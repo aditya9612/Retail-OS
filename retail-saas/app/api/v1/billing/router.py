@@ -168,7 +168,7 @@ def _ensure_price_override_allowed(
             "Product is inactive"
         )
 
-    if unit_price != product.price:
+    if unit_price != product.selling_price:
         permissions = (
             user.role.permissions
             if user.role

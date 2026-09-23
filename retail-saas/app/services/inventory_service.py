@@ -357,7 +357,7 @@ class InventoryService:
          for inventory in inventories:
              total_value += (
                  inventory.quantity *
-                 inventory.product.cost_price
+                 inventory.product.mrp
             )
 
          return {
@@ -488,7 +488,7 @@ class InventoryService:
         for inventory in inventories:
             inventory_value += (
                 inventory.quantity *
-                inventory.product.cost_price
+                inventory.product.mrp
             )
 
         return {

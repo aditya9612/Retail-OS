@@ -182,11 +182,11 @@ class CartService:
         raw_price = item.get("unit_price")
 
         if raw_price is None or raw_price == "":
-            if product.price is None:
+            if product.selling_price is None:
                 raise AppException(
                     f"Product {product.id} does not have a valid price"
                 )
-            unit_price = Decimal(str(product.price))
+            unit_price = Decimal(str(product.selling_price))
         else:
             unit_price = Decimal(str(raw_price))
 
@@ -383,7 +383,7 @@ class CartService:
         effective_price = (
             Decimal(str(unit_price))
             if unit_price is not None
-            else Decimal(str(product.price))
+            else Decimal(str(product.selling_price))
         )
 
         self._validate_item_values(
@@ -528,7 +528,7 @@ class CartService:
         current_price = (
             Decimal(str(item["unit_price"]))
             if item.get("unit_price") is not None
-            else Decimal(str(product.price))
+            else Decimal(str(product.selling_price))
         )
 
         current_discount = Decimal(
@@ -740,7 +740,7 @@ class CartService:
         if (
             unit_price is not None
             and Decimal(str(unit_price))
-            != Decimal(str(product.price))
+            != Decimal(str(product.selling_price))
         ):
             audit.log(
                 tenant_id,
@@ -750,7 +750,7 @@ class CartService:
                 product.id,
                 {
                     "product_name": product.name,
-                    "catalog_price": str(product.price),
+                    "catalog_price": str(product.selling_price),
                     "override_price": str(unit_price),
                 },
             )
