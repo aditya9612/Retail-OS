@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Optional
 from urllib.parse import quote
 
+from dateutil.relativedelta import relativedelta
 import qrcode
 from reportlab.lib.utils import ImageReader
 from sqlalchemy.orm import Session
@@ -34,7 +35,7 @@ VERIFIED = "verified"
 REJECTED = "rejected"
 
 # Subscriptions that may transition to active on successful payment
-VERIFIABLE_SUBSCRIPTION_STATUSES = ["trialing", "past_due"]
+VERIFIABLE_SUBSCRIPTION_STATUSES = ["trialing", "active", "past_due"]
 TERMINAL_SUBSCRIPTION_STATUSES = ["cancelled", "expired"]
 
 # Invoices eligible for UPI checkout
@@ -518,6 +519,15 @@ class SaaSUPIService:
 
         invoice.status = "paid"
         invoice.paid_at = now
+
+        # For renewal cycles, advance period continuously from old current_period_end
+        if invoice.billing_reason == "subscription_cycle":
+            old_period_end = subscription.current_period_end
+            subscription.current_period_start = old_period_end
+            if subscription.billing_interval.strip().lower() == "yearly":
+                subscription.current_period_end = old_period_end + relativedelta(years=1)
+            else:
+                subscription.current_period_end = old_period_end + relativedelta(months=1)
 
         subscription.status = "active"
 

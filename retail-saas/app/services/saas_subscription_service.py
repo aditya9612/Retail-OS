@@ -51,6 +51,25 @@ class SaaSSubscriptionService:
             .first()
         )
 
+    def get_latest_subscription(
+        self,
+        tenant_id: int,
+    ) -> Optional[SaaSSubscription]:
+        """
+        Retrieve the latest authoritative subscription for a tenant,
+        regardless of status (trialing, active, past_due, cancelled, expired).
+        Uses deterministic ordering: created_at DESC, id DESC.
+        """
+        return (
+            self.db.query(SaaSSubscription)
+            .filter(SaaSSubscription.tenant_id == tenant_id)
+            .order_by(
+                SaaSSubscription.created_at.desc(),
+                SaaSSubscription.id.desc(),
+            )
+            .first()
+        )
+
     def resolve_plan(
         self,
         plan_id: Optional[int] = None,
@@ -237,3 +256,62 @@ class SaaSSubscriptionService:
         self.db.flush()
 
         return subscription
+
+    def cancel_subscription(
+        self,
+        tenant_id: int,
+        cancel_at_period_end: bool = True,
+        reason: Optional[str] = None,
+    ) -> SaaSSubscription:
+        """
+        Cancels the tenant's current subscription.
+        - Enforces tenant isolation via row-locking tenant and current subscription.
+        - Normal scheduled cancellation:
+            * sets cancel_at_period_end = True
+            * sets cancelled_at = utcnow()
+            * preserves status = active
+            * maintains tenant projection active
+        - Terminal subscriptions (cancelled, expired) cannot be cancelled (raises 400).
+        - Idempotent: repeated calls safely return existing subscription without error.
+        - Flushes changes to session (caller owns commit/rollback).
+        """
+        # Lock tenant
+        tenant = (
+            self.db.query(Tenant)
+            .filter(Tenant.id == tenant_id)
+            .with_for_update()
+            .first()
+        )
+        if not tenant:
+            raise NotFoundException(f"Tenant {tenant_id} not found")
+
+        # Query and lock current subscription
+        sub = (
+            self.db.query(SaaSSubscription)
+            .filter(SaaSSubscription.tenant_id == tenant_id)
+            .order_by(
+                SaaSSubscription.created_at.desc(),
+                SaaSSubscription.id.desc(),
+            )
+            .with_for_update()
+            .first()
+        )
+        if not sub:
+            raise NotFoundException(f"No subscription found for tenant {tenant_id}")
+
+        if sub.status in ("cancelled", "expired"):
+            raise AppException(
+                f"Cannot cancel a subscription that is already '{sub.status}'"
+            )
+
+        now = datetime.utcnow()
+        if not sub.cancel_at_period_end:
+            sub.cancel_at_period_end = True
+            if sub.cancelled_at is None:
+                sub.cancelled_at = now
+
+        self.db.flush()
+        self.sync_tenant_projection(sub)
+        self.db.flush()
+
+        return sub

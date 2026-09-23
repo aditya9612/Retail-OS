@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_operational_write
 from app.models.user import User
 from app.schemas.store_transfer import (
     StoreTransferApprove,
@@ -22,7 +22,8 @@ router = APIRouter(
 @router.post(
     "",
     response_model=StoreTransferResponse,
-    status_code=status.HTTP_201_CREATED
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_operational_write)],
 )
 def create_transfer(
     data: StoreTransferCreate,
@@ -85,7 +86,8 @@ def get_transfer(
 
 @router.put(
     "/{transfer_id}/approve",
-    response_model=StoreTransferResponse
+    response_model=StoreTransferResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def approve_transfer(
     transfer_id: int,
@@ -109,7 +111,8 @@ def approve_transfer(
 
 @router.put(
     "/{transfer_id}/reject",
-    response_model=StoreTransferResponse
+    response_model=StoreTransferResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def reject_transfer(
     transfer_id: int,
@@ -130,7 +133,8 @@ def reject_transfer(
 
 @router.put(
     "/{transfer_id}/dispatch",
-    response_model=StoreTransferResponse
+    response_model=StoreTransferResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def dispatch_transfer(
     transfer_id: int,
@@ -151,7 +155,8 @@ def dispatch_transfer(
 
 @router.put(
     "/{transfer_id}/receive",
-    response_model=StoreTransferResponse
+    response_model=StoreTransferResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def receive_transfer(
     transfer_id: int,

@@ -3,7 +3,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import require_permission
+from app.core.security import require_operational_write, require_permission
 from app.models.product import ProductImage
 from app.models.user import User
 from app.schemas.product import (
@@ -168,6 +168,7 @@ def lookup_barcode(
     "",
     response_model=ProductResponse,
     status_code=201,
+    dependencies=[Depends(require_operational_write)],
 )
 def create_product(
     data: ProductCreate,
@@ -202,6 +203,7 @@ def get_product(
 @router.patch(
     "/{product_id}",
     response_model=ProductResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def update_product(
     product_id: int,
@@ -221,6 +223,7 @@ def update_product(
 @router.patch(
     "/{product_id}/toggle-status",
     response_model=ProductResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def toggle_product_status(
     product_id: int,
@@ -283,6 +286,7 @@ def barcode_image(
 @router.delete(
     "/{product_id}",
     status_code=204,
+    dependencies=[Depends(require_operational_write)],
 )
 def delete_product(
     product_id: int,
@@ -301,6 +305,7 @@ def delete_product(
     "/{product_id}/images",
     response_model=ProductImageResponse,
     status_code=201,
+    dependencies=[Depends(require_operational_write)],
 )
 def add_product_image(
     product_id: int,
@@ -360,6 +365,7 @@ def list_product_images(
 @router.delete(
     "/{product_id}/images/{image_id}",
     status_code=204,
+    dependencies=[Depends(require_operational_write)],
 )
 def delete_product_image(
     product_id: int,

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.core.database import get_db
-from app.core.security import require_permission
+from app.core.security import require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.sale import SaleCreate, SaleResponse
 from app.services.sale_service import SaleService
@@ -17,7 +17,8 @@ router = APIRouter(
 @router.post(
     "",
     response_model=SaleResponse,
-    status_code=status.HTTP_201_CREATED
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_operational_write)],
 )
 def create_sale(
     data: SaleCreate,
@@ -86,7 +87,8 @@ def get_sale(
 
 @router.put(
     "/{sale_id}",
-    response_model=SaleResponse
+    response_model=SaleResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def update_sale(
     sale_id: int,
@@ -109,7 +111,8 @@ def update_sale(
 
 
 @router.delete(
-    "/{sale_id}"
+    "/{sale_id}",
+    dependencies=[Depends(require_operational_write)],
 )
 def delete_sale(
     sale_id: int,

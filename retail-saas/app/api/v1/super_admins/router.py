@@ -35,11 +35,13 @@ from app.schemas.saas_plan import (
     SaaSPlanResponse,
     SaaSPlanUpdate,
 )
+from app.schemas.saas_subscription import SaaSSubscriptionLifecycleRunResponse
 from app.schemas.saas_upi import (
     UPIAdminTransactionResponse,
     UPITransactionListResponse,
     UPIRejectRequest,
 )
+from app.services.saas_subscription_lifecycle_service import SaaSSubscriptionLifecycleService
 from app.services.saas_upi_service import SaaSUPIService
 from app.services.super_admin_service import SuperAdminService
 
@@ -610,3 +612,22 @@ def change_password(
         current_super_admin.id,
         data,
     )
+
+
+@router.post(
+    "/subscription-lifecycle/process",
+    response_model=SaaSSubscriptionLifecycleRunResponse,
+    summary="Process SaaS Subscription Lifecycle",
+)
+def process_subscription_lifecycle(
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Executes a complete SaaS subscription lifecycle run across all tenants.
+    Super Admin access only.
+    """
+    svc = SaaSSubscriptionLifecycleService(db)
+    result = svc.run_all()
+    db.commit()
+    return result

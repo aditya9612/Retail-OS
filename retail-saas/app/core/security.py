@@ -420,3 +420,13 @@ def require_roles(*roles: str):
         )
 
     return checker
+
+
+def require_operational_write(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    from app.services.saas_access_service import SaaSSubscriptionAccessService
+
+    SaaSSubscriptionAccessService(db).require_operational_write_access(user)
+    return user

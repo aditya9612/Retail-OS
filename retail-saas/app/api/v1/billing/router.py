@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.exceptions import AppException, ForbiddenException
-from app.core.security import require_permission
+from app.core.security import require_operational_write, require_permission
 from app.models.product import Product
 from app.models.user import User
 from app.schemas.billing import ReturnItemRequest
@@ -189,6 +189,7 @@ def _ensure_price_override_allowed(
 @router.post(
     "/cart/add-item",
     response_model=CartSummaryResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def cart_add_item(
     payload: CartItemCreate,
@@ -230,6 +231,7 @@ def cart_add_item(
 @router.put(
     "/cart/update-item",
     response_model=CartSummaryResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def cart_update_item(
     payload: CartItemUpdate,
@@ -261,6 +263,7 @@ def cart_update_item(
 @router.delete(
     "/cart/remove-item",
     response_model=CartSummaryResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def cart_remove_item(
     product_id: int = Query(..., gt=0),
@@ -299,6 +302,7 @@ def get_cart(
 @router.post(
     "/cart/apply-discount",
     response_model=CartSummaryResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def cart_apply_discount(
     payload: CartDiscountApply,
@@ -321,6 +325,7 @@ def cart_apply_discount(
 @router.post(
     "/returns",
     response_model=dict,
+    dependencies=[Depends(require_operational_write)],
 )
 def process_item_return(
     payload: ReturnItemRequest,

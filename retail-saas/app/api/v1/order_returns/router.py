@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_operational_write
 from app.models.user import User
 from app.schemas.order_return import (
     OrderReturnCreate,
@@ -23,6 +23,7 @@ router = APIRouter(
     "",
     response_model=OrderReturnResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_operational_write)],
 )
 def create_return(
     data: OrderReturnCreate,
@@ -83,6 +84,7 @@ def get_return(
 @router.patch(
     "/{return_id}",
     response_model=OrderReturnResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def update_return(
     data: OrderReturnUpdate,
@@ -104,6 +106,7 @@ def update_return(
 @router.patch(
     "/{return_id}/status",
     response_model=OrderReturnResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def update_return_status(
     data: OrderReturnStatusUpdate,
@@ -125,6 +128,7 @@ def update_return_status(
 @router.post(
     "/{return_id}/approve",
     response_model=OrderReturnResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def approve_return(
     return_id: int = Path(
@@ -144,6 +148,7 @@ def approve_return(
 @router.post(
     "/{return_id}/reject",
     response_model=OrderReturnResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def reject_return(
     data: OrderReturnRejectRequest,
@@ -165,6 +170,7 @@ def reject_return(
 @router.post(
     "/{return_id}/complete",
     response_model=OrderReturnResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def complete_return(
     return_id: int = Path(

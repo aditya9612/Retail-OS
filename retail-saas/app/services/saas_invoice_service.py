@@ -113,7 +113,27 @@ class SaaSInvoiceService:
                 f"Cannot generate invoice for subscription in '{subscription.status}' status"
             )
 
-        # Idempotency / Duplicate Check
+        invoice_due_date = due_date or datetime.utcnow()
+
+        # Idempotency / Duplicate Check: Specific billing cycle check
+        if billing_reason == "subscription_cycle" and due_date is not None:
+            existing_cycle = (
+                self.db.query(SaaSInvoice)
+                .filter(
+                    SaaSInvoice.subscription_id == subscription.id,
+                    SaaSInvoice.billing_reason == "subscription_cycle",
+                    SaaSInvoice.due_date == due_date,
+                )
+                .first()
+            )
+            if existing_cycle:
+                if idempotent:
+                    return existing_cycle
+                raise ConflictException(
+                    f"An invoice already exists for subscription {subscription_id} billing cycle ending {due_date}"
+                )
+
+        # General unpaid duplicate check
         existing_unpaid = (
             self.db.query(SaaSInvoice)
             .filter(
@@ -135,7 +155,6 @@ class SaaSInvoiceService:
         tax_amount = Decimal("0.00")
         total_amount = subtotal + tax_amount
 
-        invoice_due_date = due_date or datetime.utcnow()
         invoice_number = self.generate_invoice_number(invoice_due_date.year)
 
         invoice = SaaSInvoice(

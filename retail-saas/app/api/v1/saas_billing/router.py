@@ -9,6 +9,10 @@ from app.schemas.saas_invoice import (
     SaaSInvoiceListResponse,
     SaaSInvoiceResponse,
 )
+from app.schemas.saas_subscription import (
+    SaaSSubscriptionCancelRequest,
+    SaaSSubscriptionResponse,
+)
 from app.schemas.saas_upi import (
     UPICheckoutPreviewResponse,
     UPIInitiateResponse,
@@ -17,6 +21,7 @@ from app.schemas.saas_upi import (
     UPITransactionResponse,
 )
 from app.services.saas_invoice_service import SaaSInvoiceService
+from app.services.saas_subscription_service import SaaSSubscriptionService
 from app.services.saas_upi_service import SaaSUPIService
 
 
@@ -219,3 +224,36 @@ def get_transaction_status(
         tenant_id=current_user.tenant_id,
         reference=reference,
     )
+
+
+@router.post(
+    "/subscription/cancel",
+    response_model=SaaSSubscriptionResponse,
+    summary="Cancel Tenant Subscription",
+)
+def cancel_subscription(
+    data: SaaSSubscriptionCancelRequest = SaaSSubscriptionCancelRequest(),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Schedules cancellation for the authenticated tenant's current subscription.
+    - Tenant isolation: tenant_id is derived strictly from current_user.tenant_id.
+    - Sets cancel_at_period_end = True and cancelled_at = current timestamp.
+    - Subscription and tenant projection remain active until current_period_end.
+    - Terminal states (cancelled, expired) cannot be cancelled.
+    - Cancellation is idempotent.
+    """
+    if not current_user.tenant_id:
+        raise ForbiddenException("User is not associated with any tenant")
+
+    svc = SaaSSubscriptionService(db)
+    sub = svc.cancel_subscription(
+        tenant_id=current_user.tenant_id,
+        cancel_at_period_end=data.cancel_at_period_end,
+        reason=data.reason,
+    )
+    db.commit()
+    db.refresh(sub)
+    return sub
+
