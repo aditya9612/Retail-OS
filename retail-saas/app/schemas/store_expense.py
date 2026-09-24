@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 from enum import Enum
 from typing import Optional
+import re
 
 from pydantic import (
     BaseModel,
@@ -20,17 +21,36 @@ class PaymentMethod(str, Enum):
     CHEQUE = "cheque"
     OTHER = "other"
 
+
+# ============================================================
+# STORE ID VALIDATION
+# ============================================================
+
 def validate_store_id(value) -> int:
+    # Reject boolean
     if isinstance(value, bool):
         raise ValueError(
-            "Store ID must be a whole number (integer). "
-            "Only integer values are accepted. Example: 1"
+            "Store ID must contain only whole numbers. "
+            "Letters and special characters are not allowed."
         )
 
+    # If API receives string, allow only digits
+    if isinstance(value, str):
+        value = value.strip()
+
+        if not re.fullmatch(r"[0-9]+", value):
+            raise ValueError(
+                "Store ID must contain only whole numbers. "
+                "Letters and special characters are not allowed."
+            )
+
+        value = int(value)
+
+    # Reject float, Decimal, etc.
     if not isinstance(value, int):
         raise ValueError(
-            "Store ID must be a whole number (integer). "
-            "Only integer values are accepted. Example: 1"
+            "Store ID must contain only whole numbers. "
+            "Letters and special characters are not allowed."
         )
 
     if value <= 0:
@@ -41,7 +61,40 @@ def validate_store_id(value) -> int:
     return value
 
 
-def validate_amount(value: Decimal) -> Decimal:
+# ============================================================
+# AMOUNT VALIDATION
+# ============================================================
+
+def validate_amount(value) -> Decimal:
+
+    if isinstance(value, bool):
+        raise ValueError(
+            "Amount must contain only numbers. "
+            "Letters and special characters are not allowed."
+        )
+
+    # Validate string before Decimal conversion
+    if isinstance(value, str):
+        value = value.strip()
+
+        if not re.fullmatch(r"[0-9]+(?:\.[0-9]{1,2})?", value):
+            raise ValueError(
+                "Amount must contain only numbers with up to "
+                "2 decimal places. Letters and special characters "
+                "are not allowed."
+            )
+
+        value = Decimal(value)
+
+    elif isinstance(value, (int, float, Decimal)):
+        value = Decimal(str(value))
+
+    else:
+        raise ValueError(
+            "Amount must contain only numbers. "
+            "Letters and special characters are not allowed."
+        )
+
     if value <= 0:
         raise ValueError(
             "Expense amount must be greater than 0."
@@ -52,10 +105,26 @@ def validate_amount(value: Decimal) -> Decimal:
             "Expense amount cannot exceed 9,999,999,999.99."
         )
 
+    # Maximum 2 decimal places
+    if value.as_tuple().exponent < -2:
+        raise ValueError(
+            "Amount must not have more than 2 decimal places."
+        )
+
     return value
 
 
+# ============================================================
+# CATEGORY VALIDATION
+# ============================================================
+
 def validate_category(value: str) -> str:
+
+    if not isinstance(value, str):
+        raise ValueError(
+            "Category must contain only letters and spaces."
+        )
+
     value = value.strip()
 
     if not value:
@@ -73,15 +142,38 @@ def validate_category(value: str) -> str:
             "Expense category must not exceed 100 characters."
         )
 
-    if not all(char.isalpha() or char.isspace() for char in value):
+    # Only English letters and single spaces
+    #
+    # Valid:
+    # Electricity
+    # Office Supplies
+    # Travel Expense
+    #
+    # Invalid:
+    # Food123
+    # Food@
+    # Food-Supply
+    # Office  Supplies
+    if not re.fullmatch(r"[A-Za-z]+(?: [A-Za-z]+)*", value):
         raise ValueError(
-            "Expense category must contain only letters and spaces."
+            "Category must contain only letters with a single "
+            "space between words. Numbers and special characters "
+            "are not allowed."
         )
 
     return value
 
+# ============================================================
+# DESCRIPTION VALIDATION
+# ============================================================
 
 def validate_description(value: str) -> str:
+
+    if not isinstance(value, str):
+        raise ValueError(
+            "Description must contain only letters, numbers, and spaces."
+        )
+
     value = value.strip()
 
     if not value:
@@ -99,10 +191,57 @@ def validate_description(value: str) -> str:
             "Description must not exceed 500 characters."
         )
 
+    # Only English letters, numbers and spaces
+    #
+    # Valid:
+    # Office Rent
+    # Office Rent 5000
+    # Electricity Bill 2026
+    #
+    # Invalid:
+    # Office@Rent
+    # Rent-5000
+    # Bill#123
+    if not re.fullmatch(r"[A-Za-z0-9]+(?: [A-Za-z0-9]+)*", value):
+        raise ValueError(
+            "Description can contain only letters, numbers, "
+            "and spaces. Special characters are not allowed."
+        )
+
     return value
 
 
-def validate_expense_date(value: date) -> date:
+# ============================================================
+# EXPENSE DATE VALIDATION
+# ============================================================
+
+def validate_expense_date(value) -> date:
+
+    # API input must be string in YYYY-MM-DD format
+    if isinstance(value, str):
+
+        value = value.strip()
+
+        # Only YYYY-MM-DD
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            raise ValueError(
+                "Expense date must be in YYYY-MM-DD format. "
+                "Letters and other special characters are not allowed."
+            )
+
+        try:
+            value = date.fromisoformat(value)
+        except ValueError:
+            raise ValueError(
+                "Invalid expense date. Please enter a valid date "
+                "in YYYY-MM-DD format."
+            )
+
+    elif not isinstance(value, date):
+        raise ValueError(
+            "Expense date must be in YYYY-MM-DD format."
+        )
+
     if value > date.today():
         raise ValueError(
             "Expense date cannot be in the future."
@@ -110,6 +249,41 @@ def validate_expense_date(value: date) -> date:
 
     return value
 
+# ============================================================
+# PAYMENT METHOD VALIDATION
+# ============================================================
+
+def validate_payment_method(value) -> str:
+
+    if not isinstance(value, str):
+        raise ValueError(
+            "Payment method must be one of: cash, card, upi, "
+            "bank_transfer, cheque, other."
+        )
+
+    value = value.strip().lower()
+
+    allowed_methods = {
+        "cash",
+        "card",
+        "upi",
+        "bank_transfer",
+        "cheque",
+        "other",
+    }
+
+    if value not in allowed_methods:
+        raise ValueError(
+            "Payment method must be one of: cash, card, upi, "
+            "bank_transfer, cheque, other."
+        )
+
+    return value
+
+
+# ============================================================
+# REFERENCE NUMBER VALIDATION
+# ============================================================
 
 def validate_reference_number(
     value: Optional[str],
@@ -117,6 +291,11 @@ def validate_reference_number(
 
     if value is None:
         return None
+
+    if not isinstance(value, str):
+        raise ValueError(
+            "Reference number must be text."
+        )
 
     value = value.strip()
 
@@ -128,16 +307,31 @@ def validate_reference_number(
             "Reference number must not exceed 100 characters."
         )
 
-    if not all(
-        char.isalnum() or char == "-"
-        for char in value
+    # Valid:
+    # INV123
+    # INV-123
+    # INV/123
+    # INV_123
+    #
+    # Invalid:
+    # INV@123
+    # INV 123
+    # -INV123
+    # INV-123-
+    if not re.fullmatch(
+        r"[A-Za-z0-9]+(?:[-/_][A-Za-z0-9]+)*",
+        value,
     ):
         raise ValueError(
-            "Reference number can contain only "
-            "letters, numbers, and hyphens."
+            "Reference number can contain only letters, numbers, "
+            "hyphens, underscores, and slashes."
         )
 
     return value
+
+# ============================================================
+# CREATE STORE EXPENSE
+# ============================================================
 
 class StoreExpenseCreate(BaseModel):
 
@@ -189,34 +383,39 @@ class StoreExpenseCreate(BaseModel):
     def validate_store_id_field(cls, value):
         return validate_store_id(value)
 
-    @field_validator("amount")
+    @field_validator("amount", mode="before")
     @classmethod
-    def validate_amount_field(cls, value: Decimal) -> Decimal:
+    def validate_amount_field(cls, value):
         return validate_amount(value)
 
-    @field_validator("category")
+    @field_validator("category", mode="before")
     @classmethod
-    def validate_category_field(cls, value: str) -> str:
+    def validate_category_field(cls, value):
         return validate_category(value)
 
-    @field_validator("description")
+    @field_validator("description", mode="before")
     @classmethod
-    def validate_description_field(cls, value: str) -> str:
+    def validate_description_field(cls, value):
         return validate_description(value)
 
-    @field_validator("expense_date")
+    @field_validator("expense_date", mode="before")
     @classmethod
-    def validate_expense_date_field(cls, value: date) -> date:
+    def validate_expense_date_field(cls, value):
         return validate_expense_date(value)
 
-    @field_validator("reference_number")
+    @field_validator("payment_method", mode="before")
     @classmethod
-    def validate_reference_number_field(
-        cls,
-        value: Optional[str],
-    ) -> Optional[str]:
+    def validate_payment_method_field(cls, value):
+        return validate_payment_method(value)
+
+    @field_validator("reference_number", mode="before")
+    @classmethod
+    def validate_reference_number_field(cls, value):
         return validate_reference_number(value)
 
+# ============================================================
+# UPDATE STORE EXPENSE
+# ============================================================
 
 class StoreExpenseUpdate(BaseModel):
 
@@ -268,64 +467,54 @@ class StoreExpenseUpdate(BaseModel):
     def validate_store_id_field(cls, value):
         if value is None:
             return None
-
         return validate_store_id(value)
 
-    @field_validator("amount")
+    @field_validator("amount", mode="before")
     @classmethod
-    def validate_amount_field(
-        cls,
-        value: Optional[Decimal],
-    ) -> Optional[Decimal]:
+    def validate_amount_field(cls, value):
         if value is None:
             return None
-
         return validate_amount(value)
 
-    @field_validator("category")
+    @field_validator("category", mode="before")
     @classmethod
-    def validate_category_field(
-        cls,
-        value: Optional[str],
-    ) -> Optional[str]:
+    def validate_category_field(cls, value):
         if value is None:
             return None
-
         return validate_category(value)
 
-    @field_validator("description")
+    @field_validator("description", mode="before")
     @classmethod
-    def validate_description_field(
-        cls,
-        value: Optional[str],
-    ) -> Optional[str]:
+    def validate_description_field(cls, value):
         if value is None:
             return None
-
         return validate_description(value)
 
-    @field_validator("expense_date")
+    @field_validator("expense_date", mode="before")
     @classmethod
-    def validate_expense_date_field(
-        cls,
-        value: Optional[date],
-    ) -> Optional[date]:
+    def validate_expense_date_field(cls, value):
         if value is None:
             return None
-
         return validate_expense_date(value)
 
-    @field_validator("reference_number")
+    @field_validator("payment_method", mode="before")
     @classmethod
-    def validate_reference_number_field(
-        cls,
-        value: Optional[str],
-    ) -> Optional[str]:
+    def validate_payment_method_field(cls, value):
+        if value is None:
+            return None
+        return validate_payment_method(value)
+
+    @field_validator("reference_number", mode="before")
+    @classmethod
+    def validate_reference_number_field(cls, value):
         return validate_reference_number(value)
 
-
+# ============================================================
+# RESPONSE
+# ============================================================
 
 class StoreExpenseResponse(BaseModel):
+
     id: int
     store_id: int
     amount: Decimal
@@ -335,9 +524,14 @@ class StoreExpenseResponse(BaseModel):
     payment_method: PaymentMethod
     reference_number: Optional[str] = None
 
-    model_config = ConfigDict(from_attributes=True)
-
+    model_config = ConfigDict(
+        from_attributes=True
+    )
+# ============================================================
+# SUMMARY
+# ============================================================
 
 class StoreExpenseSummary(BaseModel):
+
     total_expenses: Decimal
     expense_count: int

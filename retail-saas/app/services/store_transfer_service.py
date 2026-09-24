@@ -1,5 +1,8 @@
+from datetime import datetime
+
 from sqlalchemy.orm import Session
 
+from app.models.product import Product
 from app.models.store import Store
 from app.models.store_transfer import StoreTransfer
 from app.models.store_transfer_item import StoreTransferItem
@@ -48,10 +51,20 @@ class StoreTransferService:
             transfer_number=transfer_number,
             source_store_id=source_store_id,
             destination_store_id=destination_store_id,
-            status="Pending"
+            status="Pending",
+            created_at=datetime.now()
         )
 
         for item in items:
+            product = db.query(Product).filter(
+                Product.id == item.product_id
+            ).first()
+
+            if not product:
+                raise ValueError(
+                    f"Product with ID {item.product_id} not found"
+                )
+
             transfer.items.append(
                 StoreTransferItem(
                     product_id=item.product_id,
