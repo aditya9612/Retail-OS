@@ -1,11 +1,16 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Path, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import require_permission
-from app.models.category import Category
 from app.models.user import User
-from app.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
+from app.schemas.category import (
+    CategoryCreate,
+    CategoryDeleteResponse,
+    CategoryListResponse,
+    CategoryResponse,
+    CategoryUpdate,
+)
 from app.services.category_service import CategoryService
 
 
@@ -15,80 +20,98 @@ router = APIRouter(prefix="/categories", tags=["categories"])
 @router.post(
     "",
     response_model=CategoryResponse,
-    status_code=201,
+    status_code=status.HTTP_201_CREATED,
 )
 def create_category(
     data: CategoryCreate,
     user: User = Depends(require_permission("products:write")),
     db: Session = Depends(get_db),
 ):
-    category = Category(
+    return CategoryService(db).create_category(
         tenant_id=user.tenant_id,
-        **data.model_dump(),
+        data=data,
     )
-
-    db.add(category)
-    db.commit()
-    db.refresh(category)
-
-    return category
 
 
 @router.get(
     "",
-    response_model=list[CategoryResponse],
+    response_model=CategoryListResponse,
 )
 def list_categories(
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    return (
-        db.query(Category)
-        .filter(Category.tenant_id == user.tenant_id)
-        .all()
-    )
+    categories = CategoryService(db).list_categories(user.tenant_id)
+    return {
+        "success": True,
+        "message": (
+            "Categories retrieved successfully"
+            if categories
+            else "No categories found"
+        ),
+        "data": categories,
+    }
 
-@router.get("/{category_id}", response_model=CategoryResponse)
+
+@router.get(
+    "/{category_id}",
+    response_model=CategoryResponse,
+)
 def get_category(
-    category_id: int,
+    category_id: int = Path(
+        ...,
+        gt=0,
+        description="Category ID must be greater than 0",
+    ),
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("categories:read")),
+    user: User = Depends(require_permission("products:read")),
 ):
     return CategoryService(db).get_category(
         tenant_id=user.tenant_id,
         category_id=category_id,
     )
 
+
 @router.put(
     "/{category_id}",
     response_model=CategoryResponse,
 )
 def update_category(
-    category_id: int,
     data: CategoryUpdate,
+    category_id: int = Path(
+        ...,
+        gt=0,
+        description="Category ID must be greater than 0",
+    ),
     user: User = Depends(require_permission("products:write")),
     db: Session = Depends(get_db),
 ):
-    category = CategoryService(db).update_category(
+    return CategoryService(db).update_category(
         tenant_id=user.tenant_id,
         category_id=category_id,
         data=data,
     )
 
-    return category
 
 @router.delete(
     "/{category_id}",
-    response_model=CategoryResponse,
+    response_model=CategoryDeleteResponse,
 )
 def delete_category(
-    category_id: int,
+    category_id: int = Path(
+        ...,
+        gt=0,
+        description="Category ID must be greater than 0",
+    ),
     user: User = Depends(require_permission("products:write")),
     db: Session = Depends(get_db),
 ):
-    category = CategoryService(db).delete_category(
+    result = CategoryService(db).delete_category(
         tenant_id=user.tenant_id,
         category_id=category_id,
     )
-
-    return category    
+    return {
+        "success": True,
+        "message": "Category deleted successfully",
+        "data": result,
+    }

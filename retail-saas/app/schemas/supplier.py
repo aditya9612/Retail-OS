@@ -9,6 +9,8 @@ from pydantic import (
 )
 from typing import Any, Optional
 
+from app.schemas.purchase_order import PurchaseOrderResponse
+
 class SupplierBase(BaseModel):
 
     name: str = Field(
@@ -318,5 +320,9 @@ class SupplierPurchaseHistoryResponse(BaseModel):
     supplier_id: int
     supplier_name: str
     total_purchases: int
-    purchase_history: list[Any]
+    purchase_history: list[PurchaseOrderResponse]
     message: str
+
+    model_config = {
+        "from_attributes": True
+    }
