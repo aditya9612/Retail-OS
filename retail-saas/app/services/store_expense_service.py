@@ -24,15 +24,15 @@ class StoreExpenseService:
         db: Session,
         data: StoreExpenseCreate,
         created_by: Optional[int] = None,
+        tenant_id: int = None,
     ):
         # Verify store
         from app.models.store import Store
 
-        store = (
-            db.query(Store)
-            .filter(Store.id == data.store_id)
-            .first()
-        )
+        query = db.query(Store).filter(Store.id == data.store_id)
+        if tenant_id is not None:
+            query = query.filter(Store.tenant_id == tenant_id)
+        store = query.first()
 
         if not store:
             raise HTTPException(
@@ -61,10 +61,12 @@ class StoreExpenseService:
     def get_expense(
         db: Session,
         expense_id: int,
+        tenant_id: int,
     ):
         expense = StoreExpenseRepository.get_by_id(
             db,
             expense_id,
+            tenant_id=tenant_id,
         )
 
         if not expense or expense.status == "deleted":
@@ -78,6 +80,7 @@ class StoreExpenseService:
     @staticmethod
     def get_expenses(
         db: Session,
+        tenant_id: int,
         store_id: Optional[int] = None,
         category: Optional[str] = None,
         start_date: Optional[date] = None,
@@ -95,6 +98,7 @@ class StoreExpenseService:
 
         return StoreExpenseRepository.get_all(
             db=db,
+            tenant_id=tenant_id,
             store_id=store_id,
             category=category,
             start_date=start_date,
@@ -106,10 +110,12 @@ class StoreExpenseService:
         db: Session,
         expense_id: int,
         data: StoreExpenseUpdate,
+        tenant_id: int,
     ):
         expense = StoreExpenseRepository.get_by_id(
             db,
             expense_id,
+            tenant_id=tenant_id,
         )
 
         if not expense or expense.status == "deleted":
@@ -128,7 +134,8 @@ class StoreExpenseService:
             store = (
                 db.query(Store)
                 .filter(
-                    Store.id == update_data["store_id"]
+                    Store.id == update_data["store_id"],
+                    Store.tenant_id == tenant_id,
                 )
                 .first()
             )
@@ -151,10 +158,12 @@ class StoreExpenseService:
     def delete_expense(
         db: Session,
         expense_id: int,
+        tenant_id: int,
     ):
         expense = StoreExpenseRepository.get_by_id(
             db,
             expense_id,
+            tenant_id=tenant_id,
         )
 
         if not expense or expense.status == "deleted":
@@ -171,6 +180,7 @@ class StoreExpenseService:
     @staticmethod
     def get_summary(
         db: Session,
+        tenant_id: int,
         store_id: Optional[int] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
@@ -187,6 +197,7 @@ class StoreExpenseService:
 
         return StoreExpenseRepository.get_summary(
             db=db,
+            tenant_id=tenant_id,
             store_id=store_id,
             start_date=start_date,
             end_date=end_date,
@@ -195,9 +206,11 @@ class StoreExpenseService:
     @staticmethod
     def get_categories(
         db: Session,
+        tenant_id: int,
         store_id: Optional[int] = None,
     ):
         return StoreExpenseRepository.get_categories(
-            db,
-            store_id,
+            db=db,
+            tenant_id=tenant_id,
+            store_id=store_id,
         )

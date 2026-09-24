@@ -49,7 +49,7 @@ def get_sales(
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.get_sales(db, store_id)
+        return SaleService.get_sales(db, tenant_id=user.tenant_id, store_id=store_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -72,7 +72,7 @@ def get_sale(
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.get_sale(db, sale_id)
+        return SaleService.get_sale(db, sale_id, tenant_id=user.tenant_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -97,8 +97,13 @@ def update_sale(
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.update_sale(db, sale_id, data)
+        return SaleService.update_sale(db, sale_id, data, tenant_id=user.tenant_id)
     except ValueError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(e)
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
@@ -120,7 +125,7 @@ def delete_sale(
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.delete_sale(db, sale_id)
+        return SaleService.delete_sale(db, sale_id, tenant_id=user.tenant_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -13,7 +13,8 @@ class StoreTransferService:
         db: Session,
         source_store_id: int,
         destination_store_id: int,
-        items: list
+        items: list,
+        tenant_id: int
     ):
         if source_store_id == destination_store_id:
             raise ValueError(
@@ -29,6 +30,11 @@ class StoreTransferService:
                 "Source store not found"
             )
 
+        if source_store.tenant_id != tenant_id:
+            raise ValueError(
+                "Source store does not belong to the user's tenant"
+            )
+
         destination_store = db.query(Store).filter(
             Store.id == destination_store_id
         ).first()
@@ -38,10 +44,26 @@ class StoreTransferService:
                 "Destination store not found"
             )
 
+        if destination_store.tenant_id != tenant_id:
+            raise ValueError(
+                "Destination store does not belong to the user's tenant"
+            )
+
+        from app.models.product import Product
+
+        for item in items:
+            product = db.query(Product).filter(Product.id == item.product_id).first()
+            if not product:
+                raise ValueError(f"Product {item.product_id} not found")
+            if product.tenant_id != tenant_id:
+                raise ValueError(f"Product {item.product_id} does not belong to the user's tenant")
+            if getattr(item, "quantity", 0) <= 0:
+                raise ValueError(f"Quantity must be greater than 0 for product {item.product_id}")
+
         transfer_number = (
             f"TRF-{source_store_id}-"
             f"{destination_store_id}-"
-            f"{StoreTransferRepository.get_all(db).__len__() + 1:05d}"
+            f"{db.query(StoreTransfer).count() + 1:05d}"
         )
 
         transfer = StoreTransfer(
@@ -64,11 +86,13 @@ class StoreTransferService:
     @staticmethod
     def get_transfer(
         db: Session,
-        transfer_id: int
+        transfer_id: int,
+        tenant_id: int
     ):
         transfer = StoreTransferRepository.get_by_id(
             db,
-            transfer_id
+            transfer_id,
+            tenant_id=tenant_id
         )
 
         if not transfer:
@@ -79,26 +103,30 @@ class StoreTransferService:
     @staticmethod
     def get_transfers(
         db: Session,
+        tenant_id: int,
         source_store_id: int | None = None,
         destination_store_id: int | None = None,
         status: str | None = None
     ):
         return StoreTransferRepository.get_all(
             db,
-            source_store_id,
-            destination_store_id,
-            status
+            tenant_id=tenant_id,
+            source_store_id=source_store_id,
+            destination_store_id=destination_store_id,
+            status=status
         )
 
     @staticmethod
     def approve_transfer(
         db: Session,
         transfer_id: int,
-        approved_by: int
+        approved_by: int,
+        tenant_id: int
     ):
         transfer = StoreTransferService.get_transfer(
             db,
-            transfer_id
+            transfer_id,
+            tenant_id=tenant_id
         )
 
         if transfer.status not in ["Pending", "Draft"]:
@@ -117,11 +145,13 @@ class StoreTransferService:
     @staticmethod
     def reject_transfer(
         db: Session,
-        transfer_id: int
+        transfer_id: int,
+        tenant_id: int
     ):
         transfer = StoreTransferService.get_transfer(
             db,
-            transfer_id
+            transfer_id,
+            tenant_id=tenant_id
         )
 
         if transfer.status not in ["Pending", "Draft"]:
@@ -139,11 +169,13 @@ class StoreTransferService:
     @staticmethod
     def dispatch_transfer(
         db: Session,
-        transfer_id: int
+        transfer_id: int,
+        tenant_id: int
     ):
         transfer = StoreTransferService.get_transfer(
             db,
-            transfer_id
+            transfer_id,
+            tenant_id=tenant_id
         )
 
         if transfer.status != "Approved":
@@ -161,11 +193,13 @@ class StoreTransferService:
     @staticmethod
     def receive_transfer(
         db: Session,
-        transfer_id: int
+        transfer_id: int,
+        tenant_id: int
     ):
         transfer = StoreTransferService.get_transfer(
             db,
-            transfer_id
+            transfer_id,
+            tenant_id=tenant_id
         )
 
         if transfer.status != "Dispatched":

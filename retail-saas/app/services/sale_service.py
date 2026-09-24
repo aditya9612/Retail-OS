@@ -47,6 +47,8 @@ class SaleService:
             )
             if not customer:
                 raise ValueError(f"Customer with id {data.customer_id} not found")
+            if customer.tenant_id != tenant_id:
+                raise ValueError("Customer does not belong to the user's tenant")
 
         subtotal = Decimal("0")
         total_discount = Decimal("0")
@@ -64,6 +66,9 @@ class SaleService:
             if not product:
                 raise ValueError(f"Product {item.product_id} not found")
 
+            if product.tenant_id != tenant_id:
+                raise ValueError(f"Product {item.product_id} does not belong to the user's tenant")
+
             if not product.is_active:
                 raise ValueError(f"Product {item.product_id} is inactive")
 
@@ -71,7 +76,8 @@ class SaleService:
                 db.query(Inventory)
                 .filter(
                     Inventory.store_id == data.store_id,
-                    Inventory.product_id == item.product_id
+                    Inventory.product_id == item.product_id,
+                    Inventory.tenant_id == tenant_id
                 )
                 .first()
             )
@@ -145,16 +151,22 @@ class SaleService:
     @staticmethod
     def get_sales(
         db: Session,
+        tenant_id: int,
         store_id: int = None
     ):
-        return SaleRepository.get_all(db, store_id)
+        if store_id is not None:
+            store = db.query(Store).filter(Store.id == store_id, Store.tenant_id == tenant_id).first()
+            if not store:
+                return []
+        return SaleRepository.get_all(db, tenant_id=tenant_id, store_id=store_id)
 
     @staticmethod
     def get_sale(
         db: Session,
-        sale_id: int
+        sale_id: int,
+        tenant_id: int
     ):
-        sale = SaleRepository.get_by_id(db, sale_id)
+        sale = SaleRepository.get_by_id(db, sale_id=sale_id, tenant_id=tenant_id)
         if not sale:
             raise ValueError(f"Sale with id {sale_id} not found")
         return sale
@@ -163,9 +175,10 @@ class SaleService:
     def update_sale(
         db: Session,
         sale_id: int,
-        data: SaleCreate
+        data: SaleCreate,
+        tenant_id: int
     ):
-        sale = SaleRepository.get_by_id(db, sale_id)
+        sale = SaleRepository.get_by_id(db, sale_id=sale_id, tenant_id=tenant_id)
         if not sale:
             raise ValueError(f"Sale with id {sale_id} not found")
 
@@ -175,19 +188,24 @@ class SaleService:
         store_exists = db.query(Store).filter(Store.id == data.store_id).first()
         if not store_exists:
             raise ValueError(f"Store with id {data.store_id} not found")
+        if store_exists.tenant_id != tenant_id:
+            raise ValueError("Store does not belong to the user's tenant")
 
         if data.customer_id is not None:
             from app.models.customer import Customer
             customer = db.query(Customer).filter(Customer.id == data.customer_id).first()
             if not customer:
                 raise ValueError(f"Customer with id {data.customer_id} not found")
+            if customer.tenant_id != tenant_id:
+                raise ValueError("Customer does not belong to the user's tenant")
 
         for old_item in sale.items:
             old_inventory = (
                 db.query(Inventory)
                 .filter(
                     Inventory.store_id == sale.store_id,
-                    Inventory.product_id == old_item.product_id
+                    Inventory.product_id == old_item.product_id,
+                    Inventory.tenant_id == tenant_id
                 )
                 .first()
             )
@@ -204,6 +222,8 @@ class SaleService:
             product = db.query(Product).filter(Product.id == item.product_id).first()
             if not product:
                 raise ValueError(f"Product {item.product_id} not found")
+            if product.tenant_id != tenant_id:
+                raise ValueError(f"Product {item.product_id} does not belong to the user's tenant")
 
             if not product.is_active:
                 raise ValueError(f"Product {item.product_id} is inactive")
@@ -212,7 +232,8 @@ class SaleService:
                 db.query(Inventory)
                 .filter(
                     Inventory.store_id == data.store_id,
-                    Inventory.product_id == item.product_id
+                    Inventory.product_id == item.product_id,
+                    Inventory.tenant_id == tenant_id
                 )
                 .first()
             )
@@ -272,9 +293,10 @@ class SaleService:
     @staticmethod
     def delete_sale(
         db: Session,
-        sale_id: int
+        sale_id: int,
+        tenant_id: int
     ):
-        sale = SaleRepository.get_by_id(db, sale_id)
+        sale = SaleRepository.get_by_id(db, sale_id=sale_id, tenant_id=tenant_id)
         if not sale:
             raise ValueError(f"Sale with id {sale_id} not found")
 
@@ -283,7 +305,8 @@ class SaleService:
                 db.query(Inventory)
                 .filter(
                     Inventory.store_id == sale.store_id,
-                    Inventory.product_id == item.product_id
+                    Inventory.product_id == item.product_id,
+                    Inventory.tenant_id == tenant_id
                 )
                 .first()
             )

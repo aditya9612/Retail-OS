@@ -35,7 +35,8 @@ def create_transfer(
             db=db,
             source_store_id=data.source_store_id,
             destination_store_id=data.destination_store_id,
-            items=data.items
+            items=data.items,
+            tenant_id=current_user.tenant_id,
         )
     except ValueError as e:
         raise HTTPException(
@@ -57,6 +58,7 @@ def list_transfers(
 ):
     return StoreTransferService.get_transfers(
         db=db,
+        tenant_id=current_user.tenant_id,
         source_store_id=source_store_id,
         destination_store_id=destination_store_id,
         status=status
@@ -75,7 +77,8 @@ def get_transfer(
     try:
         return StoreTransferService.get_transfer(
             db,
-            transfer_id
+            transfer_id,
+            tenant_id=current_user.tenant_id,
         )
     except ValueError as e:
         raise HTTPException(
@@ -100,9 +103,15 @@ def approve_transfer(
         return StoreTransferService.approve_transfer(
             db=db,
             transfer_id=transfer_id,
-            approved_by=approver_id
+            approved_by=approver_id,
+            tenant_id=current_user.tenant_id,
         )
     except ValueError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=str(e)
+            )
         raise HTTPException(
             status_code=400,
             detail=str(e)
@@ -122,9 +131,15 @@ def reject_transfer(
     try:
         return StoreTransferService.reject_transfer(
             db,
-            transfer_id
+            transfer_id,
+            tenant_id=current_user.tenant_id,
         )
     except ValueError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=str(e)
+            )
         raise HTTPException(
             status_code=400,
             detail=str(e)
@@ -144,9 +159,15 @@ def dispatch_transfer(
     try:
         return StoreTransferService.dispatch_transfer(
             db,
-            transfer_id
+            transfer_id,
+            tenant_id=current_user.tenant_id,
         )
     except ValueError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=str(e)
+            )
         raise HTTPException(
             status_code=400,
             detail=str(e)
@@ -166,9 +187,15 @@ def receive_transfer(
     try:
         return StoreTransferService.receive_transfer(
             db,
-            transfer_id
+            transfer_id,
+            tenant_id=current_user.tenant_id,
         )
     except ValueError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=str(e)
+            )
         raise HTTPException(
             status_code=400,
             detail=str(e)
