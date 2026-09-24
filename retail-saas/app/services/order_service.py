@@ -217,7 +217,7 @@ class OrderService:
         unit_price = (
             item.unit_price
             if item.unit_price is not None
-            else product.price
+            else product.selling_price
         )
 
         gross_amount = (

@@ -6,6 +6,7 @@ from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.user import (
     MyProfileUpdate,
+    RoleResponse,
     UserCreate,
     UserResponse,
     UserUpdate,
@@ -53,6 +54,19 @@ def list_users(
         skip=skip,
         limit=page_size,
         include_inactive=include_inactive,
+    )
+
+
+@router.get(
+    "/roles",
+    response_model=list[RoleResponse],
+)
+def list_roles(
+    current_user: User = Depends(require_permission("users:write")),
+    db: Session = Depends(get_db),
+):
+    return UserService(db).list_roles(
+        tenant_id=current_user.tenant_id,
     )
 
 

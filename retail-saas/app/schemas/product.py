@@ -105,16 +105,17 @@ class ProductBase(BaseModel):
         le=100,
     )
 
-    price: Decimal = Field(
+    selling_price: Decimal = Field(
         gt=0,
         le=Decimal("999999.99"),
-        description="Price must be greater than 0",
+        description="Selling price must be greater than 0",
     )
 
-    cost_price: Decimal = Field(
+    mrp: Decimal = Field(
         default=Decimal("0.00"),
         ge=0,
         le=Decimal("999999.99"),
+        description="MRP cannot be negative",
     )
 
     variants: Optional[Dict[str, Any]] = None
@@ -188,14 +189,14 @@ class ProductBase(BaseModel):
             )
         return v
 
-    @field_validator("cost_price")
+    @field_validator("mrp")
     @classmethod
-    def validate_cost_price(
+    def validate_mrp(
         cls,
         v: Decimal,
     ) -> Decimal:
         if v < 0:
-            raise ValueError("Cost price cannot be negative")
+            raise ValueError("MRP cannot be negative")
         return v
 
     @field_validator("image_url")
@@ -252,13 +253,13 @@ class ProductUpdate(BaseModel):
         le=100,
     )
 
-    price: Optional[Decimal] = Field(
+    selling_price: Optional[Decimal] = Field(
         default=None,
         gt=0,
         le=Decimal("999999.99"),
     )
 
-    cost_price: Optional[Decimal] = Field(
+    mrp: Optional[Decimal] = Field(
         default=None,
         ge=0,
         le=Decimal("999999.99"),
@@ -333,6 +334,16 @@ class ProductUpdate(BaseModel):
             )
         return v
 
+    @field_validator("mrp")
+    @classmethod
+    def validate_mrp(
+        cls,
+        v: Optional[Decimal],
+    ) -> Optional[Decimal]:
+        if v is not None and v < 0:
+            raise ValueError("MRP cannot be negative")
+        return v
+
     @field_validator("image_url")
     @classmethod
     def validate_image_url(
@@ -358,8 +369,8 @@ class ProductResponse(BaseModel):
     category_id: Optional[int] = None
     hsn_code: Optional[str] = None
     gst_rate: Decimal
-    price: Decimal
-    cost_price: Decimal
+    selling_price: Decimal
+    mrp: Decimal
     variants: Optional[Dict[str, Any]] = None
     track_batch: bool
     track_expiry: bool

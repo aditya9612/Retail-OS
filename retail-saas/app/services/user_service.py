@@ -14,16 +14,25 @@ class UserService:
         self.db = db
         self.repo = UserRepository(db)
 
-    def create_user(self, tenant_id: int, data: UserCreate) -> User:
+    def create_user(
+        self,
+        tenant_id: int,
+        data: UserCreate,
+    ) -> User:
         if tenant_id is None:
             raise ConflictException("Tenant is required")
 
         email = str(data.email).strip().lower()
 
-        existing = self.repo.get_by_email(email, tenant_id)
+        existing = self.repo.get_by_email(
+            email,
+            tenant_id,
+        )
 
         if existing:
-            raise ConflictException("Email already registered")
+            raise ConflictException(
+                "Email already registered"
+            )
 
         role = (
             self.db.query(Role)
@@ -35,7 +44,9 @@ class UserService:
         )
 
         if not role:
-            raise NotFoundException("Role not found")
+            raise NotFoundException(
+                "Role not found. Use GET /api/v1/users/roles to get valid Role IDs."
+            )
 
         if data.store_id is not None:
             store = (
@@ -49,7 +60,9 @@ class UserService:
             )
 
             if not store:
-                raise NotFoundException("Store not found")
+                raise NotFoundException(
+                    "Store not found"
+                )
 
         user = User(
             tenant_id=tenant_id,
@@ -58,16 +71,48 @@ class UserService:
             phone=data.phone,
             store_id=data.store_id,
             role_id=data.role_id,
-            hashed_password=get_password_hash(data.password),
+            hashed_password=get_password_hash(
+                data.password
+            ),
             is_active=True,
             is_deleted=False,
         )
 
         return self.repo.create(user)
 
-    def get_user(self, tenant_id: int, user_id: int) -> User:
+    def list_roles(
+        self,
+        tenant_id: int,
+    ) -> list[Role]:
+        if tenant_id is None:
+            raise ConflictException(
+                "Tenant is required"
+            )
+
+        roles = (
+            self.db.query(Role)
+            .filter(
+                Role.tenant_id == tenant_id,
+            )
+            .order_by(Role.id.asc())
+            .all()
+        )
+
+        for role in roles:
+            if role.permissions is None:
+                role.permissions = []
+
+        return roles
+
+    def get_user(
+        self,
+        tenant_id: int,
+        user_id: int,
+    ) -> User:
         if user_id <= 0:
-            raise NotFoundException("User not found")
+            raise NotFoundException(
+                "User not found"
+            )
 
         user = self.repo.get_by_id(
             user_id=user_id,
@@ -76,7 +121,12 @@ class UserService:
         )
 
         if not user:
-            raise NotFoundException("User not found")
+            raise NotFoundException(
+                "User not found"
+            )
+
+        if user.role is not None and user.role.permissions is None:
+            user.role.permissions = []
 
         return user
 
@@ -96,12 +146,14 @@ class UserService:
         if limit > 100:
             limit = 100
 
-        return self.repo.list_users(
+        users = self.repo.list_users(
             tenant_id=tenant_id,
             skip=skip,
             limit=limit,
             include_inactive=include_inactive,
         )
+
+        return users
 
     def update_user(
         self,
@@ -109,12 +161,19 @@ class UserService:
         user_id: int,
         data: UserUpdate,
     ) -> User:
-        user = self.get_user(tenant_id, user_id)
+        user = self.get_user(
+            tenant_id,
+            user_id,
+        )
 
-        update_data = data.model_dump(exclude_unset=True)
+        update_data = data.model_dump(
+            exclude_unset=True
+        )
 
         if not update_data:
-            raise ConflictException("No fields provided for update")
+            raise ConflictException(
+                "No fields provided for update"
+            )
 
         if "role_id" in update_data:
             role = (
@@ -127,7 +186,9 @@ class UserService:
             )
 
             if not role:
-                raise NotFoundException("Role not found")
+                raise NotFoundException(
+                    "Role not found. Use GET /api/v1/users/roles to get valid Role IDs."
+                )
 
         if "store_id" in update_data:
             store_id = update_data["store_id"]
@@ -144,24 +205,38 @@ class UserService:
                 )
 
                 if not store:
-                    raise NotFoundException("Store not found")
+                    raise NotFoundException(
+                        "Store not found"
+                    )
 
         if "full_name" in update_data:
-            full_name = update_data["full_name"].strip()
+            full_name = update_data[
+                "full_name"
+            ].strip()
 
             if not full_name:
-                raise ConflictException("Full name cannot be empty")
+                raise ConflictException(
+                    "Full name cannot be empty"
+                )
 
             update_data["full_name"] = full_name
 
         if "password" in update_data:
-            password = update_data.pop("password")
+            password = update_data.pop(
+                "password"
+            )
 
             if password:
-                update_data["hashed_password"] = get_password_hash(password)
+                update_data[
+                    "hashed_password"
+                ] = get_password_hash(password)
 
         for key, value in update_data.items():
-            setattr(user, key, value)
+            setattr(
+                user,
+                key,
+                value,
+            )
 
         return self.repo.update(user)
 
@@ -171,27 +246,46 @@ class UserService:
         user_id: int,
         data: MyProfileUpdate,
     ) -> User:
-        user = self.get_user(tenant_id, user_id)
+        user = self.get_user(
+            tenant_id,
+            user_id,
+        )
 
-        update_data = data.model_dump(exclude_unset=True)
+        update_data = data.model_dump(
+            exclude_unset=True
+        )
 
         if not update_data:
-            raise ConflictException("No fields provided for update")
+            raise ConflictException(
+                "No fields provided for update"
+            )
 
         if "full_name" in update_data:
-            full_name = update_data["full_name"].strip()
+            full_name = update_data[
+                "full_name"
+            ].strip()
 
             if not full_name:
-                raise ConflictException("Full name cannot be empty")
+                raise ConflictException(
+                    "Full name cannot be empty"
+                )
 
             update_data["full_name"] = full_name
 
         for key, value in update_data.items():
-            setattr(user, key, value)
+            setattr(
+                user,
+                key,
+                value,
+            )
 
         return self.repo.update(user)
 
-    def activate_user(self, tenant_id: int, user_id: int) -> User:
+    def activate_user(
+        self,
+        tenant_id: int,
+        user_id: int,
+    ) -> User:
         user = self.repo.get_by_id(
             user_id=user_id,
             tenant_id=tenant_id,
@@ -199,13 +293,19 @@ class UserService:
         )
 
         if not user:
-            raise NotFoundException("User not found")
+            raise NotFoundException(
+                "User not found"
+            )
 
         if user.is_deleted:
-            raise ConflictException("Deleted user cannot be activated")
+            raise ConflictException(
+                "Deleted user cannot be activated"
+            )
 
         if user.is_active:
-            raise ConflictException("User is already active")
+            raise ConflictException(
+                "User is already active"
+            )
 
         user.is_active = True
 
@@ -217,7 +317,10 @@ class UserService:
         user_id: int,
         current_user_id: int,
     ) -> User:
-        user = self.get_user(tenant_id, user_id)
+        user = self.get_user(
+            tenant_id,
+            user_id,
+        )
 
         if user.id == current_user_id:
             raise ConflictException(
@@ -225,7 +328,9 @@ class UserService:
             )
 
         if not user.is_active:
-            raise ConflictException("User is already inactive")
+            raise ConflictException(
+                "User is already inactive"
+            )
 
         user.is_active = False
 
@@ -244,7 +349,9 @@ class UserService:
         )
 
         if not user:
-            raise NotFoundException("User not found")
+            raise NotFoundException(
+                "User not found"
+            )
 
         if user.id == current_user_id:
             raise ConflictException(
@@ -252,7 +359,9 @@ class UserService:
             )
 
         if user.is_deleted:
-            raise ConflictException("User is already deleted")
+            raise ConflictException(
+                "User is already deleted"
+            )
 
         user.is_deleted = True
         user.is_active = False

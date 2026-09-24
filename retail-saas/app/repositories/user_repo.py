@@ -74,15 +74,24 @@ class UserRepository:
         )
 
         if not include_inactive:
-            query = query.filter(User.is_active.is_(True))
+            query = query.filter(
+                User.is_active.is_(True)
+            )
 
-        return (
+        users = (
             query
             .order_by(User.id.desc())
             .offset(skip)
             .limit(limit)
             .all()
         )
+
+        for user in users:
+            if user.role is not None:
+                if user.role.permissions is None:
+                    user.role.permissions = []
+
+        return users
 
     def update(self, user: User) -> User:
         self.db.add(user)

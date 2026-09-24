@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -127,14 +127,20 @@ def register(
     phone: str | None = None,
     db: Session = Depends(get_db),
 ):
-    user = AuthService(db).register_tenant(
-        tenant_name,
-        slug,
-        email,
-        admin_name,
-        password,
-        phone,
-    )
+    try:
+        user = AuthService(db).register_tenant(
+            tenant_name,
+            slug,
+            email,
+            admin_name,
+            password,
+            phone,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        )
 
     return {
         "message": "Tenant registered",

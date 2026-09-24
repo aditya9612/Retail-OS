@@ -53,12 +53,12 @@ class Product(Base, TimestampMixin):
         default=Decimal("18.00")
     )
 
-    price: Mapped[Decimal] = mapped_column(
+    selling_price: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
         nullable=False
     )
 
-    cost_price: Mapped[Decimal] = mapped_column(
+    mrp: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
         default=Decimal("0.00")
     )
@@ -126,7 +126,6 @@ class ProductImage(Base, TimestampMixin):
         default=0,
         nullable=False
     )
-
 
     product: Mapped["Product"] = relationship(
         "Product",
