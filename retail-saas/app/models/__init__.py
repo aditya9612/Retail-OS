@@ -44,6 +44,10 @@ from app.models.saas_billing import (
     SaaSUPITransaction,
     SaaSInvoiceSequence,
 )
+from app.models.saas_plan_entitlement import (
+    SaaSPlanEntitlement,
+    EntitlementDimension,
+)
 
 
 __all__ = [
@@ -96,4 +100,6 @@ __all__ = [
     "SaaSInvoice",
     "SaaSUPITransaction",
     "SaaSInvoiceSequence",
+    "SaaSPlanEntitlement",
+    "EntitlementDimension",
 ]

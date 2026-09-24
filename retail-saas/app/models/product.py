@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -8,6 +8,9 @@ from app.core.database import Base, TimestampMixin
 
 class Product(Base, TimestampMixin):
     __tablename__ = "products"
+    __table_args__ = (
+        Index("ix_products_tenant_entitlement", "tenant_id", "is_active"),
+    )
 
     id: Mapped[int] = mapped_column(
         primary_key=True,

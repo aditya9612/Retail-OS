@@ -137,8 +137,7 @@ class ProductRepository:
 
     def create(self, product: Product) -> Product:
         self.db.add(product)
-        self.db.commit()
-        self.db.refresh(product)
+        self.db.flush()
         return product
 
     def update(self, product: Product) -> Product:

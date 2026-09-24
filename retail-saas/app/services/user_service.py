@@ -3,10 +3,12 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import ConflictException, NotFoundException
 from app.core.security import get_password_hash
 from app.models.role import Role
+from app.models.saas_plan_entitlement import EntitlementDimension
 from app.models.store import Store
 from app.models.user import User
 from app.repositories.user_repo import UserRepository
 from app.schemas.user import MyProfileUpdate, UserCreate, UserUpdate
+from app.services.saas_entitlement_service import SaaSEntitlementService
 
 
 class UserService:
@@ -64,6 +66,15 @@ class UserService:
                     "Store not found"
                 )
 
+        # Atomic tenant lock & quota check
+        entitlement_svc = SaaSEntitlementService(self.db)
+        entitlement_svc.require_limit(
+            tenant_id=tenant_id,
+            dimension=EntitlementDimension.USERS,
+            requested_amount=1,
+            lock_tenant=True,
+        )
+
         user = User(
             tenant_id=tenant_id,
             email=email,
@@ -78,7 +89,10 @@ class UserService:
             is_deleted=False,
         )
 
-        return self.repo.create(user)
+        user = self.repo.create(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
     def list_roles(
         self,
@@ -307,9 +321,20 @@ class UserService:
                 "User is already active"
             )
 
-        user.is_active = True
+        # Atomic tenant lock & quota check
+        entitlement_svc = SaaSEntitlementService(self.db)
+        entitlement_svc.require_limit(
+            tenant_id=tenant_id,
+            dimension=EntitlementDimension.USERS,
+            requested_amount=1,
+            lock_tenant=True,
+        )
 
-        return self.repo.update(user)
+        user.is_active = True
+        user = self.repo.update(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
     def deactivate_user(
         self,

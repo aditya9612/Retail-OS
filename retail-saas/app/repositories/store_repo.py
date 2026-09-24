@@ -10,21 +10,20 @@ class StoreRepository:
 
     def create(self, store: Store) -> Store:
         self.db.add(store)
-        self.db.commit()
-        self.db.refresh(store)
+        self.db.flush()
         return store
 
-    def get_by_id(self, store_id: int, tenant_id: int):
-
-        return (
+    def get_by_id(self, store_id: int, tenant_id: int, include_inactive: bool = False):
+        query = (
             self.db.query(Store)
             .filter(
                 Store.id == store_id,
                 Store.tenant_id == tenant_id,
-                Store.is_active == True
             )
-            .first()
         )
+        if not include_inactive:
+            query = query.filter(Store.is_active == True)
+        return query.first()
 
     def list_stores(self, tenant_id: int):
 

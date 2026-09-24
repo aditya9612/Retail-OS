@@ -251,6 +251,8 @@ class SaaSSubscriptionService:
         self.db.add(subscription)
         self.db.flush()
 
+        tenant.current_subscription_id = subscription.id
+
         # 6. Synchronize legacy tenant projection
         self.sync_tenant_projection(subscription)
         self.db.flush()

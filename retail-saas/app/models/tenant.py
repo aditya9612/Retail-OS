@@ -1,11 +1,12 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
-from sqlalchemy import Boolean, DateTime, JSON, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
 
 if TYPE_CHECKING:
+    from app.models.saas_billing import SaaSSubscription
     from app.models.store import Store
     from app.models.user import User
 
@@ -20,10 +21,19 @@ class Tenant(Base, TimestampMixin):
     plan: Mapped[str] = mapped_column(String(50), default="basic", nullable=False)
     subscription_status: Mapped[str] = mapped_column(String(50), default="trial", nullable=False)
     subscription_end_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    current_subscription_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("saas_subscriptions.id", use_alter=True),
+        nullable=True,
+        index=True,
+    )
     settings: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     stores: Mapped[list["Store"]] = relationship("Store", back_populates="tenant")
     users: Mapped[list["User"]] = relationship("User", back_populates="tenant")
+    current_subscription: Mapped[Optional["SaaSSubscription"]] = relationship(
+        "SaaSSubscription",
+        foreign_keys=[current_subscription_id],
+    )
 
     @property
     def slug(self) -> str:

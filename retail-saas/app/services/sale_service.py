@@ -14,7 +14,8 @@ class SaleService:
     @staticmethod
     def create_sale(
         db: Session,
-        data: SaleCreate
+        data: SaleCreate,
+        current_user=None,
     ):
         if not data.items:
             raise ValueError("Sale must contain at least one item")
@@ -27,6 +28,15 @@ class SaleService:
 
         if not store_exists:
             raise ValueError(f"Store with id {data.store_id} not found")
+
+        if current_user and getattr(current_user, "tenant_id", None) is not None:
+            if store_exists.tenant_id != current_user.tenant_id:
+                raise ValueError("Store does not belong to the user's tenant")
+            tenant_id = current_user.tenant_id
+        else:
+            if not store_exists.tenant_id:
+                raise ValueError(f"Store with id {data.store_id} is not associated with any tenant")
+            tenant_id = store_exists.tenant_id
 
         if data.customer_id is not None:
             from app.models.customer import Customer
@@ -112,8 +122,6 @@ class SaleService:
 
             inventory.quantity -= item.stock
 
-        store = db.query(Store).filter(Store.id == data.store_id).first()
-        tenant_id = store.tenant_id if store else 1
 
         sale_num = getattr(data, "sale_number", None) or getattr(data, "invoice_number", None)
         if not sale_num:

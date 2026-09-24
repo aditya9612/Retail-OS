@@ -29,7 +29,8 @@ def init_test_database():
 
     session = SessionLocal()
     try:
-        session.add_all([
+        from app.models.saas_plan_entitlement import SaaSPlanEntitlement
+        plans = [
             SaaSPlan(
                 name="Basic",
                 code="basic",
@@ -60,7 +61,21 @@ def init_test_database():
                 trial_days=0,
                 is_active=True,
             ),
-        ])
+        ]
+        session.add_all(plans)
+        session.flush()
+
+        for plan in plans:
+            dims = ["stores", "products"] if plan.code == "basic" else ["users", "stores", "products"]
+            for dim in dims:
+                session.add(
+                    SaaSPlanEntitlement(
+                        plan_id=plan.id,
+                        dimension=dim,
+                        value=0,
+                        is_unlimited=True,
+                    )
+                )
         session.commit()
     finally:
         session.close()

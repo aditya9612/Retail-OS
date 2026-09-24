@@ -2,9 +2,11 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictException, NotFoundException
 from app.models.inventory import Inventory, StockMovement
+from app.models.saas_plan_entitlement import EntitlementDimension
 from app.models.store import Store
 from app.repositories.store_repo import StoreRepository
 from app.schemas.store import StoreCreate, StoreUpdate
+from app.services.saas_entitlement_service import SaaSEntitlementService
 
 
 class StoreService:
@@ -21,16 +23,28 @@ class StoreService:
         if self.repo.get_by_code(data.code, tenant_id):
             raise ConflictException("Store code already exists")
 
+        # Atomic tenant lock & quota check
+        entitlement_svc = SaaSEntitlementService(self.db)
+        entitlement_svc.require_limit(
+            tenant_id=tenant_id,
+            dimension=EntitlementDimension.STORES,
+            requested_amount=1,
+            lock_tenant=True,
+        )
+
         store = Store(
             tenant_id=tenant_id,
             **data.model_dump()
         )
 
-        return self.repo.create(store)
+        store = self.repo.create(store)
+        self.db.commit()
+        self.db.refresh(store)
+        return store
 
-    def get_store(self, tenant_id: int, store_id: int) -> Store:
+    def get_store(self, tenant_id: int, store_id: int, include_inactive: bool = False) -> Store:
 
-        store = self.repo.get_by_id(store_id, tenant_id)
+        store = self.repo.get_by_id(store_id, tenant_id, include_inactive=include_inactive)
 
         if not store:
             raise NotFoundException("Store not found")
@@ -44,9 +58,19 @@ class StoreService:
     
     def update_store(self, tenant_id: int, store_id: int, data: StoreUpdate) -> Store:
 
-        store = self.get_store(tenant_id, store_id)
+        store = self.get_store(tenant_id, store_id, include_inactive=True)
 
         update_data = data.model_dump(exclude_unset=True)
+
+        # Quota check only when reactivating: False -> True
+        if "is_active" in update_data and not store.is_active and update_data["is_active"] is True:
+            entitlement_svc = SaaSEntitlementService(self.db)
+            entitlement_svc.require_limit(
+                tenant_id=tenant_id,
+                dimension=EntitlementDimension.STORES,
+                requested_amount=1,
+                lock_tenant=True,
+            )
 
         if "name" in update_data:
             existing = self.repo.get_by_name(update_data["name"], tenant_id)

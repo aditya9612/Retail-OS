@@ -2,12 +2,13 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
 
 if TYPE_CHECKING:
+    from app.models.saas_plan_entitlement import SaaSPlanEntitlement
     from app.models.super_admin import SuperAdmin
     from app.models.tenant import Tenant
 
@@ -63,10 +64,24 @@ class SaaSPlan(Base, TimestampMixin):
         "SaaSSubscription",
         back_populates="plan",
     )
+    entitlements: Mapped[list["SaaSPlanEntitlement"]] = relationship(
+        "SaaSPlanEntitlement",
+        back_populates="plan",
+        cascade="all, delete-orphan",
+    )
 
 
 class SaaSSubscription(Base, TimestampMixin):
     __tablename__ = "saas_subscriptions"
+    __table_args__ = (
+        Index(
+            "ix_saas_subscriptions_tenant_lookup",
+            "tenant_id",
+            "status",
+            "created_at",
+            "id",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         primary_key=True,

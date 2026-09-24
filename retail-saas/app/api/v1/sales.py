@@ -26,7 +26,7 @@ def create_sale(
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.create_sale(db, data)
+        return SaleService.create_sale(db, data, current_user=user)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

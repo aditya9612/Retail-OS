@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy import Boolean, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -6,6 +6,9 @@ from app.core.database import Base, TimestampMixin
 
 class Store(Base, TimestampMixin):
     __tablename__ = "stores"
+    __table_args__ = (
+        Index("ix_stores_tenant_entitlement", "tenant_id", "is_active"),
+    )
     expenses: Mapped[list["StoreExpense"]] = relationship(
         "StoreExpense",
         back_populates="store",
