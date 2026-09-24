@@ -127,7 +127,7 @@ class DashboardRepository:
         print("Revenue:", revenue)
 
         cost = (
-            self.db.query(func.coalesce(func.sum(Product.cost_price), 0))
+            self.db.query(func.coalesce(func.sum(Product.mrp), 0))
             .filter(Product.tenant_id == tenant_id)
             .scalar()
         )

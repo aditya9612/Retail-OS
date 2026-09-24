@@ -81,7 +81,7 @@ class SaleService:
                     f"Insufficient stock for product {item.product_id}. Available stock: {inventory.quantity}"
                 )
 
-            item_gross = Decimal(str(product.price)) * Decimal(str(item.stock))
+            item_gross = Decimal(str(product.selling_price)) * Decimal(str(item.stock))
             item_discount = Decimal(str(item.discount or 0))
 
             if item_discount < 0:
@@ -103,10 +103,10 @@ class SaleService:
                 SaleItem(
                     product_id=item.product_id,
                     quantity=item.stock,
-                    unit_price=product.price,
-                    tax_rate=gst_rate,
-                    tax_amount=item_tax,
-                    total_price=item_total,
+                    unit_price=product.selling_price,
+                    discount=item_discount,
+                    tax=item_tax,
+                    total_price=item_total
                 )
             )
 
@@ -220,7 +220,7 @@ class SaleService:
                     f"Insufficient stock for product {item.product_id}. Available stock: {inventory.quantity}"
                 )
 
-            item_gross = Decimal(str(product.price)) * Decimal(str(item.stock))
+            item_gross = Decimal(str(product.selling_price)) * Decimal(str(item.stock))
             item_discount = Decimal(str(item.discount or 0))
 
             if item_discount < 0:
@@ -241,7 +241,7 @@ class SaleService:
             sale_item = SaleItem(
                 product_id=item.product_id,
                 quantity=item.stock,
-                unit_price=product.price,
+                unit_price=product.selling_price,
                 discount=item_discount,
                 tax=item_tax,
                 total_price=item_total

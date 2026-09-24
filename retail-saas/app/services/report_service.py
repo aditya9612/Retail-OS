@@ -72,7 +72,7 @@ class ReportService:
             for item in order.items:
                 product = self.db.query(Product).filter(Product.id == item.product_id).first()
                 if product:
-                    cost += product.cost_price * item.quantity
+                    cost += product.mrp * item.quantity
         return {
             "revenue": float(revenue),
             "cost": float(cost),

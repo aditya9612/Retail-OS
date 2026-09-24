@@ -52,15 +52,19 @@ class Product(Base, TimestampMixin):
         String(20)
     )
 
+    gst_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        default=Decimal("18.00")
+    )
+
     selling_price: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2),
+        Numeric(12, 2),
         nullable=False
     )
 
-    cost_price: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2),
-        default=Decimal("0.00"),
-        nullable=False
+    mrp: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        default=Decimal("0.00")
     )
 
     tax_rate: Mapped[Decimal] = mapped_column(
@@ -184,14 +188,6 @@ class ProductImage(Base, TimestampMixin):
         default=False,
         nullable=False
     )
-
-    @property
-    def display_order(self) -> int:
-        return 0
-
-    @display_order.setter
-    def display_order(self, val: int) -> None:
-        pass
 
     product: Mapped["Product"] = relationship(
         "Product",
