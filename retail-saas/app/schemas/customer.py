@@ -301,10 +301,10 @@ class CustomerBase(BaseModel):
 
 class CustomerCreate(CustomerBase):
 
-    address: str = Field(
-        ...,
+    address: Optional[str] = Field(
+        default=None,
         max_length=500,
-        description="Address is required and cannot be null",
+        description="Address is optional",
     )
 
     birthday: Optional[date] = Field(
@@ -320,9 +320,7 @@ class CustomerCreate(CustomerBase):
     def check_create_address_before(cls, v):
 
         if v is None:
-            raise ValueError(
-                "Address is required and cannot be null"
-            )
+            return None
 
         if isinstance(v, str):
             v_strip = v.strip()
@@ -856,10 +854,10 @@ class WalletOperationBase(BaseModel):
         description="Reference number"
     )
 
-    remarks: str = Field(
-        min_length=1,
+    remarks: Optional[str] = Field(
+        default=None,
         max_length=255,
-        description="Remarks must be meaningful text"
+        description="Remarks must be meaningful text if provided"
     )
 
     @field_validator("reference_no", mode="before")
@@ -892,13 +890,15 @@ class WalletOperationBase(BaseModel):
 
     @field_validator("remarks")
     @classmethod
-    def validate_remarks(cls, v: str) -> str:
+    def validate_remarks(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
         return validate_meaningful_text(
             v,
             "Remarks",
             1,
             255,
-            required=True,
+            required=False,
         )
 
 

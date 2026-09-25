@@ -167,7 +167,10 @@ def validate_category(value: str) -> str:
 # DESCRIPTION VALIDATION
 # ============================================================
 
-def validate_description(value: str) -> str:
+def validate_description(value: Optional[str]) -> Optional[str]:
+
+    if value is None:
+        return None
 
     if not isinstance(value, str):
         raise ValueError(
@@ -355,8 +358,8 @@ class StoreExpenseCreate(BaseModel):
         description="Expense category",
     )
 
-    description: str = Field(
-        ...,
+    description: Optional[str] = Field(
+        default=None,
         min_length=3,
         max_length=500,
         description="Description of the expense",

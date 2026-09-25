@@ -14,32 +14,6 @@ VALID_GST_SLABS = [
 ]
 
 
-class CategoryBase(BaseModel):
-    name: str = Field(min_length=2, max_length=255)
-    description: Optional[str] = Field(default=None, max_length=500)
-    parent_id: Optional[int] = Field(default=None, gt=0)
-
-    @field_validator("name")
-    @classmethod
-    def validate_name(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("Category name cannot be empty or whitespace")
-        return v
-
-
-class CategoryCreate(CategoryBase):
-    pass
-
-
-class CategoryResponse(CategoryBase):
-    id: int
-    tenant_id: int
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 class ProductImageCreate(BaseModel):
     image_url: str = Field(min_length=1, max_length=500)
     is_primary: bool = Field(default=False, description="Whether this is the primary product image")

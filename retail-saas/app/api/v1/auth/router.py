@@ -93,6 +93,9 @@ def refresh(
 @router.post(
     "/refresh-token",
     response_model=TokenResponse,
+    deprecated=True,
+    summary="[Deprecated] Refresh access token",
+    description="Deprecated: Use canonical endpoint POST /api/v1/auth/refresh instead.",
 )
 def refresh_token(
     data: RefreshRequest,
