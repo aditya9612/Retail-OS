@@ -1,5 +1,8 @@
+from datetime import datetime
+
 from sqlalchemy.orm import Session
 
+from app.models.product import Product
 from app.models.store import Store
 from app.models.store_transfer import StoreTransfer
 from app.models.store_transfer_item import StoreTransferItem
@@ -70,7 +73,8 @@ class StoreTransferService:
             transfer_number=transfer_number,
             source_store_id=source_store_id,
             destination_store_id=destination_store_id,
-            status="Pending"
+            status="Pending",
+            created_at=datetime.now()
         )
 
         for item in items:

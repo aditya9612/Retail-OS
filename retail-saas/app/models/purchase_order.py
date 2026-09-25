@@ -25,6 +25,12 @@ class PurchaseOrder(Base, TimestampMixin):
         index=True,
     )
 
+    store_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("stores.id"),
+        nullable=True,
+        index=True,
+    )
+
     order_number: Mapped[str] = mapped_column(
         String(100),
         unique=True,
@@ -55,6 +61,7 @@ class PurchaseOrder(Base, TimestampMixin):
     )
 
     supplier = relationship("Supplier")
+    store = relationship("Store")
 
     items = relationship(
         "PurchaseOrderItem",
@@ -68,8 +75,6 @@ class PurchaseOrder(Base, TimestampMixin):
             kwargs["order_number"] = kwargs.pop("po_number")
         if "remarks" in kwargs and "notes" not in kwargs:
             kwargs["notes"] = kwargs.pop("remarks")
-        # store_id is not in purchase_orders table
-        self._store_id = kwargs.pop("store_id", None)
         super().__init__(**kwargs)
 
     @property
@@ -87,14 +92,6 @@ class PurchaseOrder(Base, TimestampMixin):
     @remarks.setter
     def remarks(self, value: Optional[str]) -> None:
         self.notes = value
-
-    @property
-    def store_id(self) -> Optional[int]:
-        return getattr(self, "_store_id", None)
-
-    @store_id.setter
-    def store_id(self, value: Optional[int]) -> None:
-        self._store_id = value
 
 
 class PurchaseOrderItem(Base):

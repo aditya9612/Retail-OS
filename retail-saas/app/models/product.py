@@ -146,9 +146,21 @@ class Product(Base, TimestampMixin):
             return self.images[0].image_url
         return getattr(self, "_image_url", None)
 
-    @image_url.setter
-    def image_url(self, val: str | None) -> None:
-        self._image_url = val
+    @property
+    def price(self) -> Decimal:
+        return getattr(self, "selling_price", Decimal("0.00"))
+
+    @price.setter
+    def price(self, val: Decimal) -> None:
+        self.selling_price = val
+
+    @property
+    def cost_price(self) -> Decimal | None:
+        return getattr(self, "_cost_price", None)
+
+    @cost_price.setter
+    def cost_price(self, val: Decimal | None) -> None:
+        self._cost_price = val
 
     category: Mapped["Category | None"] = relationship(
         "Category",

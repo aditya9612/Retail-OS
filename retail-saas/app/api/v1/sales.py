@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Path, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -7,6 +7,7 @@ from app.core.security import require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.sale import SaleCreate, SaleResponse
 from app.services.sale_service import SaleService
+
 
 router = APIRouter(
     prefix="/sales",
@@ -32,6 +33,7 @@ def create_sale(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -44,7 +46,11 @@ def create_sale(
     response_model=List[SaleResponse]
 )
 def get_sales(
-    store_id: Optional[int] = None,
+    store_id: Optional[int] = Query(
+        default=None,
+        gt=0,
+        description="Store ID must be a positive whole number"
+    ),
     user: User = Depends(require_permission("sales:read")),
     db: Session = Depends(get_db)
 ):
@@ -55,6 +61,7 @@ def get_sales(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -67,7 +74,11 @@ def get_sales(
     response_model=SaleResponse
 )
 def get_sale(
-    sale_id: int,
+    sale_id: int = Path(
+        ...,
+        gt=0,
+        description="Sale ID must be a positive whole number"
+    ),
     user: User = Depends(require_permission("sales:read")),
     db: Session = Depends(get_db)
 ):
@@ -78,6 +89,7 @@ def get_sale(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -91,8 +103,12 @@ def get_sale(
     dependencies=[Depends(require_operational_write)],
 )
 def update_sale(
-    sale_id: int,
     data: SaleCreate,
+    sale_id: int = Path(
+        ...,
+        gt=0,
+        description="Sale ID must be a positive whole number"
+    ),
     user: User = Depends(require_permission("sales:write")),
     db: Session = Depends(get_db)
 ):
@@ -108,6 +124,7 @@ def update_sale(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -120,7 +137,11 @@ def update_sale(
     dependencies=[Depends(require_operational_write)],
 )
 def delete_sale(
-    sale_id: int,
+    sale_id: int = Path(
+        ...,
+        gt=0,
+        description="Sale ID must be a positive whole number"
+    ),
     user: User = Depends(require_permission("sales:write")),
     db: Session = Depends(get_db)
 ):
@@ -131,6 +152,7 @@ def delete_sale(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

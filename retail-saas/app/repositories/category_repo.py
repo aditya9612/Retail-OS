@@ -20,6 +20,7 @@ class CategoryRepository:
         category = Category(
             tenant_id=tenant_id,
             name=name,
+            description=description,
             parent_id=parent_id,
             is_active=is_active,
         )
@@ -63,6 +64,9 @@ class CategoryRepository:
 
         if name is not None:
             category.name = name
+
+        if description is not None:
+            category.description = description
 
         if parent_id is not None:
             category.parent_id = parent_id
