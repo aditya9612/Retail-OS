@@ -135,10 +135,10 @@ class StoreCreate(BaseModel):
             raise ValueError("Store code must not exceed 20 characters")
 
         # Must start with a letter
-        if not re.fullmatch(r"[A-Z][A-Z0-9]*", value):
+        if not re.fullmatch(r"[A-Z][A-Z0-9_-]*", value):
             raise ValueError(
                 "Store code must start with a letter and contain only "
-                "letters and numbers"
+                "letters, numbers, hyphens and underscores"
             )
 
         return value

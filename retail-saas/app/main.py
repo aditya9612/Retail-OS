@@ -40,6 +40,7 @@ from app.api.v1.warehouses.router import router as warehouses_router
 from app.api.v1.whatsapp.router import router as whatsapp_router
 from app.api.v1.super_admins.router import router as super_admin_router
 from app.api.v1.saas_billing.router import router as saas_billing_router
+from app.api.v1.saas.router import router as saas_router
 
 from app.core.config import get_settings
 from app.core.database import init_db
@@ -148,6 +149,7 @@ app.include_router(super_admin_router, prefix=API_PREFIX)
 
 # SaaS Billing APIs (Tenant-facing)
 app.include_router(saas_billing_router, prefix=API_PREFIX)
+app.include_router(saas_router, prefix=API_PREFIX)
 
 
 # =========================

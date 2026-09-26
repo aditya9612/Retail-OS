@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.exceptions import (
+    AppException,
     ConflictException,
     NotFoundException,
     UnauthorizedException,
@@ -20,6 +21,11 @@ from app.models.store import Store
 from app.models.super_admin import SuperAdmin
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.models.saas_plan_entitlement import EntitlementDimension, SaaSPlanEntitlement
+from app.schemas.saas_entitlement import (
+    SaaSPlanEntitlementCreate,
+    SaaSPlanEntitlementUpdate,
+)
 from app.schemas.saas_plan import (
     SaaSPlanCreate,
     SaaSPlanUpdate,
@@ -887,3 +893,150 @@ class SuperAdminService:
         self.db.commit()
         self.db.refresh(plan)
         return plan
+
+    # =========================
+    # SAAS PLAN ENTITLEMENTS
+    # =========================
+
+    def list_plan_entitlements(
+        self,
+        plan_id: int,
+    ) -> dict:
+        plan = self.get_plan(plan_id)
+        items = (
+            self.db.query(SaaSPlanEntitlement)
+            .filter(SaaSPlanEntitlement.plan_id == plan.id)
+            .order_by(SaaSPlanEntitlement.id.asc())
+            .all()
+        )
+        return {
+            "plan_id": plan.id,
+            "items": items,
+            "total": len(items),
+        }
+
+    def create_plan_entitlement(
+        self,
+        plan_id: int,
+        data: SaaSPlanEntitlementCreate,
+    ) -> SaaSPlanEntitlement:
+        plan = self.get_plan(plan_id)
+        dim = data.dimension.strip().lower()
+
+        if dim not in EntitlementDimension.ALL:
+            raise AppException(
+                f"Invalid entitlement dimension '{data.dimension}'. Allowed: {sorted(list(EntitlementDimension.ALL))}"
+            )
+
+        existing = (
+            self.db.query(SaaSPlanEntitlement)
+            .filter(
+                SaaSPlanEntitlement.plan_id == plan.id,
+                SaaSPlanEntitlement.dimension == dim,
+            )
+            .first()
+        )
+        if existing:
+            raise ConflictException(
+                f"Entitlement for dimension '{dim}' already exists on plan {plan.id}"
+            )
+
+        if data.is_unlimited:
+            val = None
+        else:
+            if data.value is None or data.value < 0:
+                raise AppException("Limited entitlement must specify a non-negative value")
+            val = data.value
+
+        entitlement = SaaSPlanEntitlement(
+            plan_id=plan.id,
+            dimension=dim,
+            value=val,
+            is_unlimited=data.is_unlimited,
+        )
+
+        try:
+            self.db.add(entitlement)
+            self.db.flush()
+            self.db.commit()
+            self.db.refresh(entitlement)
+            return entitlement
+        except IntegrityError:
+            self.db.rollback()
+            raise ConflictException(
+                f"Entitlement for dimension '{dim}' already exists on plan {plan.id}"
+            )
+
+    def update_plan_entitlement(
+        self,
+        plan_id: int,
+        dimension: str,
+        data: SaaSPlanEntitlementUpdate,
+    ) -> SaaSPlanEntitlement:
+        plan = self.get_plan(plan_id)
+        dim = dimension.strip().lower()
+
+        if dim not in EntitlementDimension.ALL:
+            raise AppException(
+                f"Invalid entitlement dimension '{dimension}'. Allowed: {sorted(list(EntitlementDimension.ALL))}"
+            )
+
+        entitlement = (
+            self.db.query(SaaSPlanEntitlement)
+            .filter(
+                SaaSPlanEntitlement.plan_id == plan.id,
+                SaaSPlanEntitlement.dimension == dim,
+            )
+            .first()
+        )
+        if not entitlement:
+            raise NotFoundException(
+                f"Entitlement for dimension '{dim}' not found on plan {plan.id}"
+            )
+
+        if data.is_unlimited:
+            entitlement.is_unlimited = True
+            entitlement.value = None
+        else:
+            if data.value is None or data.value < 0:
+                raise AppException("Limited entitlement must specify a non-negative value")
+            entitlement.is_unlimited = False
+            entitlement.value = data.value
+
+        try:
+            self.db.flush()
+            self.db.commit()
+            self.db.refresh(entitlement)
+            return entitlement
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def delete_plan_entitlement(
+        self,
+        plan_id: int,
+        dimension: str,
+    ) -> None:
+        plan = self.get_plan(plan_id)
+        dim = dimension.strip().lower()
+
+        entitlement = (
+            self.db.query(SaaSPlanEntitlement)
+            .filter(
+                SaaSPlanEntitlement.plan_id == plan.id,
+                SaaSPlanEntitlement.dimension == dim,
+            )
+            .first()
+        )
+        if not entitlement:
+            raise NotFoundException(
+                f"Entitlement for dimension '{dim}' not found on plan {plan.id}"
+            )
+
+        try:
+            self.db.delete(entitlement)
+            self.db.flush()
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise

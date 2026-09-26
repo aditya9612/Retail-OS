@@ -20,6 +20,15 @@ class EntitlementDimension:
     CUSTOMERS = "customers"
     STORAGE = "storage"
 
+    # Enforced hard quotas
+    HARD_QUOTA_DIMENSIONS = {USERS, STORES, PRODUCTS}
+    # Monitored soft metrics
+    SOFT_METRIC_DIMENSIONS = {MONTHLY_ORDERS}
+    # Active operational dimensions reported in tenant usage
+    OPERATIONAL_DIMENSIONS = {USERS, STORES, PRODUCTS, MONTHLY_ORDERS}
+    # Future/configurable dimensions (not metered or blocking in Task 9.3A)
+    FUTURE_DIMENSIONS = {CUSTOMERS, STORAGE}
+
     ALL = {USERS, STORES, PRODUCTS, MONTHLY_ORDERS, CUSTOMERS, STORAGE}
 
 

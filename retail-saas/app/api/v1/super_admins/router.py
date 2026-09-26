@@ -35,6 +35,12 @@ from app.schemas.saas_plan import (
     SaaSPlanResponse,
     SaaSPlanUpdate,
 )
+from app.schemas.saas_entitlement import (
+    SaaSPlanEntitlementCreate,
+    SaaSPlanEntitlementListResponse,
+    SaaSPlanEntitlementResponse,
+    SaaSPlanEntitlementUpdate,
+)
 from app.schemas.saas_subscription import SaaSSubscriptionLifecycleRunResponse
 from app.schemas.saas_upi import (
     UPIAdminTransactionResponse,
@@ -397,6 +403,70 @@ def deactivate_saas_plan(
     db: Session = Depends(get_db),
 ):
     return SuperAdminService(db).deactivate_plan(plan_id)
+
+
+# ===============================
+# SAAS PLAN ENTITLEMENT APIS
+# ===============================
+
+
+@router.get(
+    "/saas-plans/{plan_id}/entitlements",
+    response_model=SaaSPlanEntitlementListResponse,
+    summary="List SaaS Plan Entitlements",
+)
+def list_plan_entitlements(
+    plan_id: int,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).list_plan_entitlements(plan_id)
+
+
+@router.post(
+    "/saas-plans/{plan_id}/entitlements",
+    response_model=SaaSPlanEntitlementResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create SaaS Plan Entitlement",
+)
+def create_plan_entitlement(
+    plan_id: int,
+    data: SaaSPlanEntitlementCreate,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).create_plan_entitlement(plan_id, data)
+
+
+@router.put(
+    "/saas-plans/{plan_id}/entitlements/{dimension}",
+    response_model=SaaSPlanEntitlementResponse,
+    summary="Update SaaS Plan Entitlement",
+)
+def update_plan_entitlement(
+    plan_id: int,
+    dimension: str,
+    data: SaaSPlanEntitlementUpdate,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).update_plan_entitlement(plan_id, dimension, data)
+
+
+@router.delete(
+    "/saas-plans/{plan_id}/entitlements/{dimension}",
+    status_code=status.HTTP_200_OK,
+    summary="Delete SaaS Plan Entitlement",
+)
+def delete_plan_entitlement(
+    plan_id: int,
+    dimension: str,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    SuperAdminService(db).delete_plan_entitlement(plan_id, dimension)
+    return {"success": True, "message": f"Entitlement '{dimension}' deleted for plan {plan_id}"}
+
 
 
 @router.get(

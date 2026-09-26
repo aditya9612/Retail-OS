@@ -146,6 +146,10 @@ class Product(Base, TimestampMixin):
             return self.images[0].image_url
         return getattr(self, "_image_url", None)
 
+    @image_url.setter
+    def image_url(self, val: str | None) -> None:
+        self._image_url = val
+
     @property
     def price(self) -> Decimal:
         return getattr(self, "selling_price", Decimal("0.00"))

@@ -41,3 +41,13 @@ def update_gst_rate(
     db: Session = Depends(get_db),
 ):
     return GstService(db).update_rate(user.tenant_id, rate_id, payload)
+
+
+@router.get("/{rate_id}", response_model=GstRateResponse)
+def get_gst_rate(
+    rate_id: int,
+    user: User = Depends(require_permission("billing:read")),
+    db: Session = Depends(get_db),
+):
+    return GstService(db).get_rate(user.tenant_id, rate_id)
+

@@ -12,7 +12,7 @@ from app.core.exceptions import (
 from app.models.customer import Customer
 from app.models.order import Order
 from app.models.product import Product
-from app.models.saas_billing import SaaSSubscription
+from app.models.saas_billing import SaaSPlan, SaaSSubscription
 from app.models.saas_plan_entitlement import EntitlementDimension, SaaSPlanEntitlement
 from app.models.store import Store
 from app.models.tenant import Tenant
@@ -332,3 +332,65 @@ class SaaSEntitlementService:
                 limit=check["limit"],
                 requested=requested_amount,
             )
+
+    def get_tenant_usage(self, tenant_id: int) -> dict:
+        """
+        Calculates and returns current resource usage against plan entitlements for a tenant.
+        Exposes all currently supported technical dimensions:
+        - users (hard quota)
+        - stores (hard quota)
+        - products (hard quota)
+        - monthly_orders (soft metric)
+
+        Fails closed if:
+        - tenant has no active/configured subscription
+        - subscription plan is missing
+        - plan entitlement is missing or invalid for any supported dimension
+        """
+        subscription = self.get_current_subscription(tenant_id)
+
+        plan = (
+            self.db.query(SaaSPlan)
+            .filter(SaaSPlan.id == subscription.plan_id)
+            .first()
+        )
+        if not plan:
+            raise ForbiddenException(
+                f"Plan {subscription.plan_id} not found for subscription {subscription.id}"
+            )
+
+        # Only active operational dimensions are metered in the usage response.
+        # Future dimensions (customers, storage) are optional and do not block tenants if not configured.
+        supported_dimensions = [
+            EntitlementDimension.USERS,
+            EntitlementDimension.STORES,
+            EntitlementDimension.PRODUCTS,
+            EntitlementDimension.MONTHLY_ORDERS,
+        ]
+
+        items = []
+        dimensions_dict = {}
+
+        for dimension in supported_dimensions:
+            entitlement = self.get_entitlement(tenant_id, dimension)
+            usage = self.get_usage(tenant_id, dimension)
+
+            dim_data = {
+                "dimension": dimension,
+                "current_usage": usage,
+                "limit": None if entitlement.is_unlimited else entitlement.value,
+                "is_unlimited": entitlement.is_unlimited,
+            }
+            items.append(dim_data)
+            dimensions_dict[dimension] = dim_data
+
+        return {
+            "tenant_id": tenant_id,
+            "plan_id": plan.id,
+            "plan_name": plan.name,
+            "plan_code": plan.code,
+            "subscription_status": subscription.status,
+            "items": items,
+            "dimensions": dimensions_dict,
+        }
+
