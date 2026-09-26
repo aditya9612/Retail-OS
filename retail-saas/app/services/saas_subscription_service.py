@@ -36,8 +36,22 @@ class SaaSSubscriptionService:
         """
         Retrieve the current active, trialing, or past_due subscription for a tenant.
         Historical states (cancelled, expired) are not returned.
-        Uses deterministic ordering: created_at DESC, id DESC.
+        Checks authoritative Tenant.current_subscription_id first, then deterministic fallback.
         """
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if tenant and tenant.current_subscription_id:
+            sub = (
+                self.db.query(SaaSSubscription)
+                .filter(
+                    SaaSSubscription.id == tenant.current_subscription_id,
+                    SaaSSubscription.tenant_id == tenant_id,
+                    SaaSSubscription.status.in_(CURRENT_SUBSCRIPTION_STATUSES),
+                )
+                .first()
+            )
+            if sub:
+                return sub
+
         return (
             self.db.query(SaaSSubscription)
             .filter(
@@ -317,3 +331,228 @@ class SaaSSubscriptionService:
         self.db.flush()
 
         return sub
+
+    def change_plan(
+        self,
+        tenant_id: int,
+        target_plan_id: int,
+    ) -> dict:
+        """
+        Executes a plan change (upgrade or downgrade) according to frozen business decisions:
+        - U1=B: Upgrade activates only after payment verification (sub.plan_id not changed now).
+        - U2=A: Upgrade requires plan_upgrade invoice and UPI verification.
+        - U3=B: No proration credit; charge target plan price.
+        - D1=B: Downgrade scheduled at current_period_end (sub.scheduled_plan_id set).
+        - D2=B: Downgrade preserves all existing resources.
+        - S1=A: Same-plan request rejected with HTTP 400 client error.
+        - Concurrency: Acquires exclusive SELECT ... FOR UPDATE on Tenant row.
+        - Idempotency: Duplicate upgrade requests safely return the existing unpaid upgrade invoice.
+        """
+        # 1. Pessimistic lock on tenant row
+        tenant = (
+            self.db.query(Tenant)
+            .filter(Tenant.id == tenant_id)
+            .with_for_update()
+            .first()
+        )
+        if not tenant:
+            raise NotFoundException(f"Tenant {tenant_id} not found")
+
+        # 2. Authoritative current subscription lookup
+        if not tenant.current_subscription_id:
+            raise AppException("Tenant has no authoritative subscription configured")
+
+        sub = (
+            self.db.query(SaaSSubscription)
+            .filter(
+                SaaSSubscription.id == tenant.current_subscription_id,
+                SaaSSubscription.tenant_id == tenant_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if not sub:
+            raise NotFoundException(f"Current subscription {tenant.current_subscription_id} not found")
+
+        if sub.status in ("cancelled", "expired"):
+            raise AppException(f"Cannot change plan for a subscription in '{sub.status}' status")
+
+        # 3. Validate target plan
+        target_plan = (
+            self.db.query(SaaSPlan)
+            .filter(SaaSPlan.id == target_plan_id)
+            .first()
+        )
+        if not target_plan:
+            raise NotFoundException(f"SaaS Plan with id {target_plan_id} not found")
+        if not target_plan.is_active:
+            raise AppException(f"SaaS Plan '{target_plan.name}' is inactive")
+
+        # 4. Frozen Rule S1: Reject same plan with client error
+        if target_plan.id == sub.plan_id:
+            raise AppException(f"Current subscription is already on plan '{target_plan.name}'")
+
+        # 5. Determine Upgrade vs Downgrade based on price comparison
+        is_upgrade = target_plan.price >= sub.unit_price
+
+        if is_upgrade:
+            # Upgrade flow (U1=B, U2=A, U3=B)
+            from app.models.saas_billing import SaaSInvoice
+            from app.services.saas_invoice_service import SaaSInvoiceService
+            invoice_service = SaaSInvoiceService(self.db)
+
+            # Idempotency check: see if an unpaid upgrade invoice exists
+            existing_invoice = (
+                self.db.query(SaaSInvoice)
+                .filter(
+                    SaaSInvoice.subscription_id == sub.id,
+                    SaaSInvoice.tenant_id == tenant_id,
+                    SaaSInvoice.billing_reason == "plan_upgrade",
+                    SaaSInvoice.status == "unpaid",
+                )
+                .first()
+            )
+
+            if sub.pending_plan_id == target_plan.id and existing_invoice:
+                # Idempotent return of existing pending upgrade & invoice
+                invoice = existing_invoice
+            else:
+                # If there was a previous unpaid upgrade invoice for a different plan, cancel it
+                if existing_invoice:
+                    existing_invoice.status = "cancelled"
+
+                # Store pending_plan_id without modifying sub.plan_id
+                sub.pending_plan_id = target_plan.id
+                # If there was a scheduled downgrade, clear it
+                sub.scheduled_plan_id = None
+                self.db.flush()
+
+                # Create plan_upgrade invoice for target_plan.price
+                invoice = invoice_service.create_invoice(
+                    subscription_id=sub.id,
+                    billing_reason="plan_upgrade",
+                    amount=target_plan.price,
+                    notes=f"Upgrade invoice to {target_plan.name} plan",
+                    idempotent=False,
+                )
+                self.db.flush()
+
+            return {
+                "subscription_id": sub.id,
+                "current_plan_id": sub.plan_id,
+                "target_plan_id": target_plan.id,
+                "change_type": "upgrade",
+                "status": "pending_payment",
+                "effective_timing": "after_payment_verification",
+                "invoice_id": invoice.id,
+                "invoice_number": invoice.invoice_number,
+                "amount_due": invoice.total_amount,
+                "currency": invoice.currency,
+                "message": f"Upgrade to '{target_plan.name}' requested. Please complete payment for invoice {invoice.invoice_number} to activate.",
+            }
+        else:
+            # Downgrade flow (D1=B, D2=B)
+            from app.models.saas_billing import SaaSInvoice
+
+            # If there was an unpaid upgrade invoice pending, cancel it
+            existing_upgrade_invoice = (
+                self.db.query(SaaSInvoice)
+                .filter(
+                    SaaSInvoice.subscription_id == sub.id,
+                    SaaSInvoice.tenant_id == tenant_id,
+                    SaaSInvoice.billing_reason == "plan_upgrade",
+                    SaaSInvoice.status == "unpaid",
+                )
+                .first()
+            )
+            if existing_upgrade_invoice:
+                existing_upgrade_invoice.status = "cancelled"
+
+            sub.pending_plan_id = None
+            sub.scheduled_plan_id = target_plan.id
+            self.db.flush()
+
+            period_end_str = sub.current_period_end.strftime("%Y-%m-%d")
+            return {
+                "subscription_id": sub.id,
+                "current_plan_id": sub.plan_id,
+                "target_plan_id": target_plan.id,
+                "change_type": "downgrade",
+                "status": "scheduled",
+                "effective_timing": "period_end",
+                "invoice_id": None,
+                "invoice_number": None,
+                "amount_due": None,
+                "currency": None,
+                "message": f"Downgrade to '{target_plan.name}' scheduled for the end of the current billing cycle ({period_end_str}).",
+            }
+
+    def cancel_pending_change(self, tenant_id: int) -> dict:
+        """
+        Cancels any pending upgrade or scheduled downgrade for the tenant's current subscription.
+        - Enforces tenant isolation via SELECT ... FOR UPDATE.
+        - Pending upgrade: clears pending_plan_id and marks unpaid plan_upgrade invoice cancelled.
+        - Scheduled downgrade: clears scheduled_plan_id, preserving current active plan.
+        """
+        tenant = (
+            self.db.query(Tenant)
+            .filter(Tenant.id == tenant_id)
+            .with_for_update()
+            .first()
+        )
+        if not tenant:
+            raise NotFoundException(f"Tenant {tenant_id} not found")
+
+        if not tenant.current_subscription_id:
+            raise AppException("Tenant has no authoritative subscription configured")
+
+        sub = (
+            self.db.query(SaaSSubscription)
+            .filter(
+                SaaSSubscription.id == tenant.current_subscription_id,
+                SaaSSubscription.tenant_id == tenant_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if not sub:
+            raise NotFoundException(f"Current subscription {tenant.current_subscription_id} not found")
+
+        from app.models.saas_billing import SaaSInvoice
+
+        if sub.pending_plan_id is not None:
+            sub.pending_plan_id = None
+            # Cancel any unpaid upgrade invoice
+            unpaid_upgrade_invoice = (
+                self.db.query(SaaSInvoice)
+                .filter(
+                    SaaSInvoice.subscription_id == sub.id,
+                    SaaSInvoice.tenant_id == tenant_id,
+                    SaaSInvoice.billing_reason == "plan_upgrade",
+                    SaaSInvoice.status == "unpaid",
+                )
+                .first()
+            )
+            if unpaid_upgrade_invoice:
+                unpaid_upgrade_invoice.status = "cancelled"
+
+            self.db.flush()
+            return {
+                "success": True,
+                "message": "Pending plan upgrade has been cancelled.",
+                "subscription_id": sub.id,
+                "cancelled_change_type": "upgrade",
+            }
+
+        if sub.scheduled_plan_id is not None:
+            sub.scheduled_plan_id = None
+            self.db.flush()
+            return {
+                "success": True,
+                "message": "Scheduled plan downgrade has been cancelled.",
+                "subscription_id": sub.id,
+                "cancelled_change_type": "downgrade",
+            }
+
+        raise AppException("No pending or scheduled plan change found for this subscription")
+

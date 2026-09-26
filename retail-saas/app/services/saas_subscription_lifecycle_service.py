@@ -149,13 +149,99 @@ class SaaSSubscriptionLifecycleService:
         self.db.flush()
         return cancelled_count
 
+    def process_scheduled_plan_changes(self, tenant_id: Optional[int] = None) -> int:
+        """
+        Applies scheduled plan changes (downgrades) whose current_period_end <= now.
+        - Identifies subscriptions where scheduled_plan_id IS NOT NULL and current_period_end <= now.
+        - Locks tenant row and subscription row.
+        - Validates scheduled target plan.
+        - Mutates subscription:
+            sub.plan_id = target_plan.id
+            sub.unit_price = target_plan.price
+            sub.billing_interval = target_plan.billing_interval
+            sub.currency = target_plan.currency
+            sub.scheduled_plan_id = None
+        - Advances period continuously:
+            old_period_end = sub.current_period_end
+            sub.current_period_start = old_period_end
+            sub.current_period_end = old_period_end + (1 year if yearly else 1 month)
+        - Preserves Tenant.current_subscription_id and syncs legacy projection.
+        - Idempotent: repeated runs are no-ops since scheduled_plan_id is cleared.
+        """
+        now = datetime.utcnow()
+        query = (
+            self.db.query(SaaSSubscription)
+            .filter(
+                SaaSSubscription.scheduled_plan_id.isnot(None),
+                SaaSSubscription.current_period_end <= now,
+            )
+        )
+        if tenant_id is not None:
+            query = query.filter(SaaSSubscription.tenant_id == tenant_id)
+
+        try:
+            candidates = query.with_for_update(skip_locked=True).all()
+        except Exception:
+            candidates = query.all()
+
+        applied_count = 0
+        from app.models.saas_billing import SaaSPlan
+        from app.models.tenant import Tenant
+        from dateutil.relativedelta import relativedelta
+
+        for sub in candidates:
+            if not sub.scheduled_plan_id:
+                continue
+
+            target_plan = (
+                self.db.query(SaaSPlan)
+                .filter(SaaSPlan.id == sub.scheduled_plan_id)
+                .first()
+            )
+            if not target_plan:
+                continue
+
+            # Lock tenant row
+            tenant = (
+                self.db.query(Tenant)
+                .filter(Tenant.id == sub.tenant_id)
+                .with_for_update()
+                .first()
+            )
+
+            # Apply scheduled plan change
+            sub.plan_id = target_plan.id
+            sub.unit_price = target_plan.price
+            sub.billing_interval = target_plan.billing_interval
+            sub.currency = target_plan.currency
+            sub.scheduled_plan_id = None
+
+            # Advance period continuously
+            old_period_end = sub.current_period_end
+            sub.current_period_start = old_period_end
+            if sub.billing_interval.strip().lower() == "yearly":
+                sub.current_period_end = old_period_end + relativedelta(years=1)
+            else:
+                sub.current_period_end = old_period_end + relativedelta(months=1)
+
+            # Keep authoritative pointer consistent
+            if tenant:
+                tenant.current_subscription_id = sub.id
+
+            self.subscription_service.sync_tenant_projection(sub)
+            applied_count += 1
+
+        self.db.flush()
+        return applied_count
+
     def process_period_ends(self, tenant_id: Optional[int] = None) -> int:
         """
         Transitions active subscriptions whose current_period_end <= now to 'past_due'.
 
         IMPORTANT:
-        - Only processes records where cancel_at_period_end is False.
+        - Only processes records where cancel_at_period_end is False and scheduled_plan_id is None.
         - Subscriptions with cancel_at_period_end == True are left untouched for cancellation processing.
+        - Subscriptions with scheduled_plan_id != None are handled by process_scheduled_plan_changes.
 
         Returns the number of subscriptions transitioned.
         """
@@ -165,6 +251,7 @@ class SaaSSubscriptionLifecycleService:
             .filter(
                 SaaSSubscription.status == "active",
                 SaaSSubscription.cancel_at_period_end.is_(False),
+                SaaSSubscription.scheduled_plan_id.is_(None),
                 SaaSSubscription.current_period_end <= now,
             )
         )
@@ -185,6 +272,7 @@ class SaaSSubscriptionLifecycleService:
                     SaaSSubscription.id == sub.id,
                     SaaSSubscription.status == "active",
                     SaaSSubscription.cancel_at_period_end.is_(False),
+                    SaaSSubscription.scheduled_plan_id.is_(None),
                     SaaSSubscription.current_period_end <= now,
                 )
                 .update(
@@ -322,14 +410,16 @@ class SaaSSubscriptionLifecycleService:
         Executes all lifecycle phases in deterministic order:
         1. expire_trials()
         2. process_scheduled_cancellations()
-        3. process_period_ends()
-        4. expire_grace_periods()
-        5. generate_upcoming_renewal_invoices()
+        3. process_scheduled_plan_changes()
+        4. process_period_ends()
+        5. expire_grace_periods()
+        6. generate_upcoming_renewal_invoices()
 
         Returns execution summary counts.
         """
         trials_count = self.expire_trials(tenant_id=tenant_id)
         cancellations_count = self.process_scheduled_cancellations(tenant_id=tenant_id)
+        scheduled_changes_count = self.process_scheduled_plan_changes(tenant_id=tenant_id)
         active_count = self.process_period_ends(tenant_id=tenant_id)
         expired_count = self.expire_grace_periods(tenant_id=tenant_id)
         renewal_invoices_count = self.generate_upcoming_renewal_invoices(tenant_id=tenant_id)
@@ -338,6 +428,7 @@ class SaaSSubscriptionLifecycleService:
             "trials_expired_to_past_due": trials_count,
             "active_subscriptions_moved_to_past_due": active_count,
             "scheduled_cancellations_processed": cancellations_count,
+            "scheduled_plan_changes_applied": scheduled_changes_count,
             "past_due_subscriptions_expired": expired_count,
             "renewal_invoices_generated": renewal_invoices_count,
         }

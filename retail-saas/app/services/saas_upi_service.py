@@ -528,10 +528,37 @@ class SaaSUPIService:
                 subscription.current_period_end = old_period_end + relativedelta(years=1)
             else:
                 subscription.current_period_end = old_period_end + relativedelta(months=1)
+        elif invoice.billing_reason == "plan_upgrade":
+            if not subscription.pending_plan_id:
+                raise AppException(
+                    f"Subscription {subscription.id} has no pending plan change for upgrade invoice {invoice.id}"
+                )
+            from app.models.saas_billing import SaaSPlan
+            target_plan = (
+                self.db.query(SaaSPlan)
+                .filter(SaaSPlan.id == subscription.pending_plan_id)
+                .first()
+            )
+            if not target_plan:
+                raise NotFoundException(
+                    f"Target SaaS Plan {subscription.pending_plan_id} not found"
+                )
+            if not target_plan.is_active:
+                raise AppException(
+                    f"Target SaaS Plan '{target_plan.name}' is inactive"
+                )
+
+            # Apply plan upgrade
+            subscription.plan_id = target_plan.id
+            subscription.unit_price = target_plan.price
+            subscription.billing_interval = target_plan.billing_interval
+            subscription.currency = target_plan.currency
+            subscription.pending_plan_id = None
 
         subscription.status = "active"
 
-        # 7. Sync legacy tenant projection
+        # 7. Sync legacy tenant projection and authoritative pointer
+        tenant.current_subscription_id = subscription.id
         svc = SaaSSubscriptionService(self.db)
         svc.sync_tenant_projection(subscription)
 

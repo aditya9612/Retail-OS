@@ -63,6 +63,7 @@ class SaaSPlan(Base, TimestampMixin):
     subscriptions: Mapped[list["SaaSSubscription"]] = relationship(
         "SaaSSubscription",
         back_populates="plan",
+        foreign_keys="[SaaSSubscription.plan_id]",
     )
     entitlements: Mapped[list["SaaSPlanEntitlement"]] = relationship(
         "SaaSPlanEntitlement",
@@ -143,6 +144,16 @@ class SaaSSubscription(Base, TimestampMixin):
         default=False,
         nullable=False,
     )
+    pending_plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey("saas_plans.id"),
+        nullable=True,
+        index=True,
+    )
+    scheduled_plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey("saas_plans.id"),
+        nullable=True,
+        index=True,
+    )
 
     tenant: Mapped["Tenant"] = relationship(
         "Tenant",
@@ -151,6 +162,15 @@ class SaaSSubscription(Base, TimestampMixin):
     plan: Mapped["SaaSPlan"] = relationship(
         "SaaSPlan",
         back_populates="subscriptions",
+        foreign_keys=[plan_id],
+    )
+    pending_plan: Mapped[Optional["SaaSPlan"]] = relationship(
+        "SaaSPlan",
+        foreign_keys=[pending_plan_id],
+    )
+    scheduled_plan: Mapped[Optional["SaaSPlan"]] = relationship(
+        "SaaSPlan",
+        foreign_keys=[scheduled_plan_id],
     )
     invoices: Mapped[list["SaaSInvoice"]] = relationship(
         "SaaSInvoice",

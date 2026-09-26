@@ -2,14 +2,18 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.exceptions import ForbiddenException
+from app.core.exceptions import ForbiddenException, NotFoundException
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.saas_invoice import (
     SaaSInvoiceListResponse,
     SaaSInvoiceResponse,
 )
+from app.schemas.saas_plan import SaaSPlanResponse
 from app.schemas.saas_subscription import (
+    SaaSPlanChangeCancelResponse,
+    SaaSPlanChangeRequest,
+    SaaSPlanChangeResponse,
     SaaSSubscriptionCancelRequest,
     SaaSSubscriptionResponse,
 )
@@ -256,4 +260,107 @@ def cancel_subscription(
     db.commit()
     db.refresh(sub)
     return sub
+
+
+@router.get(
+    "/subscription",
+    response_model=SaaSSubscriptionResponse,
+    summary="Get Tenant Active Subscription",
+)
+def get_subscription(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Retrieves authoritative current subscription details for the authenticated tenant.
+    Enforces strict tenant isolation.
+    """
+    if not current_user.tenant_id:
+        raise ForbiddenException("User is not associated with any tenant")
+
+    sub = SaaSSubscriptionService(db).get_current_subscription(
+        tenant_id=current_user.tenant_id
+    )
+    if not sub:
+        raise NotFoundException("No active subscription found for tenant")
+
+    return sub
+
+
+@router.get(
+    "/plans",
+    response_model=list[SaaSPlanResponse],
+    summary="List Active SaaS Plans",
+)
+def list_active_plans(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Lists available active SaaS plans from catalog for tenant upgrade/downgrade selection.
+    """
+    if not current_user.tenant_id:
+        raise ForbiddenException("User is not associated with any tenant")
+
+    from app.models.saas_billing import SaaSPlan
+    plans = (
+        db.query(SaaSPlan)
+        .filter(SaaSPlan.is_active.is_(True))
+        .order_by(SaaSPlan.price.asc(), SaaSPlan.id.asc())
+        .all()
+    )
+    return plans
+
+
+@router.post(
+    "/subscription/change",
+    response_model=SaaSPlanChangeResponse,
+    summary="Request Plan Upgrade or Downgrade",
+)
+def change_subscription_plan(
+    data: SaaSPlanChangeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Requests a SaaS plan upgrade or downgrade for the authenticated tenant.
+    - Upgrades (U1=B, U2=A, U3=B): Creates/reuses unpaid upgrade invoice; plan activates after payment verification.
+    - Downgrades (D1=B, D2=B): Schedules plan downgrade at current period end; preserves existing resources.
+    - Same plan (S1=A): Rejects with HTTP 400 client error.
+    - Concurrency: Serialized via pessimistic tenant row locking.
+    """
+    if not current_user.tenant_id:
+        raise ForbiddenException("User is not associated with any tenant")
+
+    svc = SaaSSubscriptionService(db)
+    result = svc.change_plan(
+        tenant_id=current_user.tenant_id,
+        target_plan_id=data.target_plan_id,
+    )
+    db.commit()
+    return result
+
+
+@router.post(
+    "/subscription/cancel-change",
+    response_model=SaaSPlanChangeCancelResponse,
+    summary="Cancel Pending or Scheduled Plan Change",
+)
+def cancel_subscription_plan_change(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Cancels a pending upgrade or scheduled downgrade for the authenticated tenant.
+    - Pending upgrade: Clears pending_plan_id and marks unpaid upgrade invoice cancelled.
+    - Scheduled downgrade: Clears scheduled_plan_id, retaining current plan.
+    """
+    if not current_user.tenant_id:
+        raise ForbiddenException("User is not associated with any tenant")
+
+    svc = SaaSSubscriptionService(db)
+    result = svc.cancel_pending_change(tenant_id=current_user.tenant_id)
+    db.commit()
+    return result
+
 

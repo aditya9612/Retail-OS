@@ -73,10 +73,12 @@ class SaaSInvoiceService:
         due_date: Optional[datetime] = None,
         notes: Optional[str] = None,
         idempotent: bool = True,
+        amount: Optional[Decimal] = None,
     ) -> SaaSInvoice:
         """
         Creates a SaaS invoice from an authoritative subscription within the caller's transaction.
-        - Derives tenant_id, subtotal, and currency strictly from the SaaSSubscription snapshot.
+        - Derives tenant_id and currency strictly from the SaaSSubscription snapshot.
+        - Subtotal defaults to subscription.unit_price, or uses custom amount (e.g. target plan price for plan_upgrade).
         - Defers GST: tax_amount = Decimal("0.00"), total_amount = subtotal.
         - Sets initial status to 'unpaid' and paid_at = None.
         - Sets due_date to issued timestamp if not specified.
@@ -150,8 +152,8 @@ class SaaSInvoiceService:
                 f"An unpaid invoice already exists for subscription {subscription_id} and reason '{billing_reason}'"
             )
 
-        # Monetary calculation from subscription snapshot
-        subtotal = subscription.unit_price
+        # Monetary calculation from subscription snapshot or custom amount
+        subtotal = amount if amount is not None else subscription.unit_price
         tax_amount = Decimal("0.00")
         total_amount = subtotal + tax_amount
 
