@@ -1,6 +1,7 @@
 from datetime import datetime
+from decimal import Decimal
 import re
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import (
     BaseModel,
@@ -9,6 +10,9 @@ from pydantic import (
     Field,
     field_validator,
 )
+from app.schemas.saas_invoice import SaaSInvoiceResponse
+from app.schemas.saas_upi import UPITransactionResponse
+
 
 
 class SuperAdminRefreshToken(BaseModel):
@@ -445,3 +449,161 @@ class SuperAdminDashboardResponse(BaseModel):
     active_tenants: int
     inactive_tenants: int
     total_users: int
+    # P2 Task 10: SaaS Subscription & Revenue Oversight Metrics
+    subscriptions_by_status: dict[str, int] = Field(
+        default_factory=dict,
+        description="Counts for all subscription statuses: trialing, active, past_due, expired, cancelled",
+    )
+    expired_subscriptions_count: int = Field(
+        default=0,
+        description="Count of subscriptions with status 'expired'",
+    )
+    pending_upgrades_count: int = Field(
+        default=0,
+        description="Count of subscriptions with pending_plan_id IS NOT NULL",
+    )
+    scheduled_downgrades_count: int = Field(
+        default=0,
+        description="Count of subscriptions with scheduled_plan_id IS NOT NULL",
+    )
+    total_saas_revenue: Decimal = Field(
+        default=Decimal("0.00"),
+        description="Cumulative paid SaaS invoice revenue (SUM of total_amount where status = 'paid')",
+    )
+
+
+# ==========================================
+# P2 TASK 10: SAAS SUBSCRIPTION & BILLING SCHEMAS
+# ==========================================
+
+class SuperAdminPlanSummary(BaseModel):
+    id: int
+    code: str
+    name: str
+    price: Decimal
+    currency: str
+    billing_interval: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SuperAdminSubscriptionListItem(BaseModel):
+    subscription_id: int
+    tenant_id: int
+    tenant_name: str
+    tenant_domain: Optional[str] = None
+    status: str
+    current_plan: Optional[SuperAdminPlanSummary] = None
+    pending_plan: Optional[SuperAdminPlanSummary] = None
+    scheduled_plan: Optional[SuperAdminPlanSummary] = None
+    unit_price: Decimal
+    currency: str
+    billing_interval: str
+    start_date: datetime
+    current_period_start: datetime
+    current_period_end: datetime
+    trial_end_date: Optional[datetime] = None
+    cancel_at_period_end: bool
+    cancelled_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SuperAdminSubscriptionListResponse(BaseModel):
+    items: list[SuperAdminSubscriptionListItem]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SuperAdminEntitlementUsage(BaseModel):
+    dimension: str
+    current_usage: int
+    limit: Optional[int] = None
+    is_unlimited: bool
+
+
+class SuperAdminSubscriptionDetailInfo(BaseModel):
+    id: int
+    status: str
+    billing_interval: str
+    unit_price: Decimal
+    currency: str
+    start_date: datetime
+    current_period_start: datetime
+    current_period_end: datetime
+    trial_end_date: Optional[datetime] = None
+    cancel_at_period_end: bool
+    cancelled_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SuperAdminTenantSubscriptionDetailResponse(BaseModel):
+    tenant_id: int
+    tenant_name: str
+    tenant_domain: Optional[str] = None
+    has_subscription: bool
+    subscription: Optional[SuperAdminSubscriptionDetailInfo] = None
+    current_plan: Optional[SuperAdminPlanSummary] = None
+    pending_plan: Optional[SuperAdminPlanSummary] = None
+    scheduled_plan: Optional[SuperAdminPlanSummary] = None
+    usage_summary: list[SuperAdminEntitlementUsage] = []
+    recent_invoices: list[SaaSInvoiceResponse] = []
+    latest_unpaid_invoice: Optional[SaaSInvoiceResponse] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SuperAdminInvoiceListItem(BaseModel):
+    invoice_id: int
+    invoice_number: str
+    tenant_id: int
+    tenant_name: str
+    subscription_id: int
+    billing_reason: str
+    subtotal: Decimal
+    tax_amount: Decimal
+    total_amount: Decimal
+    currency: str
+    status: str
+    due_date: datetime
+    paid_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SuperAdminInvoiceListResponse(BaseModel):
+    items: list[SuperAdminInvoiceListItem]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SuperAdminTenantSummary(BaseModel):
+    id: int
+    name: str
+    domain: str
+    is_active: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SuperAdminInvoiceDetailResponse(BaseModel):
+    invoice: SaaSInvoiceResponse
+    tenant: SuperAdminTenantSummary
+    subscription: Optional[SuperAdminSubscriptionDetailInfo] = None
+    current_plan: Optional[SuperAdminPlanSummary] = None
+    upi_transactions: list[UPITransactionResponse] = []
+    latest_upi_transaction: Optional[UPITransactionResponse] = None
+
+    model_config = ConfigDict(from_attributes=True)

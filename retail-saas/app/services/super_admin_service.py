@@ -15,8 +15,9 @@ from app.core.security import (
     get_password_hash,
     verify_password,
 )
+from decimal import Decimal
 from app.models.role import Role
-from app.models.saas_billing import SaaSPlan
+from app.models.saas_billing import SaaSInvoice, SaaSPlan, SaaSSubscription, SaaSUPITransaction
 from app.models.store import Store
 from app.models.super_admin import SuperAdmin
 from app.models.tenant import Tenant
@@ -26,16 +27,25 @@ from app.schemas.saas_entitlement import (
     SaaSPlanEntitlementCreate,
     SaaSPlanEntitlementUpdate,
 )
+from app.schemas.saas_invoice import SaaSInvoiceResponse
 from app.schemas.saas_plan import (
     SaaSPlanCreate,
     SaaSPlanUpdate,
 )
+from app.schemas.saas_upi import UPITransactionResponse
 from app.schemas.super_admin import (
     SuperAdminChangePassword,
     SuperAdminCreate,
+    SuperAdminEntitlementUsage,
+    SuperAdminInvoiceListItem,
     SuperAdminLogin,
+    SuperAdminPlanSummary,
+    SuperAdminSubscriptionDetailInfo,
+    SuperAdminSubscriptionListItem,
+    SuperAdminTenantSummary,
     SuperAdminUpdate,
 )
+from app.services.saas_entitlement_service import SaaSEntitlementService
 
 
 class SuperAdminService:
@@ -726,6 +736,39 @@ class SuperAdminService:
                 .count()
             )
 
+        # Subscription status breakdown
+        valid_statuses = ["trialing", "active", "past_due", "expired", "cancelled"]
+        subscriptions_by_status = {st: 0 for st in valid_statuses}
+        status_counts = (
+            self.db.query(SaaSSubscription.status, func.count(SaaSSubscription.id))
+            .group_by(SaaSSubscription.status)
+            .all()
+        )
+        for st, count in status_counts:
+            subscriptions_by_status[st] = count
+
+        expired_subscriptions_count = subscriptions_by_status.get("expired", 0)
+
+        pending_upgrades_count = (
+            self.db.query(SaaSSubscription)
+            .filter(SaaSSubscription.pending_plan_id.isnot(None))
+            .count()
+        )
+
+        scheduled_downgrades_count = (
+            self.db.query(SaaSSubscription)
+            .filter(SaaSSubscription.scheduled_plan_id.isnot(None))
+            .count()
+        )
+
+        # Cumulative paid SaaS invoice revenue
+        total_rev = (
+            self.db.query(func.coalesce(func.sum(SaaSInvoice.total_amount), 0))
+            .filter(SaaSInvoice.status == "paid")
+            .scalar()
+        )
+        total_saas_revenue = Decimal(str(total_rev)) if total_rev is not None else Decimal("0.00")
+
         return {
             "total_super_admins": total_super_admins,
             "active_super_admins": active_super_admins,
@@ -734,6 +777,11 @@ class SuperAdminService:
             "active_tenants": active_tenants,
             "inactive_tenants": inactive_tenants,
             "total_users": total_users,
+            "subscriptions_by_status": subscriptions_by_status,
+            "expired_subscriptions_count": expired_subscriptions_count,
+            "pending_upgrades_count": pending_upgrades_count,
+            "scheduled_downgrades_count": scheduled_downgrades_count,
+            "total_saas_revenue": total_saas_revenue,
         }
 
     # =========================
@@ -1039,4 +1087,471 @@ class SuperAdminService:
             self.db.commit()
         except Exception:
             self.db.rollback()
-            raise
+            raise
+
+    # ==========================================
+    # P2 TASK 10: SAAS SUBSCRIPTION & BILLING OVERSIGHT
+    # ==========================================
+
+    def list_subscriptions(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        status: str | None = None,
+        plan_id: int | None = None,
+        tenant_id: int | None = None,
+        has_pending_plan: bool | None = None,
+        has_scheduled_plan: bool | None = None,
+    ) -> dict:
+        valid_statuses = {"trialing", "active", "past_due", "cancelled", "expired"}
+        if status:
+            norm_status = status.strip().lower()
+            if norm_status not in valid_statuses:
+                raise AppException(
+                    detail=f"Invalid subscription status: '{status}'. Must be one of: {', '.join(sorted(valid_statuses))}",
+                    status_code=400,
+                )
+
+        query = (
+            self.db.query(SaaSSubscription)
+            .options(
+                joinedload(SaaSSubscription.tenant),
+                joinedload(SaaSSubscription.plan),
+                joinedload(SaaSSubscription.pending_plan),
+                joinedload(SaaSSubscription.scheduled_plan),
+            )
+        )
+
+        if status:
+            query = query.filter(SaaSSubscription.status == status.strip().lower())
+        if plan_id is not None:
+            query = query.filter(SaaSSubscription.plan_id == plan_id)
+        if tenant_id is not None:
+            query = query.filter(SaaSSubscription.tenant_id == tenant_id)
+        if has_pending_plan is True:
+            query = query.filter(SaaSSubscription.pending_plan_id.isnot(None))
+        elif has_pending_plan is False:
+            query = query.filter(SaaSSubscription.pending_plan_id.is_(None))
+        if has_scheduled_plan is True:
+            query = query.filter(SaaSSubscription.scheduled_plan_id.isnot(None))
+        elif has_scheduled_plan is False:
+            query = query.filter(SaaSSubscription.scheduled_plan_id.is_(None))
+
+        total = query.count()
+        total_pages = math.ceil(total / page_size) if total > 0 else 0
+
+        subscriptions = (
+            query.order_by(
+                SaaSSubscription.created_at.desc(),
+                SaaSSubscription.id.desc(),
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+        items = []
+        for sub in subscriptions:
+            tenant_name = sub.tenant.name if sub.tenant else ""
+            tenant_domain = sub.tenant.domain if sub.tenant else None
+
+            current_plan = (
+                SuperAdminPlanSummary(
+                    id=sub.plan.id,
+                    code=sub.plan.code,
+                    name=sub.plan.name,
+                    price=sub.plan.price,
+                    currency=sub.plan.currency,
+                    billing_interval=sub.plan.billing_interval,
+                )
+                if sub.plan
+                else None
+            )
+
+            pending_plan = (
+                SuperAdminPlanSummary(
+                    id=sub.pending_plan.id,
+                    code=sub.pending_plan.code,
+                    name=sub.pending_plan.name,
+                    price=sub.pending_plan.price,
+                    currency=sub.pending_plan.currency,
+                    billing_interval=sub.pending_plan.billing_interval,
+                )
+                if sub.pending_plan
+                else None
+            )
+
+            scheduled_plan = (
+                SuperAdminPlanSummary(
+                    id=sub.scheduled_plan.id,
+                    code=sub.scheduled_plan.code,
+                    name=sub.scheduled_plan.name,
+                    price=sub.scheduled_plan.price,
+                    currency=sub.scheduled_plan.currency,
+                    billing_interval=sub.scheduled_plan.billing_interval,
+                )
+                if sub.scheduled_plan
+                else None
+            )
+
+            items.append(
+                SuperAdminSubscriptionListItem(
+                    subscription_id=sub.id,
+                    tenant_id=sub.tenant_id,
+                    tenant_name=tenant_name,
+                    tenant_domain=tenant_domain,
+                    status=sub.status,
+                    current_plan=current_plan,
+                    pending_plan=pending_plan,
+                    scheduled_plan=scheduled_plan,
+                    unit_price=sub.unit_price,
+                    currency=sub.currency,
+                    billing_interval=sub.billing_interval,
+                    start_date=sub.start_date,
+                    current_period_start=sub.current_period_start,
+                    current_period_end=sub.current_period_end,
+                    trial_end_date=sub.trial_end_date,
+                    cancel_at_period_end=sub.cancel_at_period_end,
+                    cancelled_at=sub.cancelled_at,
+                )
+            )
+
+        return {
+            "items": items,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+        }
+
+    def get_tenant_subscription(self, tenant_id: int) -> dict:
+        tenant = (
+            self.db.query(Tenant)
+            .filter(Tenant.id == tenant_id)
+            .first()
+        )
+        if not tenant:
+            raise NotFoundException(f"Tenant {tenant_id} not found")
+
+        if not tenant.current_subscription_id:
+            return {
+                "tenant_id": tenant.id,
+                "tenant_name": tenant.name,
+                "tenant_domain": tenant.domain,
+                "has_subscription": False,
+                "subscription": None,
+                "current_plan": None,
+                "pending_plan": None,
+                "scheduled_plan": None,
+                "usage_summary": [],
+                "recent_invoices": [],
+                "latest_unpaid_invoice": None,
+            }
+
+        sub = (
+            self.db.query(SaaSSubscription)
+            .options(
+                joinedload(SaaSSubscription.plan),
+                joinedload(SaaSSubscription.pending_plan),
+                joinedload(SaaSSubscription.scheduled_plan),
+            )
+            .filter(SaaSSubscription.id == tenant.current_subscription_id)
+            .first()
+        )
+
+        if not sub:
+            return {
+                "tenant_id": tenant.id,
+                "tenant_name": tenant.name,
+                "tenant_domain": tenant.domain,
+                "has_subscription": False,
+                "subscription": None,
+                "current_plan": None,
+                "pending_plan": None,
+                "scheduled_plan": None,
+                "usage_summary": [],
+                "recent_invoices": [],
+                "latest_unpaid_invoice": None,
+            }
+
+        if sub.tenant_id != tenant.id:
+            raise ConflictException(
+                detail=f"Subscription {sub.id} does not belong to tenant {tenant.id}"
+            )
+
+        entitlement_svc = SaaSEntitlementService(self.db)
+        usage_summary = []
+        for dim in ["stores", "users", "products"]:
+            usage = entitlement_svc.get_usage(tenant.id, dim)
+            try:
+                limit, is_unlimited = entitlement_svc.get_limit(tenant.id, dim)
+            except Exception:
+                limit, is_unlimited = None, False
+            usage_summary.append(
+                SuperAdminEntitlementUsage(
+                    dimension=dim,
+                    current_usage=usage,
+                    limit=limit,
+                    is_unlimited=is_unlimited,
+                )
+            )
+
+        recent_invoices_models = (
+            self.db.query(SaaSInvoice)
+            .filter(SaaSInvoice.tenant_id == tenant.id)
+            .order_by(SaaSInvoice.created_at.desc(), SaaSInvoice.id.desc())
+            .limit(5)
+            .all()
+        )
+        recent_invoices = [
+            SaaSInvoiceResponse.model_validate(inv) for inv in recent_invoices_models
+        ]
+
+        latest_unpaid_model = (
+            self.db.query(SaaSInvoice)
+            .filter(
+                SaaSInvoice.tenant_id == tenant.id,
+                SaaSInvoice.status == "unpaid",
+            )
+            .order_by(SaaSInvoice.created_at.desc(), SaaSInvoice.id.desc())
+            .first()
+        )
+        latest_unpaid_invoice = (
+            SaaSInvoiceResponse.model_validate(latest_unpaid_model)
+            if latest_unpaid_model
+            else None
+        )
+
+        current_plan = (
+            SuperAdminPlanSummary(
+                id=sub.plan.id,
+                code=sub.plan.code,
+                name=sub.plan.name,
+                price=sub.plan.price,
+                currency=sub.plan.currency,
+                billing_interval=sub.plan.billing_interval,
+            )
+            if sub.plan
+            else None
+        )
+
+        pending_plan = (
+            SuperAdminPlanSummary(
+                id=sub.pending_plan.id,
+                code=sub.pending_plan.code,
+                name=sub.pending_plan.name,
+                price=sub.pending_plan.price,
+                currency=sub.pending_plan.currency,
+                billing_interval=sub.pending_plan.billing_interval,
+            )
+            if sub.pending_plan
+            else None
+        )
+
+        scheduled_plan = (
+            SuperAdminPlanSummary(
+                id=sub.scheduled_plan.id,
+                code=sub.scheduled_plan.code,
+                name=sub.scheduled_plan.name,
+                price=sub.scheduled_plan.price,
+                currency=sub.scheduled_plan.currency,
+                billing_interval=sub.scheduled_plan.billing_interval,
+            )
+            if sub.scheduled_plan
+            else None
+        )
+
+        sub_info = SuperAdminSubscriptionDetailInfo(
+            id=sub.id,
+            status=sub.status,
+            billing_interval=sub.billing_interval,
+            unit_price=sub.unit_price,
+            currency=sub.currency,
+            start_date=sub.start_date,
+            current_period_start=sub.current_period_start,
+            current_period_end=sub.current_period_end,
+            trial_end_date=sub.trial_end_date,
+            cancel_at_period_end=sub.cancel_at_period_end,
+            cancelled_at=sub.cancelled_at,
+            created_at=sub.created_at,
+            updated_at=sub.updated_at,
+        )
+
+        return {
+            "tenant_id": tenant.id,
+            "tenant_name": tenant.name,
+            "tenant_domain": tenant.domain,
+            "has_subscription": True,
+            "subscription": sub_info,
+            "current_plan": current_plan,
+            "pending_plan": pending_plan,
+            "scheduled_plan": scheduled_plan,
+            "usage_summary": usage_summary,
+            "recent_invoices": recent_invoices,
+            "latest_unpaid_invoice": latest_unpaid_invoice,
+        }
+
+    def list_invoices(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        status: str | None = None,
+        billing_reason: str | None = None,
+        tenant_id: int | None = None,
+        search: str | None = None,
+    ) -> dict:
+        valid_statuses = {"unpaid", "paid", "cancelled"}
+        if status:
+            norm_status = status.strip().lower()
+            if norm_status not in valid_statuses:
+                raise AppException(
+                    detail=f"Invalid invoice status: '{status}'. Must be one of: {', '.join(sorted(valid_statuses))}",
+                    status_code=400,
+                )
+
+        valid_reasons = {
+            "trial_conversion",
+            "subscription_cycle",
+            "plan_upgrade",
+            "manual_renewal",
+        }
+        if billing_reason:
+            norm_reason = billing_reason.strip().lower()
+            if norm_reason not in valid_reasons:
+                raise AppException(
+                    detail=f"Invalid billing reason: '{billing_reason}'. Must be one of: {', '.join(sorted(valid_reasons))}",
+                    status_code=400,
+                )
+
+        query = self.db.query(SaaSInvoice).options(joinedload(SaaSInvoice.tenant))
+
+        if status:
+            query = query.filter(SaaSInvoice.status == status.strip().lower())
+        if billing_reason:
+            query = query.filter(SaaSInvoice.billing_reason == billing_reason.strip().lower())
+        if tenant_id is not None:
+            query = query.filter(SaaSInvoice.tenant_id == tenant_id)
+        if search:
+            query = query.filter(
+                func.lower(SaaSInvoice.invoice_number).like(f"%{search.strip().lower()}%")
+            )
+
+        total = query.count()
+        total_pages = math.ceil(total / page_size) if total > 0 else 0
+
+        invoices = (
+            query.order_by(
+                SaaSInvoice.created_at.desc(),
+                SaaSInvoice.id.desc(),
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+        items = []
+        for inv in invoices:
+            tenant_name = inv.tenant.name if inv.tenant else ""
+            items.append(
+                SuperAdminInvoiceListItem(
+                    invoice_id=inv.id,
+                    invoice_number=inv.invoice_number,
+                    tenant_id=inv.tenant_id,
+                    tenant_name=tenant_name,
+                    subscription_id=inv.subscription_id,
+                    billing_reason=inv.billing_reason,
+                    subtotal=inv.subtotal,
+                    tax_amount=inv.tax_amount,
+                    total_amount=inv.total_amount,
+                    currency=inv.currency,
+                    status=inv.status,
+                    due_date=inv.due_date,
+                    paid_at=inv.paid_at,
+                    created_at=inv.created_at,
+                )
+            )
+
+        return {
+            "items": items,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+        }
+
+    def get_invoice(self, invoice_id: int) -> dict:
+        invoice = (
+            self.db.query(SaaSInvoice)
+            .options(
+                joinedload(SaaSInvoice.tenant),
+                joinedload(SaaSInvoice.subscription).joinedload(SaaSSubscription.plan),
+            )
+            .filter(SaaSInvoice.id == invoice_id)
+            .first()
+        )
+        if not invoice:
+            raise NotFoundException(f"Invoice {invoice_id} not found")
+
+        tenant_resp = (
+            SuperAdminTenantSummary(
+                id=invoice.tenant.id,
+                name=invoice.tenant.name,
+                domain=invoice.tenant.domain,
+                is_active=invoice.tenant.is_active,
+            )
+            if invoice.tenant
+            else None
+        )
+
+        sub = invoice.subscription
+        sub_resp = None
+        current_plan_resp = None
+        if sub:
+            sub_resp = SuperAdminSubscriptionDetailInfo(
+                id=sub.id,
+                status=sub.status,
+                billing_interval=sub.billing_interval,
+                unit_price=sub.unit_price,
+                currency=sub.currency,
+                start_date=sub.start_date,
+                current_period_start=sub.current_period_start,
+                current_period_end=sub.current_period_end,
+                trial_end_date=sub.trial_end_date,
+                cancel_at_period_end=sub.cancel_at_period_end,
+                cancelled_at=sub.cancelled_at,
+                created_at=sub.created_at,
+                updated_at=sub.updated_at,
+            )
+            if sub.plan:
+                current_plan_resp = SuperAdminPlanSummary(
+                    id=sub.plan.id,
+                    code=sub.plan.code,
+                    name=sub.plan.name,
+                    price=sub.plan.price,
+                    currency=sub.plan.currency,
+                    billing_interval=sub.plan.billing_interval,
+                )
+
+        upi_transactions_models = (
+            self.db.query(SaaSUPITransaction)
+            .filter(SaaSUPITransaction.invoice_id == invoice.id)
+            .order_by(
+                SaaSUPITransaction.created_at.desc(),
+                SaaSUPITransaction.id.desc(),
+            )
+            .all()
+        )
+        upi_transactions = [
+            UPITransactionResponse.model_validate(tx) for tx in upi_transactions_models
+        ]
+        latest_upi_transaction = upi_transactions[0] if upi_transactions else None
+
+        return {
+            "invoice": SaaSInvoiceResponse.model_validate(invoice),
+            "tenant": tenant_resp,
+            "subscription": sub_resp,
+            "current_plan": current_plan_resp,
+            "upi_transactions": upi_transactions,
+            "latest_upi_transaction": latest_upi_transaction,
+        }
+

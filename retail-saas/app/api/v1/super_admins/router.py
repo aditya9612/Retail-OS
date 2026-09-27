@@ -14,15 +14,19 @@ from app.schemas.super_admin import (
     SuperAdminChangePassword,
     SuperAdminCreate,
     SuperAdminDashboardResponse,
+    SuperAdminInvoiceDetailResponse,
+    SuperAdminInvoiceListResponse,
     SuperAdminListResponse,
     SuperAdminLogin,
     SuperAdminRefreshToken,
     SuperAdminResponse,
     SuperAdminStatusUpdate,
     SuperAdminStoreListResponse,
+    SuperAdminSubscriptionListResponse,
     SuperAdminTenantDetailResponse,
     SuperAdminTenantListResponse,
     SuperAdminTenantResponse,
+    SuperAdminTenantSubscriptionDetailResponse,
     SuperAdminTenantUserListResponse,
     SuperAdminTenantUserResponse,
     SuperAdminTokenResponse,
@@ -297,6 +301,29 @@ def list_tenant_stores(
     )
 
 
+@router.get(
+    "/tenants/{tenant_id}/subscription",
+    response_model=SuperAdminTenantSubscriptionDetailResponse,
+    summary="Get Tenant Subscription Detail",
+)
+def get_tenant_subscription(
+    tenant_id: int,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Retrieves deep subscription and entitlement detail for a specific tenant:
+    - Authoritative current subscription and SaaS plan
+    - Pending upgrade plan (if any)
+    - Scheduled downgrade plan (if any)
+    - Real-time resource usage vs limit summary (stores, users, products)
+    - Recent SaaS invoices (latest 5)
+    - Latest unpaid invoice
+    Super Admin authorization required.
+    """
+    return SuperAdminService(db).get_tenant_subscription(tenant_id)
+
+
 # =========================
 # SAAS PLAN MANAGEMENT APIS
 # =========================
@@ -562,6 +589,92 @@ def reject_upi_transaction(
         super_admin_id=current_super_admin.id,
         rejection_reason=data.rejection_reason,
     )
+
+
+# ==========================================
+# P2 TASK 10: SAAS SUBSCRIPTION & BILLING OVERSIGHT
+# ==========================================
+
+
+@router.get(
+    "/subscriptions",
+    response_model=SuperAdminSubscriptionListResponse,
+    summary="List SaaS Subscriptions (Super Admin)",
+)
+def list_subscriptions(
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page (1-100)"),
+    status: str | None = Query(None, description="Filter by status (trialing, active, past_due, cancelled, expired)"),
+    plan_id: int | None = Query(None, ge=1, description="Filter by SaaS plan ID"),
+    tenant_id: int | None = Query(None, ge=1, description="Filter by tenant ID"),
+    has_pending_plan: bool | None = Query(None, description="Filter subscriptions with pending upgrade"),
+    has_scheduled_plan: bool | None = Query(None, description="Filter subscriptions with scheduled downgrade"),
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Platform-wide paginated SaaS subscription oversight.
+    Super Admin authorization required.
+    """
+    return SuperAdminService(db).list_subscriptions(
+        page=page,
+        page_size=page_size,
+        status=status,
+        plan_id=plan_id,
+        tenant_id=tenant_id,
+        has_pending_plan=has_pending_plan,
+        has_scheduled_plan=has_scheduled_plan,
+    )
+
+
+@router.get(
+    "/invoices",
+    response_model=SuperAdminInvoiceListResponse,
+    summary="List SaaS Invoices (Super Admin)",
+)
+def list_invoices(
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page (1-100)"),
+    status: str | None = Query(None, description="Filter by invoice status (unpaid, paid, cancelled)"),
+    billing_reason: str | None = Query(None, description="Filter by billing reason (trial_conversion, subscription_cycle, plan_upgrade, manual_renewal)"),
+    tenant_id: int | None = Query(None, ge=1, description="Filter by tenant ID"),
+    search: str | None = Query(None, description="Search by invoice number"),
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Platform-wide paginated SaaS invoice oversight.
+    Super Admin authorization required.
+    """
+    return SuperAdminService(db).list_invoices(
+        page=page,
+        page_size=page_size,
+        status=status,
+        billing_reason=billing_reason,
+        tenant_id=tenant_id,
+        search=search,
+    )
+
+
+@router.get(
+    "/invoices/{invoice_id}",
+    response_model=SuperAdminInvoiceDetailResponse,
+    summary="Get SaaS Invoice Detail (Super Admin)",
+)
+def get_invoice(
+    invoice_id: int,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Retrieves deep detail for a specific SaaS invoice:
+    - Authoritative invoice fields
+    - Associated tenant and subscription
+    - SaaS plan details
+    - Complete history of associated UPI payment attempts
+    Super Admin authorization required.
+    """
+    return SuperAdminService(db).get_invoice(invoice_id)
 
 
 @router.get(
