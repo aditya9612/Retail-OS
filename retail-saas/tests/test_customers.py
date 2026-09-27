@@ -1443,3 +1443,246 @@ def test_list_customers_status_pagination_and_legacy_serialization(tenant_a, ten
     finally:
         db.close()
 
+
+# ============================================================================
+# P2 TASK 11 — CUSTOMER MULTI-TENANT ISOLATION TESTS
+# ============================================================================
+
+def test_cross_tenant_same_phone_allowed(tenant_a, tenant_b):
+    headers_a, _ = tenant_a
+    headers_b, _ = tenant_b
+    shared_phone = random_phone()
+
+    # Tenant A creates customer with shared_phone
+    res_a = client.post(
+        "/api/v1/customers",
+        json={"name": "Tenant A Cust", "phone": shared_phone, "address": "123 Street, Pune"},
+        headers=headers_a,
+    )
+    assert res_a.status_code == 201, res_a.text
+    assert res_a.json()["phone"] == shared_phone
+
+    # Tenant B creates customer with same shared_phone -> must succeed
+    res_b = client.post(
+        "/api/v1/customers",
+        json={"name": "Tenant B Cust", "phone": shared_phone, "address": "456 Avenue, Mumbai"},
+        headers=headers_b,
+    )
+    assert res_b.status_code == 201, res_b.text
+    assert res_b.json()["phone"] == shared_phone
+
+
+def test_cross_tenant_same_email_allowed(tenant_a, tenant_b):
+    headers_a, _ = tenant_a
+    headers_b, _ = tenant_b
+    shared_email = f"shared_{uuid.uuid4().hex[:8]}@example.com"
+
+    # Tenant A creates customer with shared_email
+    res_a = client.post(
+        "/api/v1/customers",
+        json={
+            "name": "Tenant A Cust",
+            "phone": random_phone(),
+            "email": shared_email,
+            "address": "123 Street, Pune",
+        },
+        headers=headers_a,
+    )
+    assert res_a.status_code == 201, res_a.text
+    assert res_a.json()["email"] == shared_email
+
+    # Tenant B creates customer with same shared_email -> must succeed
+    res_b = client.post(
+        "/api/v1/customers",
+        json={
+            "name": "Tenant B Cust",
+            "phone": random_phone(),
+            "email": shared_email,
+            "address": "456 Avenue, Mumbai",
+        },
+        headers=headers_b,
+    )
+    assert res_b.status_code == 201, res_b.text
+    assert res_b.json()["email"] == shared_email
+
+
+def test_same_tenant_duplicate_phone_rejected(tenant_a):
+    headers_a, _ = tenant_a
+    phone = random_phone()
+
+    res_1 = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer One", "phone": phone, "address": "123 Street, Pune"},
+        headers=headers_a,
+    )
+    assert res_1.status_code == 201, res_1.text
+
+    # Second creation with identical phone in same tenant must return 409 Conflict
+    res_2 = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer Two", "phone": phone, "address": "789 Road, Pune"},
+        headers=headers_a,
+    )
+    assert res_2.status_code == 409
+    assert "phone" in str(res_2.json()).lower()
+
+
+def test_same_tenant_duplicate_email_rejected(tenant_a):
+    headers_a, _ = tenant_a
+    email = f"dup_{uuid.uuid4().hex[:8]}@example.com"
+
+    res_1 = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer One", "phone": random_phone(), "email": email, "address": "123 Street, Pune"},
+        headers=headers_a,
+    )
+    assert res_1.status_code == 201, res_1.text
+
+    # Second creation with identical email in same tenant must return 409 Conflict
+    res_2 = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer Two", "phone": random_phone(), "email": email, "address": "789 Road, Pune"},
+        headers=headers_a,
+    )
+    assert res_2.status_code == 409
+    assert "email" in str(res_2.json()).lower()
+
+
+def test_same_tenant_multiple_null_emails_allowed(tenant_a):
+    headers_a, _ = tenant_a
+
+    res_1 = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer No Email One", "phone": random_phone(), "email": None, "address": "123 Street, Pune"},
+        headers=headers_a,
+    )
+    assert res_1.status_code == 201, res_1.text
+    assert res_1.json()["email"] is None
+
+    res_2 = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer No Email Two", "phone": random_phone(), "email": None, "address": "456 Avenue, Pune"},
+        headers=headers_a,
+    )
+    assert res_2.status_code == 201, res_2.text
+    assert res_2.json()["email"] is None
+
+
+def test_cross_tenant_update_same_phone_and_email_allowed(tenant_a, tenant_b):
+    headers_a, _ = tenant_a
+    headers_b, _ = tenant_b
+    shared_phone = random_phone()
+    shared_email = f"update_{uuid.uuid4().hex[:8]}@example.com"
+
+    # Tenant A creates customer with shared_phone and shared_email
+    res_a = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer Alpha", "phone": shared_phone, "email": shared_email, "address": "123 Street, Pune"},
+        headers=headers_a,
+    )
+    assert res_a.status_code == 201, res_a.text
+
+    # Tenant B creates customer with distinct phone and email
+    res_b = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer Beta", "phone": random_phone(), "email": f"b_{uuid.uuid4().hex[:8]}@example.com", "address": "456 Avenue, Pune"},
+        headers=headers_b,
+    )
+    assert res_b.status_code == 201, res_b.text
+    cust_b_id = res_b.json()["id"]
+
+    # Tenant B updates customer B to use Tenant A's shared_phone and shared_email -> must succeed
+    res_update = client.put(
+        f"/api/v1/customers/{cust_b_id}",
+        json={"phone": shared_phone, "email": shared_email},
+        headers=headers_b,
+    )
+    assert res_update.status_code == 200, res_update.text
+    assert res_update.json()["phone"] == shared_phone
+    assert res_update.json()["email"] == shared_email
+
+
+def test_cross_tenant_access_blocked_comprehensive(tenant_a, tenant_b):
+    headers_a, _ = tenant_a
+    headers_b, _ = tenant_b
+
+    # Tenant A creates customer
+    res_a = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer Alpha", "phone": random_phone(), "address": "123 Street, Pune"},
+        headers=headers_a,
+    )
+    assert res_a.status_code == 201
+    cust_a_id = res_a.json()["id"]
+
+    # Tenant B GET customer A -> 404
+    get_res = client.get(f"/api/v1/customers/{cust_a_id}", headers=headers_b)
+    assert get_res.status_code == 404
+
+    # Tenant B UPDATE customer A -> 404
+    put_res = client.put(f"/api/v1/customers/{cust_a_id}", json={"name": "Hacked Name"}, headers=headers_b)
+    assert put_res.status_code == 404
+
+    # Tenant B wallet credit customer A -> 404
+    credit_res = client.post(
+        f"/api/v1/customers/{cust_a_id}/wallet/credit",
+        json={"amount": 100.0, "reference_no": f"ref_{uuid.uuid4().hex[:6]}"},
+        headers=headers_b,
+    )
+    assert credit_res.status_code == 404
+
+    # Tenant B wallet debit customer A -> 404
+    debit_res = client.post(
+        f"/api/v1/customers/{cust_a_id}/wallet/debit",
+        json={"amount": 50.0, "reference_no": f"ref_{uuid.uuid4().hex[:6]}"},
+        headers=headers_b,
+    )
+    assert debit_res.status_code == 404
+
+    # Tenant B wallet transactions customer A -> 404
+    tx_res = client.get(f"/api/v1/customers/{cust_a_id}/wallet/transactions", headers=headers_b)
+    assert tx_res.status_code == 404
+
+
+def test_customer_email_case_and_whitespace_normalization(tenant_a):
+    headers_a, _ = tenant_a
+    raw_email = "  User.Shopper@Example.COM  "
+    normalized_email = "user.shopper@example.com"
+
+    res_1 = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer Normalization", "phone": random_phone(), "email": raw_email, "address": "123 Street, Pune"},
+        headers=headers_a,
+    )
+    assert res_1.status_code == 201, res_1.text
+    assert res_1.json()["email"] == normalized_email
+
+    # Attempting to register same email with different casing/whitespace in same tenant must fail with 409
+    res_2 = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer Collide", "phone": random_phone(), "email": "USER.SHOPPER@EXAMPLE.COM", "address": "456 Street, Pune"},
+        headers=headers_a,
+    )
+    assert res_2.status_code == 409
+
+
+def test_customer_phone_representation_regression(tenant_a):
+    headers_a, _ = tenant_a
+    phone_10_digit = "9876500001"
+    phone_plus91 = "+919876500002"
+
+    res_1 = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer Ten Digit", "phone": phone_10_digit, "address": "123 Street, Pune"},
+        headers=headers_a,
+    )
+    assert res_1.status_code == 201, res_1.text
+    assert res_1.json()["phone"] == phone_10_digit
+
+    res_2 = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer Plus Ninety", "phone": phone_plus91, "address": "456 Avenue, Pune"},
+        headers=headers_a,
+    )
+    assert res_2.status_code == 201, res_2.text
+    assert res_2.json()["phone"] == phone_plus91

@@ -879,6 +879,7 @@ class CustomerService:
                 self.db.query(Customer)
                 .filter(
                     Customer.email == email_val,
+                    Customer.tenant_id == tenant_id,
                 )
                 .first()
             )
@@ -892,6 +893,7 @@ class CustomerService:
             self.db.query(Customer)
             .filter(
                 Customer.phone == data.phone,
+                Customer.tenant_id == tenant_id,
             )
             .first()
         )
@@ -940,11 +942,11 @@ class CustomerService:
         except IntegrityError as exc:
             self.db.rollback()
             err_msg = str(exc).lower()
-            if "ix_customers_phone" in err_msg or "customers.phone" in err_msg or "phone" in err_msg:
+            if "ix_customers_phone" in err_msg or "customers.phone" in err_msg or "uq_customer_tenant_phone" in err_msg or "phone" in err_msg:
                 raise ConflictException(
                     "Customer with this phone number already exists"
                 )
-            if "ix_customers_email" in err_msg or "customers.email" in err_msg or "email" in err_msg:
+            if "ix_customers_email" in err_msg or "customers.email" in err_msg or "uq_customer_tenant_email" in err_msg or "email" in err_msg:
                 raise ConflictException(
                     "Customer with this email already exists"
                 )
@@ -1019,6 +1021,7 @@ class CustomerService:
                 self.db.query(Customer)
                 .filter(
                     Customer.email == email_val,
+                    Customer.tenant_id == tenant_id,
                     Customer.id != customer_id,
                 )
                 .first()
@@ -1037,6 +1040,7 @@ class CustomerService:
                 self.db.query(Customer)
                 .filter(
                     Customer.phone == dump_data["phone"],
+                    Customer.tenant_id == tenant_id,
                     Customer.id != customer_id,
                 )
                 .first()
@@ -1077,11 +1081,11 @@ class CustomerService:
         except IntegrityError as exc:
             self.db.rollback()
             err_msg = str(exc).lower()
-            if "ix_customers_phone" in err_msg or "customers.phone" in err_msg or "phone" in err_msg:
+            if "ix_customers_phone" in err_msg or "customers.phone" in err_msg or "uq_customer_tenant_phone" in err_msg or "phone" in err_msg:
                 raise ConflictException(
                     "Customer with this phone number already exists"
                 )
-            if "ix_customers_email" in err_msg or "customers.email" in err_msg or "email" in err_msg:
+            if "ix_customers_email" in err_msg or "customers.email" in err_msg or "uq_customer_tenant_email" in err_msg or "email" in err_msg:
                 raise ConflictException(
                     "Customer with this email already exists"
                 )
