@@ -68,6 +68,7 @@ class SaaSSubscriptionLifecycleRunResponse(BaseModel):
     trials_expired_to_past_due: int
     active_subscriptions_moved_to_past_due: int
     scheduled_cancellations_processed: int
+    scheduled_plan_changes_applied: int = 0
     past_due_subscriptions_expired: int
     renewal_invoices_generated: int
 

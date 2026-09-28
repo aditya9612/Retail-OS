@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -184,6 +184,14 @@ class SaaSSubscription(Base, TimestampMixin):
 
 class SaaSInvoice(Base, TimestampMixin):
     __tablename__ = "saas_invoices"
+    __table_args__ = (
+        UniqueConstraint(
+            "subscription_id",
+            "billing_reason",
+            "due_date",
+            name="uq_saas_invoice_cycle",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         primary_key=True,

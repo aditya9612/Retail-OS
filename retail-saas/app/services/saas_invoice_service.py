@@ -180,10 +180,55 @@ class SaaSInvoiceService:
                 self.db.add(invoice)
                 self.db.flush()
         except IntegrityError:
-            # Fallback if invoice number collided unexpectedly; safely retry sequence generation once
-            invoice.invoice_number = self.generate_invoice_number(invoice_due_date.year)
-            self.db.add(invoice)
-            self.db.flush()
+            # Check if another transaction created the cycle invoice concurrently
+            if idempotent and billing_reason == "subscription_cycle" and due_date is not None:
+                existing_cycle = (
+                    self.db.query(SaaSInvoice)
+                    .filter(
+                        SaaSInvoice.subscription_id == subscription.id,
+                        SaaSInvoice.billing_reason == "subscription_cycle",
+                        SaaSInvoice.due_date == due_date,
+                    )
+                    .first()
+                )
+                if existing_cycle:
+                    return existing_cycle
+
+            # Check if an unpaid invoice already exists
+            existing_unpaid = (
+                self.db.query(SaaSInvoice)
+                .filter(
+                    SaaSInvoice.subscription_id == subscription.id,
+                    SaaSInvoice.billing_reason == billing_reason,
+                    SaaSInvoice.status == "unpaid",
+                )
+                .first()
+            )
+            if existing_unpaid and idempotent:
+                return existing_unpaid
+
+            # If it was an invoice number collision, retry sequence generation once inside a savepoint
+            try:
+                with self.db.begin_nested():
+                    invoice.invoice_number = self.generate_invoice_number(invoice_due_date.year)
+                    self.db.add(invoice)
+                    self.db.flush()
+            except IntegrityError:
+                if idempotent:
+                    existing = (
+                        self.db.query(SaaSInvoice)
+                        .filter(
+                            SaaSInvoice.subscription_id == subscription.id,
+                            SaaSInvoice.billing_reason == billing_reason,
+                            SaaSInvoice.due_date == due_date,
+                        )
+                        .first()
+                    )
+                    if existing:
+                        return existing
+                raise ConflictException(
+                    f"Duplicate invoice detected for subscription {subscription_id} and reason '{billing_reason}'"
+                )
 
         return invoice
 

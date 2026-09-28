@@ -947,6 +947,7 @@ def test_concurrent_lifecycle_processing_threads(db_session: Session, ensure_bas
         current_period_end=now - timedelta(hours=1),
     )
     sub_id = sub.id
+    tenant_id = tenant.id
     db_session.commit()
 
     results = []
@@ -955,7 +956,7 @@ def test_concurrent_lifecycle_processing_threads(db_session: Session, ensure_bas
         worker_db = SessionLocal()
         try:
             svc = SaaSSubscriptionLifecycleService(worker_db)
-            count = svc.process_period_ends(tenant_id=tenant.id)
+            count = svc.process_period_ends(tenant_id=tenant_id)
             worker_db.commit()
             results.append(count)
         finally:

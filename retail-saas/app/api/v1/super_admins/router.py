@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -51,6 +51,7 @@ from app.schemas.saas_upi import (
     UPITransactionListResponse,
     UPIRejectRequest,
 )
+from app.core.redis_lock import RedisDistributedLock, SAAS_LIFECYCLE_LOCK_KEY
 from app.services.saas_subscription_lifecycle_service import SaaSSubscriptionLifecycleService
 from app.services.saas_upi_service import SaaSUPIService
 from app.services.super_admin_service import SuperAdminService
@@ -809,8 +810,26 @@ def process_subscription_lifecycle(
     """
     Executes a complete SaaS subscription lifecycle run across all tenants.
     Super Admin access only.
+    Protected by Redis distributed lock against concurrent automated or manual runs.
     """
-    svc = SaaSSubscriptionLifecycleService(db)
-    result = svc.run_all()
-    db.commit()
-    return result
+    lock = RedisDistributedLock(SAAS_LIFECYCLE_LOCK_KEY, ttl_seconds=600)
+    if not lock.acquire():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="SaaS subscription lifecycle execution is already in progress. Please retry shortly.",
+        )
+    try:
+        svc = SaaSSubscriptionLifecycleService(db)
+        result = svc.run_all()
+        if not lock.is_valid() or not lock.renew():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Distributed lock was lost during lifecycle execution: {lock.lock_lost_reason}",
+            )
+        db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        lock.release()

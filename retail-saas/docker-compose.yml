@@ -25,6 +25,18 @@ services:
       - .:/app
     command: celery -A app.tasks.celery_worker.celery_app worker --loglevel=info
 
+  celery_beat:
+    build:
+      context: .
+      dockerfile: docker/fastapi/Dockerfile
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    volumes:
+      - .:/app
+    command: celery -A app.tasks.celery_worker.celery_app beat --loglevel=info
+
   redis:
     image: redis:7-alpine
     ports:
