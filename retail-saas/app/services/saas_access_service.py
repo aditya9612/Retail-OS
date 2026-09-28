@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import ForbiddenException
 from app.models.saas_billing import SaaSSubscription
+from app.models.tenant import Tenant
 from app.models.user import User
 
 
@@ -28,9 +29,26 @@ class SaaSSubscriptionAccessService:
         tenant_id: int,
     ) -> Optional[SaaSSubscription]:
         """
-        Deterministically queries the latest authoritative subscription for a tenant.
-        Uses created_at DESC, id DESC ordering consistent with SaaSSubscriptionService.
+        Deterministically queries the authoritative subscription for a tenant:
+        1. Checks authoritative Tenant.current_subscription_id first if configured.
+        2. Validates tenant ownership of the pointed subscription (fails closed with 403 on mismatch).
+        3. If current_subscription_id is NULL, falls back deterministically to latest subscription (created_at DESC, id DESC).
         """
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if tenant and tenant.current_subscription_id is not None:
+            sub = (
+                self.db.query(SaaSSubscription)
+                .filter(SaaSSubscription.id == tenant.current_subscription_id)
+                .first()
+            )
+            if sub:
+                if sub.tenant_id != tenant_id:
+                    raise ForbiddenException(
+                        f"Security violation: Subscription {sub.id} belongs to tenant {sub.tenant_id}, but tenant pointer is {tenant_id}"
+                    )
+                return sub
+            return None
+
         return (
             self.db.query(SaaSSubscription)
             .filter(SaaSSubscription.tenant_id == tenant_id)

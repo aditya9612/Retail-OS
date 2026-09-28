@@ -525,3 +525,355 @@ def test_http_policy_does_not_blindly_block_all_posts_or_allow_all_gets(unique_s
         headers=headers,
     )
     assert order_resp.status_code == 403
+
+
+# =========================================================================
+# 10. ARCHITECTURAL RESOLUTION & REGRESSION TESTS
+# =========================================================================
+
+
+def test_pointer_divergence_prefers_authoritative_pointer_over_latest_row(unique_slug):
+    """
+    Pointer Divergence:
+    - Subscription A: pointed by tenant.current_subscription_id, status = 'active'.
+    - Subscription B: newer created_at / higher id, status = 'expired'.
+    - Operational write must be ALLOWED because authoritative pointer points to A.
+    Proves access service uses authoritative Tenant.current_subscription_id over created_at DESC.
+    """
+    data = _register_and_get_tenant(unique_slug)
+    tenant_id = data["tenant_id"]
+    headers = data["headers"]
+    store_id = data["store_id"]
+    product_id = data["product_id"]
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        sub_a = db.query(SaaSSubscription).filter(SaaSSubscription.id == tenant.current_subscription_id).first()
+        sub_a.status = "active"
+
+        # Create newer subscription B with expired status
+        sub_b = SaaSSubscription(
+            tenant_id=tenant_id,
+            plan_id=sub_a.plan_id,
+            status="expired",
+            billing_interval=sub_a.billing_interval,
+            unit_price=sub_a.unit_price,
+            currency=sub_a.currency,
+            start_date=sub_a.start_date,
+            current_period_start=sub_a.current_period_start,
+            current_period_end=sub_a.current_period_end,
+        )
+        db.add(sub_b)
+        db.commit()
+        db.refresh(sub_b)
+
+        # Explicitly ensure tenant.current_subscription_id points to sub_a
+        tenant.current_subscription_id = sub_a.id
+        db.commit()
+
+    resp = client.post(
+        "/api/v1/orders",
+        json={"store_id": store_id, "items": [{"product_id": product_id, "quantity": 1}]},
+        headers=headers,
+    )
+    assert resp.status_code == 201, f"Operational write failed despite active pointer: {resp.text}"
+
+
+def test_historical_subscriptions_uses_current_subscription(unique_slug):
+    """
+    Historical Subscriptions:
+    - Old subscription: expired.
+    - New current subscription: active, pointed by current_subscription_id.
+    - Operational write must use current subscription and succeed.
+    """
+    data = _register_and_get_tenant(unique_slug)
+    tenant_id = data["tenant_id"]
+    headers = data["headers"]
+    store_id = data["store_id"]
+    product_id = data["product_id"]
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        old_sub = db.query(SaaSSubscription).filter(SaaSSubscription.id == tenant.current_subscription_id).first()
+        old_sub.status = "expired"
+
+        new_sub = SaaSSubscription(
+            tenant_id=tenant_id,
+            plan_id=old_sub.plan_id,
+            status="active",
+            billing_interval=old_sub.billing_interval,
+            unit_price=old_sub.unit_price,
+            currency=old_sub.currency,
+            start_date=old_sub.start_date,
+            current_period_start=old_sub.current_period_start,
+            current_period_end=old_sub.current_period_end,
+        )
+        db.add(new_sub)
+        db.flush()
+        tenant.current_subscription_id = new_sub.id
+        db.commit()
+
+    resp = client.post(
+        "/api/v1/orders",
+        json={"store_id": store_id, "items": [{"product_id": product_id, "quantity": 1}]},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+
+
+def test_cross_tenant_pointer_fails_closed(unique_slug):
+    """
+    Cross-Tenant Pointer:
+    - Tenant A's current_subscription_id points to Tenant B's subscription.
+    - Operational write for Tenant A must fail closed with HTTP 403 Forbidden.
+    - Must NOT silently switch to Tenant B's subscription or auto-repair.
+    """
+    slug_a = f"{unique_slug}-cta"
+    slug_b = f"{unique_slug}-ctb"
+    data_a = _register_and_get_tenant(slug_a)
+    data_b = _register_and_get_tenant(slug_b)
+
+    with SessionLocal() as db:
+        tenant_a = db.query(Tenant).filter(Tenant.id == data_a["tenant_id"]).first()
+        tenant_b = db.query(Tenant).filter(Tenant.id == data_b["tenant_id"]).first()
+        sub_b = db.query(SaaSSubscription).filter(SaaSSubscription.id == tenant_b.current_subscription_id).first()
+        sub_b.status = "active"
+
+        # Tamper pointer: point tenant_a to tenant_b's subscription
+        tenant_a.current_subscription_id = sub_b.id
+        db.commit()
+
+    resp = client.post(
+        "/api/v1/orders",
+        json={"store_id": data_a["store_id"], "items": [{"product_id": data_a["product_id"], "quantity": 1}]},
+        headers=data_a["headers"],
+    )
+    assert resp.status_code == 403
+    assert "Security violation" in _get_error_message(resp)
+
+
+def test_missing_current_subscription_id_falls_back_to_latest(unique_slug):
+    """
+    Missing Current Pointer:
+    - Tenant has current_subscription_id = NULL.
+    - Access service must use deterministic fallback to latest subscription (created_at DESC, id DESC).
+    """
+    data = _register_and_get_tenant(unique_slug)
+    tenant_id = data["tenant_id"]
+    headers = data["headers"]
+    store_id = data["store_id"]
+    product_id = data["product_id"]
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        tenant.current_subscription_id = None
+        sub = db.query(SaaSSubscription).filter(SaaSSubscription.tenant_id == tenant_id).first()
+        sub.status = "active"
+        db.commit()
+
+    # Fallback to active sub succeeds
+    resp = client.post(
+        "/api/v1/orders",
+        json={"store_id": store_id, "items": [{"product_id": product_id, "quantity": 1}]},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+
+    # Transition fallback sub to expired; fallback now detects expired status
+    with SessionLocal() as db:
+        sub = db.query(SaaSSubscription).filter(SaaSSubscription.tenant_id == tenant_id).first()
+        sub.status = "expired"
+        db.commit()
+
+    resp_expired = client.post(
+        "/api/v1/orders",
+        json={"store_id": store_id, "items": [{"product_id": product_id, "quantity": 1}]},
+        headers=headers,
+    )
+    assert resp_expired.status_code == 403
+    assert "Subscription is expired" in _get_error_message(resp_expired)
+
+
+def test_remaining_operational_routers_blocked_when_expired(unique_slug):
+    """
+    Verifies that remaining operational routers:
+    - products
+    - payments
+    - purchase_orders
+    - purchase_order_returns
+    - store_transfers
+    - grn
+    - order_returns
+    properly block operational mutations with 403 when subscription is expired.
+    """
+    data = _register_and_get_tenant(unique_slug)
+    tenant_id = data["tenant_id"]
+    headers = data["headers"]
+    store_id = data["store_id"]
+
+    _set_subscription_status(tenant_id, "expired")
+
+    # 1. Product creation blocked
+    prod_resp = client.post(
+        "/api/v1/products",
+        json={"name": "Blocked Item", "sku": f"SKU-EX-{unique_slug[:6]}", "price": "50.00"},
+        headers=headers,
+    )
+    assert prod_resp.status_code == 403
+    assert "Subscription is expired" in _get_error_message(prod_resp)
+
+    # 2. Payments blocked
+    pmt_resp = client.post(
+        "/api/v1/payments",
+        json={"order_id": 999999, "amount": "100.00", "payment_method": "cash"},
+        headers=headers,
+    )
+    assert pmt_resp.status_code == 403
+    assert "Subscription is expired" in _get_error_message(pmt_resp)
+
+    # 3. Purchase orders blocked
+    po_resp = client.post(
+        "/api/v1/purchase-orders",
+        json={"supplier_id": 1, "store_id": store_id, "items": []},
+        headers=headers,
+    )
+    assert po_resp.status_code == 403
+    assert "Subscription is expired" in _get_error_message(po_resp)
+
+    # 4. GRN blocked
+    grn_resp = client.post(
+        "/api/v1/grn",
+        json={"purchase_order_id": 1, "invoice_number": "INV-TEST-001"},
+        headers=headers,
+    )
+    assert grn_resp.status_code == 403
+    assert "Subscription is expired" in _get_error_message(grn_resp)
+
+    # 5. Store transfers blocked
+    st_resp = client.post(
+        "/api/v1/store-transfers",
+        json={"from_store_id": store_id, "to_store_id": 2, "items": []},
+        headers=headers,
+    )
+    assert st_resp.status_code == 403
+    assert "Subscription is expired" in _get_error_message(st_resp)
+
+    # 6. Order returns blocked
+    or_resp = client.post(
+        "/api/v1/order-returns",
+        json={"order_id": 1, "items": []},
+        headers=headers,
+    )
+    assert or_resp.status_code == 403
+    assert "Subscription is expired" in _get_error_message(or_resp)
+
+    # 7. Purchase order returns blocked
+    por_resp = client.post(
+        "/api/v1/purchase-order-returns",
+        json={"purchase_order_id": 1, "items": []},
+        headers=headers,
+    )
+    assert por_resp.status_code == 403
+    assert "Subscription is expired" in _get_error_message(por_resp)
+
+
+def test_all_operational_mutation_endpoints_have_gating_dependency():
+    """
+    Verifies that all 48 operational mutation endpoints across the 10 operational routers + payments
+    strictly include require_operational_write in their route dependencies.
+    """
+    from fastapi.routing import APIRoute
+    from app.api.v1.orders.router import router as r_orders
+    from app.api.v1.billing.router import router as r_billing
+    from app.api.v1.sales import router as r_sales
+    from app.api.v1.inventory.router import router as r_inventory
+    from app.api.v1.purchase_orders.router import router as r_po
+    from app.api.v1.purchase_order_returns.router import router as r_por
+    from app.api.v1.store_transfers import router as r_st
+    from app.api.v1.grn.router import router as r_grn
+    from app.api.v1.order_returns.router import router as r_or
+    from app.api.v1.products.router import router as r_prod
+    from app.api.v1.payments.router import router as r_payments
+
+    operational_routers = [
+        r_orders, r_billing, r_sales, r_inventory, r_po,
+        r_por, r_st, r_grn, r_or, r_prod,
+    ]
+
+    total_gated = 0
+    # 1. Check all mutations in the 10 operational domain routers
+    for r in operational_routers:
+        for route in r.routes:
+            if isinstance(route, APIRoute):
+                methods = route.methods - {"HEAD", "OPTIONS"}
+                if any(m in {"POST", "PUT", "PATCH", "DELETE"} for m in methods):
+                    dep_names = [
+                        d.dependency.__name__
+                        if hasattr(d, "dependency") and hasattr(d.dependency, "__name__")
+                        else (d.call.__name__ if hasattr(d, "call") and hasattr(d.call, "__name__") else "")
+                        for d in route.dependencies
+                    ]
+                    assert "require_operational_write" in dep_names, (
+                        f"Route {route.path} [{methods}] is missing require_operational_write dependency!"
+                    )
+                    total_gated += 1
+
+    # 2. Check payments create_payment operational mutation
+    for route in r_payments.routes:
+        if isinstance(route, APIRoute) and route.path == "/payments" and "POST" in route.methods:
+            dep_names = [
+                d.dependency.__name__
+                if hasattr(d, "dependency") and hasattr(d.dependency, "__name__")
+                else (d.call.__name__ if hasattr(d, "call") and hasattr(d.call, "__name__") else "")
+                for d in route.dependencies
+            ]
+            assert "require_operational_write" in dep_names
+            total_gated += 1
+
+    assert total_gated == 48, f"Expected exactly 48 gated operational routes, found {total_gated}"
+
+
+def test_non_operational_mutations_not_blocked_by_subscription_gating(unique_slug):
+    """
+    Verifies that non-operational mutations (such as customers, suppliers, coupons)
+    do not have subscription gating applied and are not blocked with 403 Forbidden
+    when subscription is expired.
+    """
+    data = _register_and_get_tenant(unique_slug)
+    tenant_id = data["tenant_id"]
+    headers = data["headers"]
+
+    _set_subscription_status(tenant_id, "expired")
+
+    # Customer creation: should not fail with 403 subscription expired
+    cust_resp = client.post(
+        "/api/v1/customers",
+        json={"name": "Walk-in Buyer", "phone": "9876543210"},
+        headers=headers,
+    )
+    assert cust_resp.status_code != 403 or "Subscription" not in _get_error_message(cust_resp)
+
+    # Supplier creation: should not fail with 403 subscription expired
+    supp_resp = client.post(
+        "/api/v1/suppliers",
+        json={
+            "name": "Alpha Wholesalers",
+            "phone": "9876543211",
+            "contact_person": "Vendor Contact",
+            "email": "vendor@alphawholesale.com",
+        },
+        headers=headers,
+    )
+    assert supp_resp.status_code != 403 or "Subscription" not in _get_error_message(supp_resp)
+
+    # Coupon creation: should not fail with 403 subscription expired
+    coup_resp = client.post(
+        "/api/v1/coupons/",
+        json={
+            "code": f"SAVE{unique_slug[:4].upper()}",
+            "discount_type": "percentage",
+            "discount_value": 10,
+        },
+        headers=headers,
+    )
+    assert coup_resp.status_code != 403 or "Subscription" not in _get_error_message(coup_resp)
