@@ -1,4 +1,6 @@
 from decimal import Decimal
+from typing import Any
+
 
 from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -65,9 +67,10 @@ class Product(Base, TimestampMixin):
         nullable=False
     )
 
-    mrp: Mapped[Decimal] = mapped_column(
-        Numeric(12, 2),
-        default=Decimal("0.00")
+    cost_price: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        default=Decimal("0.00"),
+        nullable=False,
     )
 
     tax_rate: Mapped[Decimal] = mapped_column(
@@ -159,12 +162,12 @@ class Product(Base, TimestampMixin):
         self.selling_price = val
 
     @property
-    def cost_price(self) -> Decimal | None:
-        return getattr(self, "_cost_price", None)
+    def mrp(self) -> Decimal:
+        return getattr(self, "_mrp", Decimal("0.00"))
 
-    @cost_price.setter
-    def cost_price(self, val: Decimal | None) -> None:
-        self._cost_price = val
+    @mrp.setter
+    def mrp(self, val: Any) -> None:
+        self._mrp = Decimal(str(val)) if val is not None else Decimal("0.00")
 
     category: Mapped["Category | None"] = relationship(
         "Category",
