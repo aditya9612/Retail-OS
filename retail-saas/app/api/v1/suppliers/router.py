@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, Path
+from fastapi import APIRouter, Depends, Query, Path, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -70,9 +70,15 @@ def search_suppliers(
     ),
     db: Session = Depends(get_db),
 ):
+    search_clean = search.strip()
+    if not search_clean:
+        raise HTTPException(
+            status_code=422,
+            detail="Search term cannot be empty or whitespace",
+        )
     return SupplierService(db).search_suppliers(
         user.tenant_id,
-        search,
+        search_clean,
     )
 
 

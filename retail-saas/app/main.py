@@ -39,6 +39,9 @@ from app.api.v1.users.router import router as users_router
 from app.api.v1.warehouses.router import router as warehouses_router
 from app.api.v1.whatsapp.router import router as whatsapp_router
 from app.api.v1.super_admins.router import router as super_admin_router
+from app.api.v1.saas_billing.router import router as saas_billing_router
+from app.api.v1.saas.router import router as saas_router
+from app.api.v1.multi_store.router import router as multi_store_router
 
 from app.core.config import get_settings
 from app.core.database import init_db
@@ -138,12 +141,17 @@ app.include_router(reports_router, prefix=API_PREFIX)
 app.include_router(dashboard_router, prefix=API_PREFIX)
 app.include_router(analytics_router, prefix=API_PREFIX)
 app.include_router(ai_router, prefix=API_PREFIX)
+app.include_router(multi_store_router, prefix=API_PREFIX)
 
 # GRN APIs
 app.include_router(grn_router, prefix=API_PREFIX)
 
 # Super Admin APIs
 app.include_router(super_admin_router, prefix=API_PREFIX)
+
+# SaaS Billing APIs (Tenant-facing)
+app.include_router(saas_billing_router, prefix=API_PREFIX)
+app.include_router(saas_router, prefix=API_PREFIX)
 
 
 # =========================

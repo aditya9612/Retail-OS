@@ -17,23 +17,26 @@ class SaleRepository:
     @staticmethod
     def get_by_id(
         db: Session,
-        sale_id: int
+        sale_id: int,
+        tenant_id: int
     ):
         return (
             db.query(Sale)
             .options(joinedload(Sale.items))
-            .filter(Sale.id == sale_id)
+            .filter(Sale.id == sale_id, Sale.tenant_id == tenant_id)
             .first()
         )
 
     @staticmethod
     def get_all(
         db: Session,
+        tenant_id: int,
         store_id: int = None
     ):
         query = (
             db.query(Sale)
             .options(joinedload(Sale.items))
+            .filter(Sale.tenant_id == tenant_id)
         )
 
         if store_id is not None:

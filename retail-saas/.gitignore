@@ -61,3 +61,6 @@ Desktop.ini
 *.p12
 *.pfx
 *.jks
+
+# Scratch scripts
+scratch/

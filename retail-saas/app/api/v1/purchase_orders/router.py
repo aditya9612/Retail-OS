@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import require_permission
+from app.core.security import require_operational_write, require_permission
 from app.models.user import User
 
 from app.schemas.purchase_order import (
@@ -21,7 +21,7 @@ router = APIRouter(
 )
 
 
-@router.post("", response_model=PurchaseOrderResponse, status_code=status.HTTP_201_CREATED,)
+@router.post("", response_model=PurchaseOrderResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_operational_write)])
 def create_purchase_order(
     data: PurchaseOrderCreate,
     user: User = Depends(require_permission("purchase_orders:write")),
@@ -63,7 +63,7 @@ def get_purchase_order(
     )
     
     
-@router.patch("/{purchase_order_id}", response_model=PurchaseOrderResponse,)
+@router.patch("/{purchase_order_id}", response_model=PurchaseOrderResponse, dependencies=[Depends(require_operational_write)])
 def update_purchase_order(
     purchase_order_id: int,
     data: PurchaseOrderUpdate,
@@ -79,7 +79,7 @@ def update_purchase_order(
     )
     
     
-@router.post("/{purchase_order_id}/receive", response_model=PurchaseOrderResponse,)
+@router.post("/{purchase_order_id}/receive", response_model=PurchaseOrderResponse, dependencies=[Depends(require_operational_write)])
 def receive_purchase_order(
     purchase_order_id: int,
     data: PurchaseOrderReceive,
@@ -95,7 +95,7 @@ def receive_purchase_order(
     )
     
     
-@router.patch("/{purchase_order_id}/status", response_model=PurchaseOrderResponse,)
+@router.patch("/{purchase_order_id}/status", response_model=PurchaseOrderResponse, dependencies=[Depends(require_operational_write)])
 def update_purchase_order_status(
     purchase_order_id: int,
     data: PurchaseOrderStatusUpdate,

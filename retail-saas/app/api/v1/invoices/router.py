@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import require_permission
 from app.models.user import User
-from app.schemas.billing import InvoiceCreate
+from app.schemas.billing import InvoiceCreate, InvoiceReprintRequest
 from app.schemas.order import InvoiceResponse
 from app.services.billing_service import BillingService
 from app.tasks.invoice_tasks import generate_invoice_pdf_task
@@ -56,7 +56,7 @@ def search_invoices(
         pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$",
     ),
     payment_status: Optional[
-        Literal["paid", "unpaid", "partial", "cancelled"]
+        Literal["paid", "unpaid", "partial", "cancelled", "completed", "pending", "failed"]
     ] = Query(default=None),
     date_from: Optional[datetime] = Query(default=None),
     date_to: Optional[datetime] = Query(default=None),
@@ -182,14 +182,11 @@ def invoice_pdf(
 @router.post("/{invoice_id}/reprint")
 def reprint_invoice(
     invoice_id: int,
-    printer_type: str = Query(
-        default="generic",
-        min_length=1,
-        max_length=50,
-    ),
+    data: InvoiceReprintRequest = None,
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
+    printer_type = data.printer_type if data else "generic"
     result = BillingService(db).reprint_invoice(
         user.tenant_id,
         invoice_id,

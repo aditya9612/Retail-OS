@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import require_permission
+from app.core.security import require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.grn import (
     GRNCreate,
@@ -23,6 +23,7 @@ router = APIRouter(
     "",
     response_model=GRNResponse,
     status_code=201,
+    dependencies=[Depends(require_operational_write)],
 )
 def create_grn(
     data: GRNCreate,
@@ -75,6 +76,7 @@ def get_grn(
 @router.post(
     "/{grn_id}/receive",
     response_model=GRNResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def receive_grn(
     grn_id: int,
@@ -93,6 +95,7 @@ def receive_grn(
 @router.post(
     "/{grn_id}/reject",
     response_model=GRNResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def reject_grn(
     grn_id: int,
