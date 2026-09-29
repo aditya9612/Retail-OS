@@ -1,7 +1,7 @@
 import re
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator
 
 
 class StaffCreate(BaseModel):
@@ -17,7 +17,7 @@ class StaffCreate(BaseModel):
 
     role: str
 
-    is_active: bool = True
+    is_active: StrictBool = True
 
 @field_validator("name")
 @classmethod
@@ -188,7 +188,7 @@ class StaffUpdate(BaseModel):
         gt=0
     )
 
-    is_active: Optional[bool] = None
+    is_active: Optional[StrictBool] = None
 
 
 @field_validator("name")
