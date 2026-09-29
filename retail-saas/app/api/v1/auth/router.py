@@ -124,7 +124,7 @@ def logout(
     )
 
 
-@router.post("/register", response_model=RegisterResponse, status_code=200)
+@router.post("/register", response_model=RegisterResponse, status_code=200, include_in_schema=False)
 def register(
     data: Optional[RegisterRequest] = Body(None),
     tenant_name: Optional[str] = Query(None, include_in_schema=False),

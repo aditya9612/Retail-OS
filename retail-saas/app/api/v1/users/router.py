@@ -109,6 +109,7 @@ def get_my_profile(
 @router.patch(
     "/me",
     response_model=UserResponse,
+    include_in_schema=False,
 )
 def update_my_profile(
     data: MyProfileUpdate,
@@ -147,6 +148,7 @@ def get_user(
 @router.patch(
     "/{user_id}",
     response_model=UserResponse,
+    include_in_schema=False,
 )
 def update_user(
     user_id: int,

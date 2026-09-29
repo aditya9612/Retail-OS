@@ -613,7 +613,6 @@ class SuperAdminInvoiceDetailResponse(BaseModel):
 class SuperAdminStoreOwnerCreate(BaseModel):
     """
     Schema for Super Admin creating a new Store Owner (Tenant).
-    Supports Store Owner terminology with fallback to legacy tenant fields.
     """
     store_name: str = Field(
         ...,
@@ -645,12 +644,8 @@ class SuperAdminStoreOwnerCreate(BaseModel):
         default=None,
         description="Unique subdomain/slug for the store (auto-generated if omitted)",
     )
-    plan_id: Optional[int] = Field(
-        default=None,
-        description="SaaS plan ID to assign",
-    )
     plan_code: Optional[str] = Field(
-        default=None,
+        default="basic",
         description="SaaS plan code (e.g. basic, pro, enterprise)",
     )
     address: Optional[str] = Field(
@@ -674,17 +669,30 @@ class SuperAdminStoreOwnerCreate(BaseModel):
         description="Pincode",
     )
 
-    # Backwards-compatible aliases
-    tenant_name: Optional[str] = None
-    admin_name: Optional[str] = None
-    email: Optional[EmailStr] = None
-    phone: Optional[str] = None
-    slug: Optional[str] = None
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "example": {
+                "store_name": "D-Mart Retail",
+                "owner_name": "Ramesh Patil",
+                "owner_email": "ramesh@dmart.com",
+                "password": "Owner@12345",
+                "owner_phone": "9876543210",
+                "domain": "dmart",
+                "plan_code": "basic",
+                "address": "FC Road, Deccan",
+                "city": "Pune",
+                "state": "Maharashtra",
+                "pincode": "411004",
+            }
+        },
+    )
 
     @model_validator(mode="before")
     @classmethod
     def populate_aliases(cls, data: Any) -> Any:
         if isinstance(data, dict):
+            # Map legacy aliases if modern fields are absent
             if not data.get("store_name") and data.get("tenant_name"):
                 data["store_name"] = data["tenant_name"]
             if not data.get("owner_name") and data.get("admin_name"):
@@ -721,10 +729,21 @@ class SuperAdminStoreOwnerUpdate(BaseModel):
     pincode: Optional[str] = None
     is_active: Optional[bool] = None
 
-    # Aliases
-    tenant_name: Optional[str] = None
-    admin_name: Optional[str] = None
-    phone: Optional[str] = None
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "example": {
+                "store_name": "D-Mart Retail",
+                "owner_name": "Ramesh Patil",
+                "owner_phone": "9876543210",
+                "address": "FC Road, Deccan",
+                "city": "Pune",
+                "state": "Maharashtra",
+                "pincode": "411004",
+                "is_active": True,
+            }
+        },
+    )
 
     @model_validator(mode="before")
     @classmethod

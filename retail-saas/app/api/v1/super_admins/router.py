@@ -180,7 +180,7 @@ def super_admin_dashboard(
     status_code=status.HTTP_201_CREATED,
     summary="Create Store Owner",
     description="Alias endpoint for creating a Store Owner (Tenant).",
-    include_in_schema=True,
+    include_in_schema=False,
 )
 def create_tenant(
     data: SuperAdminStoreOwnerCreate,
@@ -201,7 +201,7 @@ def create_tenant(
     "/store-owners",
     response_model=SuperAdminTenantListResponse,
     summary="List Store Owners",
-    include_in_schema=True,
+    include_in_schema=False,
 )
 def list_tenants(
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
@@ -234,7 +234,7 @@ def list_tenants(
     "/store-owners/{tenant_id}",
     response_model=SuperAdminTenantDetailResponse,
     summary="Get Store Owner",
-    include_in_schema=True,
+    include_in_schema=False,
 )
 def get_tenant(
     tenant_id: int,
@@ -259,7 +259,7 @@ def get_tenant(
     response_model=SuperAdminTenantDetailResponse,
     summary="Update Store Owner",
     description="Alias endpoint for updating a Store Owner (Tenant).",
-    include_in_schema=True,
+    include_in_schema=False,
 )
 def update_tenant(
     tenant_id: int,
@@ -284,7 +284,7 @@ def update_tenant(
     "/store-owners/{tenant_id}",
     summary="Delete Store Owner",
     description="Alias endpoint for deleting a Store Owner (Tenant).",
-    include_in_schema=True,
+    include_in_schema=False,
 )
 def delete_tenant(
     tenant_id: int,
@@ -307,7 +307,7 @@ def delete_tenant(
     "/store-owners/{tenant_id}/status",
     response_model=SuperAdminTenantResponse,
     summary="Activate or Deactivate Store Owner",
-    include_in_schema=True,
+    include_in_schema=False,
 )
 def update_tenant_status(
     tenant_id: int,
@@ -332,7 +332,7 @@ def update_tenant_status(
     "/store-owners/{tenant_id}/users",
     response_model=SuperAdminTenantUserListResponse,
     summary="List Store Owner Users",
-    include_in_schema=True,
+    include_in_schema=False,
 )
 def list_tenant_users(
     tenant_id: int,
@@ -365,7 +365,7 @@ def list_tenant_users(
     "/store-owners/{tenant_id}/stores",
     response_model=SuperAdminStoreListResponse,
     summary="List Store Owner Stores",
-    include_in_schema=True,
+    include_in_schema=False,
 )
 def list_tenant_stores(
     tenant_id: int,
@@ -402,7 +402,7 @@ def list_tenant_stores(
     "/store-owners/{tenant_id}/subscription",
     response_model=SuperAdminTenantSubscriptionDetailResponse,
     summary="Get Store Owner Subscription Detail",
-    include_in_schema=True,
+    include_in_schema=False,
 )
 def get_tenant_subscription(
     tenant_id: int,

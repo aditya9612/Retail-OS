@@ -519,11 +519,11 @@ class SuperAdminService:
         self,
         data: SuperAdminStoreOwnerCreate,
     ) -> dict:
-        store_name = (data.store_name or data.tenant_name or "").strip()
-        owner_name = (data.owner_name or data.admin_name or "").strip()
-        owner_email = str(data.owner_email or data.email or "").strip().lower()
-        owner_phone = data.owner_phone or data.phone
-        domain_val = (data.domain or data.slug or "").strip().lower()
+        store_name = (data.store_name or "").strip()
+        owner_name = (data.owner_name or "").strip()
+        owner_email = str(data.owner_email or "").strip().lower()
+        owner_phone = data.owner_phone
+        domain_val = (data.domain or "").strip().lower()
 
         if not store_name:
             raise AppException("Store name is required")
@@ -634,7 +634,7 @@ class SuperAdminService:
 
             SaaSSubscriptionService(self.db).create_initial_subscription(
                 tenant_id=tenant.id,
-                plan_id=data.plan_id,
+                plan_id=getattr(data, "plan_id", None),
                 plan_code=data.plan_code,
             )
 
@@ -659,7 +659,7 @@ class SuperAdminService:
         if not tenant:
             raise NotFoundException("Tenant not found")
 
-        store_name = data.store_name or data.tenant_name
+        store_name = data.store_name
         if store_name is not None and store_name.strip():
             tenant.name = store_name.strip()
 
@@ -675,12 +675,12 @@ class SuperAdminService:
             settings["state"] = data.state
         if data.pincode is not None:
             settings["pincode"] = data.pincode
-        owner_phone = data.owner_phone or data.phone
+        owner_phone = data.owner_phone
         if owner_phone is not None:
             settings["phone"] = owner_phone
         tenant.settings = settings
 
-        owner_name = data.owner_name or data.admin_name
+        owner_name = data.owner_name
         if owner_name is not None or owner_phone is not None:
             owner_user = (
                 self.db.query(User)
