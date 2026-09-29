@@ -36,19 +36,33 @@ class UserService:
                 "Email already registered"
             )
 
-        role = (
-            self.db.query(Role)
-            .filter(
-                Role.id == data.role_id,
-                Role.tenant_id == tenant_id,
+        role = None
+        if data.role_id is not None:
+            role = (
+                self.db.query(Role)
+                .filter(
+                    Role.id == data.role_id,
+                    Role.tenant_id == tenant_id,
+                )
+                .first()
             )
-            .first()
-        )
+        elif getattr(data, "role", None):
+            role_str = str(data.role).strip().lower()
+            role = (
+                self.db.query(Role)
+                .filter(
+                    Role.name == role_str,
+                    Role.tenant_id == tenant_id,
+                )
+                .first()
+            )
 
         if not role:
             raise NotFoundException(
-                "Role not found. Use GET /api/v1/users/roles to get valid Role IDs."
+                "Role not found. Use GET /api/v1/users/roles to get valid Roles."
             )
+
+        resolved_role_id = role.id
 
         if data.store_id is not None:
             store = (
@@ -81,7 +95,7 @@ class UserService:
             full_name=data.full_name.strip(),
             phone=data.phone,
             store_id=data.store_id,
-            role_id=data.role_id,
+            role_id=resolved_role_id,
             hashed_password=get_password_hash(
                 data.password
             ),
@@ -403,3 +417,35 @@ class UserService:
 
         self.repo.update(user)
         self.db.commit()
+
+    def assign_store(
+        self,
+        tenant_id: int,
+        user_id: int,
+        store_id: int,
+    ) -> User:
+        user = self.get_user(
+            tenant_id,
+            user_id,
+        )
+
+        store = (
+            self.db.query(Store)
+            .filter(
+                Store.id == store_id,
+                Store.tenant_id == tenant_id,
+                Store.is_active.is_(True),
+            )
+            .first()
+        )
+
+        if not store:
+            raise NotFoundException(
+                "Store not found or inactive"
+            )
+
+        user.store_id = store.id
+        user = self.repo.update(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user

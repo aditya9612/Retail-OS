@@ -40,11 +40,18 @@ class UserBase(BaseModel):
     store_id: Optional[int] = Field(
         default=None,
         gt=0,
+        description="Optional Store ID. Can be assigned later via /users/{user_id}/assign-store",
     )
 
-    role_id: int = Field(
+    role_id: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Role ID from GET /api/v1/users/roles. The role must belong to the current tenant.",
+        description="Role ID from GET /api/v1/users/roles. Optional if 'role' name is provided.",
+    )
+
+    role: Optional[str] = Field(
+        default=None,
+        description="Role name (e.g. manager, staff, admin, owner). Automatically mapped to role_id.",
     )
 
     @field_validator("email")
@@ -175,6 +182,12 @@ class UserCreate(UserBase):
             )
 
         return value
+
+    @model_validator(mode="after")
+    def validate_role_specified(self):
+        if not self.role_id and not (self.role and self.role.strip()):
+            raise ValueError("Either 'role' (e.g. 'manager', 'staff') or 'role_id' must be provided")
+        return self
 
 
 class UserUpdate(BaseModel):
@@ -460,3 +473,19 @@ class UserResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
     )
+
+
+class AssignStoreRequest(BaseModel):
+    store_id: int = Field(
+        ...,
+        gt=0,
+        description="Store ID to assign to the user",
+    )
+
+
+class AssignStoreResponse(BaseModel):
+    message: str = "Store assigned successfully"
+    user_id: int
+    store_id: int
+    store_name: Optional[str] = None
+    role: Optional[str] = None

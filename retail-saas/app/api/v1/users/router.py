@@ -13,6 +13,8 @@ from app.schemas.user import (
     UserCreate,
     UserResponse,
     UserUpdate,
+    AssignStoreRequest,
+    AssignStoreResponse,
 )
 from app.services.user_service import UserService
 
@@ -234,4 +236,37 @@ def delete_user(
         current_user.tenant_id,
         user_id,
         current_user.id,
+    )
+
+
+@router.post(
+    "/{user_id}/assign-store",
+    response_model=AssignStoreResponse,
+    summary="Assign Store to User",
+    description="Assigns or moves a user to a specific store within the tenant organization.",
+)
+def assign_store(
+    user_id: int,
+    data: AssignStoreRequest,
+    current_user: User = Depends(require_permission("users:write")),
+    db: Session = Depends(get_db),
+):
+    if current_user.store_id is not None:
+        raise ForbiddenException("Only Store Owner or Tenant Admin can assign users to stores")
+
+    user = UserService(db).assign_store(
+        tenant_id=current_user.tenant_id,
+        user_id=user_id,
+        store_id=data.store_id,
+    )
+
+    store_name = user.store.name if getattr(user, "store", None) else None
+    role_name = user.role.name if getattr(user, "role", None) else None
+
+    return AssignStoreResponse(
+        message="Store assigned successfully",
+        user_id=user.id,
+        store_id=user.store_id,
+        store_name=store_name,
+        role=role_name,
     )

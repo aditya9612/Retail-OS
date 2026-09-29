@@ -669,24 +669,7 @@ class SuperAdminStoreOwnerCreate(BaseModel):
         description="Pincode",
     )
 
-    model_config = ConfigDict(
-        extra="ignore",
-        json_schema_extra={
-            "example": {
-                "store_name": "D-Mart Retail",
-                "owner_name": "Ramesh Patil",
-                "owner_email": "ramesh@dmart.com",
-                "password": "Owner@12345",
-                "owner_phone": "9876543210",
-                "domain": "dmart",
-                "plan_code": "basic",
-                "address": "FC Road, Deccan",
-                "city": "Pune",
-                "state": "Maharashtra",
-                "pincode": "411004",
-            }
-        },
-    )
+    model_config = ConfigDict(extra="ignore")
 
     @model_validator(mode="before")
     @classmethod
@@ -729,21 +712,7 @@ class SuperAdminStoreOwnerUpdate(BaseModel):
     pincode: Optional[str] = None
     is_active: Optional[bool] = None
 
-    model_config = ConfigDict(
-        extra="ignore",
-        json_schema_extra={
-            "example": {
-                "store_name": "D-Mart Retail",
-                "owner_name": "Ramesh Patil",
-                "owner_phone": "9876543210",
-                "address": "FC Road, Deccan",
-                "city": "Pune",
-                "state": "Maharashtra",
-                "pincode": "411004",
-                "is_active": True,
-            }
-        },
-    )
+    model_config = ConfigDict(extra="ignore")
 
     @model_validator(mode="before")
     @classmethod
