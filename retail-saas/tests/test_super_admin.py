@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.core.database import SessionLocal
+from app.core.security import get_password_hash
 from app.models.super_admin import SuperAdmin
 from app.models.tenant import Tenant
 from app.models.user import User
@@ -24,18 +25,27 @@ def db_session():
 
 @pytest.fixture
 def super_admin_fixture(db_session):
-    uid = uuid.uuid4().hex[:6]
-    name_suffix = "".join([c for c in uid if c.isalpha()] or ["Alpha"])
-    email = f"sa_{uid}@example.com"
+    sa = db_session.query(SuperAdmin).first()
     password = "SuperPassword@123!"
-    data = SuperAdminCreate(
-        email=email,
-        full_name=f"Super Admin {name_suffix}",
-        password=password,
-        phone="9876543210",
-    )
-    # Use service (bootstrap path)
-    sa = SuperAdminService(db_session).create_super_admin(data)
+    if sa:
+        sa.hashed_password = get_password_hash(password)
+        sa.is_active = True
+        db_session.commit()
+        db_session.refresh(sa)
+        email = sa.email
+    else:
+        uid = uuid.uuid4().hex[:6]
+        email = f"sa_{uid}@example.com"
+        sa = SuperAdmin(
+            email=email,
+            full_name="Super Admin Alpha",
+            hashed_password=get_password_hash(password),
+            phone="9876543210",
+            is_active=True,
+        )
+        db_session.add(sa)
+        db_session.commit()
+        db_session.refresh(sa)
     return {"super_admin": sa, "email": email, "password": password}
 
 
@@ -71,7 +81,7 @@ def tenant_fixture(db_session):
 
 
 def test_sec01_anonymous_user_cannot_create_super_admin():
-    """SEC-01: Verify anonymous requests to POST /api/v1/super-admins are rejected with 401."""
+    """SEC-01: Verify POST /api/v1/super-admins is removed from API (returns 405 Method Not Allowed)."""
     payload = {
         "email": f"hacker_{uuid.uuid4().hex[:6]}@example.com",
         "full_name": "Anonymous Attacker",
@@ -79,11 +89,11 @@ def test_sec01_anonymous_user_cannot_create_super_admin():
         "phone": "9876543210",
     }
     r = client.post("/api/v1/super-admins", json=payload)
-    assert r.status_code == 401, f"Expected 401 Unauthorized, got {r.status_code}: {r.text}"
+    assert r.status_code in (404, 405), f"Expected 404/405, got {r.status_code}: {r.text}"
 
 
 def test_sec01_tenant_user_cannot_create_super_admin(tenant_fixture):
-    """SEC-01: Verify tenant user token cannot call POST /api/v1/super-admins."""
+    """SEC-01: Verify tenant user cannot call POST /api/v1/super-admins (returns 405/404)."""
     payload = {
         "email": f"tenant_escalated_{uuid.uuid4().hex[:6]}@example.com",
         "full_name": "Escalated User",
@@ -92,11 +102,11 @@ def test_sec01_tenant_user_cannot_create_super_admin(tenant_fixture):
     }
     headers = {"Authorization": f"Bearer {tenant_fixture['token']}"}
     r = client.post("/api/v1/super-admins", json=payload, headers=headers)
-    assert r.status_code == 401, f"Expected 401 Unauthorized, got {r.status_code}: {r.text}"
+    assert r.status_code in (404, 405), f"Expected 404/405, got {r.status_code}: {r.text}"
 
 
-def test_sec01_authenticated_super_admin_can_create_another_super_admin(super_admin_fixture):
-    """SEC-01: Authenticated Super Admin can create additional Super Admins."""
+def test_sec01_super_admin_api_creation_removed_and_single_admin_enforced(super_admin_fixture, db_session):
+    """SEC-01: Verify Super Admin creation via API is removed and single Super Admin rule is enforced."""
     # 1. Login as Super Admin
     login_r = client.post(
         "/api/v1/super-admins/login",
@@ -108,7 +118,7 @@ def test_sec01_authenticated_super_admin_can_create_another_super_admin(super_ad
     assert login_r.status_code == 200
     token = login_r.json()["access_token"]
 
-    # 2. Create another Super Admin
+    # 2. Attempting to create via API must be rejected with 405/404
     new_email = f"second_sa_{uuid.uuid4().hex[:6]}@example.com"
     headers = {"Authorization": f"Bearer {token}"}
     payload = {
@@ -118,8 +128,19 @@ def test_sec01_authenticated_super_admin_can_create_another_super_admin(super_ad
         "phone": "9876543211",
     }
     create_r = client.post("/api/v1/super-admins", json=payload, headers=headers)
-    assert create_r.status_code == 201
-    assert create_r.json()["email"] == new_email
+    assert create_r.status_code in (404, 405)
+
+    # 3. Attempting to create via SuperAdminService must raise ConflictException
+    from app.core.exceptions import ConflictException
+    with pytest.raises(ConflictException) as exc:
+        data = SuperAdminCreate(
+            email=new_email,
+            full_name="Second Super Admin",
+            password="SecondPassword@123!",
+            phone="9876543211",
+        )
+        SuperAdminService(db_session).create_super_admin(data)
+    assert "Only ONE Super Admin is permitted" in str(exc.value.detail)
 
 
 def test_super_admin_login_and_token_refresh(super_admin_fixture):
@@ -153,8 +174,8 @@ def test_tenant_token_rejected_on_super_admin_routes(tenant_fixture):
     assert r.status_code == 401
 
 
-def test_super_admin_self_delete_protection(super_admin_fixture):
-    """Verify Super Admin cannot delete their own account."""
+def test_super_admin_api_delete_removed(super_admin_fixture):
+    """Verify Super Admin delete endpoint is removed from API (returns 405/404)."""
     login_r = client.post(
         "/api/v1/super-admins/login",
         json={
@@ -167,9 +188,7 @@ def test_super_admin_self_delete_protection(super_admin_fixture):
 
     headers = {"Authorization": f"Bearer {token}"}
     del_r = client.delete(f"/api/v1/super-admins/{sa_id}", headers=headers)
-    assert del_r.status_code == 409
-    res_text = del_r.text.lower()
-    assert "cannot delete your own" in res_text
+    assert del_r.status_code in (404, 405)
 
 
 def test_sec02_tenant_suspension_immediately_blocks_active_jwt(super_admin_fixture, tenant_fixture):
@@ -1379,5 +1398,188 @@ def test_p1_list_super_admins_security_no_sensitive_fields(super_admin_fixture):
         assert set(item.keys()) == expected_keys
 
 
+# ==============================================================================
+# STORE OWNER / TENANT MANAGEMENT TESTS
+# ==============================================================================
+
+def test_create_store_owner_success(super_admin_fixture):
+    """Verify Super Admin can create a new Store Owner / Tenant."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": super_admin_fixture["password"],
+        },
+    )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    uid = uuid.uuid4().hex[:6]
+    payload = {
+        "store_name": f"Ganesh Supermarket {uid}",
+        "owner_name": f"Ganesh Patil {uid}",
+        "owner_email": f"ganesh_{uid}@example.com",
+        "password": "Password@123!",
+        "owner_phone": "9876543210",
+        "address": "MG Road",
+        "city": "Pune",
+        "state": "Maharashtra",
+        "pincode": "411001",
+    }
+
+    r = client.post("/api/v1/super-admins/store-owners", json=payload, headers=headers)
+    assert r.status_code == 201
+    data = r.json()
+
+    assert data["name"] == payload["store_name"]
+    assert data["is_active"] is True
+    assert data["owner"]["email"] == payload["owner_email"]
+    assert data["owner"]["full_name"] == payload["owner_name"]
+    assert data["total_stores"] == 1
+    assert data["stores"][0]["is_main"] is True
 
 
+def test_create_store_owner_legacy_payload_on_tenants_endpoint(super_admin_fixture):
+    """Verify POST /api/v1/super-admins/tenants accepts legacy tenant fields via aliases."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": super_admin_fixture["password"],
+        },
+    )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    uid = uuid.uuid4().hex[:6]
+    payload = {
+        "tenant_name": f"Legacy Retail {uid}",
+        "admin_name": f"Admin Name {uid}",
+        "email": f"legacy_{uid}@example.com",
+        "password": "Password@123!",
+        "phone": "9876543211",
+        "domain": f"legacy-{uid}",
+    }
+
+    r = client.post("/api/v1/super-admins/tenants", json=payload, headers=headers)
+    assert r.status_code == 201
+    data = r.json()
+
+    assert data["name"] == payload["tenant_name"]
+    assert data["slug"] == payload["domain"]
+    assert data["owner"]["email"] == payload["email"]
+
+
+def test_create_store_owner_duplicate_email(super_admin_fixture):
+    """Verify 409 Conflict when attempting to create a Store Owner with an existing email."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": super_admin_fixture["password"],
+        },
+    )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    uid = uuid.uuid4().hex[:6]
+    payload = {
+        "store_name": f"Store A {uid}",
+        "owner_name": "Owner A",
+        "owner_email": f"dup_{uid}@example.com",
+        "password": "Password@123!",
+        "owner_phone": "9876543212",
+    }
+
+    # First creation succeeds
+    r1 = client.post("/api/v1/super-admins/store-owners", json=payload, headers=headers)
+    assert r1.status_code == 201
+
+    # Second creation with same email fails with 409
+    payload2 = {
+        "store_name": f"Store B {uid}",
+        "owner_name": "Owner B",
+        "owner_email": f"dup_{uid}@example.com",
+        "password": "Password@123!",
+        "owner_phone": "9876543213",
+    }
+    r2 = client.post("/api/v1/super-admins/store-owners", json=payload2, headers=headers)
+    assert r2.status_code == 409
+
+
+def test_update_and_delete_store_owner(super_admin_fixture):
+    """Verify PATCH and DELETE on Store Owner / Tenant."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": super_admin_fixture["password"],
+        },
+    )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    uid = uuid.uuid4().hex[:6]
+    create_payload = {
+        "store_name": f"Initial Mart {uid}",
+        "owner_name": "Initial Owner",
+        "owner_email": f"crud_{uid}@example.com",
+        "password": "Password@123!",
+        "owner_phone": "9876543214",
+        "city": "Mumbai",
+    }
+    r_create = client.post("/api/v1/super-admins/store-owners", json=create_payload, headers=headers)
+    assert r_create.status_code == 201
+    tenant_id = r_create.json()["id"]
+
+    # 1. Update store owner
+    update_payload = {
+        "store_name": f"Updated Mart {uid}",
+        "owner_name": "Updated Owner",
+        "city": "Pune",
+    }
+    r_update = client.patch(f"/api/v1/super-admins/store-owners/{tenant_id}", json=update_payload, headers=headers)
+    assert r_update.status_code == 200
+    updated_data = r_update.json()
+    assert updated_data["name"] == update_payload["store_name"]
+    assert updated_data["owner"]["full_name"] == update_payload["owner_name"]
+
+    # 2. Delete store owner
+    r_delete = client.delete(f"/api/v1/super-admins/store-owners/{tenant_id}", headers=headers)
+    assert r_delete.status_code == 200
+    assert r_delete.json()["success"] is True
+
+    # Check detail now shows inactive
+    r_detail = client.get(f"/api/v1/super-admins/store-owners/{tenant_id}", headers=headers)
+    assert r_detail.status_code == 200
+    assert r_detail.json()["is_active"] is False
+
+
+def test_store_owners_alias_endpoints(super_admin_fixture, tenant_fixture):
+    """Verify /store-owners aliases work for list, detail, users, and stores."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": super_admin_fixture["password"],
+        },
+    )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    tenant_id = tenant_fixture["tenant_id"]
+
+    # List
+    r_list = client.get("/api/v1/super-admins/store-owners", headers=headers)
+    assert r_list.status_code == 200
+    assert "items" in r_list.json()
+
+    # Detail
+    r_detail = client.get(f"/api/v1/super-admins/store-owners/{tenant_id}", headers=headers)
+    assert r_detail.status_code == 200
+    assert r_detail.json()["id"] == tenant_id
+
+    # Users
+    r_users = client.get(f"/api/v1/super-admins/store-owners/{tenant_id}/users", headers=headers)
+    assert r_users.status_code == 200
+    assert "items" in r_users.json()
+
+    # Stores
+    r_stores = client.get(f"/api/v1/super-admins/store-owners/{tenant_id}/stores", headers=headers)
+    assert r_stores.status_code == 200
+    assert "items" in r_stores.json()

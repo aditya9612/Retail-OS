@@ -9,6 +9,7 @@ from pydantic import (
     EmailStr,
     Field,
     field_validator,
+    model_validator,
 )
 from app.schemas.saas_invoice import SaaSInvoiceResponse
 from app.schemas.saas_upi import UPITransactionResponse
@@ -606,4 +607,133 @@ class SuperAdminInvoiceDetailResponse(BaseModel):
     upi_transactions: list[UPITransactionResponse] = []
     latest_upi_transaction: Optional[UPITransactionResponse] = None
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SuperAdminStoreOwnerCreate(BaseModel):
+    """
+    Schema for Super Admin creating a new Store Owner (Tenant).
+    Supports Store Owner terminology with fallback to legacy tenant fields.
+    """
+    store_name: str = Field(
+        ...,
+        min_length=2,
+        max_length=255,
+        description="Name of the retail business / main store",
+    )
+    owner_name: str = Field(
+        ...,
+        min_length=2,
+        max_length=255,
+        description="Full name of the Store Owner",
+    )
+    owner_email: EmailStr = Field(
+        ...,
+        description="Email address for Store Owner login",
+    )
+    password: str = Field(
+        ...,
+        min_length=8,
+        max_length=128,
+        description="Initial password for Store Owner",
+    )
+    owner_phone: Optional[str] = Field(
+        default=None,
+        description="Phone number of the Store Owner",
+    )
+    domain: Optional[str] = Field(
+        default=None,
+        description="Unique subdomain/slug for the store (auto-generated if omitted)",
+    )
+    plan_id: Optional[int] = Field(
+        default=None,
+        description="SaaS plan ID to assign",
+    )
+    plan_code: Optional[str] = Field(
+        default=None,
+        description="SaaS plan code (e.g. basic, pro, enterprise)",
+    )
+    address: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Address of the main store",
+    )
+    city: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="City",
+    )
+    state: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="State",
+    )
+    pincode: Optional[str] = Field(
+        default=None,
+        max_length=20,
+        description="Pincode",
+    )
+
+    # Backwards-compatible aliases
+    tenant_name: Optional[str] = None
+    admin_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    slug: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("store_name") and data.get("tenant_name"):
+                data["store_name"] = data["tenant_name"]
+            if not data.get("owner_name") and data.get("admin_name"):
+                data["owner_name"] = data["admin_name"]
+            if not data.get("owner_email") and data.get("email"):
+                data["owner_email"] = data["email"]
+            if not data.get("owner_phone") and data.get("phone"):
+                data["owner_phone"] = data["phone"]
+            if not data.get("domain") and data.get("slug"):
+                data["domain"] = data["slug"]
+        return data
+
+    @field_validator("owner_phone")
+    @classmethod
+    def validate_owner_phone(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        return value
+
+
+class SuperAdminStoreOwnerUpdate(BaseModel):
+    """
+    Schema for Super Admin updating Store Owner (Tenant) information.
+    """
+    store_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
+    owner_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
+    owner_phone: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pincode: Optional[str] = None
+    is_active: Optional[bool] = None
+
+    # Aliases
+    tenant_name: Optional[str] = None
+    admin_name: Optional[str] = None
+    phone: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("store_name") and data.get("tenant_name"):
+                data["store_name"] = data["tenant_name"]
+            if not data.get("owner_name") and data.get("admin_name"):
+                data["owner_name"] = data["admin_name"]
+            if not data.get("owner_phone") and data.get("phone"):
+                data["owner_phone"] = data["phone"]
+        return data

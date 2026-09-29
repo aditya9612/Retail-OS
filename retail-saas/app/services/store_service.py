@@ -51,8 +51,10 @@ class StoreService:
 
         return store
 
-    def list_stores(self, tenant_id: int) -> list[Store]:
-
+    def list_stores(self, tenant_id: int, store_id: int | None = None) -> list[Store]:
+        if store_id is not None:
+            store = self.repo.get_by_id(store_id, tenant_id)
+            return [store] if store else []
         return self.repo.list_stores(tenant_id)
 
     

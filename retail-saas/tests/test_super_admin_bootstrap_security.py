@@ -30,6 +30,23 @@ def _get_error_msg(res) -> str:
 
 
 class TestSuperAdminBootstrap:
+    @pytest.fixture(autouse=True)
+    def clean_super_admins(self):
+        db = SessionLocal()
+        try:
+            db.query(SuperAdmin).delete()
+            db.commit()
+        finally:
+            db.close()
+        yield
+        # cleanup after test if needed
+        db = SessionLocal()
+        try:
+            db.query(SuperAdmin).delete()
+            db.commit()
+        finally:
+            db.close()
+
     def test_bootstrap_creates_first_super_admin(self, monkeypatch):
         uid = uuid.uuid4().hex[:8]
         name_suffix = "".join([c for c in uid if c.isalpha()] or ["Alpha"])
@@ -90,7 +107,30 @@ class TestSuperAdminBootstrap:
 
         assert exc.value.code == 1
         err_out = captured_err.getvalue()
-        assert "already exists" in err_out
+        assert "already exists" in err_out or "Only ONE Super Admin" in err_out
+
+    def test_bootstrap_rejects_second_super_admin_with_different_email(self, monkeypatch):
+        # Create first Super Admin
+        create_super_admin_bootstrap(
+            email="first_sa@example.com",
+            full_name="First Admin",
+            password="BootPassword@987!",
+        )
+
+        captured_err = io.StringIO()
+        monkeypatch.setattr(sys, "stderr", captured_err)
+
+        # Attempt to create a SECOND Super Admin with different email must fail
+        with pytest.raises(SystemExit) as exc:
+            create_super_admin_bootstrap(
+                email="second_sa@example.com",
+                full_name="Second Admin",
+                password="BootPassword@987!",
+            )
+
+        assert exc.value.code == 1
+        err_out = captured_err.getvalue()
+        assert "Only ONE Super Admin is permitted" in err_out
 
     def test_bootstrap_does_not_overwrite_or_reactivate_inactive(self, monkeypatch):
         uid = uuid.uuid4().hex[:8]
@@ -115,7 +155,7 @@ class TestSuperAdminBootstrap:
         captured_err = io.StringIO()
         monkeypatch.setattr(sys, "stderr", captured_err)
 
-        # Attempt to run bootstrap on the same email
+        # Attempt to run bootstrap on the same email without reset flag
         with pytest.raises(SystemExit) as exc:
             create_super_admin_bootstrap(
                 email=email,
@@ -124,7 +164,7 @@ class TestSuperAdminBootstrap:
             )
 
         assert exc.value.code == 1
-        assert "already exists" in captured_err.getvalue()
+        assert "already exists" in captured_err.getvalue() or "Only ONE" in captured_err.getvalue()
 
         # Verify DB record was NOT modified or reactivated
         verify_db = SessionLocal()
@@ -191,12 +231,16 @@ class TestSuperAdminBootstrap:
 class TestSuperAdminSecurityAuthorization:
     @pytest.fixture
     def active_super_admin(self):
-        uid = uuid.uuid4().hex[:8]
-        name_suffix = "".join([c for c in uid if c.isalpha()] or ["Alpha"])
-        email = f"sa_sec_{uid}@example.com"
-        password = "SuperPassword@123!"
         db = SessionLocal()
         try:
+            # Ensure only one super admin exists
+            db.query(SuperAdmin).delete()
+            db.commit()
+
+            uid = uuid.uuid4().hex[:8]
+            name_suffix = "".join([c for c in uid if c.isalpha()] or ["Alpha"])
+            email = f"sa_sec_{uid}@example.com"
+            password = "SuperPassword@123!"
             sa = SuperAdmin(
                 email=email,
                 full_name=f"Security SA {name_suffix}",
@@ -223,13 +267,14 @@ class TestSuperAdminSecurityAuthorization:
         }
 
     def test_anonymous_cannot_create_super_admin(self):
+        """Verify POST /api/v1/super-admins is removed from API (returns 405 Method Not Allowed)."""
         payload = {
             "email": "anon_attacker@example.com",
             "full_name": "Anon Attacker",
             "password": "Password@123!",
         }
         res = client.post("/api/v1/super-admins", json=payload)
-        assert res.status_code == 401
+        assert res.status_code in (404, 405)
 
     def test_tenant_jwt_rejected_on_super_admin_api(self):
         # Create tenant JWT (type='access', role='tenant_admin')
@@ -296,12 +341,11 @@ class TestSuperAdminSecurityAuthorization:
         msg = _get_error_msg(res)
         assert "cannot deactivate your own account" in msg
 
-    def test_self_deletion_protection(self, active_super_admin):
+    def test_api_deletion_endpoint_removed(self, active_super_admin):
+        """Verify DELETE /api/v1/super-admins/{id} is removed from API (returns 405 Method Not Allowed)."""
         headers = {"Authorization": f"Bearer {active_super_admin['access_token']}"}
         res = client.delete(
             f"/api/v1/super-admins/{active_super_admin['id']}",
             headers=headers,
         )
-        assert res.status_code == 409
-        msg = _get_error_msg(res)
-        assert "cannot delete your own" in msg.lower()
+        assert res.status_code in (404, 405)

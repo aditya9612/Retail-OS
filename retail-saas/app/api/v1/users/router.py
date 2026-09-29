@@ -1,7 +1,10 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.exceptions import ForbiddenException
 from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.user import (
@@ -30,6 +33,13 @@ def create_user(
     current_user: User = Depends(require_permission("users:write")),
     db: Session = Depends(get_db),
 ):
+    # Store-level user (manager/staff) may only create users for their assigned store
+    if current_user.store_id is not None:
+        if data.store_id is not None and data.store_id != current_user.store_id:
+            raise ForbiddenException("You can only create users for your assigned store")
+        if data.store_id is None:
+            data.store_id = current_user.store_id
+
     return UserService(db).create_user(
         current_user.tenant_id,
         data,
@@ -44,9 +54,16 @@ def list_users(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     include_inactive: bool = Query(False),
+    store_id: Optional[int] = Query(None, description="Filter users by store ID"),
     current_user: User = Depends(require_permission("users:read")),
     db: Session = Depends(get_db),
 ):
+    effective_store_id = store_id
+    if current_user.store_id is not None:
+        if store_id is not None and store_id != current_user.store_id:
+            raise ForbiddenException("Access denied to users of this store")
+        effective_store_id = current_user.store_id
+
     skip = (page - 1) * page_size
 
     return UserService(db).list_users(
@@ -54,6 +71,7 @@ def list_users(
         skip=skip,
         limit=page_size,
         include_inactive=include_inactive,
+        store_id=effective_store_id,
     )
 
 
@@ -88,6 +106,10 @@ def get_my_profile(
     "/me",
     response_model=UserResponse,
 )
+@router.patch(
+    "/me",
+    response_model=UserResponse,
+)
 def update_my_profile(
     data: MyProfileUpdate,
     current_user: User = Depends(require_permission("users:read")),
@@ -109,13 +131,20 @@ def get_user(
     current_user: User = Depends(require_permission("users:read")),
     db: Session = Depends(get_db),
 ):
-    return UserService(db).get_user(
+    user = UserService(db).get_user(
         current_user.tenant_id,
         user_id,
     )
+    if current_user.store_id is not None and user.store_id != current_user.store_id:
+        raise ForbiddenException("Access denied to user of another store")
+    return user
 
 
 @router.put(
+    "/{user_id}",
+    response_model=UserResponse,
+)
+@router.patch(
     "/{user_id}",
     response_model=UserResponse,
 )
@@ -125,6 +154,15 @@ def update_user(
     current_user: User = Depends(require_permission("users:write")),
     db: Session = Depends(get_db),
 ):
+    target_user = UserService(db).get_user(
+        current_user.tenant_id,
+        user_id,
+    )
+    if current_user.store_id is not None:
+        if target_user.store_id != current_user.store_id:
+            raise ForbiddenException("Access denied to user of another store")
+        if data.store_id is not None and data.store_id != current_user.store_id:
+            raise ForbiddenException("Cannot reassign user to another store")
     return UserService(db).update_user(
         current_user.tenant_id,
         user_id,
@@ -141,6 +179,12 @@ def activate_user(
     current_user: User = Depends(require_permission("users:write")),
     db: Session = Depends(get_db),
 ):
+    target_user = UserService(db).get_user(
+        current_user.tenant_id,
+        user_id,
+    )
+    if current_user.store_id is not None and target_user.store_id != current_user.store_id:
+        raise ForbiddenException("Access denied to user of another store")
     return UserService(db).activate_user(
         current_user.tenant_id,
         user_id,
@@ -156,6 +200,12 @@ def deactivate_user(
     current_user: User = Depends(require_permission("users:write")),
     db: Session = Depends(get_db),
 ):
+    target_user = UserService(db).get_user(
+        current_user.tenant_id,
+        user_id,
+    )
+    if current_user.store_id is not None and target_user.store_id != current_user.store_id:
+        raise ForbiddenException("Access denied to user of another store")
     return UserService(db).deactivate_user(
         current_user.tenant_id,
         user_id,
@@ -172,6 +222,12 @@ def delete_user(
     current_user: User = Depends(require_permission("users:write")),
     db: Session = Depends(get_db),
 ):
+    target_user = UserService(db).get_user(
+        current_user.tenant_id,
+        user_id,
+    )
+    if current_user.store_id is not None and target_user.store_id != current_user.store_id:
+        raise ForbiddenException("Access denied to user of another store")
     UserService(db).delete_user(
         current_user.tenant_id,
         user_id,

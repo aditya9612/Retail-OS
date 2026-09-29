@@ -150,6 +150,7 @@ class UserService:
         skip: int = 0,
         limit: int = 20,
         include_inactive: bool = False,
+        store_id: int | None = None,
     ) -> list[User]:
         if skip < 0:
             skip = 0
@@ -165,6 +166,7 @@ class UserService:
             skip=skip,
             limit=limit,
             include_inactive=include_inactive,
+            store_id=store_id,
         )
 
         return users
@@ -252,7 +254,10 @@ class UserService:
                 value,
             )
 
-        return self.repo.update(user)
+        user = self.repo.update(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
     def update_my_profile(
         self,
@@ -293,7 +298,10 @@ class UserService:
                 value,
             )
 
-        return self.repo.update(user)
+        user = self.repo.update(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
     def activate_user(
         self,
@@ -358,8 +366,10 @@ class UserService:
             )
 
         user.is_active = False
-
-        return self.repo.update(user)
+        user = self.repo.update(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
     def delete_user(
         self,
@@ -392,3 +402,4 @@ class UserService:
         user.is_active = False
 
         self.repo.update(user)
+        self.db.commit()

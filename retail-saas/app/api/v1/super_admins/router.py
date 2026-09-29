@@ -22,6 +22,8 @@ from app.schemas.super_admin import (
     SuperAdminResponse,
     SuperAdminStatusUpdate,
     SuperAdminStoreListResponse,
+    SuperAdminStoreOwnerCreate,
+    SuperAdminStoreOwnerUpdate,
     SuperAdminSubscriptionListResponse,
     SuperAdminTenantDetailResponse,
     SuperAdminTenantListResponse,
@@ -61,22 +63,6 @@ router = APIRouter(
     prefix="/super-admins",
     tags=["Super Admins"],
 )
-
-
-@router.post(
-    "",
-    response_model=SuperAdminResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create Super Admin",
-)
-def create_super_admin(
-    data: SuperAdminCreate,
-    current_super_admin: SuperAdmin = Depends(
-        get_current_super_admin
-    ),
-    db: Session = Depends(get_db),
-):
-    return SuperAdminService(db).create_super_admin(data)
 
 
 @router.post(
@@ -181,10 +167,41 @@ def super_admin_dashboard(
     return SuperAdminService(db).dashboard()
 
 
+@router.post(
+    "/tenants",
+    response_model=SuperAdminTenantDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Store Owner (Tenant)",
+    description="Creates a new Store Owner (Tenant) account with initial store, admin credentials, and SaaS subscription.",
+)
+@router.post(
+    "/store-owners",
+    response_model=SuperAdminTenantDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Store Owner",
+    description="Alias endpoint for creating a Store Owner (Tenant).",
+    include_in_schema=True,
+)
+def create_tenant(
+    data: SuperAdminStoreOwnerCreate,
+    current_super_admin: SuperAdmin = Depends(
+        get_current_super_admin
+    ),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).create_tenant(data)
+
+
 @router.get(
     "/tenants",
     response_model=SuperAdminTenantListResponse,
-    summary="List Tenants",
+    summary="List Store Owners (Tenants)",
+)
+@router.get(
+    "/store-owners",
+    response_model=SuperAdminTenantListResponse,
+    summary="List Store Owners",
+    include_in_schema=True,
 )
 def list_tenants(
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
@@ -211,7 +228,13 @@ def list_tenants(
 @router.get(
     "/tenants/{tenant_id}",
     response_model=SuperAdminTenantDetailResponse,
-    summary="Get Tenant",
+    summary="Get Store Owner (Tenant)",
+)
+@router.get(
+    "/store-owners/{tenant_id}",
+    response_model=SuperAdminTenantDetailResponse,
+    summary="Get Store Owner",
+    include_in_schema=True,
 )
 def get_tenant(
     tenant_id: int,
@@ -226,9 +249,65 @@ def get_tenant(
 
 
 @router.patch(
+    "/tenants/{tenant_id}",
+    response_model=SuperAdminTenantDetailResponse,
+    summary="Update Store Owner (Tenant)",
+    description="Updates Store Owner (Tenant) information such as store name, address, owner contact, and status.",
+)
+@router.patch(
+    "/store-owners/{tenant_id}",
+    response_model=SuperAdminTenantDetailResponse,
+    summary="Update Store Owner",
+    description="Alias endpoint for updating a Store Owner (Tenant).",
+    include_in_schema=True,
+)
+def update_tenant(
+    tenant_id: int,
+    data: SuperAdminStoreOwnerUpdate,
+    current_super_admin: SuperAdmin = Depends(
+        get_current_super_admin
+    ),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).update_tenant(
+        tenant_id,
+        data,
+    )
+
+
+@router.delete(
+    "/tenants/{tenant_id}",
+    summary="Delete Store Owner (Tenant)",
+    description="Deactivates a Store Owner (Tenant) account and disables all associated stores and user logins.",
+)
+@router.delete(
+    "/store-owners/{tenant_id}",
+    summary="Delete Store Owner",
+    description="Alias endpoint for deleting a Store Owner (Tenant).",
+    include_in_schema=True,
+)
+def delete_tenant(
+    tenant_id: int,
+    current_super_admin: SuperAdmin = Depends(
+        get_current_super_admin
+    ),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).delete_tenant(
+        tenant_id
+    )
+
+
+@router.patch(
     "/tenants/{tenant_id}/status",
     response_model=SuperAdminTenantResponse,
-    summary="Activate or Deactivate Tenant",
+    summary="Activate or Deactivate Store Owner (Tenant)",
+)
+@router.patch(
+    "/store-owners/{tenant_id}/status",
+    response_model=SuperAdminTenantResponse,
+    summary="Activate or Deactivate Store Owner",
+    include_in_schema=True,
 )
 def update_tenant_status(
     tenant_id: int,
@@ -247,7 +326,13 @@ def update_tenant_status(
 @router.get(
     "/tenants/{tenant_id}/users",
     response_model=SuperAdminTenantUserListResponse,
-    summary="List Tenant Users",
+    summary="List Store Owner Users",
+)
+@router.get(
+    "/store-owners/{tenant_id}/users",
+    response_model=SuperAdminTenantUserListResponse,
+    summary="List Store Owner Users",
+    include_in_schema=True,
 )
 def list_tenant_users(
     tenant_id: int,
@@ -274,7 +359,13 @@ def list_tenant_users(
 @router.get(
     "/tenants/{tenant_id}/stores",
     response_model=SuperAdminStoreListResponse,
-    summary="List Tenant Stores",
+    summary="List Store Owner Stores",
+)
+@router.get(
+    "/store-owners/{tenant_id}/stores",
+    response_model=SuperAdminStoreListResponse,
+    summary="List Store Owner Stores",
+    include_in_schema=True,
 )
 def list_tenant_stores(
     tenant_id: int,
@@ -305,7 +396,13 @@ def list_tenant_stores(
 @router.get(
     "/tenants/{tenant_id}/subscription",
     response_model=SuperAdminTenantSubscriptionDetailResponse,
-    summary="Get Tenant Subscription Detail",
+    summary="Get Store Owner Subscription Detail",
+)
+@router.get(
+    "/store-owners/{tenant_id}/subscription",
+    response_model=SuperAdminTenantSubscriptionDetailResponse,
+    summary="Get Store Owner Subscription Detail",
+    include_in_schema=True,
 )
 def get_tenant_subscription(
     tenant_id: int,
@@ -313,7 +410,7 @@ def get_tenant_subscription(
     db: Session = Depends(get_db),
 ):
     """
-    Retrieves deep subscription and entitlement detail for a specific tenant:
+    Retrieves deep subscription and entitlement detail for a specific Store Owner (tenant):
     - Authoritative current subscription and SaaS plan
     - Pending upgrade plan (if any)
     - Scheduled downgrade plan (if any)
@@ -761,23 +858,6 @@ def update_super_admin_status(
     return SuperAdminService(db).update_status(
         super_admin_id,
         data.is_active,
-    )
-
-
-@router.delete(
-    "/{super_admin_id}",
-    summary="Delete Super Admin",
-)
-def delete_super_admin(
-    super_admin_id: int,
-    current_super_admin: SuperAdmin = Depends(
-        get_current_super_admin
-    ),
-    db: Session = Depends(get_db),
-):
-    return SuperAdminService(db).delete_super_admin(
-        super_admin_id,
-        current_super_admin.id,
     )
 
 

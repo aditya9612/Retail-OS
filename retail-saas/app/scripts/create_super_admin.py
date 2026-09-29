@@ -16,11 +16,12 @@ def create_super_admin_bootstrap(
     full_name: str,
     password: str,
     phone: str | None = None,
+    reset_password_if_exists: bool = False,
 ) -> None:
     """
-    Creates the first Super Admin platform account.
+    Creates the first and only Super Admin platform account.
     Enforces production SuperAdminCreate schema validations (including strict password rules).
-    Fails closed if an account with this email already exists.
+    Enforces that ONLY ONE Super Admin is permitted in the entire system.
     """
     # 1. Validate data using production schema
     try:
@@ -40,14 +41,22 @@ def create_super_admin_bootstrap(
     db = SessionLocal()
     try:
         clean_email = str(data.email).strip().lower()
-        existing = (
-            db.query(SuperAdmin)
-            .filter(SuperAdmin.email == clean_email)
-            .first()
-        )
-        if existing:
+        existing_any = db.query(SuperAdmin).first()
+
+        if existing_any:
+            if reset_password_if_exists and existing_any.email == clean_email:
+                existing_any.hashed_password = get_password_hash(data.password)
+                if data.full_name:
+                    existing_any.full_name = data.full_name
+                if data.phone:
+                    existing_any.phone = data.phone
+                existing_any.is_active = True
+                db.commit()
+                print(f"Super Admin password reset successfully: {existing_any.email}")
+                return
+
             print(
-                f"Error: Super Admin with this email already exists: {clean_email}",
+                f"Error: Only ONE Super Admin is permitted in the system. A Super Admin already exists: {existing_any.email}",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -74,11 +83,17 @@ def create_super_admin_bootstrap(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Bootstrap canonical initial Super Admin account"
+        description="Bootstrap canonical single Super Admin account"
     )
     parser.add_argument("--email", help="Super Admin email address", default=None)
     parser.add_argument("--full-name", help="Super Admin full name", default=None)
     parser.add_argument("--phone", help="Super Admin phone number (optional)", default=None)
+    parser.add_argument(
+        "--reset-password",
+        action="store_true",
+        help="Reset password of existing single Super Admin if email matches",
+        default=False,
+    )
 
     args = parser.parse_args()
 
@@ -119,8 +134,10 @@ def main():
         full_name=full_name,
         password=password,
         phone=phone,
+        reset_password_if_exists=args.reset_password,
     )
 
 
 if __name__ == "__main__":
     main()
+

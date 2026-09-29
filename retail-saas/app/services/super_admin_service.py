@@ -1,4 +1,5 @@
 import math
+import re
 from sqlalchemy import case, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
@@ -40,12 +41,16 @@ from app.schemas.super_admin import (
     SuperAdminInvoiceListItem,
     SuperAdminLogin,
     SuperAdminPlanSummary,
+    SuperAdminStoreOwnerCreate,
+    SuperAdminStoreOwnerUpdate,
     SuperAdminSubscriptionDetailInfo,
     SuperAdminSubscriptionListItem,
     SuperAdminTenantSummary,
     SuperAdminUpdate,
 )
 from app.services.saas_entitlement_service import SaaSEntitlementService
+from app.services.saas_subscription_service import SaaSSubscriptionService
+from app.utils.constants import DEFAULT_ROLE_PERMISSIONS, UserRole
 
 
 class SuperAdminService:
@@ -57,6 +62,12 @@ class SuperAdminService:
         self,
         data: SuperAdminCreate,
     ) -> SuperAdmin:
+        count = self.db.query(SuperAdmin).count()
+        if count >= 1:
+            raise ConflictException(
+                "Only ONE Super Admin is permitted in the system"
+            )
+
         existing = (
             self.db.query(SuperAdmin)
             .filter(
@@ -502,6 +513,218 @@ class SuperAdminService:
             "total_users": total_users,
             "active_users": active_users,
             "stores": stores_summary,
+        }
+
+    def create_tenant(
+        self,
+        data: SuperAdminStoreOwnerCreate,
+    ) -> dict:
+        store_name = (data.store_name or data.tenant_name or "").strip()
+        owner_name = (data.owner_name or data.admin_name or "").strip()
+        owner_email = str(data.owner_email or data.email or "").strip().lower()
+        owner_phone = data.owner_phone or data.phone
+        domain_val = (data.domain or data.slug or "").strip().lower()
+
+        if not store_name:
+            raise AppException("Store name is required")
+        if not owner_name:
+            raise AppException("Owner name is required")
+        if not owner_email:
+            raise AppException("Owner email is required")
+
+        if not domain_val:
+            base_slug = re.sub(r"[^a-z0-9]+", "-", store_name.lower()).strip("-")
+            domain_val = base_slug or "store"
+
+        domain_val = re.sub(r"[^a-z0-9-]+", "", domain_val).strip("-")
+        if not domain_val:
+            domain_val = "store"
+
+        candidate_domain = domain_val
+        counter = 1
+        while self.db.query(Tenant).filter(Tenant.domain == candidate_domain).first():
+            candidate_domain = f"{domain_val}-{counter}"
+            counter += 1
+        domain_val = candidate_domain
+
+        existing_user = (
+            self.db.query(User)
+            .filter(func.lower(User.email) == owner_email.lower())
+            .first()
+        )
+        if existing_user:
+            raise ConflictException("Email address is already registered")
+
+        try:
+            settings_dict = {}
+            if data.address:
+                settings_dict["address"] = data.address
+            if data.city:
+                settings_dict["city"] = data.city
+            if data.state:
+                settings_dict["state"] = data.state
+            if data.pincode:
+                settings_dict["pincode"] = data.pincode
+            if owner_phone:
+                settings_dict["phone"] = owner_phone
+            if owner_email:
+                settings_dict["email"] = owner_email
+
+            tenant = Tenant(
+                name=store_name,
+                domain=domain_val,
+                is_active=True,
+                settings=settings_dict or None,
+            )
+            self.db.add(tenant)
+            self.db.flush()
+
+            for role_name in UserRole:
+                if role_name == UserRole.SUPERADMIN:
+                    continue
+                role = Role(
+                    tenant_id=tenant.id,
+                    name=role_name.value,
+                    permissions=DEFAULT_ROLE_PERMISSIONS[role_name],
+                    is_system=False,
+                )
+                self.db.add(role)
+            self.db.flush()
+
+            admin_role = (
+                self.db.query(Role)
+                .filter(
+                    Role.tenant_id == tenant.id,
+                    Role.name == UserRole.ADMIN.value,
+                )
+                .first()
+            )
+            if not admin_role:
+                self.db.rollback()
+                raise AppException("Admin role could not be created")
+
+            main_store = Store(
+                tenant_id=tenant.id,
+                name=store_name,
+                code="MAIN-01",
+                address=data.address,
+                city=data.city,
+                state=data.state,
+                pincode=data.pincode,
+                phone=owner_phone,
+                email=owner_email,
+                is_main=True,
+                is_active=True,
+            )
+            self.db.add(main_store)
+            self.db.flush()
+
+            user = User(
+                tenant_id=tenant.id,
+                role_id=admin_role.id,
+                store_id=None,
+                email=owner_email,
+                password_hash=get_password_hash(data.password),
+                full_name=owner_name,
+                phone=owner_phone,
+                is_active=True,
+            )
+            self.db.add(user)
+            self.db.flush()
+
+            SaaSSubscriptionService(self.db).create_initial_subscription(
+                tenant_id=tenant.id,
+                plan_id=data.plan_id,
+                plan_code=data.plan_code,
+            )
+
+            self.db.commit()
+            return self.get_tenant(tenant.id)
+        except ConflictException:
+            self.db.rollback()
+            raise
+        except IntegrityError as exc:
+            self.db.rollback()
+            raise ConflictException("Tenant or user information already exists") from exc
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def update_tenant(
+        self,
+        tenant_id: int,
+        data: SuperAdminStoreOwnerUpdate,
+    ) -> dict:
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            raise NotFoundException("Tenant not found")
+
+        store_name = data.store_name or data.tenant_name
+        if store_name is not None and store_name.strip():
+            tenant.name = store_name.strip()
+
+        if data.is_active is not None:
+            tenant.is_active = data.is_active
+
+        settings = dict(tenant.settings or {})
+        if data.address is not None:
+            settings["address"] = data.address
+        if data.city is not None:
+            settings["city"] = data.city
+        if data.state is not None:
+            settings["state"] = data.state
+        if data.pincode is not None:
+            settings["pincode"] = data.pincode
+        owner_phone = data.owner_phone or data.phone
+        if owner_phone is not None:
+            settings["phone"] = owner_phone
+        tenant.settings = settings
+
+        owner_name = data.owner_name or data.admin_name
+        if owner_name is not None or owner_phone is not None:
+            owner_user = (
+                self.db.query(User)
+                .join(Role, Role.id == User.role_id)
+                .filter(
+                    User.tenant_id == tenant_id,
+                    User.is_deleted.is_(False),
+                    func.lower(Role.name).in_(["admin", "owner"]),
+                )
+                .order_by(User.id.asc())
+                .first()
+            )
+            if owner_user:
+                if owner_name is not None:
+                    owner_user.full_name = owner_name.strip()
+                if owner_phone is not None:
+                    owner_user.phone = owner_phone.strip()
+
+        self.db.commit()
+        return self.get_tenant(tenant.id)
+
+    def delete_tenant(
+        self,
+        tenant_id: int,
+    ) -> dict:
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            raise NotFoundException("Tenant not found")
+
+        tenant.is_active = False
+
+        stores = self.db.query(Store).filter(Store.tenant_id == tenant_id).all()
+        for s in stores:
+            s.is_active = False
+
+        users = self.db.query(User).filter(User.tenant_id == tenant_id).all()
+        for u in users:
+            u.is_active = False
+            u.is_deleted = True
+
+        self.db.commit()
+        return {
+            "success": True,
+            "message": f"Store Owner (Tenant {tenant_id}) deleted/deactivated successfully",
         }
 
     def update_tenant_status(
@@ -1554,4 +1777,3 @@ class SuperAdminService:
             "upi_transactions": upi_transactions,
             "latest_upi_transaction": latest_upi_transaction,
         }
-
