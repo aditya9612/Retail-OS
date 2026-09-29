@@ -1,6 +1,4 @@
-"""empty message
-
-Revision ID: c070896d644a
+"""Revision ID: c070896d644a
 Revises: a5d85bdc91e0
 Create Date: 2026-09-23 11:12:36.205800
 
