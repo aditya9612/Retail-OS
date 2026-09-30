@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.exceptions import (
     AppException,
     ConflictException,
+    ForbiddenException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -268,6 +269,17 @@ class SuperAdminService:
             super_admin_id
         )
 
+        if not is_active:
+            active_count = (
+                self.db.query(SuperAdmin)
+                .filter(SuperAdmin.is_active.is_(True))
+                .count()
+            )
+            if active_count <= 1:
+                raise ForbiddenException(
+                    "Cannot deactivate the only active Super Admin"
+                )
+
         super_admin.is_active = is_active
 
         self.db.commit()
@@ -287,6 +299,16 @@ class SuperAdminService:
         if super_admin.id == current_super_admin_id:
             raise ConflictException(
                 "You cannot delete your own Super Admin account"
+            )
+
+        active_count = (
+            self.db.query(SuperAdmin)
+            .filter(SuperAdmin.is_active.is_(True))
+            .count()
+        )
+        if active_count <= 1:
+            raise ForbiddenException(
+                "Cannot delete the only Super Admin"
             )
 
         self.db.delete(super_admin)
@@ -312,6 +334,14 @@ class SuperAdminService:
         ):
             raise UnauthorizedException(
                 "Current password is incorrect"
+            )
+
+        if verify_password(
+            data.new_password,
+            super_admin.hashed_password,
+        ):
+            raise AppException(
+                "New password cannot be the same as the current password"
             )
 
         super_admin.hashed_password = get_password_hash(
@@ -997,6 +1027,14 @@ class SuperAdminService:
         )
         total_saas_revenue = Decimal(str(total_rev)) if total_rev is not None else Decimal("0.00")
 
+        total_stores = self.db.query(Store).count()
+        active_stores = self.db.query(Store).filter(Store.is_active.is_(True)).count()
+        active_plans = self.db.query(SaaSPlan).filter(SaaSPlan.is_active.is_(True)).count()
+
+        pending_upi_transactions = self.db.query(SaaSUPITransaction).filter(SaaSUPITransaction.status.in_(["pending", "submitted"])).count()
+        verified_upi_transactions = self.db.query(SaaSUPITransaction).filter(SaaSUPITransaction.status == "verified").count()
+        rejected_upi_transactions = self.db.query(SaaSUPITransaction).filter(SaaSUPITransaction.status == "rejected").count()
+
         return {
             "total_super_admins": total_super_admins,
             "active_super_admins": active_super_admins,
@@ -1005,6 +1043,12 @@ class SuperAdminService:
             "active_tenants": active_tenants,
             "inactive_tenants": inactive_tenants,
             "total_users": total_users,
+            "total_stores": total_stores,
+            "active_stores": active_stores,
+            "active_plans": active_plans,
+            "pending_upi_transactions": pending_upi_transactions,
+            "verified_upi_transactions": verified_upi_transactions,
+            "rejected_upi_transactions": rejected_upi_transactions,
             "subscriptions_by_status": subscriptions_by_status,
             "expired_subscriptions_count": expired_subscriptions_count,
             "pending_upgrades_count": pending_upgrades_count,
@@ -1165,6 +1209,8 @@ class SuperAdminService:
         plan_id: int,
     ) -> SaaSPlan:
         plan = self.get_plan(plan_id)
+        if plan.code.lower() == "basic":
+            raise AppException("The default 'basic' plan cannot be deactivated")
         plan.is_active = False
         self.db.commit()
         self.db.refresh(plan)

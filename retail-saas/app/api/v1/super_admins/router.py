@@ -1,13 +1,17 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.exceptions import UnauthorizedException
 from app.core.security import (
+    blacklist_token,
     create_super_admin_access_token,
     create_super_admin_refresh_token,
     decode_token,
     get_current_super_admin,
+    super_admin_security_scheme,
 )
 from app.models.super_admin import SuperAdmin
 from app.schemas.super_admin import (
@@ -25,6 +29,7 @@ from app.schemas.super_admin import (
     SuperAdminStoreOwnerCreate,
     SuperAdminStoreOwnerUpdate,
     SuperAdminSubscriptionListResponse,
+    SuperAdminTenantDeleteResponse,
     SuperAdminTenantDetailResponse,
     SuperAdminTenantListResponse,
     SuperAdminTenantResponse,
@@ -155,6 +160,27 @@ def get_current_super_admin_profile(
     return current_super_admin
 
 
+@router.patch(
+    "/me",
+    response_model=SuperAdminResponse,
+    summary="Update Current Super Admin Profile",
+)
+def update_current_super_admin_profile(
+    data: SuperAdminUpdate,
+    current_super_admin: SuperAdmin = Depends(
+        get_current_super_admin
+    ),
+    db: Session = Depends(get_db),
+):
+    """
+    Updates the logged-in Super Admin's own profile information (full_name, phone, email).
+    """
+    return SuperAdminService(db).update_super_admin(
+        current_super_admin.id,
+        data,
+    )
+
+
 @router.get(
     "/dashboard",
     response_model=SuperAdminDashboardResponse,
@@ -279,11 +305,13 @@ def update_tenant(
 
 @router.delete(
     "/tenants/{tenant_id}",
+    response_model=SuperAdminTenantDeleteResponse,
     summary="Delete Store Owner (Tenant)",
     description="Deactivates a Store Owner (Tenant) account and disables all associated stores and user logins.",
 )
 @router.delete(
     "/store-owners/{tenant_id}",
+    response_model=SuperAdminTenantDeleteResponse,
     summary="Delete Store Owner",
     description="Alias endpoint for deleting a Store Owner (Tenant).",
     include_in_schema=False,
@@ -600,11 +628,6 @@ def delete_plan_entitlement(
     response_model=PlanLimitsConfigureResponse,
     summary="Configure All Plan Limits/Entitlements in a Single API",
 )
-@router.post(
-    "/saas-plans/{plan_id}/configure-limits",
-    response_model=PlanLimitsConfigureResponse,
-    summary="Configure All Plan Limits/Entitlements in a Single API",
-)
 def configure_plan_limits_by_path(
     plan_id: str,
     data: PlanLimitsConfigureRequest,
@@ -612,7 +635,7 @@ def configure_plan_limits_by_path(
     db: Session = Depends(get_db),
 ):
     """
-    Single API to configure all limits (users, stores, products, monthly_orders, etc.) for a plan in one request.
+    Authoritative single API to configure all limits (users, stores, products, monthly_orders, etc.) for a plan in one request.
     Can set numbers or unlimited (is_unlimited=True / null).
     plan_id can be an ID (e.g. 1, 2, 3) or code (e.g. 'basic', 'pro', 'enterprise').
     """
@@ -620,9 +643,27 @@ def configure_plan_limits_by_path(
 
 
 @router.post(
+    "/saas-plans/{plan_id}/configure-limits",
+    response_model=PlanLimitsConfigureResponse,
+    summary="Configure Plan Limits (Deprecated POST alias)",
+    deprecated=True,
+    description="Deprecated: Use PUT /api/v1/super-admins/saas-plans/{plan_id}/configure-limits instead.",
+)
+def configure_plan_limits_by_path_post_deprecated(
+    plan_id: str,
+    data: PlanLimitsConfigureRequest,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).configure_plan_limits(plan_id, data)
+
+
+@router.post(
     "/saas-plans/configure-limits",
     response_model=PlanLimitsConfigureResponse,
-    summary="Configure All Plan Limits/Entitlements in a Single API (Plan in Body)",
+    summary="Configure All Plan Limits (Deprecated Body alias)",
+    deprecated=True,
+    description="Deprecated: Use PUT /api/v1/super-admins/saas-plans/{plan_id}/configure-limits instead.",
 )
 def configure_plan_limits_by_body(
     data: PlanLimitsConfigureRequest,
@@ -630,7 +671,8 @@ def configure_plan_limits_by_body(
     db: Session = Depends(get_db),
 ):
     """
-    Single API to select a plan (by plan_id or plan_code in request body) and configure all its limits in one request.
+    Deprecated: select a plan (by plan_id or plan_code in request body) and configure all its limits.
+    Use PUT /api/v1/super-admins/saas-plans/{plan_id}/configure-limits instead.
     """
     return SuperAdminService(db).configure_plan_limits(None, data)
 
@@ -912,12 +954,18 @@ def change_password(
     current_super_admin: SuperAdmin = Depends(
         get_current_super_admin
     ),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(
+        super_admin_security_scheme
+    ),
     db: Session = Depends(get_db),
 ):
-    return SuperAdminService(db).change_password(
+    result = SuperAdminService(db).change_password(
         current_super_admin.id,
         data,
     )
+    if credentials and credentials.credentials:
+        blacklist_token(credentials.credentials)
+    return result
 
 
 @router.post(
