@@ -93,3 +93,42 @@ class SaaSUsageResponse(BaseModel):
     dimensions: dict[str, DimensionUsageResponse]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class LimitItemDetail(BaseModel):
+    dimension: str
+    value: Optional[int] = None
+    is_unlimited: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PlanLimitsConfigureRequest(BaseModel):
+    plan_id: Optional[int] = Field(None, description="Optional plan ID (can also be passed in URL path)")
+    plan_code: Optional[str] = Field(None, description="Optional plan code (e.g. 'basic', 'pro', 'enterprise')")
+
+    # Direct dimension values (None means unlimited when is_*_unlimited is True, or if null sent for unlimited)
+    users: Optional[int] = Field(None, ge=0, description="Users limit (number or null for unlimited)")
+    is_users_unlimited: Optional[bool] = Field(None, description="Set True for unlimited users")
+
+    stores: Optional[int] = Field(None, ge=0, description="Stores limit (number or null for unlimited)")
+    is_stores_unlimited: Optional[bool] = Field(None, description="Set True for unlimited stores")
+
+    products: Optional[int] = Field(None, ge=0, description="Products limit (number or null for unlimited)")
+    is_products_unlimited: Optional[bool] = Field(None, description="Set True for unlimited products")
+
+    monthly_orders: Optional[int] = Field(None, ge=0, description="Monthly orders limit (number or null for unlimited)")
+    is_monthly_orders_unlimited: Optional[bool] = Field(None, description="Set True for unlimited monthly orders")
+
+    items: Optional[list[SaaSPlanEntitlementCreate]] = Field(None, description="Optional list of custom dimensions")
+
+
+class PlanLimitsConfigureResponse(BaseModel):
+    success: bool = True
+    message: str
+    plan_id: int
+    plan_name: str
+    plan_code: str
+    limits: list[LimitItemDetail]
+
+    model_config = ConfigDict(from_attributes=True)

@@ -1,3 +1,5 @@
+from datetime import datetime
+from typing import Optional, Union, Tuple, List, Dict, Any
 import math
 import re
 from sqlalchemy import case, func, or_
@@ -25,6 +27,9 @@ from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.saas_plan_entitlement import EntitlementDimension, SaaSPlanEntitlement
 from app.schemas.saas_entitlement import (
+    LimitItemDetail,
+    PlanLimitsConfigureRequest,
+    PlanLimitsConfigureResponse,
     SaaSPlanEntitlementCreate,
     SaaSPlanEntitlementUpdate,
 )
@@ -1311,6 +1316,110 @@ class SuperAdminService:
         except Exception:
             self.db.rollback()
             raise
+
+    def configure_plan_limits(
+        self,
+        plan_identifier: int | str | None,
+        data: PlanLimitsConfigureRequest,
+    ) -> PlanLimitsConfigureResponse:
+        """
+        Configure all limits (users, stores, products, monthly_orders, etc.)
+        for a plan in a single API call (bulk create/update).
+        """
+        target = plan_identifier if plan_identifier is not None else (data.plan_id or data.plan_code)
+        if target is None:
+            raise AppException("plan_id or plan_code must be provided")
+
+        plan = None
+        if isinstance(target, int) or (isinstance(target, str) and target.isdigit()):
+            plan = self.db.query(SaaSPlan).filter(SaaSPlan.id == int(target)).first()
+        elif isinstance(target, str):
+            plan = (
+                self.db.query(SaaSPlan)
+                .filter(func.lower(SaaSPlan.code) == target.strip().lower())
+                .first()
+            )
+
+        if not plan:
+            raise NotFoundException(f"SaaS Plan '{target}' not found")
+
+        dim_map: dict[str, tuple[Optional[int], bool]] = {}
+
+        def process_dim(dim_name: str, val: Optional[int], is_unl: Optional[bool]):
+            if is_unl is True:
+                dim_map[dim_name] = (None, True)
+            elif is_unl is False:
+                if val is None:
+                    raise AppException(f"Dimension '{dim_name}' has is_unlimited=False but no value was provided")
+                dim_map[dim_name] = (val, False)
+            elif val is not None:
+                dim_map[dim_name] = (val, False)
+            elif dim_name in data.model_fields_set:
+                dim_map[dim_name] = (None, True)
+
+        process_dim("users", data.users, data.is_users_unlimited)
+        process_dim("stores", data.stores, data.is_stores_unlimited)
+        process_dim("products", data.products, data.is_products_unlimited)
+        process_dim("monthly_orders", data.monthly_orders, data.is_monthly_orders_unlimited)
+
+        if data.items:
+            for item in data.items:
+                dim_map[item.dimension] = (None if item.is_unlimited else item.value, item.is_unlimited)
+
+        if not dim_map:
+            raise AppException("No limits or dimensions were specified to configure")
+
+        try:
+            for dim, (val, is_unl) in dim_map.items():
+                entitlement = (
+                    self.db.query(SaaSPlanEntitlement)
+                    .filter(
+                        SaaSPlanEntitlement.plan_id == plan.id,
+                        SaaSPlanEntitlement.dimension == dim,
+                    )
+                    .first()
+                )
+                if entitlement:
+                    entitlement.value = val
+                    entitlement.is_unlimited = is_unl
+                    entitlement.updated_at = datetime.utcnow()
+                else:
+                    entitlement = SaaSPlanEntitlement(
+                        plan_id=plan.id,
+                        dimension=dim,
+                        value=val,
+                        is_unlimited=is_unl,
+                    )
+                    self.db.add(entitlement)
+
+            self.db.flush()
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+
+        current_ents = (
+            self.db.query(SaaSPlanEntitlement)
+            .filter(SaaSPlanEntitlement.plan_id == plan.id)
+            .order_by(SaaSPlanEntitlement.id.asc())
+            .all()
+        )
+
+        return PlanLimitsConfigureResponse(
+            success=True,
+            message=f"Limits configured successfully for plan '{plan.name}' (ID: {plan.id})",
+            plan_id=plan.id,
+            plan_name=plan.name,
+            plan_code=plan.code,
+            limits=[
+                LimitItemDetail(
+                    dimension=e.dimension,
+                    value=e.value,
+                    is_unlimited=e.is_unlimited,
+                )
+                for e in current_ents
+            ],
+        )
 
     # ==========================================
     # P2 TASK 10: SAAS SUBSCRIPTION & BILLING OVERSIGHT

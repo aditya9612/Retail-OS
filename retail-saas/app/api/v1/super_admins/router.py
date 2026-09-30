@@ -42,6 +42,8 @@ from app.schemas.saas_plan import (
     SaaSPlanUpdate,
 )
 from app.schemas.saas_entitlement import (
+    PlanLimitsConfigureRequest,
+    PlanLimitsConfigureResponse,
     SaaSPlanEntitlementCreate,
     SaaSPlanEntitlementListResponse,
     SaaSPlanEntitlementResponse,
@@ -591,6 +593,46 @@ def delete_plan_entitlement(
 ):
     SuperAdminService(db).delete_plan_entitlement(plan_id, dimension)
     return {"success": True, "message": f"Entitlement '{dimension}' deleted for plan {plan_id}"}
+
+
+@router.put(
+    "/saas-plans/{plan_id}/configure-limits",
+    response_model=PlanLimitsConfigureResponse,
+    summary="Configure All Plan Limits/Entitlements in a Single API",
+)
+@router.post(
+    "/saas-plans/{plan_id}/configure-limits",
+    response_model=PlanLimitsConfigureResponse,
+    summary="Configure All Plan Limits/Entitlements in a Single API",
+)
+def configure_plan_limits_by_path(
+    plan_id: str,
+    data: PlanLimitsConfigureRequest,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Single API to configure all limits (users, stores, products, monthly_orders, etc.) for a plan in one request.
+    Can set numbers or unlimited (is_unlimited=True / null).
+    plan_id can be an ID (e.g. 1, 2, 3) or code (e.g. 'basic', 'pro', 'enterprise').
+    """
+    return SuperAdminService(db).configure_plan_limits(plan_id, data)
+
+
+@router.post(
+    "/saas-plans/configure-limits",
+    response_model=PlanLimitsConfigureResponse,
+    summary="Configure All Plan Limits/Entitlements in a Single API (Plan in Body)",
+)
+def configure_plan_limits_by_body(
+    data: PlanLimitsConfigureRequest,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Single API to select a plan (by plan_id or plan_code in request body) and configure all its limits in one request.
+    """
+    return SuperAdminService(db).configure_plan_limits(None, data)
 
 
 

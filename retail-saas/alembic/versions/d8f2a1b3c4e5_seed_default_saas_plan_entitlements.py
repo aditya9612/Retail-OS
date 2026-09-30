@@ -84,3 +84,4 @@ def downgrade() -> None:
                     ),
                     {"p_id": plan_id, "dim": dim}
                 )
+
