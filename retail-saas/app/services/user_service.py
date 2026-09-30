@@ -1,3 +1,5 @@
+from typing import Optional
+
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictException, NotFoundException
@@ -101,6 +103,11 @@ class UserService:
             ),
             is_active=True,
             is_deleted=False,
+            pancard=getattr(data, "pancard", None),
+            addhar_card=getattr(data, "addhar_card", None),
+            profile_photo=getattr(data, "profile_photo", None),
+            pan_number=getattr(data, "pan_number", None),
+            addhar_number=getattr(data, "addhar_number", None),
         )
 
         user = self.repo.create(user)
@@ -449,3 +456,32 @@ class UserService:
         self.db.commit()
         self.db.refresh(user)
         return user
+
+    def remove_store(
+        self,
+        tenant_id: int,
+        user_id: int,
+        store_id: Optional[int] = None,
+    ) -> tuple[User, int]:
+        user = self.get_user(
+            tenant_id,
+            user_id,
+        )
+
+        if user.store_id is None:
+            raise ConflictException(
+                "User is not currently assigned to any store"
+            )
+
+        if store_id is not None and user.store_id != store_id:
+            raise ConflictException(
+                f"User is assigned to store {user.store_id}, not store {store_id}"
+            )
+
+        previous_store_id = user.store_id
+        user.store_id = None
+        user = self.repo.update(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user, previous_store_id
+

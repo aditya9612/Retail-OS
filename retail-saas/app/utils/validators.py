@@ -516,3 +516,103 @@ def validate_email_format(
         raise ValueError(f"Invalid {field_name.lower()} format")
 
     return v
+
+
+PAN_CARD_PATTERN = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]{1}$")
+AADHAAR_CARD_PATTERN = re.compile(r"^[2-9][0-9]{11}$")
+
+
+def validate_pan_number(
+    value: Any,
+    field_name: str = "PAN card number",
+    required: bool = False,
+) -> Optional[str]:
+    """
+    Validates Indian Permanent Account Number (PAN).
+    Format: 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F).
+    Automatically strips whitespace and converts to uppercase.
+    Rejects: wrong length, wrong characters, placeholders.
+    """
+    if value is None:
+        if required:
+            raise ValueError(f"{field_name} cannot be null")
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string")
+
+    v = value.strip().upper()
+    if not v:
+        if required:
+            raise ValueError(f"{field_name} cannot be empty or whitespace")
+        return None
+
+    if v in ("STRING", "NULL", "NONE", "UNDEFINED"):
+        raise ValueError(f"{field_name} cannot be placeholder '{value}'")
+
+    if len(v) != 10:
+        raise ValueError(
+            f"Invalid {field_name}. It must be exactly 10 characters long (e.g. ABCDE1234F)"
+        )
+
+    if not PAN_CARD_PATTERN.fullmatch(v):
+        raise ValueError(
+            f"Invalid {field_name} format '{v}'. It must contain 5 letters followed by 4 digits and 1 letter (e.g. ABCDE1234F)"
+        )
+
+    return v
+
+
+def validate_aadhaar_number(
+    value: Any,
+    field_name: str = "Aadhaar number",
+    required: bool = False,
+) -> Optional[str]:
+    """
+    Validates Indian Aadhaar card number.
+    Format: exactly 12 numeric digits, cannot start with 0 or 1.
+    Automatically strips spaces and hyphens (e.g. '1234 5678 9012' -> '123456789012').
+    Rejects: non-digits, length != 12, starting with 0/1, repeated dummy digits.
+    """
+    if value is None:
+        if required:
+            raise ValueError(f"{field_name} cannot be null")
+        return None
+
+    if isinstance(value, int):
+        v = str(value)
+    elif isinstance(value, str):
+        v = value.strip()
+    else:
+        raise ValueError(f"{field_name} must be a string or integer")
+
+    if not v:
+        if required:
+            raise ValueError(f"{field_name} cannot be empty or whitespace")
+        return None
+
+    if v.lower() in ("string", "null", "none", "undefined"):
+        raise ValueError(f"{field_name} cannot be placeholder '{value}'")
+
+    clean_v = re.sub(r"[\s\-]", "", v)
+
+    if not clean_v.isdigit():
+        raise ValueError(f"{field_name} must contain only numeric digits")
+
+    if len(clean_v) != 12:
+        raise ValueError(
+            f"Invalid {field_name}. It must be exactly 12 digits (found {len(clean_v)} digits)"
+        )
+
+    if clean_v.startswith("0") or clean_v.startswith("1"):
+        raise ValueError(
+            f"Invalid {field_name}. Aadhaar number cannot start with 0 or 1"
+        )
+
+    if len(set(clean_v)) == 1:
+        raise ValueError(
+            f"Invalid {field_name}. Aadhaar number cannot contain 12 identical digits"
+        )
+
+    return clean_v
+

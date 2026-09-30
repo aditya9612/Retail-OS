@@ -76,13 +76,89 @@ app = FastAPI(
 )
 
 
+import json
+from starlette.types import ASGIApp, Receive, Scope, Send
+
 UPLOAD_DIR = Path("uploads")
 PRODUCT_UPLOAD_DIR = UPLOAD_DIR / "products"
+USER_UPLOAD_DIR = UPLOAD_DIR / "users"
 
 PRODUCT_UPLOAD_DIR.mkdir(
     parents=True,
     exist_ok=True,
 )
+USER_UPLOAD_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+
+class UserJsonToFormMiddleware:
+    """Seamlessly adapts JSON payloads on POST /api/v1/users to multipart form-data."""
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if (
+            scope.get("type") == "http"
+            and scope.get("path", "").rstrip("/") == "/api/v1/users"
+            and scope.get("method") == "POST"
+        ):
+            headers_dict = dict(scope.get("headers", []))
+            ct = headers_dict.get(b"content-type", b"").decode("latin1")
+            if "application/json" in ct:
+                body = bytearray()
+                while True:
+                    message = await receive()
+                    body.extend(message.get("body", b""))
+                    if not message.get("more_body", False):
+                        break
+
+                try:
+                    data = json.loads(body.decode("utf-8")) if body else {}
+                except Exception:
+                    data = {}
+
+                # Map legacy role_id to role name if role string was omitted
+                if data.get("role_id") and not data.get("role"):
+                    try:
+                        from app.core.database import SessionLocal
+                        from app.models.role import Role
+                        with SessionLocal() as db_session:
+                            r = db_session.query(Role).filter(Role.id == data["role_id"]).first()
+                            if r:
+                                data["role"] = r.name
+                    except Exception:
+                        pass
+
+                boundary = "----RetailOSFormBoundaryXyZ12345"
+                body_parts = []
+                for k, v in data.items():
+                    if v is not None:
+                        body_parts.append(
+                            f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'
+                        )
+                body_parts.append(f'--{boundary}--\r\n')
+                new_body = "".join(body_parts).encode("utf-8")
+
+                new_headers = []
+                for k, v in scope.get("headers", []):
+                    if k.lower() == b"content-type":
+                        new_headers.append(
+                            (b"content-type", f"multipart/form-data; boundary={boundary}".encode("ascii"))
+                        )
+                    elif k.lower() == b"content-length":
+                        new_headers.append((b"content-length", str(len(new_body)).encode("ascii")))
+                    else:
+                        new_headers.append((k, v))
+                scope["headers"] = new_headers
+
+                async def new_receive():
+                    return {"type": "http.request", "body": new_body, "more_body": False}
+
+                return await self.app(scope, new_receive, send)
+
+        return await self.app(scope, receive, send)
 
 
 app.mount(
@@ -101,6 +177,7 @@ app.add_middleware(
 )
 
 app.add_middleware(TenantMiddleware)
+app.add_middleware(UserJsonToFormMiddleware)
 
 
 API_PREFIX = "/api/v1"

@@ -1,6 +1,6 @@
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 import re
 
 from pydantic import (
@@ -11,6 +11,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from app.utils.validators import validate_pan_number, validate_aadhaar_number
 
 
 PHONE_PATTERN = re.compile(r"^(?:\+91)?[6-9]\d{9}$")
@@ -53,6 +55,42 @@ class UserBase(BaseModel):
         default=None,
         description="Role name (e.g. manager, staff, admin, owner). Automatically mapped to role_id.",
     )
+
+    pancard: Optional[str] = Field(
+        default=None,
+        description="PAN card number or uploaded document URL",
+    )
+
+    addhar_card: Optional[str] = Field(
+        default=None,
+        description="Aadhaar card number or uploaded document URL",
+    )
+
+    profile_photo: Optional[str] = Field(
+        default=None,
+        description="Profile photo URL or file path",
+    )
+
+    pan_number: Optional[str] = Field(
+        default=None,
+        description="PAN card number (e.g. ABCDE1234F)",
+    )
+
+    addhar_number: Optional[str] = Field(
+        default=None,
+        description="Aadhaar card 12-digit number",
+    )
+
+    @field_validator("pan_number")
+    @classmethod
+    def validate_pan(cls, value: Optional[str]) -> Optional[str]:
+        return validate_pan_number(value)
+
+    @field_validator("addhar_number", mode="before")
+    @classmethod
+    def validate_aadhaar(cls, value: Any) -> Optional[str]:
+        return validate_aadhaar_number(value)
+
 
     @field_validator("email")
     @classmethod
@@ -220,6 +258,36 @@ class UserUpdate(BaseModel):
         min_length=8,
         max_length=100,
     )
+
+    pancard: Optional[str] = Field(
+        default=None,
+    )
+
+    addhar_card: Optional[str] = Field(
+        default=None,
+    )
+
+    profile_photo: Optional[str] = Field(
+        default=None,
+    )
+
+    pan_number: Optional[str] = Field(
+        default=None,
+    )
+
+    addhar_number: Optional[str] = Field(
+        default=None,
+    )
+
+    @field_validator("pan_number")
+    @classmethod
+    def validate_pan(cls, value: Optional[str]) -> Optional[str]:
+        return validate_pan_number(value)
+
+    @field_validator("addhar_number", mode="before")
+    @classmethod
+    def validate_aadhaar(cls, value: Any) -> Optional[str]:
+        return validate_aadhaar_number(value)
 
     model_config = ConfigDict(
         extra="forbid",
@@ -469,6 +537,11 @@ class UserResponse(BaseModel):
     is_active: bool
     role: Optional[RoleResponse] = None
     created_at: datetime
+    pancard: Optional[str] = None
+    addhar_card: Optional[str] = None
+    profile_photo: Optional[str] = None
+    pan_number: Optional[str] = None
+    addhar_number: Optional[str] = None
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -489,3 +562,20 @@ class AssignStoreResponse(BaseModel):
     store_id: int
     store_name: Optional[str] = None
     role: Optional[str] = None
+
+
+class RemoveStoreRequest(BaseModel):
+    store_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Optional Store ID to verify before removing user from store. If provided, ensures user is assigned to this store.",
+    )
+
+
+class RemoveStoreResponse(BaseModel):
+    message: str = "User removed from store successfully"
+    user_id: int
+    store_id: Optional[int] = None
+    previous_store_id: Optional[int] = None
+    role: Optional[str] = None
+

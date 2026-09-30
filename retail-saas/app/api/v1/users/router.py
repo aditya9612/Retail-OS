@@ -1,6 +1,9 @@
+import uuid
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from pydantic import EmailStr
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -15,8 +18,11 @@ from app.schemas.user import (
     UserUpdate,
     AssignStoreRequest,
     AssignStoreResponse,
+    RemoveStoreRequest,
+    RemoveStoreResponse,
 )
 from app.services.user_service import UserService
+from app.utils.validators import validate_pan_number, validate_aadhaar_number
 
 
 router = APIRouter(
@@ -25,27 +31,93 @@ router = APIRouter(
 )
 
 
+async def _save_user_file(file: Optional[UploadFile], prefix: str) -> Optional[str]:
+    if not file:
+        return None
+    content = await file.read()
+    if not content:
+        return None
+
+    filename = getattr(file, "filename", None)
+    if not filename:
+        text_val = content.decode("utf-8", errors="ignore").strip()
+        return text_val if text_val else None
+
+    ext = Path(filename).suffix.lower()
+    if not ext:
+        content_type = getattr(file, "content_type", "")
+        if "pdf" in content_type:
+            ext = ".pdf"
+        elif "png" in content_type:
+            ext = ".png"
+        elif "jpeg" in content_type or "jpg" in content_type:
+            ext = ".jpg"
+        else:
+            ext = ".bin"
+
+    unique_filename = f"{prefix}_{uuid.uuid4().hex[:12]}{ext}"
+    user_upload_dir = Path("uploads") / "users"
+    user_upload_dir.mkdir(parents=True, exist_ok=True)
+    file_path = user_upload_dir / unique_filename
+    with open(file_path, "wb") as f:
+        f.write(content)
+    return f"/uploads/users/{unique_filename}"
+
+
 @router.post(
     "",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="Create User",
+    description="Create a new user with role and KYC/profile details (pan_number, addhar_number, pancard, addhar card, profile photo) using multipart/form-data.",
 )
-def create_user(
-    data: UserCreate,
+async def create_user(
+    email: EmailStr = Form(..., description="Valid email address is required"),
+    full_name: str = Form(..., min_length=2, max_length=100, description="Full name of the user"),
+    password: str = Form(..., min_length=8, max_length=100, description="Password (min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char)"),
+    role: str = Form("staff", description="Role name (e.g. staff, manager, cashier, admin)"),
+    phone: Optional[str] = Form(None, description="Optional 10-digit phone number"),
+    pan_number: Optional[str] = Form(None, description="PAN card number (e.g. ABCDE1234F)"),
+    addhar_number: Optional[str] = Form(None, description="Aadhaar card 12-digit number (e.g. 987654321012)"),
+    pancard: Optional[UploadFile] = File(None, description="PAN card document or image file"),
+    addhar_card: Optional[UploadFile] = File(None, description="Aadhaar card document or image file"),
+    profile_photo: Optional[UploadFile] = File(None, description="Profile photo image file"),
     current_user: User = Depends(require_permission("users:write")),
     db: Session = Depends(get_db),
 ):
-    # Store-level user (manager/staff) may only create users for their assigned store
-    if current_user.store_id is not None:
-        if data.store_id is not None and data.store_id != current_user.store_id:
-            raise ForbiddenException("You can only create users for your assigned store")
-        if data.store_id is None:
-            data.store_id = current_user.store_id
+    try:
+        validated_pan = validate_pan_number(pan_number)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        validated_aadhaar = validate_aadhaar_number(addhar_number)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    pancard_path = await _save_user_file(pancard, "pancard")
+    addhar_card_path = await _save_user_file(addhar_card, "addhar_card")
+    profile_photo_path = await _save_user_file(profile_photo, "profile_photo")
+
+    user_data = UserCreate(
+        email=email,
+        full_name=full_name,
+        password=password,
+        role=role,
+        phone=phone,
+        pan_number=validated_pan,
+        addhar_number=validated_aadhaar,
+        pancard=pancard_path,
+        addhar_card=addhar_card_path,
+        profile_photo=profile_photo_path,
+        store_id=current_user.store_id,
+    )
 
     return UserService(db).create_user(
         current_user.tenant_id,
-        data,
+        user_data,
     )
+
 
 
 @router.get(
@@ -270,3 +342,47 @@ def assign_store(
         store_name=store_name,
         role=role_name,
     )
+
+
+@router.post(
+    "/{user_id}/remove-store",
+    response_model=RemoveStoreResponse,
+    summary="Remove User from Store",
+    description="Removes/unassigns a user from their currently assigned store, setting store_id to null.",
+)
+def remove_store(
+    user_id: int,
+    data: Optional[RemoveStoreRequest] = None,
+    current_user: User = Depends(require_permission("users:write")),
+    db: Session = Depends(get_db),
+):
+    target_user = UserService(db).get_user(
+        current_user.tenant_id,
+        user_id,
+    )
+
+    effective_store_id = data.store_id if data else None
+
+    if current_user.store_id is not None:
+        if target_user.store_id != current_user.store_id:
+            raise ForbiddenException("Access denied to user of another store")
+        if effective_store_id is not None and effective_store_id != current_user.store_id:
+            raise ForbiddenException("You can only remove users from your assigned store")
+        effective_store_id = current_user.store_id
+
+    user, previous_store_id = UserService(db).remove_store(
+        tenant_id=current_user.tenant_id,
+        user_id=user_id,
+        store_id=effective_store_id,
+    )
+
+    role_name = user.role.name if getattr(user, "role", None) else None
+
+    return RemoveStoreResponse(
+        message="User removed from store successfully",
+        user_id=user.id,
+        store_id=user.store_id,
+        previous_store_id=previous_store_id,
+        role=role_name,
+    )
+

@@ -61,6 +61,57 @@ class User(Base, TimestampMixin):
         nullable=True,
     )
 
+    pancard: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    addhar_card: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    profile_photo: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
+    pan_number: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    addhar_number: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    @property
+    def aadhar_card(self) -> str | None:
+        return self.addhar_card
+
+    @aadhar_card.setter
+    def aadhar_card(self, val: str | None) -> None:
+        self.addhar_card = val
+
+    @property
+    def aadhar_number(self) -> str | None:
+        return self.addhar_number
+
+    @aadhar_number.setter
+    def aadhar_number(self, val: str | None) -> None:
+        self.addhar_number = val
+
+    @property
+    def pancard_number(self) -> str | None:
+        return self.pan_number
+
+    @pancard_number.setter
+    def pancard_number(self, val: str | None) -> None:
+        self.pan_number = val
+
+
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
