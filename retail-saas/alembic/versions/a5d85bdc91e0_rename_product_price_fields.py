@@ -18,38 +18,30 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.alter_column(
-        "products",
-        "price",
-        new_column_name="selling_price",
-        existing_type=sa.Numeric(12, 2),
-        existing_nullable=False,
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    cols = [col["name"] for col in inspector.get_columns("products")]
 
-    op.alter_column(
-        "products",
-        "cost_price",
-        new_column_name="mrp",
-        existing_type=sa.Numeric(12, 2),
-        existing_nullable=True,
-        existing_server_default=sa.text("0.00"),
-    )
+    if "price" in cols and "selling_price" not in cols:
+        op.alter_column(
+            "products",
+            "price",
+            new_column_name="selling_price",
+            existing_type=sa.Numeric(12, 2),
+            existing_nullable=False,
+        )
 
 
 def downgrade() -> None:
-    op.alter_column(
-        "products",
-        "selling_price",
-        new_column_name="price",
-        existing_type=sa.Numeric(12, 2),
-        existing_nullable=False,
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    cols = [col["name"] for col in inspector.get_columns("products")]
 
-    op.alter_column(
-        "products",
-        "mrp",
-        new_column_name="cost_price",
-        existing_type=sa.Numeric(12, 2),
-        existing_nullable=True,
-        existing_server_default=sa.text("0.00"),
-    )
+    if "selling_price" in cols and "price" not in cols:
+        op.alter_column(
+            "products",
+            "selling_price",
+            new_column_name="price",
+            existing_type=sa.Numeric(12, 2),
+            existing_nullable=False,
+        )

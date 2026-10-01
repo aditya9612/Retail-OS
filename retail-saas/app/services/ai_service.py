@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.inventory import Inventory
 from app.models.order import Order
 from app.models.order_item import OrderItem
+from app.models.product import Product
 from app.utils.constants import OrderStatus
 
 
@@ -17,7 +18,7 @@ class AIService:
     def reorder_prediction(self, tenant_id: int, store_id: int | None = None) -> list[dict]:
         query = self.db.query(Inventory).filter(
             Inventory.tenant_id == tenant_id,
-            Inventory.quantity <= Inventory.low_stock_threshold,
+            Inventory.quantity <= Inventory.min_stock_level,
         )
         if store_id:
             query = query.filter(Inventory.store_id == store_id)
@@ -27,30 +28,30 @@ class AIService:
                 "product_id": i.product_id,
                 "store_id": i.store_id,
                 "current_stock": i.quantity,
-                "threshold": i.low_stock_threshold,
-                "recommended_reorder": max(i.low_stock_threshold * 2 - i.quantity, i.low_stock_threshold),
+                "reorder_level": i.reorder_point,
+                "recommended_order": max(i.max_stock_level - i.quantity, 10),
             }
             for i in items
         ]
 
-    def demand_forecast(self, tenant_id: int, product_id: int, days: int = 30) -> dict:
-        since = datetime.utcnow() - timedelta(days=days)
-        sold = (
+    def demand_forecast(self, tenant_id: int, product_id: int) -> dict:
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        total_sold = (
             self.db.query(func.coalesce(func.sum(OrderItem.quantity), 0))
             .join(Order)
             .filter(
                 Order.tenant_id == tenant_id,
                 OrderItem.product_id == product_id,
-                Order.created_at >= since,
                 Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.DELIVERED.value]),
+                Order.created_at >= thirty_days_ago,
             )
             .scalar()
         )
-        daily_avg = float(sold) / days if days else 0
+        daily_avg = float(total_sold) / 30.0
         return {
             "product_id": product_id,
-            "period_days": days,
-            "total_sold": int(sold),
+            "period_days": 30,
+            "total_sold": int(total_sold),
             "daily_average": round(daily_avg, 2),
             "forecast_next_7_days": round(daily_avg * 7, 0),
             "forecast_next_30_days": round(daily_avg * 30, 0),
@@ -60,12 +61,13 @@ class AIService:
         rows = (
             self.db.query(
                 OrderItem.product_id,
-                OrderItem.product_name,
+                Product.name.label("product_name"),
                 func.sum(OrderItem.quantity).label("qty"),
             )
-            .join(Order)
+            .join(Order, Order.id == OrderItem.order_id)
+            .join(Product, Product.id == OrderItem.product_id)
             .filter(Order.tenant_id == tenant_id, Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.DELIVERED.value]))
-            .group_by(OrderItem.product_id, OrderItem.product_name)
+            .group_by(OrderItem.product_id, Product.name)
             .order_by(func.sum(OrderItem.quantity).desc())
             .limit(limit)
             .all()

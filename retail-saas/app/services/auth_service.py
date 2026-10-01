@@ -3,6 +3,7 @@ import json
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -28,6 +29,7 @@ from app.models.role import Role
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.repositories.user_repo import UserRepository
+from app.services.saas_subscription_service import SaaSSubscriptionService
 from app.schemas.auth import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
@@ -410,18 +412,41 @@ class AuthService:
 
     def register_tenant(
         self,
-        tenant_name: str,
-        slug: str,
-        email: str,
-        admin_name: str,
-        password: str,
+        data_or_name: Any,
+        domain: str | None = None,
+        email: str | None = None,
+        admin_name: str | None = None,
+        password: str | None = None,
         phone: str | None = None,
     ) -> User:
+        plan_id = None
+        plan_code = None
+        if hasattr(data_or_name, "tenant_name"):
+            tenant_name = data_or_name.tenant_name
+            domain_val = getattr(data_or_name, "domain", None) or getattr(data_or_name, "slug", None)
+            email = data_or_name.email
+            admin_name = data_or_name.admin_name
+            password = data_or_name.password
+            phone = data_or_name.phone
+            plan_id = getattr(data_or_name, "plan_id", None)
+            plan_code = getattr(data_or_name, "plan_code", None)
+        elif isinstance(data_or_name, dict):
+            tenant_name = data_or_name.get("tenant_name", "")
+            domain_val = data_or_name.get("domain") or data_or_name.get("slug", "")
+            email = data_or_name.get("email", "")
+            admin_name = data_or_name.get("admin_name", "")
+            password = data_or_name.get("password", "")
+            phone = data_or_name.get("phone")
+            plan_id = data_or_name.get("plan_id")
+            plan_code = data_or_name.get("plan_code")
+        else:
+            tenant_name = data_or_name
+            domain_val = domain
 
-        tenant_name = tenant_name.strip()
-        slug = slug.strip().lower()
-        email = normalize_email(email)
-        admin_name = admin_name.strip()
+        tenant_name = (tenant_name or "").strip()
+        domain_val = (domain_val or "").strip().lower()
+        email = normalize_email(email or "")
+        admin_name = (admin_name or "").strip()
 
         if len(tenant_name) < 2:
             raise AppException(
@@ -433,9 +458,9 @@ class AuthService:
                 "Tenant name must not exceed 255 characters"
             )
 
-        if not _SLUG_PATTERN.fullmatch(slug):
+        if not domain_val or not re.match(r"^[a-z0-9-]+$", domain_val):
             raise AppException(
-                "Slug must contain lowercase letters, numbers, and hyphens and must start and end with a letter or number"
+                "Domain must contain lowercase alphanumeric characters and hyphens"
             )
 
         if not admin_name:
@@ -463,14 +488,14 @@ class AuthService:
         existing_tenant = (
             self.db.query(Tenant)
             .filter(
-                Tenant.slug == slug
+                Tenant.domain == domain_val
             )
             .first()
         )
 
         if existing_tenant:
             raise ConflictException(
-                "Tenant slug already exists"
+                "Tenant domain already exists"
             )
 
         existing_user = (
@@ -489,9 +514,7 @@ class AuthService:
         try:
             tenant = Tenant(
                 name=tenant_name,
-                slug=slug,
-                email=email,
-                phone=phone,
+                domain=domain_val,
                 is_active=True,
             )
 
@@ -499,7 +522,6 @@ class AuthService:
             self.db.flush()
 
             for role_name in UserRole:
-
                 if role_name == UserRole.SUPERADMIN:
                     continue
 
@@ -509,6 +531,7 @@ class AuthService:
                     permissions=DEFAULT_ROLE_PERMISSIONS[
                         role_name
                     ],
+                    is_system=False,
                 )
 
                 self.db.add(role)
@@ -535,7 +558,7 @@ class AuthService:
                 tenant_id=tenant.id,
                 role_id=admin_role.id,
                 email=email,
-                hashed_password=get_password_hash(
+                password_hash=get_password_hash(
                     password
                 ),
                 full_name=admin_name,
@@ -545,6 +568,13 @@ class AuthService:
 
             self.db.add(user)
             self.db.flush()
+
+            # Create initial SaaSSubscription and synchronize legacy tenant projection
+            SaaSSubscriptionService(self.db).create_initial_subscription(
+                tenant_id=tenant.id,
+                plan_id=plan_id,
+                plan_code=plan_code,
+            )
 
             self.db.commit()
             self.db.refresh(user)
@@ -739,10 +769,10 @@ class AuthService:
             .filter(
                 PasswordResetToken.user_id
                 == user.id,
-                PasswordResetToken.used.is_(False),
+                PasswordResetToken.used_at.is_(None),
             )
             .update(
-                {"used": True},
+                {"used_at": datetime.utcnow()},
                 synchronize_session=False,
             )
         )
@@ -751,7 +781,7 @@ class AuthService:
             user_id=user.id,
             token_hash=token_hash,
             expires_at=expires_at,
-            used=False,
+            used_at=None,
         )
 
         self.db.add(reset_token)
@@ -779,7 +809,7 @@ class AuthService:
             .filter(
                 PasswordResetToken.token_hash
                 == token_hash,
-                PasswordResetToken.used.is_(False),
+                PasswordResetToken.used_at.is_(None),
             )
             .first()
         )
@@ -790,7 +820,7 @@ class AuthService:
             )
 
         if reset_token.expires_at < datetime.utcnow():
-            reset_token.used = True
+            reset_token.used_at = datetime.utcnow()
             self.db.commit()
 
             raise UnauthorizedException(
@@ -807,7 +837,7 @@ class AuthService:
         )
 
         if not user:
-            reset_token.used = True
+            reset_token.used_at = datetime.utcnow()
             self.db.commit()
 
             raise UnauthorizedException(
@@ -819,13 +849,13 @@ class AuthService:
                 "Account is disabled"
             )
 
-        user.hashed_password = (
+        user.password_hash = (
             get_password_hash(
                 data.new_password
             )
         )
 
-        reset_token.used = True
+        reset_token.used_at = datetime.utcnow()
 
         self.db.commit()
 
@@ -889,7 +919,7 @@ class AuthService:
             data.new_password
         )
 
-        user.hashed_password = (
+        user.password_hash = (
             get_password_hash(
                 data.new_password
             )

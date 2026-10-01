@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import require_permission
+from app.core.security import require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.order import OrderCreate, OrderResponse, OrderUpdate, OrderTrackingResponse, OrderStatusUpdateRequest
 from app.services.order_service import OrderService
@@ -21,7 +21,7 @@ def list_orders(
     return OrderService(db).list_orders(user.tenant_id, store_id, page, page_size)
 
 
-@router.post("", response_model=OrderResponse, status_code=201)
+@router.post("", response_model=OrderResponse, status_code=201, dependencies=[Depends(require_operational_write)])
 def create_order(
     data: OrderCreate,
     user: User = Depends(require_permission("orders:write")),
@@ -39,7 +39,7 @@ def get_order(
     return OrderService(db).get_order(user.tenant_id, order_id)
 
 
-@router.patch("/{order_id}", response_model=OrderResponse)
+@router.patch("/{order_id}", response_model=OrderResponse, dependencies=[Depends(require_operational_write)])
 def update_order(
     order_id: int,
     data: OrderUpdate,
@@ -49,7 +49,7 @@ def update_order(
     return OrderService(db).update_order(user.tenant_id, order_id, data)
 
 
-@router.post("/{order_id}/confirm", response_model=OrderResponse)
+@router.post("/{order_id}/confirm", response_model=OrderResponse, dependencies=[Depends(require_operational_write)])
 def confirm_order(
     order_id: int,
     user: User = Depends(require_permission("orders:write")),
@@ -58,7 +58,7 @@ def confirm_order(
     return OrderService(db).confirm_order(user.tenant_id, order_id)
 
 
-@router.post("/{order_id}/cancel", response_model=OrderResponse)
+@router.post("/{order_id}/cancel", response_model=OrderResponse, dependencies=[Depends(require_operational_write)])
 def cancel_order(
     order_id: int,
     user: User = Depends(require_permission("orders:write")),
@@ -67,7 +67,7 @@ def cancel_order(
     return OrderService(db).cancel_order(user.tenant_id, order_id)
 
 
-@router.patch("/{order_id}/status", response_model=OrderResponse)
+@router.patch("/{order_id}/status", response_model=OrderResponse, dependencies=[Depends(require_operational_write)])
 def update_order_status(
     order_id: int,
     data: OrderStatusUpdateRequest,

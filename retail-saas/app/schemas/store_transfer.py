@@ -144,6 +144,10 @@ class StoreTransferUpdate(BaseModel):
     )
 
 
+class StoreTransferApprove(BaseModel):
+    approved_by: int | None = Field(default=None, gt=0, description="User ID approving the transfer")
+
+
 class StoreTransferItemResponse(BaseModel):
     id: int
     product_id: int

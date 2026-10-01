@@ -14,6 +14,7 @@ class CategoryRepository:
         name: str,
         description: str | None = None,
         parent_id: int | None = None,
+        is_active: bool = True,
     ) -> Category:
 
         category = Category(
@@ -21,6 +22,7 @@ class CategoryRepository:
             name=name,
             description=description,
             parent_id=parent_id,
+            is_active=is_active,
         )
 
         self.db.add(category)
@@ -57,6 +59,7 @@ class CategoryRepository:
         name: str | None = None,
         description: str | None = None,
         parent_id: int | None = None,
+        is_active: bool | None = None,
     ) -> Category:
 
         if name is not None:
@@ -67,6 +70,9 @@ class CategoryRepository:
 
         if parent_id is not None:
             category.parent_id = parent_id
+
+        if is_active is not None:
+            category.is_active = is_active
 
         self.db.commit()
         self.db.refresh(category)

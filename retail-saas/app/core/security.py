@@ -299,6 +299,22 @@ def get_current_user(
             "Invalid tenant user account"
         )
 
+    from app.models.tenant import Tenant
+
+    tenant = (
+        db.query(Tenant)
+        .filter(
+            Tenant.id == user.tenant_id,
+            Tenant.is_active.is_(True),
+        )
+        .first()
+    )
+
+    if not tenant:
+        raise UnauthorizedException(
+            "Tenant account is disabled"
+        )
+
     set_current_user_id(user.id)
     set_current_tenant_id(user.tenant_id)
     set_current_store_id(user.store_id)
@@ -404,3 +420,13 @@ def require_roles(*roles: str):
         )
 
     return checker
+
+
+def require_operational_write(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    from app.services.saas_access_service import SaaSSubscriptionAccessService
+
+    SaaSSubscriptionAccessService(db).require_operational_write_access(user)
+    return user

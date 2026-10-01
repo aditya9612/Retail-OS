@@ -31,16 +31,37 @@ class OrderReturnCreate(BaseModel):
         description="Return reason is required and must be 3-100 characters",
     )
 
-    remarks: str = Field(
-        ...,
+    remarks: str | None = Field(
+        default=None,
         min_length=3,
         max_length=500,
-        description="Return remarks are required and must be 3-500 characters",
+        description="Return remarks are optional (3-500 characters if provided)",
     )
 
-    @field_validator("reason", "remarks")
+    @field_validator("reason")
     @classmethod
-    def validate_text_fields(cls, value: str) -> str:
+    def validate_reason(cls, value: str) -> str:
+        if value is None:
+            raise ValueError("This field cannot be null")
+
+        value = value.strip()
+
+        if not value:
+            raise ValueError("This field cannot be empty")
+
+        if value.lower() == "string":
+            raise ValueError(
+                "Please provide a valid value instead of 'string'"
+            )
+
+        return value
+
+    @field_validator("remarks")
+    @classmethod
+    def validate_remarks(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
         value = value.strip()
 
         if not value:

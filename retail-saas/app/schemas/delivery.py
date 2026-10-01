@@ -281,7 +281,7 @@ class DeliveryStatsResponse(BaseModel):
 class DeliveryMethodCreate(BaseModel):
     name: str = Field(..., description="Method name between 2 and 100 characters")
     code: str = Field(..., description="Unique method code (alphanumeric, underscores, hyphens)")
-    description: str = Field(..., description="Meaningful description (required)")
+    description: Optional[str] = Field(default=None, description="Meaningful description (optional)")
     cost: Decimal = Field(default=Decimal("0.00"), description="Delivery cost >= 0")
     estimated_days: Optional[int] = Field(default=None, description="Estimated delivery days > 0")
     is_active: bool = Field(default=True, description="Active status")
@@ -304,11 +304,8 @@ class DeliveryMethodCreate(BaseModel):
 
     @field_validator("description", mode="before")
     @classmethod
-    def check_description(cls, value: Any) -> str:
-        res = validate_meaningful_text(value, field_name="Description", min_length=2, max_length=255, required=True)
-        if not res:
-            raise ValueError("Description cannot be empty")
-        return res
+    def check_description(cls, value: Any) -> Optional[str]:
+        return validate_meaningful_text(value, field_name="Description", min_length=2, max_length=255, required=False)
 
     @field_validator("cost", mode="before")
     @classmethod
@@ -398,7 +395,7 @@ class DeliveryMethodListResponse(BaseModel):
 class DeliveryZoneCreate(BaseModel):
     name: str = Field(..., description="Zone name between 2 and 100 characters")
     code: str = Field(..., description="Unique zone code (alphanumeric, underscores, hyphens)")
-    description: str = Field(..., description="Zone description (required)")
+    description: Optional[str] = Field(default=None, description="Zone description (optional)")
     city: Optional[str] = Field(default=None, description="Optional city name")
     state: Optional[str] = Field(default=None, description="Optional state name")
     pincodes: list[str] = Field(default_factory=list, description="List of 6-digit postal pincodes")
@@ -422,11 +419,8 @@ class DeliveryZoneCreate(BaseModel):
 
     @field_validator("description", mode="before")
     @classmethod
-    def check_description(cls, value: Any) -> str:
-        res = validate_meaningful_text(value, field_name="Description", min_length=2, max_length=255, required=True)
-        if not res:
-            raise ValueError("Description cannot be empty")
-        return res
+    def check_description(cls, value: Any) -> Optional[str]:
+        return validate_meaningful_text(value, field_name="Description", min_length=2, max_length=255, required=False)
 
     @field_validator("city", mode="before")
     @classmethod

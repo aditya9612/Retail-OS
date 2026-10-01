@@ -145,15 +145,21 @@ class OrderItemResponse(BaseModel):
 
     id: int
     product_id: int
-    product_name: str
-    sku: str
+    product_name: str = ""
+    sku: str = ""
     quantity: int
     unit_price: Decimal
-    discount: Decimal
-    tax_rate: Decimal
-    tax_amount: Decimal
-    total: Decimal
-    variant: Optional[str]
+    discount: Decimal = Decimal("0.00")
+    discount_amount: Decimal = Decimal("0.00")
+    tax_rate: Decimal = Decimal("0.00")
+    tax_amount: Decimal = Decimal("0.00")
+    total: Decimal = Decimal("0.00")
+    total_amount: Decimal = Decimal("0.00")
+    cgst_amount: Decimal = Decimal("0.00")
+    sgst_amount: Decimal = Decimal("0.00")
+    igst_amount: Decimal = Decimal("0.00")
+    notes: Optional[str] = None
+    variant: Optional[str] = None
 
     model_config = {
         "from_attributes": True
@@ -511,14 +517,16 @@ class OrderResponse(BaseModel):
     order_number: str
     order_type: str
     status: str
-    coupon_code: Optional[str]
+    coupon_code: Optional[str] = None
     discount_amount: Decimal
     subtotal: Decimal
     tax_amount: Decimal
     total_amount: Decimal
-    delivery_address: Optional[str]
-    delivery_status: Optional[str]
-    notes: Optional[str]
+    payment_status: Optional[str] = "pending"
+    delivery_address: Optional[str] = None
+    delivery_pincode: Optional[str] = None
+    delivery_status: Optional[str] = None
+    notes: Optional[str] = None
     items: List[OrderItemResponse] = Field(default_factory=list)
     created_at: datetime
 
@@ -546,109 +554,6 @@ class InvoiceResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
-
-
-class PaymentCreate(BaseModel):
-
-    model_config = ConfigDict(
-        extra="forbid",
-        str_strip_whitespace=True,
-    )
-
-    order_id: StrictInt = Field(
-        ...,
-        gt=0,
-        description="Order ID must be positive",
-    )
-
-    payment_method: str = Field(
-        ...,
-        min_length=1,
-        max_length=30,
-    )
-
-    amount: Decimal = Field(
-        ...,
-        gt=0,
-        le=Decimal("999999.99"),
-        description="Payment amount must be greater than 0",
-    )
-
-    transaction_id: Optional[str] = Field(
-        default=None,
-        min_length=1,
-        max_length=100,
-    )
-
-    @field_validator("payment_method")
-    @classmethod
-    def validate_payment_method(
-        cls,
-        v: str,
-    ) -> str:
-
-        v = v.strip().lower()
-
-        if not v:
-            raise ValueError(
-                "Payment method cannot be empty"
-            )
-
-        if v in INVALID_STRING_VALUES:
-            raise ValueError(
-                "Invalid payment method"
-            )
-
-        if v not in VALID_PAYMENT_METHODS:
-            raise ValueError(
-                f"payment_method must be one of {VALID_PAYMENT_METHODS}"
-            )
-
-        return v
-
-    @field_validator("amount", mode="before")
-    @classmethod
-    def validate_payment_amount(cls, v):
-
-        if isinstance(v, str):
-
-            value = v.strip().lower()
-
-            if value in INVALID_STRING_VALUES:
-                raise ValueError(
-                    "Invalid payment amount"
-                )
-
-            if value == "":
-                raise ValueError(
-                    "Payment amount cannot be empty"
-                )
-
-        return v
-
-    @field_validator("transaction_id")
-    @classmethod
-    def validate_transaction_id(
-        cls,
-        v: Optional[str],
-    ) -> Optional[str]:
-
-        if v is None:
-            return None
-
-        v = v.strip()
-
-        if not v:
-            raise ValueError(
-                "Transaction ID cannot be empty"
-            )
-
-        if v.lower() in INVALID_STRING_VALUES:
-            raise ValueError(
-                "Invalid transaction ID"
-            )
-
-        return v
 
 
 class PaymentResponse(BaseModel):

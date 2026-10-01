@@ -26,6 +26,7 @@ from app.schemas.customer import (
     WalletResponse,
     WalletTransactionResponse,
     WalletOperationResponse,
+    LoyaltyAddPointsRequest,
     LoyaltyEarnRequest,
     LoyaltyRedeemRequest,
     LoyaltyResponse,
@@ -453,11 +454,11 @@ def customer_orders(
 @router.post("/{customer_id}/loyalty", response_model=LoyaltyResponse)
 def add_loyalty(
     customer_id: int = Path(..., gt=0),
-    points: int = Query(..., gt=0, le=10000),
+    data: LoyaltyAddPointsRequest = ...,
     user: User = Depends(require_permission("customers:write")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).add_loyalty_points(user.tenant_id, customer_id, points)
+    return CustomerService(db).add_loyalty_points(user.tenant_id, customer_id, data.points)
 
 
 @router.post(

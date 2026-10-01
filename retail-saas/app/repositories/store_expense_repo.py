@@ -25,23 +25,38 @@ class StoreExpenseRepository:
     def get_by_id(
         db: Session,
         expense_id: int,
+        tenant_id: int,
     ) -> Optional[StoreExpense]:
+        from app.models.store import Store
+
         return (
             db.query(StoreExpense)
-            .filter(StoreExpense.id == expense_id)
+            .join(Store, StoreExpense.store_id == Store.id)
+            .filter(
+                StoreExpense.id == expense_id,
+                Store.tenant_id == tenant_id,
+            )
             .first()
         )
 
     @staticmethod
     def get_all(
         db: Session,
+        tenant_id: int,
         store_id: Optional[int] = None,
         category: Optional[str] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ):
-        query = db.query(StoreExpense).filter(
-            StoreExpense.status == "active"
+        from app.models.store import Store
+
+        query = (
+            db.query(StoreExpense)
+            .join(Store, StoreExpense.store_id == Store.id)
+            .filter(
+                StoreExpense.status == "active",
+                Store.tenant_id == tenant_id,
+            )
         )
 
         if store_id is not None:
@@ -94,19 +109,27 @@ class StoreExpenseRepository:
     @staticmethod
     def get_summary(
         db: Session,
+        tenant_id: int,
         store_id: Optional[int] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ):
-        query = db.query(
-            StoreExpense.store_id,
-            func.coalesce(
-                func.sum(StoreExpense.amount),
-                0,
-            ).label("total_expenses"),
-            func.count(StoreExpense.id).label("expense_count"),
-        ).filter(
-            StoreExpense.status == "active"
+        from app.models.store import Store
+
+        query = (
+            db.query(
+                StoreExpense.store_id,
+                func.coalesce(
+                    func.sum(StoreExpense.amount),
+                    0,
+                ).label("total_expenses"),
+                func.count(StoreExpense.id).label("expense_count"),
+            )
+            .join(Store, StoreExpense.store_id == Store.id)
+            .filter(
+                StoreExpense.status == "active",
+                Store.tenant_id == tenant_id,
+            )
         )
 
         if store_id is not None:
@@ -134,11 +157,18 @@ class StoreExpenseRepository:
     @staticmethod
     def get_categories(
         db: Session,
+        tenant_id: int,
         store_id: Optional[int] = None,
     ):
+        from app.models.store import Store
+
         query = (
             db.query(StoreExpense.category)
-            .filter(StoreExpense.status == "active")
+            .join(Store, StoreExpense.store_id == Store.id)
+            .filter(
+                StoreExpense.status == "active",
+                Store.tenant_id == tenant_id,
+            )
             .distinct()
         )
 

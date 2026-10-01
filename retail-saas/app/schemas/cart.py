@@ -28,6 +28,7 @@ class CartItemCreate(BaseModel):
         decimal_places=2,
     )
     store_id: Optional[int] = Field(default=None, gt=0)
+    same_state: bool = Field(default=True, description="Whether transaction is within the same state")
 
     @field_validator("quantity")
     @classmethod

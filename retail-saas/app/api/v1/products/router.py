@@ -3,11 +3,13 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import require_permission
+from app.core.security import require_operational_write, require_permission
 from app.models.product import ProductImage
 from app.models.user import User
 from app.schemas.product import (
     ProductCreate,
+    ProductImageCreate,
+    ProductImageResponse,
     ProductResponse,
     ProductUpdate,
 )
@@ -166,6 +168,7 @@ def lookup_barcode(
     "",
     response_model=ProductResponse,
     status_code=201,
+    dependencies=[Depends(require_operational_write)],
 )
 def create_product(
     data: ProductCreate,
@@ -200,6 +203,7 @@ def get_product(
 @router.patch(
     "/{product_id}",
     response_model=ProductResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def update_product(
     product_id: int,
@@ -219,6 +223,7 @@ def update_product(
 @router.patch(
     "/{product_id}/toggle-status",
     response_model=ProductResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def toggle_product_status(
     product_id: int,
@@ -281,6 +286,7 @@ def barcode_image(
 @router.delete(
     "/{product_id}",
     status_code=204,
+    dependencies=[Depends(require_operational_write)],
 )
 def delete_product(
     product_id: int,
@@ -297,15 +303,13 @@ def delete_product(
 
 @router.post(
     "/{product_id}/images",
+    response_model=ProductImageResponse,
     status_code=201,
+    dependencies=[Depends(require_operational_write)],
 )
 def add_product_image(
     product_id: int,
-    image_url: str,
-    display_order: int = Query(
-        default=0,
-        ge=0,
-    ),
+    data: ProductImageCreate,
     user: User = Depends(
         require_permission("products:write")
     ),
@@ -318,8 +322,8 @@ def add_product_image(
 
     image = ProductImage(
         product_id=product.id,
-        image_url=image_url,
-        display_order=display_order,
+        image_url=data.image_url,
+        is_primary=data.is_primary,
     )
 
     db.add(image)
@@ -331,6 +335,7 @@ def add_product_image(
 
 @router.get(
     "/{product_id}/images",
+    response_model=list[ProductImageResponse],
 )
 def list_product_images(
     product_id: int,
@@ -350,7 +355,8 @@ def list_product_images(
             ProductImage.product_id == product.id
         )
         .order_by(
-            ProductImage.display_order.asc()
+            ProductImage.is_primary.desc(),
+            ProductImage.id.asc(),
         )
         .all()
     )
@@ -359,6 +365,7 @@ def list_product_images(
 @router.delete(
     "/{product_id}/images/{image_id}",
     status_code=204,
+    dependencies=[Depends(require_operational_write)],
 )
 def delete_product_image(
     product_id: int,
