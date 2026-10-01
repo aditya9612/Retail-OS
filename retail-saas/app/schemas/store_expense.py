@@ -686,8 +686,13 @@ class StoreExpenseUpdate(BaseModel):
 # RESPONSE
 # ============================================================
 
-class StoreExpenseResponse(BaseModel):
+from datetime import date
+from typing import Optional
 
+from pydantic import BaseModel, ConfigDict
+
+
+class StoreExpenseResponse(BaseModel):
     id: int
     store_id: int
     amount: float
@@ -697,9 +702,7 @@ class StoreExpenseResponse(BaseModel):
     payment_method: PaymentMethod
     reference_number: Optional[str] = None
 
-    model_config = ConfigDict(
-        from_attributes=True
-    )
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================

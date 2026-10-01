@@ -1,7 +1,7 @@
 import re
 from typing import Optional
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, EmailStr
 
 INDIAN_STATES_AND_UTS = {
     "Andhra Pradesh",
@@ -89,6 +89,18 @@ class StoreCreate(BaseModel):
         if value is None:
             return None
         value = value.strip()
+        if value.lower() in {
+            "string",
+            "test",
+            "name",
+            "store",
+            "example",
+            "null",
+            "none",
+            "n/a",
+            "na",
+        }:
+            raise ValueError("Please enter a valid store name")
 
         if not value:
             raise ValueError("Store name is required")
@@ -184,7 +196,17 @@ class StoreCreate(BaseModel):
             return None
 
         value = value.strip()
-
+        if value.lower() in {
+          "string",
+          "test",
+          "city",
+          "example",
+          "null",
+          "none",
+          "n/a",
+          "na",
+            }:
+          raise ValueError("Please enter a valid city name")
         if not value:
             raise ValueError("City is required")
 
@@ -241,18 +263,11 @@ class StoreCreate(BaseModel):
     def validate_pincode(cls, value):
         if value is None:
          return None
-
-        value = value.strip()
-
-        # Exactly 6 digits
+        value = value.strip()                                           # Exactly 6 digits
         if not re.fullmatch(r"\d{6}", value):
-            raise ValueError("Pincode must be exactly 6 digits")
-
-        # Reject all same digits
+            raise ValueError("Pincode must be exactly 6 digits")        # Reject all same digits
         if len(set(value)) == 1:
-            raise ValueError("Invalid pincode")
-
-        # Reject obvious sequential test values
+            raise ValueError("Invalid pincode")                    # Reject obvious sequential test values
         if value in {"123456", "654321"}:
             raise ValueError("Invalid pincode")
 
@@ -269,9 +284,83 @@ class StoreCreate(BaseModel):
           return None
 
         clean_phone = v.strip()
-        if not re.fullmatch(r"^[0-9+ -]{7,15}$", clean_phone):
-            raise ValueError("Invalid phone number format")
+
+        if not clean_phone.isdigit() or len(clean_phone) != 10:
+            raise ValueError("Phone number must be exactly 10 digits")
+
+        if clean_phone[0] not in "6789":
+            raise ValueError("Phone number must start with 6, 7, 8, or 9")
+
+        if len(set(clean_phone)) == 1:
+            raise ValueError("Please enter a valid phone number")
+
         return clean_phone
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value):
+        if value is None:
+         return None
+
+        value = value.strip().lower()
+
+        if not value:
+           raise ValueError("Email is required")
+
+        if len(value) > 254:
+           raise ValueError("Email must not exceed 254 characters")
+
+    # Must contain exactly one @
+        if value.count("@") != 1:
+           raise ValueError("Please enter a valid email address")
+
+        local_part, domain = value.rsplit("@", 1)
+
+    # Local part validation
+        if not local_part:
+            raise ValueError("Email must contain a username before @")
+
+        if len(local_part) > 64:
+            raise ValueError("Email username must not exceed 64 characters")
+
+        if local_part.startswith(".") or local_part.endswith("."):
+            raise ValueError("Email username cannot start or end with a dot")
+
+        if ".." in local_part:
+            raise ValueError("Email username cannot contain consecutive dots")
+
+    # Allowed characters in email username
+        if not re.fullmatch(
+             r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+",
+             local_part
+        ):
+            raise ValueError("Email contains invalid characters")
+
+    # Domain validation
+        if not domain:
+            raise ValueError("Email must contain a valid domain")
+
+        if len(domain) > 253:
+            raise ValueError("Email domain is too long")
+
+        if "." not in domain:
+            raise ValueError("Email domain must contain a valid extension")
+
+        if domain.startswith(".") or domain.endswith("."):
+            raise ValueError("Email domain cannot start or end with a dot")
+
+        if ".." in domain:
+            raise ValueError("Email domain cannot contain consecutive dots")
+
+    # Domain labels must be valid
+        if not re.fullmatch(
+            r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+",
+            domain
+        ):
+            raise ValueError("Email domain contains invalid characters")
+
+        return value
+
     @field_validator("gstin")
     @classmethod
     def validate_gstin(cls, v: Optional[str]) -> Optional[str]:
@@ -305,7 +394,18 @@ class StoreUpdate(BaseModel):
         if value is None:
             return None
         value = value.strip()
-
+        if value.lower() in {
+            "string",
+            "test",
+            "name",
+            "store",
+            "example",
+            "null",
+            "none",
+            "n/a",
+            "na",
+        }:
+            raise ValueError("Please enter a valid store name")
         if not value:
             raise ValueError("Store name is required")
 
@@ -366,6 +466,17 @@ class StoreUpdate(BaseModel):
 
         value = value.strip()
 
+        if value.lower() in {
+            "string",
+            "test",
+            "city",
+            "example",
+            "null",
+            "none",
+            "n/a",
+        "na",
+        }:
+            raise ValueError("Please enter a valid city name")
         if not value:
             raise ValueError("City is required")
 
@@ -448,19 +559,82 @@ class StoreUpdate(BaseModel):
             return None
         clean_phone = v.strip()
 
-        if len(clean_phone) != 10 or not clean_phone.isdigit():
-            raise ValueError("Mobile number must be exactly 10 digits")
+        clean_phone = v.strip()
 
-        if clean_phone[0] in ["0", "1", "2", "3", "4", "5"]:
-            raise ValueError(
-                f"Mobile number cannot start with '{clean_phone[0]}'. "
-                "Must start with 6, 7, 8, or 9"
-            )
+        if not clean_phone.isdigit() or len(clean_phone) != 10:
+            raise ValueError("Phone number must be exactly 10 digits")
 
-        if not re.fullmatch(r"^[6-9]\d{9}$", clean_phone):
-            raise ValueError("Invalid Indian mobile number format")
+        if clean_phone[0] not in "6789":
+            raise ValueError("Phone number must start with 6, 7, 8, or 9")
+
+        if len(set(clean_phone)) == 1:
+            raise ValueError("Please enter a valid phone number")
 
         return clean_phone
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value):
+        if value is None:
+         return None
+
+        value = value.strip().lower()
+
+        if not value:
+           raise ValueError("Email is required")
+
+        if len(value) > 254:
+           raise ValueError("Email must not exceed 254 characters")
+
+    # Must contain exactly one @
+        if value.count("@") != 1:
+           raise ValueError("Please enter a valid email address")
+
+        local_part, domain = value.rsplit("@", 1)
+
+    # Local part validation
+        if not local_part:
+            raise ValueError("Email must contain a username before @")
+
+        if len(local_part) > 64:
+            raise ValueError("Email username must not exceed 64 characters")
+
+        if local_part.startswith(".") or local_part.endswith("."):
+            raise ValueError("Email username cannot start or end with a dot")
+
+        if ".." in local_part:
+            raise ValueError("Email username cannot contain consecutive dots")
+
+    # Allowed characters in email username
+        if not re.fullmatch(
+             r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+",
+             local_part
+        ):
+            raise ValueError("Email contains invalid characters")
+
+    # Domain validation
+        if not domain:
+            raise ValueError("Email must contain a valid domain")
+
+        if len(domain) > 253:
+            raise ValueError("Email domain is too long")
+
+        if "." not in domain:
+            raise ValueError("Email domain must contain a valid extension")
+
+        if domain.startswith(".") or domain.endswith("."):
+            raise ValueError("Email domain cannot start or end with a dot")
+
+        if ".." in domain:
+            raise ValueError("Email domain cannot contain consecutive dots")
+
+    # Domain labels must be valid
+        if not re.fullmatch(
+            r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+",
+            domain
+        ):
+            raise ValueError("Email domain contains invalid characters")
+
+        return value
 
     @field_validator("gstin")
     @classmethod
@@ -480,22 +654,26 @@ class StoreUpdate(BaseModel):
 
 
 
+from pydantic import BaseModel, ConfigDict, EmailStr
+
+
 class StoreResponse(BaseModel):
     id: int
     tenant_id: int
+
     name: str
-    code: Optional[str] = None
-    address: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    pincode: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[str] = None
+    code: str | None = None
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+
+    pincode: int | None = None
+    phone: int | None = None
+    email: EmailStr | None = None
+
     is_main: bool = False
-    gstin: Optional[str] = None
+    gstin: str | None = None
     is_active: bool = True
     is_warehouse: bool = False
 
-    model_config = ConfigDict(
-        from_attributes=True
-    )
+    model_config = ConfigDict(from_attributes=True)
