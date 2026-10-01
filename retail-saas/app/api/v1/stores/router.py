@@ -1,6 +1,7 @@
 from typing import Optional
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Path, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -12,13 +13,27 @@ from app.schemas.store import (
     StoreResponse,
     StoreUpdate,
 )
+from app.schemas.staff import (
+    StaffCreate,
+    StaffUpdate,
+    StaffResponse,
+)
 from app.schemas.user import (
     UserCreate,
     UserResponse,
 )
 from app.services.store_service import StoreService
 from app.services.user_service import UserService
-
+from app.services.staff_service import (
+    create_staff_service,
+    list_staff_service,
+    get_staff_service,
+    update_staff_service,
+    delete_staff_service,
+    assign_staff_service,
+    transfer_staff_service,
+    list_all_staff_service,
+)
 router = APIRouter(
     prefix="/stores",
     tags=["Stores"],
@@ -79,15 +94,20 @@ def create_store(
         user.tenant_id,
         data,
     )
-
-
 @router.get(
     "/{store_id}",
     response_model=StoreResponse,
     summary="Get Store Details",
 )
 def get_store(
-    store_id: int,
+    store_id: Annotated[
+        int,
+        Path(
+            gt=0,
+            le=999999,
+            description="Store ID must be a positive integer up to 999999",
+        ),
+    ],
     user: User = Depends(
         require_permission("stores:read")
     ),
@@ -103,14 +123,20 @@ def get_store(
         store_id,
     )
 
-
 @router.patch(
     "/{store_id}",
     response_model=StoreResponse,
     summary="Update Store Details",
 )
 def update_store(
-    store_id: int,
+    store_id: Annotated[
+        int,
+        Path(
+            gt=0,
+            le=999999,
+            description="Store ID must be a positive integer up to 999999",
+        ),
+    ],
     data: StoreUpdate,
     user: User = Depends(
         require_permission("stores:write")
@@ -134,7 +160,14 @@ def update_store(
     summary="Delete Store",
 )
 def delete_store(
-    store_id: int,
+    store_id: Annotated[
+        int,
+        Path(
+            gt=0,
+            le=999999,
+            description="Store ID must be a positive integer up to 999999",
+        ),
+    ],
     user: User = Depends(
         require_permission("stores:write")
     ),
@@ -153,7 +186,6 @@ def delete_store(
     return {
         "message": "Store deleted successfully"
     }
-
 
 # ============================================================
 # ROLE-BASED STORE USER APIs (PER STORE)
@@ -202,7 +234,14 @@ def list_store_users(
     description="Store Owner creates a role-based user for a specific store.",
 )
 def create_store_user(
-    store_id: int,
+    store_id: Annotated[
+    int,
+    Path(
+        gt=0,
+        le=999999,
+        description="Store ID must be a positive integer up to 999999",
+        ),
+    ],
     data: UserCreate,
     user: User = Depends(
         require_permission("users:write")
@@ -225,3 +264,146 @@ def create_store_user(
         tenant_id=user.tenant_id,
         data=data,
     )
+# ============================================================
+# STAFF APIs
+# ============================================================
+
+@router.post(
+    "/{store_id}/staff",
+    response_model=StaffResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_staff(
+    store_id: int,
+    data: StaffCreate,
+    user: User = Depends(
+        require_permission("employees:write")
+    ),
+    db: Session = Depends(get_db),
+):
+    return create_staff_service(
+        db,
+        store_id,
+        data,
+    )
+
+
+@router.get(
+    "/{store_id}/staff",
+    response_model=list[StaffResponse],
+)
+def list_staff(
+    store_id: int,
+    user: User = Depends(
+        require_permission("employees:read")
+    ),
+    db: Session = Depends(get_db),
+):
+    return list_staff_service(
+        db,
+        store_id,
+    )
+
+
+@router.get(
+    "/{store_id}/staff/{staff_id}",
+    response_model=StaffResponse,
+)
+def get_staff(
+    store_id: int,
+    staff_id: int,
+    user: User = Depends(
+        require_permission("employees:read")
+    ),
+    db: Session = Depends(get_db),
+):
+    return get_staff_service(
+        db,
+        store_id,
+        staff_id,
+    )
+
+
+@router.patch(
+    "/{store_id}/staff/{staff_id}",
+    response_model=StaffResponse,
+)
+def patch_staff(
+    store_id: int,
+    staff_id: int,
+    data: StaffUpdate,
+    user: User = Depends(
+        require_permission("employees:write")
+    ),
+    db: Session = Depends(get_db),
+):
+    return update_staff_service(
+        db,
+        store_id,
+        staff_id,
+        data,
+    )
+
+
+@router.delete(
+    "/{store_id}/staff/{staff_id}",
+)
+def delete_staff(
+    store_id: int,
+    staff_id: int,
+    user: User = Depends(
+        require_permission("employees:write")
+    ),
+    db: Session = Depends(get_db),
+):
+    return delete_staff_service(
+        db,
+        store_id,
+        staff_id,
+    )
+
+
+# ============================================================
+# STAFF ASSIGN / TRANSFER / ALL
+# ============================================================
+
+@router.patch("/assign/{staff_id}/{store_id}")
+def assign_staff(
+    staff_id: int,
+    store_id: int,
+    user: User = Depends(
+        require_permission("employees:write")
+    ),
+    db: Session = Depends(get_db),
+):
+    return assign_staff_service(
+        db,
+        staff_id,
+        store_id,
+    )
+
+
+@router.patch("/transfer/{staff_id}/{store_id}")
+def transfer_staff(
+    staff_id: int,
+    store_id: int,
+    user: User = Depends(
+        require_permission("employees:write")
+    ),
+    db: Session = Depends(get_db),
+):
+    return transfer_staff_service(
+        db,
+        staff_id,
+        store_id,
+    )
+
+
+@router.get("/all")
+def list_all_staff(
+    user: User = Depends(
+        require_permission("employees:read")
+    ),
+    db: Session = Depends(get_db),
+):
+    return list_all_staff_service(db)

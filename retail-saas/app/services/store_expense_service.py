@@ -40,6 +40,21 @@ class StoreExpenseService:
                 detail="Store not found",
             )
 
+        effective_tenant_id = tenant_id if tenant_id is not None else store.tenant_id
+
+        # Validate duplicate reference number
+        if data.reference_number:
+            existing_ref = StoreExpenseRepository.get_by_reference_number(
+                db=db,
+                reference_number=data.reference_number,
+                tenant_id=effective_tenant_id,
+            )
+            if existing_ref:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Reference number already exists",
+                )
+
         expense = StoreExpense(
             store_id=data.store_id,
             amount=data.amount,
@@ -52,10 +67,14 @@ class StoreExpenseService:
             status="active",
         )
 
-        return StoreExpenseRepository.create(
+        created_expense = StoreExpenseRepository.create(
             db,
             expense,
         )
+
+        print("AMOUNT VALUE:", created_expense.amount)
+        print("AMOUNT TYPE:", type(created_expense.amount))
+        return created_expense
 
     @staticmethod
     def get_expense(
@@ -96,6 +115,24 @@ class StoreExpenseService:
                 detail="start_date cannot be greater than end_date",
             )
 
+        if store_id is not None:
+            from app.models.store import Store
+
+            store = (
+                db.query(Store)
+                .filter(
+                    Store.id == store_id,
+                    Store.tenant_id == tenant_id,
+                )
+                .first()
+            )
+
+            if not store:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Store not found",
+                )
+
         return StoreExpenseRepository.get_all(
             db=db,
             tenant_id=tenant_id,
@@ -124,27 +161,46 @@ class StoreExpenseService:
                 detail="Expense not found",
             )
 
+        # Prevent store reassignment on update
+        if data.store_id is not None and data.store_id != expense.store_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Store ID cannot be changed for an existing expense",
+            )
+
+        # Check duplicate reference number
+        if data.reference_number is not None and data.reference_number.strip() != "":
+            existing_ref = StoreExpenseRepository.get_by_reference_number(
+                db=db,
+                reference_number=data.reference_number.strip(),
+                tenant_id=tenant_id,
+                exclude_id=expense_id,
+            )
+            if existing_ref:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Reference number already exists",
+                )
+
+        # Validate reference_number and expense_date correlation
+        target_ref = data.reference_number if data.reference_number is not None else expense.reference_number
+        target_date = data.expense_date if data.expense_date is not None else expense.expense_date
+        if target_ref and target_date:
+            from app.schemas.store_expense import validate_reference_number_date
+            try:
+                validate_reference_number_date(target_ref, target_date)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(e),
+                )
+
         update_data = data.model_dump(
             exclude_unset=True
         )
 
-        if "store_id" in update_data:
-            from app.models.store import Store
-
-            store = (
-                db.query(Store)
-                .filter(
-                    Store.id == update_data["store_id"],
-                    Store.tenant_id == tenant_id,
-                )
-                .first()
-            )
-
-            if not store:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Store not found",
-                )
+        # store_id is immutable during update, remove to ensure store assignment is never modified
+        update_data.pop("store_id", None)
 
         for field, value in update_data.items():
             setattr(expense, field, value)

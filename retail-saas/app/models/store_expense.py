@@ -29,8 +29,8 @@ class StoreExpense(Base):
     )
 
     amount = Column(
-        Numeric(12, 2),
-        nullable=False,
+    Numeric(12, 2, asdecimal=False),
+    nullable=False,
     )
 
     category = Column(

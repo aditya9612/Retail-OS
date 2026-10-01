@@ -1,8 +1,11 @@
+from email_validator import validate_email
+from email_validator import validate_email
+from email_validator import validate_email
 import re
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
-
+from pydantic import  ConfigDict, EmailStr
 
 class StaffCreate(BaseModel):
     name: str = Field(
@@ -19,142 +22,145 @@ class StaffCreate(BaseModel):
 
     is_active: bool = True
 
-@field_validator("name")
-@classmethod
-def validate_name(cls, value: str) -> str:
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
     # Do not silently accept leading/trailing spaces
-    if value != value.strip():
-        raise ValueError(
-            "Name must not have leading or trailing spaces"
+        if value != value.strip():
+            raise ValueError(
+                "Name must not have leading or trailing spaces"
         )
 
-    if not value:
-        raise ValueError("Name is required")
+        if not value:
+            raise ValueError("Name is required")
 
-    if len(value) < 2:
-        raise ValueError("Name must contain at least 2 characters")
+        if len(value) < 2:
+            raise ValueError("Name must contain at least 2 characters")
 
-    if len(value) > 100:
-        raise ValueError("Name must not exceed 100 characters")
+        if len(value) > 100:
+            raise ValueError("Name must not exceed 100 characters")
 
     # Only English letters and exactly one space between words.
     # Rejects numbers and all special characters.
-    if not re.fullmatch(r"[A-Za-z]+(?: [A-Za-z]+)*", value):
-        raise ValueError(
-            "Name can contain only letters with a single space "
-            "between words. Numbers and special characters are not allowed."
+        if not re.fullmatch(r"[A-Za-z]+(?: [A-Za-z]+)*", value):
+            raise ValueError(
+                "Name can contain only letters with a single space "
+                "between words. Numbers and special characters are not allowed."
+            )
+
+        return value
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        value = v.strip()
+
+        if not value:
+            raise ValueError("Role cannot be empty")
+
+        if value.lower() in {
+        "string",
+        "test",
+        "role",
+        "example",
+        "null",
+        "none",
+        "n/a",
+        "na",
+        }:
+            raise ValueError("Please enter a valid role")
+
+        if not re.fullmatch(r"[A-Za-z]+(?: [A-Za-z]+)*", value):
+            raise ValueError(
+            "Role can contain only letters with a single space between words. "
+            "Numbers and special characters are not allowed."
         )
 
-    return value
+        if len(value) < 2 or len(value) > 50:
+                raise ValueError("Role must be between 2 and 50 characters")
 
-@field_validator("role")
-@classmethod
-def validate_role(cls, value: str) -> str:
-    # Do not silently accept leading/trailing spaces
-    if value != value.strip():
-        raise ValueError(
-            "Role must not have leading or trailing spaces"
-        )
+        return value
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        email = value.strip().lower()
 
-    if not value:
-        raise ValueError("Role is required")
+        if not email:
+            raise ValueError("Email is required")
 
-    if len(value) < 2:
-        raise ValueError("Role must contain at least 2 characters")
-
-    if len(value) > 50:
-        raise ValueError("Role must not exceed 50 characters")
-
-    # Only English letters and exactly one space between words.    # Rejects numbers and all special characters.
-    if not re.fullmatch(r"[A-Za-z]+(?: [A-Za-z]+)*", value):
-        raise ValueError(
-            "Role can contain only letters with a single space "
-            "between words. Numbers and special characters are not allowed."
-        )
-
-    return value
-
-@field_validator("phone")
-@classmethod
-def validate_phone(cls, v: str) -> str:
-    clean_phone = v.strip()
-
-    # Only 10 digits, starting with 6, 7, 8, or 9
-    if not re.fullmatch(r"[6-9][0-9]{9}", clean_phone):
-        raise ValueError(
-            "Mobile number must contain exactly 10 digits "
-            "and must start with 6, 7, 8, or 9. "
-            "Letters, spaces, and special characters are not allowed."
-        )
-
-    return clean_phone
-
-@field_validator("email")
-@classmethod
-def validate_email(cls, value: str) -> str:
-    email = value.strip().lower()
-
-    if not email:
-        raise ValueError("Email is required")
-
-    # Maximum email length according to common email standards
-    if len(email) > 254:
-        raise ValueError("Email must not exceed 254 characters")
+        if len(email) > 254:
+                raise ValueError("Email must not exceed 254 characters")
 
     # No spaces allowed
-    if re.search(r"\s", email):
-        raise ValueError("Email must not contain spaces")
+        if " " in email:
+            raise ValueError("Email must not contain spaces")
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        email = value.strip().lower()
+
+        if not email:
+            raise ValueError("Email is required")
+
+    # Maximum email length according to common email standards
+        if len(email) > 254:
+            raise ValueError("Email must not exceed 254 characters")
+
+    # No spaces allowed
+        if re.search(r"\s", email):
+                raise ValueError("Email must not contain spaces")
 
     # Exactly one @ symbol
-    if email.count("@") != 1:
-        raise ValueError("Email must contain exactly one @ symbol")
+        if email.count("@") != 1:
+            raise ValueError("Email must contain exactly one @ symbol")
 
-    local_part, domain = email.split("@")
+        local_part, domain = email.split("@")
 
     # Local part validation
-    if not local_part:
-        raise ValueError("Email username is required")
+        if not local_part:
+            raise ValueError("Email username is required")
 
-    if len(local_part) > 64:
-        raise ValueError("Email username must not exceed 64 characters")
+        if len(local_part) > 64:
+            raise ValueError("Email username must not exceed 64 characters")
 
     # Cannot start or end with a dot
-    if local_part.startswith(".") or local_part.endswith("."):
-        raise ValueError("Email username cannot start or end with a dot")
+        if local_part.startswith(".") or local_part.endswith("."):
+            raise ValueError("Email username cannot start or end with a dot")
 
     # No consecutive dots
-    if ".." in email:
-        raise ValueError("Email must not contain consecutive dots")
+        if ".." in email:
+            raise ValueError("Email must not contain consecutive dots")
 
     # Allowed characters before @
-    if not re.fullmatch(
+        if not re.fullmatch(
         r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+",
         local_part,
     ):
-        raise ValueError("Email username contains invalid characters")
+            raise ValueError("Email username contains invalid characters")
 
     # Domain validation
-    if not domain:
-        raise ValueError("Email domain is required")
+        if not domain:
+            raise ValueError("Email domain is required")
 
-    if len(domain) > 253:
-        raise ValueError("Email domain is too long")
+        if len(domain) > 253:
+            raise ValueError("Email domain is too long")
 
     # Domain must contain only valid characters
-    if not re.fullmatch(
+        if not re.fullmatch(
         r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
         r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+",
         domain,
     ):
-        raise ValueError("Invalid email domain")
+                raise ValueError("Invalid email domain")
 
     # Domain extension must contain at least 2 letters
-    extension = domain.rsplit(".", 1)[-1]
+        extension = domain.rsplit(".", 1)[-1]
 
-    if not re.fullmatch(r"[A-Za-z]{2,63}", extension):
-        raise ValueError("Invalid email domain extension")
+        if not re.fullmatch(r"[A-Za-z]{2,63}", extension):
+            raise ValueError("Invalid email domain extension")
 
-    return email
+        return email
 
 class StaffResponse(BaseModel):
     id: int
@@ -191,142 +197,118 @@ class StaffUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
-@field_validator("name")
-@classmethod
-def validate_name(cls, value: str) -> str:
-    # Do not silently accept leading/trailing spaces
-    if value != value.strip():
-        raise ValueError(
-            "Name must not have leading or trailing spaces"
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        value = v.strip()
+
+        if not value:
+            raise ValueError("Role cannot be empty")
+
+        if value.lower() in {
+        "string",
+        "test",
+        "role",
+        "example",
+        "null",
+        "none",
+        "n/a",
+        "na",
+        }:
+                raise ValueError("Please enter a valid role")
+
+        if not re.fullmatch(r"[A-Za-z]+(?: [A-Za-z]+)*", value):
+            raise ValueError(
+                "Role can contain only letters with a single space between words. "
+                "Numbers and special characters are not allowed."
         )
 
-    if not value:
-        raise ValueError("Name is required")
+        if len(value) < 2 or len(value) > 50:
+            raise ValueError("Role must be between 2 and 50 characters")
 
-    if len(value) < 2:
-        raise ValueError("Name must contain at least 2 characters")
+        return value
 
-    if len(value) > 100:
-        raise ValueError("Name must not exceed 100 characters")
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        email = value.strip().lower()
 
-    # Only English letters and exactly one space between words.
-    # Rejects numbers and all special characters.
-    if not re.fullmatch(r"[A-Za-z]+(?: [A-Za-z]+)*", value):
-        raise ValueError(
-            "Name can contain only letters with a single space "
-            "between words. Numbers and special characters are not allowed."
-        )
+        if not email:
+            raise ValueError("Email is required")
 
-    return value
+        if len(email) > 254:
+            raise ValueError("Email must not exceed 254 characters")
 
-@field_validator("role")
-@classmethod
-def validate_role(cls, value: str) -> str:
-    # Do not silently accept leading/trailing spaces
-    if value != value.strip():
-        raise ValueError(
-            "Role must not have leading or trailing spaces"
-        )
+        # No spaces allowed
+        if " " in email:
+            raise ValueError("Email must not contain spaces")
 
-    if not value:
-        raise ValueError("Role is required")
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        email = value.strip().lower()
 
-    if len(value) < 2:
-        raise ValueError("Role must contain at least 2 characters")
+        if not email:
+            raise ValueError("Email is required")
 
-    if len(value) > 50:
-        raise ValueError("Role must not exceed 50 characters")
+        # Maximum email length according to common email standards
+        if len(email) > 254:
+            raise ValueError("Email must not exceed 254 characters")
 
-    # Only English letters and exactly one space between words.    # Rejects numbers and all special characters.
-    if not re.fullmatch(r"[A-Za-z]+(?: [A-Za-z]+)*", value):
-        raise ValueError(
-            "Role can contain only letters with a single space "
-            "between words. Numbers and special characters are not allowed."
-        )
+        # No spaces allowed
+        if re.search(r"\s", email):
+            raise ValueError("Email must not contain spaces")
 
-    return value
+        # Exactly one @ symbol
+        if email.count("@") != 1:
+            raise ValueError("Email must contain exactly one @ symbol")
 
-@field_validator("phone")
-@classmethod
-def validate_phone(cls, v: str) -> str:
-    clean_phone = v.strip()
+        local_part, domain = email.split("@")
 
-    # Only 10 digits, starting with 6, 7, 8, or 9
-    if not re.fullmatch(r"[6-9][0-9]{9}", clean_phone):
-        raise ValueError(
-            "Mobile number must contain exactly 10 digits "
-            "and must start with 6, 7, 8, or 9. "
-            "Letters, spaces, and special characters are not allowed."
-        )
+        # Local part validati   on
+        if not local_part:
+            raise ValueError("Email username is required")
 
-    return clean_phone
+        if len(local_part) > 64:
+            raise ValueError("Email username must not exceed 64 characters")
 
-@field_validator("email")
-@classmethod
-def validate_email(cls, value: str) -> str:
-    email = value.strip().lower()
+        # Cannot start or end with a dot
+        if local_part.startswith(".") or local_part.endswith("."):
+                raise ValueError("Email username cannot start or end with a dot")
 
-    if not email:
-        raise ValueError("Email is required")
-
-    # Maximum email length according to common email standards
-    if len(email) > 254:
-        raise ValueError("Email must not exceed 254 characters")
-
-    # No spaces allowed
-    if re.search(r"\s", email):
-        raise ValueError("Email must not contain spaces")
-
-    # Exactly one @ symbol
-    if email.count("@") != 1:
-        raise ValueError("Email must contain exactly one @ symbol")
-
-    local_part, domain = email.split("@")
-
-    # Local part validation
-    if not local_part:
-        raise ValueError("Email username is required")
-
-    if len(local_part) > 64:
-        raise ValueError("Email username must not exceed 64 characters")
-
-    # Cannot start or end with a dot
-    if local_part.startswith(".") or local_part.endswith("."):
-        raise ValueError("Email username cannot start or end with a dot")
-
-    # No consecutive dots
-    if ".." in email:
-        raise ValueError("Email must not contain consecutive dots")
+        # No consecutive dots
+        if ".." in email:
+            raise ValueError("Email must not contain consecutive dots")
 
     # Allowed characters before @
-    if not re.fullmatch(
-        r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+",
-        local_part,
-    ):
-        raise ValueError("Email username contains invalid characters")
+        if not re.fullmatch(
+            r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+",
+            local_part,
+        ):
+            raise ValueError("Email username contains invalid characters")
 
     # Domain validation
-    if not domain:
-        raise ValueError("Email domain is required")
+        if not domain:
+            raise ValueError("Email domain is required")
 
-    if len(domain) > 253:
-        raise ValueError("Email domain is too long")
+        if len(domain) > 253:
+            raise ValueError("Email domain is too long")
 
     # Domain must contain only valid characters
-    if not re.fullmatch(
+        if not re.fullmatch(
         r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
         r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+",
         domain,
     ):
-        raise ValueError("Invalid email domain")
+            raise ValueError("Invalid email domain")
 
     # Domain extension must contain at least 2 letters
-    extension = domain.rsplit(".", 1)[-1]
+        extension = domain.rsplit(".", 1)[-1]
 
-    if not re.fullmatch(r"[A-Za-z]{2,63}", extension):
-        raise ValueError("Invalid email domain extension")
+        if not re.fullmatch(r"[A-Za-z]{2,63}", extension):
+            raise ValueError("Invalid email domain extension")
 
-    return email
+        return email
 
 
 
@@ -357,3 +339,15 @@ class StaffTransfer(BaseModel):
         ...,
         gt=0
     )
+class StaffResponse(BaseModel):
+    id: int
+
+    name: str
+    email: EmailStr
+    phone: str
+    role: str
+
+    store_id: int
+    is_active: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
