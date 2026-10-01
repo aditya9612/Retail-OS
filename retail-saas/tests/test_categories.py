@@ -590,3 +590,112 @@ def test_delete_category_conflict_subcategories(tenant_fixture):
     # Deleting parent should be blocked with 409 Conflict
     del_resp = client.delete(f"/api/v1/categories/{parent_cat['id']}", headers=headers)
     assert del_resp.status_code == 409, f"Expected 409 Conflict, got {del_resp.status_code}: {del_resp.text}"
+
+
+def test_create_root_category_explicit_null_parent(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    resp = client.post(
+        "/api/v1/categories",
+        json={"name": "Explicit Root Category", "parent_id": None},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["name"] == "Explicit Root Category"
+    assert data["parent_id"] is None
+
+
+def test_create_category_reject_script_injection(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    resp1 = client.post(
+        "/api/v1/categories",
+        json={"name": "<script>alert(1)</script>"},
+        headers=headers,
+    )
+    assert resp1.status_code == 422
+
+    resp2 = client.post(
+        "/api/v1/categories",
+        json={"name": "Safe Name", "description": "javascript:void(0)"},
+        headers=headers,
+    )
+    assert resp2.status_code == 422
+
+
+def test_update_category_circular_hierarchy_rejected(tenant_fixture):
+    headers = tenant_fixture["headers"]
+
+    # Create root
+    root = client.post(
+        "/api/v1/categories",
+        json={"name": "Root Hierarchy"},
+        headers=headers,
+    ).json()
+
+    # Create child
+    child = client.post(
+        "/api/v1/categories",
+        json={"name": "Child Hierarchy", "parent_id": root["id"]},
+        headers=headers,
+    ).json()
+
+    # Create grandchild
+    grandchild = client.post(
+        "/api/v1/categories",
+        json={"name": "Grandchild Hierarchy", "parent_id": child["id"]},
+        headers=headers,
+    ).json()
+
+    # Attempt to set root's parent to grandchild -> 422 Circular Reference
+    resp_cycle = client.put(
+        f"/api/v1/categories/{root['id']}",
+        json={"parent_id": grandchild["id"]},
+        headers=headers,
+    )
+    assert resp_cycle.status_code == 422, f"Expected 422 for circular parenting, got {resp_cycle.status_code}"
+    body = resp_cycle.json()
+    assert "circular reference" in str(body).lower() or "detail" in body
+
+
+def test_update_category_unset_parent_to_root(tenant_fixture):
+    headers = tenant_fixture["headers"]
+
+    root = client.post(
+        "/api/v1/categories",
+        json={"name": "Root Parent"},
+        headers=headers,
+    ).json()
+
+    child = client.post(
+        "/api/v1/categories",
+        json={"name": "Child To Be Root", "parent_id": root["id"]},
+        headers=headers,
+    ).json()
+    assert child["parent_id"] == root["id"]
+
+    # Update child to unset parent_id back to null
+    update_resp = client.put(
+        f"/api/v1/categories/{child['id']}",
+        json={"parent_id": None},
+        headers=headers,
+    )
+    assert update_resp.status_code == 200, update_resp.text
+    assert update_resp.json()["parent_id"] is None
+
+
+def test_update_category_reject_null_name(tenant_fixture):
+    headers = tenant_fixture["headers"]
+
+    cat = client.post(
+        "/api/v1/categories",
+        json={"name": "Category For Null Name Test"},
+        headers=headers,
+    ).json()
+
+    resp = client.put(
+        f"/api/v1/categories/{cat['id']}",
+        json={"name": None},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+
