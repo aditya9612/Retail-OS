@@ -40,6 +40,30 @@ class StoreExpenseRepository:
         )
 
     @staticmethod
+    def get_by_reference_number(
+        db: Session,
+        reference_number: str,
+        tenant_id: int,
+        exclude_id: Optional[int] = None,
+    ) -> Optional[StoreExpense]:
+        from app.models.store import Store
+
+        query = (
+            db.query(StoreExpense)
+            .join(Store, StoreExpense.store_id == Store.id)
+            .filter(
+                StoreExpense.reference_number == reference_number,
+                StoreExpense.status == "active",
+                Store.tenant_id == tenant_id,
+            )
+        )
+
+        if exclude_id is not None:
+            query = query.filter(StoreExpense.id != exclude_id)
+
+        return query.first()
+
+    @staticmethod
     def get_all(
         db: Session,
         tenant_id: int,

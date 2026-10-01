@@ -10,6 +10,7 @@ from pydantic import (
     Field,
     StrictInt,
     field_validator,
+    model_validator,
 )
 
 
@@ -34,23 +35,12 @@ def validate_store_id(value) -> int:
             "Letters and special characters are not allowed."
         )
 
-    # If API receives string, allow only digits
-    if isinstance(value, str):
-        value = value.strip()
-
-        if not re.fullmatch(r"[0-9]+", value):
-            raise ValueError(
-                "Store ID must contain only whole numbers. "
-                "Letters and special characters are not allowed."
-            )
-
-        value = int(value)
-
-    # Reject float, Decimal, etc.
+    # Store ID must be an actual integer.
+    # Numeric strings, floats and decimals are rejected.
     if not isinstance(value, int):
         raise ValueError(
             "Store ID must contain only whole numbers. "
-            "Letters and special characters are not allowed."
+            "Letters, decimals and special characters are not allowed."
         )
 
     if value <= 0:
@@ -66,33 +56,26 @@ def validate_store_id(value) -> int:
 # ============================================================
 
 def validate_amount(value) -> Decimal:
-
+    # Reject boolean
     if isinstance(value, bool):
         raise ValueError(
             "Amount must contain only numbers. "
             "Letters and special characters are not allowed."
         )
 
-    # Validate string before Decimal conversion
-    if isinstance(value, str):
-        value = value.strip()
-
-        if not re.fullmatch(r"[0-9]+(?:\.[0-9]{1,2})?", value):
-            raise ValueError(
-                "Amount must contain only numbers with up to "
-                "2 decimal places. Letters and special characters "
-                "are not allowed."
-            )
-
-        value = Decimal(value)
-
-    elif isinstance(value, (int, float, Decimal)):
-        value = Decimal(str(value))
-
-    else:
+    # Accept only actual numeric JSON values.
+    # Numeric strings such as "100" are rejected.
+    if not isinstance(value, (int, float, Decimal)):
         raise ValueError(
-            "Amount must contain only numbers. "
+            "Amount must be a number, not a string. "
             "Letters and special characters are not allowed."
+        )
+
+    try:
+        value = Decimal(str(value))
+    except Exception:
+        raise ValueError(
+            "Amount must contain only numbers."
         )
 
     if value <= 0:
@@ -118,8 +101,28 @@ def validate_amount(value) -> Decimal:
 # CATEGORY VALIDATION
 # ============================================================
 
-def validate_category(value: str) -> str:
+VALID_EXPENSE_CATEGORIES = {
+    "Rent",
+    "Utilities",
+    "Salary",
+    "Maintenance",
+    "Travel",
+    "Office Supplies",
+    "Office",
+    "Marketing",
+    "Other",
+}
 
+CATEGORY_ALIASES = {
+    "electricity": "Utilities",
+    "utility": "Utilities",
+    "travel expense": "Travel",
+    "salaries": "Salary",
+    "others": "Other",
+}
+
+
+def validate_category(value: str) -> str:
     if not isinstance(value, str):
         raise ValueError(
             "Category must contain only letters and spaces."
@@ -143,17 +146,6 @@ def validate_category(value: str) -> str:
         )
 
     # Only English letters and single spaces
-    #
-    # Valid:
-    # Electricity
-    # Office Supplies
-    # Travel Expense
-    #
-    # Invalid:
-    # Food123
-    # Food@
-    # Food-Supply
-    # Office  Supplies
     if not re.fullmatch(r"[A-Za-z]+(?: [A-Za-z]+)*", value):
         raise ValueError(
             "Category must contain only letters with a single "
@@ -161,14 +153,30 @@ def validate_category(value: str) -> str:
             "are not allowed."
         )
 
-    return value
+    normalized_key = value.lower()
+
+    # Check canonical categories
+    for canonical in VALID_EXPENSE_CATEGORIES:
+        if canonical.lower() == normalized_key:
+            return canonical
+
+    # Check allowed aliases
+    if normalized_key in CATEGORY_ALIASES:
+        return CATEGORY_ALIASES[normalized_key]
+
+    allowed_list = ", ".join(sorted(VALID_EXPENSE_CATEGORIES))
+
+    raise ValueError(
+        f"Invalid category '{value}'. "
+        f"Category must be one of: {allowed_list}."
+    )
+
 
 # ============================================================
 # DESCRIPTION VALIDATION
 # ============================================================
 
 def validate_description(value: Optional[str]) -> Optional[str]:
-
     if value is None:
         return None
 
@@ -194,17 +202,7 @@ def validate_description(value: Optional[str]) -> Optional[str]:
             "Description must not exceed 500 characters."
         )
 
-    # Only English letters, numbers and spaces
-    #
-    # Valid:
-    # Office Rent
-    # Office Rent 5000
-    # Electricity Bill 2026
-    #
-    # Invalid:
-    # Office@Rent
-    # Rent-5000
-    # Bill#123
+    # Only English letters, numbers and single spaces
     if not re.fullmatch(r"[A-Za-z0-9]+(?: [A-Za-z0-9]+)*", value):
         raise ValueError(
             "Description can contain only letters, numbers, "
@@ -219,30 +217,27 @@ def validate_description(value: Optional[str]) -> Optional[str]:
 # ============================================================
 
 def validate_expense_date(value) -> date:
-
-    # API input must be string in YYYY-MM-DD format
-    if isinstance(value, str):
-
-        value = value.strip()
-
-        # Only YYYY-MM-DD
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
-            raise ValueError(
-                "Expense date must be in YYYY-MM-DD format. "
-                "Letters and other special characters are not allowed."
-            )
-
-        try:
-            value = date.fromisoformat(value)
-        except ValueError:
-            raise ValueError(
-                "Invalid expense date. Please enter a valid date "
-                "in YYYY-MM-DD format."
-            )
-
-    elif not isinstance(value, date):
+    # API input must be a string in YYYY-MM-DD format
+    if not isinstance(value, str):
         raise ValueError(
             "Expense date must be in YYYY-MM-DD format."
+        )
+
+    value = value.strip()
+
+    # Only YYYY-MM-DD
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise ValueError(
+            "Expense date must be in YYYY-MM-DD format. "
+            "Letters and other special characters are not allowed."
+        )
+
+    try:
+        value = date.fromisoformat(value)
+    except ValueError:
+        raise ValueError(
+            "Invalid expense date. Please enter a valid date "
+            "in YYYY-MM-DD format."
         )
 
     if value > date.today():
@@ -252,12 +247,12 @@ def validate_expense_date(value) -> date:
 
     return value
 
+
 # ============================================================
 # PAYMENT METHOD VALIDATION
 # ============================================================
 
 def validate_payment_method(value) -> str:
-
     if not isinstance(value, str):
         raise ValueError(
             "Payment method must be one of: cash, card, upi, "
@@ -305,6 +300,12 @@ def validate_reference_number(
     if not value:
         return None
 
+    # Reject Swagger placeholder
+    if value.lower() == "string":
+        raise ValueError(
+            "Reference number cannot be 'string'."
+        )
+
     if len(value) > 100:
         raise ValueError(
             "Reference number must not exceed 100 characters."
@@ -315,6 +316,7 @@ def validate_reference_number(
     # INV-123
     # INV/123
     # INV_123
+    # EXP-20260930-002
     #
     # Invalid:
     # INV@123
@@ -331,6 +333,154 @@ def validate_reference_number(
         )
 
     return value
+
+
+# ============================================================
+# EXTRACT DATE FROM REFERENCE NUMBER
+# ============================================================
+
+def extract_date_from_reference_number(
+    ref: str,
+) -> tuple[Optional[date], Optional[int]]:
+    """
+    Extract a date or year from reference_number if present.
+
+    Supported formats:
+    YYYY-MM-DD
+    YYYY/MM/DD
+    YYYY_MM_DD
+    DD-MM-YYYY
+    DD/MM/YYYY
+    DD_MM_YYYY
+    YYYYMMDD
+    DDMMYYYY
+    YYYY
+    """
+
+    # 1. YYYY-MM-DD / YYYY/MM/DD / YYYY_MM_DD
+    m = re.search(
+        r"\b(20\d{2})[-/_](0[1-9]|1[0-2])[-/_]"
+        r"(0[1-9]|[12]\d|3[01])\b",
+        ref,
+    )
+
+    if m:
+        try:
+            return (
+                date(
+                    int(m.group(1)),
+                    int(m.group(2)),
+                    int(m.group(3)),
+                ),
+                int(m.group(1)),
+            )
+        except ValueError:
+            pass
+
+    # 2. DD-MM-YYYY / DD/MM/YYYY / DD_MM_YYYY
+    m = re.search(
+        r"\b(0[1-9]|[12]\d|3[01])[-/_]"
+        r"(0[1-9]|1[0-2])[-/_](20\d{2})\b",
+        ref,
+    )
+
+    if m:
+        try:
+            return (
+                date(
+                    int(m.group(3)),
+                    int(m.group(2)),
+                    int(m.group(1)),
+                ),
+                int(m.group(3)),
+            )
+        except ValueError:
+            pass
+
+    # 3. YYYYMMDD
+    for m in re.finditer(
+        r"(?<!\d)"
+        r"(20\d{2})"
+        r"(0[1-9]|1[0-2])"
+        r"(0[1-9]|[12]\d|3[01])"
+        r"(?!\d)",
+        ref,
+    ):
+        try:
+            return (
+                date(
+                    int(m.group(1)),
+                    int(m.group(2)),
+                    int(m.group(3)),
+                ),
+                int(m.group(1)),
+            )
+        except ValueError:
+            pass
+
+    # 4. DDMMYYYY
+    for m in re.finditer(
+        r"(?<!\d)"
+        r"(0[1-9]|[12]\d|3[01])"
+        r"(0[1-9]|1[0-2])"
+        r"(20\d{2})"
+        r"(?!\d)",
+        ref,
+    ):
+        try:
+            return (
+                date(
+                    int(m.group(3)),
+                    int(m.group(2)),
+                    int(m.group(1)),
+                ),
+                int(m.group(3)),
+            )
+        except ValueError:
+            pass
+
+    # 5. Four-digit year 2000-2099
+    m = re.search(
+        r"(?<!\d)(20\d{2})(?!\d)",
+        ref,
+    )
+
+    if m:
+        return None, int(m.group(1))
+
+    return None, None
+
+
+# ============================================================
+# REFERENCE NUMBER / EXPENSE DATE VALIDATION
+# ============================================================
+
+def validate_reference_number_date(
+    reference_number: Optional[str],
+    expense_date: Optional[date],
+) -> None:
+
+    if not reference_number or not expense_date:
+        return
+
+    ref_date, ref_year = extract_date_from_reference_number(
+        reference_number
+    )
+
+    if ref_date is not None:
+        if ref_date != expense_date:
+            raise ValueError(
+                f"Reference number date ({ref_date}) does not match "
+                f"expense date ({expense_date})."
+            )
+
+    elif ref_year is not None:
+        if ref_year != expense_date.year:
+            raise ValueError(
+                f"Reference number year ({ref_year}) does not match "
+                f"expense date year ({expense_date.year})."
+            )
+
 
 # ============================================================
 # CREATE STORE EXPENSE
@@ -415,6 +565,16 @@ class StoreExpenseCreate(BaseModel):
     @classmethod
     def validate_reference_number_field(cls, value):
         return validate_reference_number(value)
+
+    @model_validator(mode="after")
+    def validate_reference_with_expense_date(self):
+        if self.reference_number and self.expense_date:
+            validate_reference_number_date(
+                self.reference_number,
+                self.expense_date,
+            )
+        return self
+
 
 # ============================================================
 # UPDATE STORE EXPENSE
@@ -512,6 +672,16 @@ class StoreExpenseUpdate(BaseModel):
     def validate_reference_number_field(cls, value):
         return validate_reference_number(value)
 
+    @model_validator(mode="after")
+    def validate_reference_with_expense_date(self):
+        if self.reference_number and self.expense_date:
+            validate_reference_number_date(
+                self.reference_number,
+                self.expense_date,
+            )
+        return self
+
+
 # ============================================================
 # RESPONSE
 # ============================================================
@@ -520,9 +690,9 @@ class StoreExpenseResponse(BaseModel):
 
     id: int
     store_id: int
-    amount: Decimal
+    amount: float
     category: str
-    description: str
+    description: Optional[str] = None
     expense_date: date
     payment_method: PaymentMethod
     reference_number: Optional[str] = None
@@ -530,6 +700,8 @@ class StoreExpenseResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True
     )
+
+
 # ============================================================
 # SUMMARY
 # ============================================================
