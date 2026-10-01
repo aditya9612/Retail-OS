@@ -53,6 +53,10 @@ from app.models import *
 
 settings = get_settings()
 
+# Production safety guard: Fixed OTP must be disabled in production
+if settings.APP_ENV == "production" and getattr(settings, "AUTH_FIXED_OTP_ENABLED", False):
+    raise RuntimeError("Fixed OTP must be disabled in production.")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

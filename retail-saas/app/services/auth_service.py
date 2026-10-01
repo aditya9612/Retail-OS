@@ -39,7 +39,12 @@ from app.schemas.auth import (
     MobileOTPRequestSchema,
     MobileOTPVerifySchema,
     MobilePINLoginRequest,
+    PINChangeRequest,
+    PINResetRequestSchema,
+    PINResetVerifySchema,
+    PINSetupRequest,
     ResetPasswordRequest,
+    ResetPINRequest,
     TokenResponse,
     VerifyOTPRequest,
     normalize_email,
@@ -503,10 +508,15 @@ class AuthService:
 
             if not phone:
                 phone = None
-            elif not _PHONE_PATTERN.fullmatch(phone):
-                raise AppException(
-                    "Phone must contain 10 to 15 digits"
-                )
+            else:
+                try:
+                    phone = normalize_phone_number(phone)
+                except ValueError as err:
+                    raise AppException(str(err)) from err
+
+                existing_phone_user = self.user_repo.get_active_user_by_phone(phone)
+                if existing_phone_user:
+                    raise ConflictException("Phone number is already registered")
 
         _validate_password(password)
 
@@ -612,7 +622,8 @@ class AuthService:
 
         except IntegrityError as exc:
             self.db.rollback()
-
+            if "uq_users_active_phone" in str(exc) or "active_phone" in str(exc).lower():
+                raise ConflictException("Phone number is already registered") from exc
             raise ConflictException(
                 "Tenant or user information already exists"
             ) from exc
@@ -691,8 +702,13 @@ class AuthService:
         except Exception:
             pass
 
-        # 3. Cryptographically secure 6-digit OTP
-        otp = f"{secrets.randbelow(1_000_000):06d}"
+        # 3. Generate OTP (fixed for development when enabled)
+        from app.core.config import get_settings
+        _settings = get_settings()
+        if getattr(_settings, "AUTH_FIXED_OTP_ENABLED", False):
+            otp = str(_settings.AUTH_FIXED_OTP)
+        else:
+            otp = f"{secrets.randbelow(1_000_000):06d}"
         otp_hash = hashlib.sha256(otp.encode("utf-8")).hexdigest()
 
         otp_key = self._otp_key(purpose, tenant_id, canon_id)
@@ -706,6 +722,23 @@ class AuthService:
                 self.redis.setex(cooldown_key, OTP_COOLDOWN_SECONDS, "1")
         except Exception as exc:
             raise AppException("OTP service is temporarily unavailable") from exc
+
+        # 4. Send OTP via configured SMS provider
+        from app.services.sms_provider import get_sms_provider
+        sms_provider = get_sms_provider()
+        try:
+            # phone number must be canonicalized identifier (already normalized)
+            sms_provider.send_otp(canon_id, otp, purpose.value if isinstance(purpose, OTPPurpose) else str(purpose))
+        except Exception as exc:
+            # Cleanup stored OTP to avoid blocking future attempts
+            try:
+                self.redis.delete(otp_key)
+                self.redis.delete(attempts_key)
+                if enforce_cooldown:
+                    self.redis.delete(cooldown_key)
+            except Exception:
+                pass
+            raise AppException("Failed to send OTP via SMS provider") from exc
 
         return otp
 
@@ -1125,26 +1158,38 @@ class AuthService:
         POST /api/v1/auth/login/mobile-otp/request
 
         Generates and stores (via the unified OTP core) a MOBILE_LOGIN OTP for
-        the given domain + phone combination.
+        the given phone number.
 
         Security:
+        - Resolves user globally via get_active_user_by_phone (no domain input).
+        - Derives tenant_id from user.tenant_id.
         - Always returns a generic success message to prevent phone enumeration.
         - OTP is never returned in the API response.
         - Tenant must be active; otherwise, no OTP is generated.
-        - If the phone is not found, the method returns silently (no-op) to
+        - If the phone is not found or inactive, returns silently (no-op) to
           prevent enumeration of registered phone numbers.
         - Rate limiting and resend cooldown are enforced by the OTP core.
         """
-        # 1. Resolve tenant (generic failure — no tenant enumeration)
-        tenant = self._resolve_tenant_by_domain(data.domain)
+        # 1. Normalize phone
+        canonical_phone = normalize_phone_number(data.phone)
 
-        # 2. Normalize phone (already done by Pydantic schema, but be explicit)
-        normalized_phone = data.phone  # Pydantic already called normalize_phone_number
+        # 2. Look up user globally (no tenant filter, active/non-deleted only)
+        user = self.user_repo.get_active_user_by_phone(canonical_phone)
+        if not user or not user.is_active:
+            # Silently return — generic response to caller prevents enumeration
+            return
 
-        # 3. Look up user — silently no-op on unknown phone (no enumeration)
-        user = self._find_active_user_by_phone(tenant.id, normalized_phone)
-        if not user:
-            # Do not raise; return silently. Caller returns the generic response.
+        # 3. Derive tenant from user and validate
+        if user.tenant_id is None:
+            return
+
+        tenant = (
+            self.db.query(Tenant)
+            .filter(Tenant.id == user.tenant_id)
+            .first()
+        )
+        if not tenant or not tenant.is_active:
+            # Inactive tenant: silent return (generic enumeration-safe behavior)
             return
 
         # 4. Validate store (if assigned)
@@ -1152,15 +1197,12 @@ class AuthService:
 
         # 5. Generate OTP via the unified D1 engine
         #    Rate limit + cooldown enforced inside generate_and_store_otp.
-        #    Returns the plaintext OTP (not used here — no delivery yet).
+        #    SMS provider delivery is executed inside generate_and_store_otp.
         self.generate_and_store_otp(
             purpose=OTPPurpose.MOBILE_LOGIN,
             tenant_id=tenant.id,
-            identifier=normalized_phone,
+            identifier=canonical_phone,
         )
-
-        # NOTE: SMS delivery will be wired here in Phase 2-E (SMS provider phase).
-        # The OTP is intentionally NOT returned; the caller returns a generic response.
 
     def mobile_otp_verify(
         self,
@@ -1170,28 +1212,37 @@ class AuthService:
         POST /api/v1/auth/login/mobile-otp/verify
 
         Full verification flow:
-          1. Re-resolve tenant (state may have changed since OTP request).
-          2. Normalize phone.
-          3. Find active, non-deleted user.
+          1. Normalize phone.
+          2. Resolve active, non-deleted user globally via get_active_user_by_phone.
+          3. Derive tenant from user.tenant_id and validate tenant active.
           4. Validate store if assigned.
           5. Verify OTP via unified D1 engine (MOBILE_LOGIN purpose).
           6. Mark phone as verified (is_mobile_verified + mobile_verified_at).
           7. Issue JWT using the exact same token_data structure as email login.
 
         Security:
-        - All checks (tenant, user, store) are re-verified at verify time.
+        - Resolves tenant strictly from the authenticated user, NOT from client input.
         - Cross-tenant and cross-purpose OTP reuse is prevented by the D1 engine.
         - JWT structure is identical to email/password login.
         """
-        # 1. Re-resolve tenant
-        tenant = self._resolve_tenant_by_domain(data.domain)
+        # 1. Normalize phone
+        canonical_phone = normalize_phone_number(data.phone)
 
-        # 2. Normalize phone (already normalized by schema)
-        normalized_phone = data.phone
+        # 2. Resolve active, non-deleted user globally
+        user = self.user_repo.get_active_user_by_phone(canonical_phone)
+        if not user or not user.is_active:
+            raise UnauthorizedException("Authentication failed")
 
-        # 3. Find active, non-deleted user
-        user = self._find_active_user_by_phone(tenant.id, normalized_phone)
-        if not user:
+        # 3. Derive tenant from user and validate
+        if user.tenant_id is None:
+            raise UnauthorizedException("Authentication failed")
+
+        tenant = (
+            self.db.query(Tenant)
+            .filter(Tenant.id == user.tenant_id)
+            .first()
+        )
+        if not tenant or not tenant.is_active:
             raise UnauthorizedException("Authentication failed")
 
         # 4. Validate store
@@ -1201,7 +1252,7 @@ class AuthService:
         self.verify_otp_code(
             purpose=OTPPurpose.MOBILE_LOGIN,
             tenant_id=tenant.id,
-            identifier=normalized_phone,
+            identifier=canonical_phone,
             otp_code=data.otp,
         )
 
@@ -1214,7 +1265,6 @@ class AuthService:
                 self.db.refresh(user)
             except Exception:
                 self.db.rollback()
-                # Non-fatal: verification flag update failure doesn't block login
                 pass
 
         # 7. Issue JWT — exact same token_data structure as email/password login
@@ -1285,32 +1335,41 @@ class AuthService:
         """
         POST /api/v1/auth/login/mobile-pin
 
-        Authenticates user with tenant domain + normalized phone + 4-digit PIN.
+        Authenticates user with normalized phone + 4-digit PIN.
         Security:
+        - Resolves tenant from user.tenant_id globally (no domain input).
         - Brute-force lockout: 5 failed attempts -> 15 min lock
         - Generic errors: No disclosure of phone existence, wrong PIN, or inactive state
-        - Multi-tenant isolated brute-force state
+        - Tenant-isolated brute-force state using (tenant_id, canonical_phone)
         - Never affects password or OTP login
         - Uses bcrypt verification via verify_password
         - Issues identical JWT access + refresh tokens
         """
-        # 1. Resolve tenant (generic failure — no tenant enumeration)
-        tenant = self._resolve_tenant_by_domain(data.domain)
+        # 1. Normalize phone
+        canonical_phone = normalize_phone_number(data.phone)
 
-        # 2. Normalize phone
-        normalized_phone = data.phone
+        # 2. Lookup active, non-deleted user globally
+        user = self.user_repo.get_active_user_by_phone(canonical_phone)
+        if not user or not user.is_active:
+            raise UnauthorizedException("Authentication failed")
 
-        # 3. Check brute-force lock
-        if self._is_pin_locked(tenant.id, normalized_phone):
+        # 3. Derive tenant from user and validate
+        if user.tenant_id is None:
+            raise UnauthorizedException("Authentication failed")
+
+        tenant = (
+            self.db.query(Tenant)
+            .filter(Tenant.id == user.tenant_id)
+            .first()
+        )
+        if not tenant or not tenant.is_active:
+            raise UnauthorizedException("Authentication failed")
+
+        # 4. Check brute-force lock using tenant_id + canonical_phone
+        if self._is_pin_locked(tenant.id, canonical_phone):
             raise UnauthorizedException(
                 "Account is temporarily locked. Please try again later."
             )
-
-        # 4. Lookup active, non-deleted user
-        user = self._find_active_user_by_phone(tenant.id, normalized_phone)
-        if not user:
-            self._record_failed_pin_attempt(tenant.id, normalized_phone)
-            raise UnauthorizedException("Authentication failed")
 
         # 5. Validate store if assigned
         if user.store_id is not None:
@@ -1320,12 +1379,12 @@ class AuthService:
                 .first()
             )
             if not store or store.tenant_id != user.tenant_id or not store.is_active:
-                self._record_failed_pin_attempt(tenant.id, normalized_phone)
+                self._record_failed_pin_attempt(tenant.id, canonical_phone)
                 raise UnauthorizedException("Authentication failed")
 
         # 6. Verify PIN hash exists on user
         if not user.pin_hash:
-            self._record_failed_pin_attempt(tenant.id, normalized_phone)
+            self._record_failed_pin_attempt(tenant.id, canonical_phone)
             raise UnauthorizedException("Authentication failed")
 
         # 7. Verify PIN using bcrypt
@@ -1335,11 +1394,11 @@ class AuthService:
             pin_valid = False
 
         if not pin_valid:
-            self._record_failed_pin_attempt(tenant.id, normalized_phone)
+            self._record_failed_pin_attempt(tenant.id, canonical_phone)
             raise UnauthorizedException("Authentication failed")
 
         # 8. Clear brute-force state on successful login
-        self._clear_pin_attempt_state(tenant.id, normalized_phone)
+        self._clear_pin_attempt_state(tenant.id, canonical_phone)
 
         # 9. Issue JWT — exact same token_data structure as email/password login
         token_data = {
@@ -1364,3 +1423,244 @@ class AuthService:
             access_token=create_access_token(token_data),
             refresh_token=create_refresh_token(token_data),
         )
+
+    # ------------------------------------------------------------------
+    # PIN Reset & Management Flow
+    # ------------------------------------------------------------------
+
+    def pin_reset_request(
+        self,
+        data: PINResetRequestSchema,
+    ) -> None:
+        """
+        POST /api/v1/auth/pin/reset/request
+
+        Generates and stores a PIN_RESET OTP for the user associated with the phone.
+        Security:
+        - Resolves user globally via get_active_user_by_phone (no domain input).
+        - Silent return (enumeration protection) if user not found, inactive, or tenant inactive.
+        - Rate limiting and cooldown enforced by the OTP core.
+        """
+        # 1. Normalize phone
+        canonical_phone = normalize_phone_number(data.phone)
+
+        # 2. Resolve user globally
+        user = self.user_repo.get_active_user_by_phone(canonical_phone)
+        if not user or not user.is_active:
+            return
+
+        # 3. Derive tenant from user and validate
+        if user.tenant_id is None:
+            return
+
+        tenant = (
+            self.db.query(Tenant)
+            .filter(Tenant.id == user.tenant_id)
+            .first()
+        )
+        if not tenant or not tenant.is_active:
+            return
+
+        # 4. Validate store if assigned
+        self._validate_user_store(user)
+
+        # 5. Generate PIN_RESET OTP using existing OTP infrastructure
+        self.generate_and_store_otp(
+            purpose=OTPPurpose.PIN_RESET,
+            tenant_id=tenant.id,
+            identifier=canonical_phone,
+        )
+
+    def pin_reset_verify(
+        self,
+        data: PINResetVerifySchema,
+    ) -> str:
+        """
+        POST /api/v1/auth/pin/reset/verify
+
+        Verifies the PIN_RESET OTP and issues a single-use 256-bit reset token.
+        Security:
+        - Resolves user globally via get_active_user_by_phone (no domain input).
+        - Validates tenant active.
+        - Verifies OTPPurpose.PIN_RESET.
+        - Generates 256-bit secure reset token with 10-minute expiry.
+        - Stores SHA-256 hash in password_reset_tokens table.
+        - Returns raw reset token.
+        """
+        # 1. Normalize phone
+        canonical_phone = normalize_phone_number(data.phone)
+
+        # 2. Resolve active user globally
+        user = self.user_repo.get_active_user_by_phone(canonical_phone)
+        if not user or not user.is_active:
+            raise UnauthorizedException("Authentication failed")
+
+        # 3. Derive tenant from user and validate
+        if user.tenant_id is None:
+            raise UnauthorizedException("Authentication failed")
+
+        tenant = (
+            self.db.query(Tenant)
+            .filter(Tenant.id == user.tenant_id)
+            .first()
+        )
+        if not tenant or not tenant.is_active:
+            raise UnauthorizedException("Authentication failed")
+
+        # 4. Validate store if assigned
+        self._validate_user_store(user)
+
+        # 5. Verify OTP (purpose=PIN_RESET)
+        self.verify_otp_code(
+            purpose=OTPPurpose.PIN_RESET,
+            tenant_id=tenant.id,
+            identifier=canonical_phone,
+            otp_code=data.otp,
+        )
+
+        # 6. Issue secure reset token
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        expires_at = datetime.utcnow() + timedelta(minutes=10)
+
+        # Invalidate any previous unused reset tokens for this user
+        (
+            self.db.query(PasswordResetToken)
+            .filter(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.used_at.is_(None),
+            )
+            .update(
+                {"used_at": datetime.utcnow()},
+                synchronize_session=False,
+            )
+        )
+
+        reset_token = PasswordResetToken(
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+            used_at=None,
+        )
+        self.db.add(reset_token)
+        self.db.commit()
+
+        return raw_token
+
+    def pin_setup(
+        self,
+        user: User,
+        data: PINSetupRequest,
+    ) -> str:
+        """
+        POST /api/v1/auth/pin/setup
+
+        Sets the user's 4-digit PIN for the first time.
+        Requires authenticated user.
+        """
+        if not user.is_active or user.is_deleted:
+            raise UnauthorizedException("Account is disabled")
+
+        if user.pin_hash:
+            raise ConflictException("PIN is already set. Use change PIN instead.")
+
+        user.pin_hash = get_password_hash(data.pin)
+        user.pin_set_at = datetime.now(timezone.utc)
+        self.db.commit()
+        return "PIN set successfully"
+
+    def pin_change(
+        self,
+        user: User,
+        data: PINChangeRequest,
+    ) -> str:
+        """
+        POST /api/v1/auth/pin/change
+
+        Changes user's PIN after validating current PIN.
+        Requires authenticated user.
+        """
+        if not user.is_active or user.is_deleted:
+            raise UnauthorizedException("Account is disabled")
+
+        if not user.pin_hash:
+            raise UnauthorizedException("PIN has not been set yet")
+
+        if not verify_password(data.current_pin, user.pin_hash):
+            raise UnauthorizedException("Current PIN is incorrect")
+
+        user.pin_hash = get_password_hash(data.new_pin)
+        user.pin_set_at = datetime.now(timezone.utc)
+
+        if user.phone and user.tenant_id:
+            try:
+                canonical_phone = normalize_phone_number(user.phone)
+                self._clear_pin_attempt_state(user.tenant_id, canonical_phone)
+            except Exception:
+                pass
+
+        self.db.commit()
+        return "PIN changed successfully"
+
+    def pin_reset(
+        self,
+        data: ResetPINRequest,
+    ) -> str:
+        """
+        POST /api/v1/auth/pin/reset
+
+        Consumes the reset token issued by pin_reset_verify and sets a new 4-digit PIN.
+        """
+        token = data.token.strip()
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+        reset_token = (
+            self.db.query(PasswordResetToken)
+            .filter(
+                PasswordResetToken.token_hash == token_hash,
+                PasswordResetToken.used_at.is_(None),
+            )
+            .first()
+        )
+
+        if not reset_token:
+            raise UnauthorizedException("Invalid or expired reset token")
+
+        if reset_token.expires_at < datetime.utcnow():
+            reset_token.used_at = datetime.utcnow()
+            self.db.commit()
+            raise UnauthorizedException("Invalid or expired reset token")
+
+        user = (
+            self.db.query(User)
+            .filter(User.id == reset_token.user_id)
+            .first()
+        )
+
+        if not user or not user.is_active or user.is_deleted:
+            reset_token.used_at = datetime.utcnow()
+            self.db.commit()
+            raise UnauthorizedException("Invalid or expired reset token")
+
+        if user.tenant_id is not None:
+            tenant = (
+                self.db.query(Tenant)
+                .filter(Tenant.id == user.tenant_id)
+                .first()
+            )
+            if not tenant or not tenant.is_active:
+                raise UnauthorizedException("Tenant account is disabled")
+
+        user.pin_hash = get_password_hash(data.new_pin)
+        user.pin_set_at = datetime.now(timezone.utc)
+        reset_token.used_at = datetime.utcnow()
+
+        if user.phone and user.tenant_id:
+            try:
+                canonical_phone = normalize_phone_number(user.phone)
+                self._clear_pin_attempt_state(user.tenant_id, canonical_phone)
+            except Exception:
+                pass
+
+        self.db.commit()
+        return "PIN reset successfully"

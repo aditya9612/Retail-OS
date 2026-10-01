@@ -9,7 +9,7 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
     __table_args__ = (
         Index("ix_users_tenant_entitlement", "tenant_id", "is_deleted", "is_active"),
-        UniqueConstraint("tenant_id", "active_phone", name="uq_users_tenant_active_phone"),
+        UniqueConstraint("active_phone", name="uq_users_active_phone"),
     )
 
     id: Mapped[int] = mapped_column(

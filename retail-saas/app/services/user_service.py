@@ -1,5 +1,6 @@
 from typing import Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictException, NotFoundException
@@ -11,6 +12,7 @@ from app.models.user import User
 from app.repositories.user_repo import UserRepository
 from app.schemas.user import MyProfileUpdate, UserCreate, UserUpdate
 from app.services.saas_entitlement_service import SaaSEntitlementService
+from app.utils.phone import normalize_phone_number
 
 
 class UserService:
@@ -91,11 +93,18 @@ class UserService:
             lock_tenant=True,
         )
 
+        canonical_phone = None
+        if data.phone:
+            canonical_phone = normalize_phone_number(data.phone)
+            existing_phone_user = self.repo.get_active_user_by_phone(canonical_phone)
+            if existing_phone_user:
+                raise ConflictException("Phone number is already registered")
+
         user = User(
             tenant_id=tenant_id,
             email=email,
             full_name=data.full_name.strip(),
-            phone=data.phone,
+            phone=canonical_phone,
             store_id=data.store_id,
             role_id=resolved_role_id,
             hashed_password=get_password_hash(
@@ -110,10 +119,16 @@ class UserService:
             addhar_number=getattr(data, "addhar_number", None),
         )
 
-        user = self.repo.create(user)
-        self.db.commit()
-        self.db.refresh(user)
-        return user
+        try:
+            user = self.repo.create(user)
+            self.db.commit()
+            self.db.refresh(user)
+            return user
+        except IntegrityError as exc:
+            self.db.rollback()
+            if "uq_users_active_phone" in str(exc) or "active_phone" in str(exc).lower():
+                raise ConflictException("Phone number is already registered") from exc
+            raise ConflictException("User already exists") from exc
 
     def list_roles(
         self,
@@ -268,17 +283,35 @@ class UserService:
                     "hashed_password"
                 ] = get_password_hash(password)
 
-        for key, value in update_data.items():
-            setattr(
-                user,
-                key,
-                value,
-            )
+        if "phone" in update_data:
+            raw_phone = update_data["phone"]
+            if raw_phone:
+                canonical_phone = normalize_phone_number(raw_phone)
+                update_data["phone"] = canonical_phone
+                if canonical_phone != user.phone:
+                    existing_phone_user = self.repo.get_active_user_by_phone(canonical_phone)
+                    if existing_phone_user and existing_phone_user.id != user.id:
+                        raise ConflictException("Phone number is already in use")
+            else:
+                update_data["phone"] = None
 
-        user = self.repo.update(user)
-        self.db.commit()
-        self.db.refresh(user)
-        return user
+        try:
+            for key, value in update_data.items():
+                setattr(
+                    user,
+                    key,
+                    value,
+                )
+
+            user = self.repo.update(user)
+            self.db.commit()
+            self.db.refresh(user)
+            return user
+        except IntegrityError as exc:
+            self.db.rollback()
+            if "uq_users_active_phone" in str(exc) or "active_phone" in str(exc).lower():
+                raise ConflictException("Phone number is already in use") from exc
+            raise ConflictException("Failed to update user due to a conflict") from exc
 
     def update_my_profile(
         self,
@@ -312,17 +345,35 @@ class UserService:
 
             update_data["full_name"] = full_name
 
-        for key, value in update_data.items():
-            setattr(
-                user,
-                key,
-                value,
-            )
+        if "phone" in update_data:
+            raw_phone = update_data["phone"]
+            if raw_phone:
+                canonical_phone = normalize_phone_number(raw_phone)
+                update_data["phone"] = canonical_phone
+                if canonical_phone != user.phone:
+                    existing_phone_user = self.repo.get_active_user_by_phone(canonical_phone)
+                    if existing_phone_user and existing_phone_user.id != user.id:
+                        raise ConflictException("Phone number is already in use")
+            else:
+                update_data["phone"] = None
 
-        user = self.repo.update(user)
-        self.db.commit()
-        self.db.refresh(user)
-        return user
+        try:
+            for key, value in update_data.items():
+                setattr(
+                    user,
+                    key,
+                    value,
+                )
+
+            user = self.repo.update(user)
+            self.db.commit()
+            self.db.refresh(user)
+            return user
+        except IntegrityError as exc:
+            self.db.rollback()
+            if "uq_users_active_phone" in str(exc) or "active_phone" in str(exc).lower():
+                raise ConflictException("Phone number is already in use") from exc
+            raise ConflictException("Failed to update profile due to a conflict") from exc
 
     def activate_user(
         self,

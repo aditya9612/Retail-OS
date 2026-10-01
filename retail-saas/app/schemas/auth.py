@@ -225,18 +225,7 @@ class MobileOTPRequestSchema(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    domain: str = Field(..., min_length=1, description="Tenant domain identifier")
     phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
-
-    @field_validator("domain")
-    @classmethod
-    def validate_domain(cls, value: str) -> str:
-        val = value.strip().lower()
-        if not val:
-            raise ValueError("Domain is required")
-        if not re.match(r"^[a-z0-9-]+$", val):
-            raise ValueError("Domain must contain only lowercase alphanumeric characters and hyphens")
-        return val
 
     @field_validator("phone")
     @classmethod
@@ -252,19 +241,8 @@ class MobileOTPVerifySchema(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    domain: str = Field(..., min_length=1, description="Tenant domain identifier")
     phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
     otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code")
-
-    @field_validator("domain")
-    @classmethod
-    def validate_domain(cls, value: str) -> str:
-        val = value.strip().lower()
-        if not val:
-            raise ValueError("Domain is required")
-        if not re.match(r"^[a-z0-9-]+$", val):
-            raise ValueError("Domain must contain only lowercase alphanumeric characters and hyphens")
-        return val
 
     @field_validator("phone")
     @classmethod
@@ -287,19 +265,8 @@ class MobilePINLoginRequest(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    domain: str = Field(..., min_length=1, description="Tenant domain identifier")
     phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
     pin: str = Field(..., min_length=4, max_length=4, description="4-digit security PIN")
-
-    @field_validator("domain")
-    @classmethod
-    def validate_domain(cls, value: str) -> str:
-        val = value.strip().lower()
-        if not val:
-            raise ValueError("Domain is required")
-        if not re.match(r"^[a-z0-9-]+$", val):
-            raise ValueError("Domain must contain only lowercase alphanumeric characters and hyphens")
-        return val
 
     @field_validator("phone")
     @classmethod
@@ -367,18 +334,7 @@ class PINResetRequestSchema(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    domain: str = Field(..., min_length=1, description="Tenant domain identifier")
     phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
-
-    @field_validator("domain")
-    @classmethod
-    def validate_domain(cls, value: str) -> str:
-        val = value.strip().lower()
-        if not val:
-            raise ValueError("Domain is required")
-        if not re.match(r"^[a-z0-9-]+$", val):
-            raise ValueError("Domain must contain only lowercase alphanumeric characters and hyphens")
-        return val
 
     @field_validator("phone")
     @classmethod
@@ -394,19 +350,8 @@ class PINResetVerifySchema(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    domain: str = Field(..., min_length=1, description="Tenant domain identifier")
     phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
     otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code")
-
-    @field_validator("domain")
-    @classmethod
-    def validate_domain(cls, value: str) -> str:
-        val = value.strip().lower()
-        if not val:
-            raise ValueError("Domain is required")
-        if not re.match(r"^[a-z0-9-]+$", val):
-            raise ValueError("Domain must contain only lowercase alphanumeric characters and hyphens")
-        return val
 
     @field_validator("phone")
     @classmethod
