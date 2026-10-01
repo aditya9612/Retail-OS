@@ -88,11 +88,23 @@ class FakeRedis:
     def get(self, key: str):
         return self._store.get(key)
 
+    def set(self, key: str, value: str, ex: int = None):
+        self._store[key] = value
+
     def setex(self, key: str, ttl: int, value: str):
         self._store[key] = value
 
-    def delete(self, key: str):
-        self._store.pop(key, None)
+    def exists(self, key: str):
+        return 1 if key in self._store else 0
+
+    def delete(self, *keys: str):
+        for k in keys:
+            self._store.pop(k, None)
+
+    def incr(self, key: str):
+        val = int(self._store.get(key, "0")) + 1
+        self._store[key] = str(val)
+        return val
 
 
 @pytest.fixture
@@ -107,6 +119,9 @@ def fake_redis():
     get_redis.cache_clear()
     fake = FakeRedis()
     with (
+        patch("app.core.redis_client.get_redis", return_value=fake),
+        patch("app.core.security.get_redis", return_value=fake),
+        patch("app.services.auth_service.get_redis", return_value=fake),
         patch("app.services.cart_service.get_redis", return_value=fake),
         patch("app.utils.helpers.get_redis_client", return_value=fake),
         patch("app.utils.helpers.cache_delete_pattern"),

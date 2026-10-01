@@ -14,6 +14,9 @@ from app.schemas.auth import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
+    MobileOTPRequestSchema,
+    MobileOTPVerifySchema,
+    MobilePINLoginRequest,
     RefreshRequest,
     RegisterRequest,
     RegisterResponse,
@@ -166,14 +169,13 @@ def forgot_password(
     data: ForgotPasswordRequest,
     db: Session = Depends(get_db),
 ):
-    otp = AuthService(db).forgot_password(
+    AuthService(db).forgot_password(
         data
     )
 
     return {
         "success": True,
-        "message": "OTP generated successfully.",
-        "otp": otp,
+        "message": "OTP sent successfully.",
         "expires_in": 300,
     }
 
@@ -240,3 +242,40 @@ def change_password(
         "success": True,
         "message": message,
     }
+
+
+@router.post(
+    "/login/mobile-otp/request",
+    summary="Request Mobile OTP Login",
+    description=(
+        "Generates a time-limited OTP for mobile number login. "
+        "Returns a generic response regardless of whether the phone number "
+        "is registered, to prevent phone enumeration attacks."
+    ),
+)
+def mobile_otp_request(
+    data: MobileOTPRequestSchema,
+    db: Session = Depends(get_db),
+):
+    AuthService(db).mobile_otp_request(data)
+    return {
+        "success": True,
+        "message": "If the account exists, an OTP has been sent.",
+        "expires_in": 300,
+    }
+
+
+@router.post(
+    "/login/mobile-otp/verify",
+    response_model=TokenResponse,
+    summary="Verify Mobile OTP and Login",
+    description=(
+        "Verifies the OTP for the given domain + phone combination. "
+        "On success, marks the phone as verified and issues JWT access + refresh tokens."
+    ),
+)
+def mobile_otp_verify(
+    data: MobileOTPVerifySchema,
+    db: Session = Depends(get_db),
+):
+    return AuthService(db).mobile_otp_verify(data)

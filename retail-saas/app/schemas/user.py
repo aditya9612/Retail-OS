@@ -13,6 +13,7 @@ from pydantic import (
 )
 
 from app.utils.validators import validate_pan_number, validate_aadhaar_number
+from app.utils.phone import normalize_phone_number
 
 
 PHONE_PATTERN = re.compile(r"^(?:\+91)?[6-9]\d{9}$")
@@ -155,24 +156,9 @@ class UserBase(BaseModel):
         cls,
         value: Optional[str],
     ) -> Optional[str]:
-
         if value is None:
             return None
-
-        value = str(value).strip()
-
-        if not value:
-            raise ValueError("Phone cannot be empty")
-
-        if not PHONE_PATTERN.fullmatch(value):
-            raise ValueError(
-                "Phone must be 10 digits starting with 6-9 or +91 followed by 10 digits"
-            )
-
-        if value.startswith("+91"):
-            value = value[3:]
-
-        return value
+        return normalize_phone_number(value)
 
 
 class UserCreate(UserBase):
@@ -328,24 +314,9 @@ class UserUpdate(BaseModel):
         cls,
         value: Optional[str],
     ) -> Optional[str]:
-
         if value is None:
             return None
-
-        value = str(value).strip()
-
-        if not value:
-            raise ValueError("Phone cannot be empty")
-
-        if not PHONE_PATTERN.fullmatch(value):
-            raise ValueError(
-                "Phone must be 10 digits starting with 6-9 or +91 followed by 10 digits"
-            )
-
-        if value.startswith("+91"):
-            value = value[3:]
-
-        return value
+        return normalize_phone_number(value)
 
     @field_validator("password")
     @classmethod
@@ -472,24 +443,9 @@ class MyProfileUpdate(BaseModel):
         cls,
         value: Optional[str],
     ) -> Optional[str]:
-
         if value is None:
             return None
-
-        value = str(value).strip()
-
-        if not value:
-            raise ValueError("Phone cannot be empty")
-
-        if not PHONE_PATTERN.fullmatch(value):
-            raise ValueError(
-                "Phone must be 10 digits starting with 6-9 or +91 followed by 10 digits"
-            )
-
-        if value.startswith("+91"):
-            value = value[3:]
-
-        return value
+        return normalize_phone_number(value)
 
     @model_validator(mode="after")
     def validate_updates(self):

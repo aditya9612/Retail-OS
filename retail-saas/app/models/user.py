@@ -1,4 +1,5 @@
-from sqlalchemy import Boolean, ForeignKey, Index, String
+from datetime import datetime
+from sqlalchemy import Boolean, Computed, DateTime, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -8,6 +9,7 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
     __table_args__ = (
         Index("ix_users_tenant_entitlement", "tenant_id", "is_deleted", "is_active"),
+        UniqueConstraint("tenant_id", "active_phone", name="uq_users_tenant_active_phone"),
     )
 
     id: Mapped[int] = mapped_column(
@@ -43,6 +45,16 @@ class User(Base, TimestampMixin):
         nullable=False,
     )
 
+    pin_hash: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    pin_set_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
     @property
     def hashed_password(self) -> str:
         return self.password_hash
@@ -58,6 +70,26 @@ class User(Base, TimestampMixin):
 
     phone: Mapped[str | None] = mapped_column(
         String(20),
+        nullable=True,
+    )
+
+    is_mobile_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    mobile_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    active_phone: Mapped[str | None] = mapped_column(
+        String(20),
+        Computed(
+            "CASE WHEN is_deleted = 0 AND phone IS NOT NULL AND phone != '' THEN phone ELSE NULL END",
+            persisted=False,
+        ),
         nullable=True,
     )
 
