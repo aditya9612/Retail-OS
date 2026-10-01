@@ -1569,6 +1569,44 @@ class AuthService:
         self.db.commit()
         return "PIN set successfully"
 
+    def _pin_change_attempts_key(self, tenant_id: int, user_id: int) -> str:
+        return f"auth:pin_change:attempts:{tenant_id}:{user_id}"
+
+    def _pin_change_lock_key(self, tenant_id: int, user_id: int) -> str:
+        return f"auth:pin_change:lock:{tenant_id}:{user_id}"
+
+    def _is_pin_change_locked(self, tenant_id: int, user_id: int) -> bool:
+        lock_key = self._pin_change_lock_key(tenant_id, user_id)
+        try:
+            return bool(self.redis.get(lock_key))
+        except Exception:
+            return False
+
+    def _record_failed_pin_change_attempt(self, tenant_id: int, user_id: int) -> None:
+        attempts_key = self._pin_change_attempts_key(tenant_id, user_id)
+        lock_key = self._pin_change_lock_key(tenant_id, user_id)
+        try:
+            current = self.redis.get(attempts_key)
+            if current is None or (int(current) >= PIN_MAX_FAILED_ATTEMPTS and not self.redis.get(lock_key)):
+                attempts = 1
+            else:
+                attempts = int(current) + 1
+
+            self.redis.setex(attempts_key, PIN_ATTEMPTS_WINDOW_SECONDS, str(attempts))
+
+            if attempts >= PIN_MAX_FAILED_ATTEMPTS:
+                self.redis.setex(lock_key, PIN_LOCK_DURATION_SECONDS, "1")
+        except Exception:
+            pass
+
+    def _clear_pin_change_attempt_state(self, tenant_id: int, user_id: int) -> None:
+        attempts_key = self._pin_change_attempts_key(tenant_id, user_id)
+        lock_key = self._pin_change_lock_key(tenant_id, user_id)
+        try:
+            self.redis.delete(attempts_key, lock_key)
+        except Exception:
+            pass
+
     def pin_change(
         self,
         user: User,
@@ -1579,6 +1617,9 @@ class AuthService:
 
         Changes user's PIN after validating current PIN.
         Requires authenticated user.
+        Brute-force protection:
+        - 5 failed current-PIN attempts -> 15 min lockout
+        - Keyed by (user.tenant_id, user.id)
         """
         if not user.is_active or user.is_deleted:
             raise UnauthorizedException("Account is disabled")
@@ -1586,8 +1627,25 @@ class AuthService:
         if not user.pin_hash:
             raise UnauthorizedException("PIN has not been set yet")
 
-        if not verify_password(data.current_pin, user.pin_hash):
+        tenant_id = user.tenant_id or 0
+        if self._is_pin_change_locked(tenant_id, user.id):
+            raise UnauthorizedException(
+                "Account is temporarily locked. Please try again later."
+            )
+
+        try:
+            pin_valid = verify_password(data.current_pin, user.pin_hash)
+        except Exception:
+            pin_valid = False
+
+        if not pin_valid:
+            self._record_failed_pin_change_attempt(tenant_id, user.id)
             raise UnauthorizedException("Current PIN is incorrect")
+
+        self._clear_pin_change_attempt_state(tenant_id, user.id)
+
+        if data.current_pin == data.new_pin:
+            raise AppException("New PIN must be different from current PIN")
 
         user.pin_hash = get_password_hash(data.new_pin)
         user.pin_set_at = datetime.now(timezone.utc)

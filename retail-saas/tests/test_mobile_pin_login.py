@@ -1,37 +1,12 @@
 """
 Phase 2-D3: Mobile + PIN Login — Comprehensive Test Suite.
 
-Covers:
-1. Successful mobile + PIN login
-2. Correct JWT response
-3. JWT claims match email/password login
-4. JWT claims match mobile OTP login
-5. Invalid domain
-6. Inactive tenant
-7. Unknown phone
-8. Inactive user
-9. Soft-deleted user
-10. Inactive store
-11. Cross-tenant store mismatch
-12. Tenant-level user with store_id = NULL
-13. Wrong PIN
-14. 5 failed PIN attempts
-15. PIN lock after 5 failures
-16. Login rejected while locked
-17. Lock expires after 15 minutes
-18. Successful login clears failed-attempt state
-19. Same phone in two tenants has isolated PIN brute-force state
-20. PIN lock does not affect OTP login
-21. PIN lock does not affect email/password login
-22. Non-numeric PIN rejected
-23. PIN shorter than 4 digits rejected
-24. PIN longer than 4 digits rejected
-25. PIN is never returned in API response
-26. pin_hash is never returned in API response
-27. Existing email/password login regression
-28. Existing mobile OTP login regression
-29. Existing refresh/logout behavior regression
-30. PIN management endpoints exist and enforce auth/payload
+Updated for Task 10:
+- Domain-less mobile PIN requests (phone + pin only)
+- Global phone uniqueness (unique phones per tenant)
+- Dynamic OTP verification via MockSMSProvider and deterministic fixture
+- Preserves all security assertions: lockout, expiration, store/tenant enforcement,
+  validation, privacy, JWT claims compatibility, regression tests.
 """
 
 import base64
@@ -46,10 +21,32 @@ from app.main import app
 from app.models.store import Store
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.services.sms_provider import MockSMSProvider
 
 client = TestClient(app)
 
 FIXED_OTP = "654321"
+
+_pin_phone_seq = 50000000
+
+
+@pytest.fixture(autouse=True)
+def ensure_deterministic_otp(monkeypatch):
+    from app.core.config import get_settings
+    monkeypatch.setenv("AUTH_FIXED_OTP_ENABLED", "false")
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.services.auth_service.secrets.randbelow", lambda _: int(FIXED_OTP))
+    MockSMSProvider.clear_sent_messages()
+    yield
+    MockSMSProvider.clear_sent_messages()
+    get_settings.cache_clear()
+
+
+def _last_otp() -> str:
+    messages = MockSMSProvider.get_sent_messages()
+    if messages:
+        return messages[-1][1]
+    return FIXED_OTP
 
 
 # ---------------------------------------------------------------------------
@@ -60,19 +57,28 @@ def _unique():
     return uuid.uuid4().hex[:8]
 
 
-def _register(slug, email, phone="9876543210", password="TestPass@123!"):
+def _unique_phone() -> str:
+    global _pin_phone_seq
+    _pin_phone_seq += 1
+    return f"9{_pin_phone_seq:09d}"
+
+
+def _register(slug, email, phone=None, password="TestPass@123!"):
+    if phone is None:
+        phone = _unique_phone()
     payload = {
         "tenant_name": f"PinTest {slug}",
         "domain": slug,
         "email": email,
         "admin_name": "PIN Tester",
         "password": password,
+        "phone": phone,
     }
-    if phone:
-        payload["phone"] = phone
     resp = client.post("/api/v1/auth/register", json=payload)
     assert resp.status_code == 200, f"Register failed: {resp.json()}"
-    return resp.json()
+    data = resp.json()
+    data["phone"] = phone
+    return data
 
 
 def _set_pin(user_id: int, pin: str = "1234"):
@@ -86,10 +92,10 @@ def _set_pin(user_id: int, pin: str = "1234"):
         db.close()
 
 
-def _pin_login(domain: str, phone: str, pin: str):
+def _pin_login(phone: str, pin: str):
     return client.post(
         "/api/v1/auth/login/mobile-pin",
-        json={"domain": domain, "phone": phone, "pin": pin},
+        json={"phone": phone, "pin": pin},
     )
 
 
@@ -107,11 +113,12 @@ class TestMobilePINSuccessFlow:
 
     def test_successful_mobile_pin_login(self, unique_slug):
         """1. Successful mobile + PIN login."""
+        phone = _unique_phone()
         email = f"pin-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9876543210")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "1234")
 
-        resp = _pin_login(unique_slug, "9876543210", "1234")
+        resp = _pin_login(phone, "1234")
         assert resp.status_code == 200
         data = resp.json()
         assert "access_token" in data
@@ -120,11 +127,12 @@ class TestMobilePINSuccessFlow:
 
     def test_correct_jwt_response_format(self, unique_slug):
         """2. Correct JWT response."""
+        phone = _unique_phone()
         email = f"jwt-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9123456789")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "4321")
 
-        resp = _pin_login(unique_slug, "9123456789", "4321")
+        resp = _pin_login(phone, "4321")
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data["access_token"], str) and len(data["access_token"]) > 20
@@ -133,8 +141,9 @@ class TestMobilePINSuccessFlow:
 
     def test_jwt_claims_match_email_password_login(self, unique_slug):
         """3. JWT claims match email/password login."""
+        phone = _unique_phone()
         email = f"claims-email-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9234567890", password="TestPass@123!")
+        reg = _register(unique_slug, email, phone=phone, password="TestPass@123!")
         _set_pin(reg["user_id"], "5678")
 
         # Email login
@@ -143,7 +152,7 @@ class TestMobilePINSuccessFlow:
         email_claims = _decode_claims(email_resp.json()["access_token"])
 
         # PIN login
-        pin_resp = _pin_login(unique_slug, "9234567890", "5678")
+        pin_resp = _pin_login(phone, "5678")
         assert pin_resp.status_code == 200
         pin_claims = _decode_claims(pin_resp.json()["access_token"])
 
@@ -151,24 +160,24 @@ class TestMobilePINSuccessFlow:
             assert key in pin_claims
             assert pin_claims[key] == email_claims[key]
 
-    def test_jwt_claims_match_mobile_otp_login(self, unique_slug, monkeypatch):
+    def test_jwt_claims_match_mobile_otp_login(self, unique_slug):
         """4. JWT claims match mobile OTP login."""
-        monkeypatch.setattr("app.services.auth_service.secrets.randbelow", lambda _: int(FIXED_OTP))
+        phone = _unique_phone()
         email = f"claims-otp-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9345678901")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "9876")
 
         # OTP login
-        client.post("/api/v1/auth/login/mobile-otp/request", json={"domain": unique_slug, "phone": "9345678901"})
+        client.post("/api/v1/auth/login/mobile-otp/request", json={"phone": phone})
         otp_resp = client.post(
             "/api/v1/auth/login/mobile-otp/verify",
-            json={"domain": unique_slug, "phone": "9345678901", "otp": FIXED_OTP},
+            json={"phone": phone, "otp": _last_otp()},
         )
         assert otp_resp.status_code == 200
         otp_claims = _decode_claims(otp_resp.json()["access_token"])
 
         # PIN login
-        pin_resp = _pin_login(unique_slug, "9345678901", "9876")
+        pin_resp = _pin_login(phone, "9876")
         assert pin_resp.status_code == 200
         pin_claims = _decode_claims(pin_resp.json()["access_token"])
 
@@ -178,11 +187,12 @@ class TestMobilePINSuccessFlow:
 
     def test_tenant_level_user_store_id_null(self, unique_slug):
         """12. Tenant-level user with store_id = NULL."""
+        phone = _unique_phone()
         email = f"tenant-level-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9456789012")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "1122")
 
-        resp = _pin_login(unique_slug, "9456789012", "1122")
+        resp = _pin_login(phone, "1122")
         assert resp.status_code == 200
         claims = _decode_claims(resp.json()["access_token"])
         assert claims["store_id"] is None
@@ -194,17 +204,16 @@ class TestMobilePINSuccessFlow:
 
 class TestAccountAndStoreEnforcement:
 
-    def test_invalid_domain_rejected(self):
-        """5. Invalid domain."""
-        resp = _pin_login("non-existent-domain-xyz", "9876543210", "1234")
-        assert resp.status_code == 401
-        assert "not found" not in resp.text.lower()
-        assert "does not exist" not in resp.text.lower()
+    def test_invalid_phone_format_rejected(self):
+        """5. Invalid phone format rejected with 422."""
+        resp = _pin_login("12345", "1234")
+        assert resp.status_code == 422
 
     def test_inactive_tenant_rejected(self, unique_slug):
         """6. Inactive tenant."""
+        phone = _unique_phone()
         email = f"inact-t-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9567890123")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "1234")
 
         # Deactivate tenant
@@ -216,24 +225,25 @@ class TestAccountAndStoreEnforcement:
         finally:
             db.close()
 
-        resp = _pin_login(unique_slug, "9567890123", "1234")
+        resp = _pin_login(phone, "1234")
         assert resp.status_code == 401
         assert "inactive" not in resp.text.lower()
 
     def test_unknown_phone_rejected(self, unique_slug):
         """7. Unknown phone."""
         email = f"unknown-p-{unique_slug}@example.com"
-        _register(unique_slug, email, phone="9678901234")
+        _register(unique_slug, email)
 
-        resp = _pin_login(unique_slug, "9999999999", "1234")
+        resp = _pin_login("9999999999", "1234")
         assert resp.status_code == 401
         assert "not found" not in resp.text.lower()
         assert "not registered" not in resp.text.lower()
 
     def test_inactive_user_rejected(self, unique_slug):
         """8. Inactive user."""
+        phone = _unique_phone()
         email = f"inact-u-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9789012345")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "1234")
 
         # Deactivate user
@@ -245,14 +255,15 @@ class TestAccountAndStoreEnforcement:
         finally:
             db.close()
 
-        resp = _pin_login(unique_slug, "9789012345", "1234")
+        resp = _pin_login(phone, "1234")
         assert resp.status_code == 401
         assert "inactive" not in resp.text.lower()
 
     def test_soft_deleted_user_rejected(self, unique_slug):
         """9. Soft-deleted user."""
+        phone = _unique_phone()
         email = f"del-u-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9890123456")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "1234")
 
         # Soft delete user
@@ -264,14 +275,15 @@ class TestAccountAndStoreEnforcement:
         finally:
             db.close()
 
-        resp = _pin_login(unique_slug, "9890123456", "1234")
+        resp = _pin_login(phone, "1234")
         assert resp.status_code == 401
         assert "deleted" not in resp.text.lower()
 
     def test_inactive_store_rejected(self, unique_slug):
         """10. Inactive store."""
+        phone = _unique_phone()
         email = f"inact-s-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9901234567")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "1234")
 
         # Assign user to inactive store
@@ -286,15 +298,16 @@ class TestAccountAndStoreEnforcement:
         finally:
             db.close()
 
-        resp = _pin_login(unique_slug, "9901234567", "1234")
+        resp = _pin_login(phone, "1234")
         assert resp.status_code == 401
         assert "inactive" not in resp.text.lower()
         assert "store" not in resp.text.lower()
 
     def test_cross_tenant_store_mismatch_rejected(self, unique_slug):
         """11. Cross-tenant store mismatch."""
+        phone = _unique_phone()
         email = f"cross-s-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9012345678")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "1234")
 
         # Create another tenant and store, assign user to that other tenant's store
@@ -313,7 +326,7 @@ class TestAccountAndStoreEnforcement:
         finally:
             db.close()
 
-        resp = _pin_login(unique_slug, "9012345678", "1234")
+        resp = _pin_login(phone, "1234")
         assert resp.status_code == 401
 
 
@@ -325,23 +338,25 @@ class TestPINBruteForceProtection:
 
     def test_wrong_pin_rejected(self, unique_slug):
         """13. Wrong PIN."""
+        phone = _unique_phone()
         email = f"wrong-pin-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9112233445")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "1234")
 
-        resp = _pin_login(unique_slug, "9112233445", "9999")
+        resp = _pin_login(phone, "9999")
         assert resp.status_code == 401
         assert "wrong pin" not in resp.text.lower()
 
     def test_five_failed_pin_attempts_locks_account(self, unique_slug, fake_redis):
         """14, 15, 16. 5 failed attempts, lock set, login rejected while locked."""
+        phone = _unique_phone()
         email = f"lock-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9223344556")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "1234")
 
         # 5 failed attempts
         for i in range(5):
-            resp = _pin_login(unique_slug, "9223344556", "0000")
+            resp = _pin_login(phone, "0000")
             assert resp.status_code == 401
 
         # Check Redis lock exists
@@ -352,23 +367,24 @@ class TestPINBruteForceProtection:
         finally:
             db.close()
 
-        lock_key = f"auth:pin:lock:{tenant_id}:9223344556"
+        lock_key = f"auth:pin:lock:{tenant_id}:{phone}"
         assert fake_redis.get(lock_key) is not None, "Redis lock key must exist after 5 failures"
 
         # 6th attempt (even with correct PIN) is rejected while locked
-        locked_resp = _pin_login(unique_slug, "9223344556", "1234")
+        locked_resp = _pin_login(phone, "1234")
         assert locked_resp.status_code == 401
         assert "locked" in locked_resp.text.lower() or "authentication failed" in locked_resp.text.lower()
 
     def test_lock_expires_after_15_minutes_allows_login(self, unique_slug, fake_redis):
         """17. Lock expires after 15 minutes allows login again."""
+        phone = _unique_phone()
         email = f"lock-expire-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9334455667")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "1234")
 
         # 5 failed attempts
         for _ in range(5):
-            _pin_login(unique_slug, "9334455667", "0000")
+            _pin_login(phone, "0000")
 
         db = SessionLocal()
         try:
@@ -377,20 +393,21 @@ class TestPINBruteForceProtection:
         finally:
             db.close()
 
-        lock_key = f"auth:pin:lock:{tenant_id}:9334455667"
+        lock_key = f"auth:pin:lock:{tenant_id}:{phone}"
         assert fake_redis.get(lock_key) is not None
 
         # Simulate 15 minutes expiry: lock key is gone
         del fake_redis._store[lock_key]
 
         # Login with correct PIN now succeeds
-        resp = _pin_login(unique_slug, "9334455667", "1234")
+        resp = _pin_login(phone, "1234")
         assert resp.status_code == 200
 
     def test_successful_login_clears_failed_attempt_state(self, unique_slug, fake_redis):
         """18. Successful login clears failed-attempt state."""
+        phone = _unique_phone()
         email = f"clear-state-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9445566778")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "1234")
 
         db = SessionLocal()
@@ -400,17 +417,17 @@ class TestPINBruteForceProtection:
         finally:
             db.close()
 
-        attempts_key = f"auth:pin:attempts:{tenant_id}:9445566778"
-        lock_key = f"auth:pin:lock:{tenant_id}:9445566778"
+        attempts_key = f"auth:pin:attempts:{tenant_id}:{phone}"
+        lock_key = f"auth:pin:lock:{tenant_id}:{phone}"
 
         # 3 failed attempts
         for _ in range(3):
-            _pin_login(unique_slug, "9445566778", "0000")
+            _pin_login(phone, "0000")
 
         assert fake_redis.get(attempts_key) == "3"
 
         # Successful login on 4th attempt
-        success_resp = _pin_login(unique_slug, "9445566778", "1234")
+        success_resp = _pin_login(phone, "1234")
         assert success_resp.status_code == 200
 
         # Both attempts and lock must be cleared
@@ -418,67 +435,81 @@ class TestPINBruteForceProtection:
         assert fake_redis.get(lock_key) is None
 
     def test_same_phone_different_tenants_isolated_pin_lock(self, fake_redis):
-        """19. Same phone in two tenants has isolated PIN brute-force state."""
+        """19. Cross-tenant duplicate phone rejection and PIN brute-force isolation."""
         slug_a = f"tenant-a-{_unique()}"
         slug_b = f"tenant-b-{_unique()}"
         email_a = f"a-{_unique()}@example.com"
         email_b = f"b-{_unique()}@example.com"
-        shared_phone = "9556677889"
+        phone_a = _unique_phone()
+        phone_b = _unique_phone()
 
-        reg_a = _register(slug_a, email_a, phone=shared_phone)
-        reg_b = _register(slug_b, email_b, phone=shared_phone)
+        reg_a = _register(slug_a, email_a, phone=phone_a)
+
+        # Cross-tenant duplicate active phone is rejected (409)
+        dup_resp = client.post("/api/v1/auth/register", json={
+            "tenant_name": f"PinTest {slug_b}",
+            "domain": slug_b,
+            "email": email_b,
+            "admin_name": "PIN Tester",
+            "password": "TestPass@123!",
+            "phone": phone_a,
+        })
+        assert dup_resp.status_code == 409
+        assert "already registered" in dup_resp.text.lower()
+
+        # Register Tenant B with distinct phone_b
+        reg_b = _register(slug_b, email_b, phone=phone_b)
         _set_pin(reg_a["user_id"], "1111")
         _set_pin(reg_b["user_id"], "2222")
 
-        # 5 failed attempts on Tenant A locks Tenant A
+        # 5 failed attempts on Tenant A locks phone_a
         for _ in range(5):
-            _pin_login(slug_a, shared_phone, "0000")
+            _pin_login(phone_a, "0000")
 
         # Tenant A must now be locked
-        resp_a = _pin_login(slug_a, shared_phone, "1111")
+        resp_a = _pin_login(phone_a, "1111")
         assert resp_a.status_code == 401
 
         # Tenant B must NOT be locked and succeeds with its PIN
-        resp_b = _pin_login(slug_b, shared_phone, "2222")
+        resp_b = _pin_login(phone_b, "2222")
         assert resp_b.status_code == 200
 
-    def test_pin_lock_does_not_affect_otp_login(self, unique_slug, monkeypatch, fake_redis):
+    def test_pin_lock_does_not_affect_otp_login(self, unique_slug, fake_redis):
         """20. PIN lock does not affect OTP login."""
-        monkeypatch.setattr("app.services.auth_service.secrets.randbelow", lambda _: int(FIXED_OTP))
         email = f"pin-lock-otp-{unique_slug}@example.com"
-        phone = "9667788990"
+        phone = _unique_phone()
         reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "1234")
 
         # Lock PIN login with 5 failures
         for _ in range(5):
-            _pin_login(unique_slug, phone, "0000")
+            _pin_login(phone, "0000")
 
         # PIN login is locked
-        assert _pin_login(unique_slug, phone, "1234").status_code == 401
+        assert _pin_login(phone, "1234").status_code == 401
 
-        # OTP login still works seamlessly
-        req_resp = client.post("/api/v1/auth/login/mobile-otp/request", json={"domain": unique_slug, "phone": phone})
+        # OTP login still works seamlessly (domain-less)
+        req_resp = client.post("/api/v1/auth/login/mobile-otp/request", json={"phone": phone})
         assert req_resp.status_code == 200
 
         verify_resp = client.post(
             "/api/v1/auth/login/mobile-otp/verify",
-            json={"domain": unique_slug, "phone": phone, "otp": FIXED_OTP},
+            json={"phone": phone, "otp": _last_otp()},
         )
         assert verify_resp.status_code == 200
         assert "access_token" in verify_resp.json()
 
     def test_pin_lock_does_not_affect_email_password_login(self, unique_slug):
         """21. PIN lock does not affect email/password login."""
+        phone = _unique_phone()
         email = f"pin-lock-pwd-{unique_slug}@example.com"
-        phone = "9778899001"
         password = "UserPass@123!"
         reg = _register(unique_slug, email, phone=phone, password=password)
         _set_pin(reg["user_id"], "1234")
 
         # Lock PIN login with 5 failures
         for _ in range(5):
-            _pin_login(unique_slug, phone, "0000")
+            _pin_login(phone, "0000")
 
         # Email login still succeeds
         email_resp = client.post("/api/v1/auth/login", json={"email": email, "password": password})
@@ -494,41 +525,43 @@ class TestPINValidationAndPrivacy:
 
     def test_non_numeric_pin_rejected(self, unique_slug):
         """22. Non-numeric PIN rejected with 422."""
-        resp = _pin_login(unique_slug, "9889900112", "abcd")
+        resp = _pin_login("9889900112", "abcd")
         assert resp.status_code == 422
 
     def test_pin_shorter_than_4_digits_rejected(self, unique_slug):
         """23. PIN shorter than 4 digits rejected with 422."""
-        resp = _pin_login(unique_slug, "9889900112", "123")
+        resp = _pin_login("9889900112", "123")
         assert resp.status_code == 422
 
     def test_pin_longer_than_4_digits_rejected(self, unique_slug):
         """24. PIN longer than 4 digits rejected with 422."""
-        resp = _pin_login(unique_slug, "9889900112", "12345")
+        resp = _pin_login("9889900112", "12345")
         assert resp.status_code == 422
 
     def test_pin_never_returned_in_response(self, unique_slug):
         """25. PIN is never returned in API response."""
+        phone = _unique_phone()
         email = f"privacy-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9990011223")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "7788")
 
         # Success response
-        resp = _pin_login(unique_slug, "9990011223", "7788")
+        resp = _pin_login(phone, "7788")
         assert "7788" not in resp.text
 
         # Error response
-        err_resp = _pin_login(unique_slug, "9990011223", "0000")
+        err_resp = _pin_login(phone, "0000")
         assert "0000" not in err_resp.text
         assert "7788" not in err_resp.text
 
     def test_pin_hash_never_returned_in_response(self, unique_slug):
         """26. pin_hash is never returned in API response."""
+        phone = _unique_phone()
         email = f"hash-priv-{unique_slug}@example.com"
-        reg = _register(unique_slug, email, phone="9001122334")
+        reg = _register(unique_slug, email, phone=phone)
         _set_pin(reg["user_id"], "9988")
 
-        resp = _pin_login(unique_slug, "9001122334", "9988")
+        resp = _pin_login(phone, "9988")
         assert "pin_hash" not in resp.text
 
 
@@ -547,18 +580,18 @@ class TestAuthRegressions:
         assert resp.status_code == 200
         assert "access_token" in resp.json()
 
-    def test_mobile_otp_login_regression(self, unique_slug, monkeypatch):
+    def test_mobile_otp_login_regression(self, unique_slug):
         """28. Existing mobile OTP login regression."""
-        monkeypatch.setattr("app.services.auth_service.secrets.randbelow", lambda _: int(FIXED_OTP))
+        phone = _unique_phone()
         email = f"reg-otp-{unique_slug}@example.com"
-        _register(unique_slug, email, phone="9123409876")
+        _register(unique_slug, email, phone=phone)
 
-        req = client.post("/api/v1/auth/login/mobile-otp/request", json={"domain": unique_slug, "phone": "9123409876"})
+        req = client.post("/api/v1/auth/login/mobile-otp/request", json={"phone": phone})
         assert req.status_code == 200
 
         verify = client.post(
             "/api/v1/auth/login/mobile-otp/verify",
-            json={"domain": unique_slug, "phone": "9123409876", "otp": FIXED_OTP},
+            json={"phone": phone, "otp": _last_otp()},
         )
         assert verify.status_code == 200
         assert "access_token" in verify.json()
