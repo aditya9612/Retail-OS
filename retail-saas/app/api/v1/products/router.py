@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -7,9 +9,11 @@ from app.core.security import require_operational_write, require_permission
 from app.models.product import ProductImage
 from app.models.user import User
 from app.schemas.product import (
+    BarcodeMode,
     ProductCreate,
     ProductImageCreate,
     ProductImageResponse,
+    ProductLowStockResponse,
     ProductResponse,
     ProductUpdate,
 )
@@ -95,7 +99,7 @@ def search_products(
 
 @router.get(
     "/low-stock",
-    response_model=list[ProductResponse],
+    response_model=list[ProductLowStockResponse],
 )
 def list_low_stock(
     store_id: int = Query(
@@ -109,11 +113,28 @@ def list_low_stock(
         le=1000000,
         description="Low-stock threshold",
     ),
+    days: Optional[str] = Query(
+        default=None,
+        description="Optional days of stock remaining threshold",
+    ),
     user: User = Depends(
         require_permission("products:read")
     ),
     db: Session = Depends(get_db),
 ):
+    if days is not None:
+        days_str = days.strip()
+        if not days_str:
+            raise HTTPException(
+                status_code=422,
+                detail="Days parameter cannot be empty",
+            )
+        if not days_str.isdigit() or int(days_str) <= 0 or int(days_str) > 365:
+            raise HTTPException(
+                status_code=422,
+                detail="Days must be an integer between 1 and 365",
+            )
+
     return ProductService(db).list_low_stock(
         user.tenant_id,
         store_id,
@@ -130,20 +151,35 @@ def list_expiring_soon(
         ...,
         gt=0,
     ),
-    days: int = Query(
-        default=30,
-        gt=0,
-        le=365,
+    days: Optional[str] = Query(
+        default="30",
+        description="Days until expiration (1-365)",
     ),
     user: User = Depends(
         require_permission("products:read")
     ),
     db: Session = Depends(get_db),
 ):
+    if days is not None:
+        days_str = days.strip()
+        if not days_str:
+            raise HTTPException(
+                status_code=422,
+                detail="Days parameter cannot be empty",
+            )
+        if not days_str.isdigit() or int(days_str) <= 0 or int(days_str) > 365:
+            raise HTTPException(
+                status_code=422,
+                detail="Days must be an integer between 1 and 365",
+            )
+        days_val = int(days_str)
+    else:
+        days_val = 30
+
     return ProductService(db).list_expiring_soon(
         user.tenant_id,
         store_id,
-        days,
+        days_val,
     )
 
 
@@ -243,8 +279,8 @@ def toggle_product_status(
 )
 def barcode_image(
     product_id: int,
-    mode: str = Query(
-        default="download",
+    mode: BarcodeMode = Query(
+        default=BarcodeMode.DOWNLOAD,
         description="download or preview",
     ),
     user: User = Depends(
@@ -262,12 +298,9 @@ def barcode_image(
         product_id,
     )
 
-    if mode not in {"download", "preview"}:
-        mode = "download"
-
     disposition = (
         "inline"
-        if mode == "preview"
+        if mode == BarcodeMode.PREVIEW
         else "attachment"
     )
 
@@ -286,6 +319,11 @@ def barcode_image(
 @router.delete(
     "/{product_id}",
     status_code=204,
+    responses={
+        204: {
+            "description": "Product deleted successfully",
+        }
+    },
     dependencies=[Depends(require_operational_write)],
 )
 def delete_product(
@@ -365,6 +403,11 @@ def list_product_images(
 @router.delete(
     "/{product_id}/images/{image_id}",
     status_code=204,
+    responses={
+        204: {
+            "description": "Product image deleted successfully",
+        }
+    },
     dependencies=[Depends(require_operational_write)],
 )
 def delete_product_image(
@@ -389,6 +432,11 @@ def delete_product_image(
         .first()
     )
 
-    if image:
-        db.delete(image)
-        db.commit()
+    if not image:
+        raise HTTPException(
+            status_code=404,
+            detail="Product image not found",
+        )
+
+    db.delete(image)
+    db.commit()
