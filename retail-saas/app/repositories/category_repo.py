@@ -60,15 +60,21 @@ class CategoryRepository:
         description: str | None = None,
         parent_id: int | None = None,
         is_active: bool | None = None,
+        update_parent_id: bool = False,
+        update_description: bool = False,
     ) -> Category:
 
         if name is not None:
             category.name = name
 
-        if description is not None:
+        if update_description:
+            category.description = description
+        elif description is not None:
             category.description = description
 
-        if parent_id is not None:
+        if update_parent_id:
+            category.parent_id = parent_id
+        elif parent_id is not None:
             category.parent_id = parent_id
 
         if is_active is not None:
@@ -77,7 +83,7 @@ class CategoryRepository:
         self.db.commit()
         self.db.refresh(category)
 
-        return category    
+        return category
 
     def delete(self, category: Category) -> None:
         self.db.delete(category)

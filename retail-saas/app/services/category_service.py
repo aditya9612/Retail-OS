@@ -72,7 +72,10 @@ class CategoryService:
         if not category:
             raise NotFoundException("Category not found")
 
-        if data.parent_id is not None:
+        update_parent_id = "parent_id" in data.model_fields_set
+        update_description = "description" in data.model_fields_set
+
+        if update_parent_id and data.parent_id is not None:
             if data.parent_id == category_id:
                 raise AppException(
                     detail="Category cannot be its own parent",
@@ -85,6 +88,21 @@ class CategoryService:
             if not parent:
                 raise NotFoundException("Parent category not found")
 
+            # Circular reference check: ensure parent is not a descendant of category_id
+            curr = parent
+            visited = {category_id}
+            while curr is not None and curr.parent_id is not None:
+                if curr.parent_id in visited:
+                    raise AppException(
+                        detail="Category cannot have a descendant as its parent (circular reference detected)",
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    )
+                visited.add(curr.id)
+                curr = self.repository.get_by_id(
+                    tenant_id=tenant_id,
+                    category_id=curr.parent_id,
+                )
+
         try:
             return self.repository.update(
                 category=category,
@@ -92,6 +110,8 @@ class CategoryService:
                 description=data.description,
                 parent_id=data.parent_id,
                 is_active=getattr(data, "is_active", None),
+                update_parent_id=update_parent_id,
+                update_description=update_description,
             )
         except IntegrityError:
             self.db.rollback()
