@@ -39,11 +39,11 @@ def validate_category_name(v: str) -> str:
         raise ValueError(f"Category name cannot be placeholder '{v}'")
 
     # Reject if only special characters or repeating symbols
-    if re.fullmatch(r"^[-_.@#$%^&*!+=~`|<>?/\\]+$", v):
+    if re.fullmatch(r"^[-_.@#$%^&*!+=~`|<>{}\[\]()?/\\'\"]+$", v):
         raise ValueError("Category name cannot consist only of special characters")
 
     # Reject if numeric-only (e.g., "1234", "999")
-    if v.isdigit() or re.fullmatch(r"^\d+$", v):
+    if v.isdigit() or bool(re.fullmatch(r"^\d+$", v)):
         raise ValueError("Category name cannot consist only of numbers")
 
     # Must contain at least one letter (allows real-world names like "4K TVs", "Shoes 2026", "USB-C Accessories")
@@ -74,11 +74,11 @@ def validate_category_description(v: Optional[str]) -> Optional[str]:
         raise ValueError(f"Description cannot be placeholder '{v}'")
 
     # Reject if only special characters
-    if re.fullmatch(r"^[-_.@#$%^&*!+=~`|<>?/\\]+$", v):
+    if re.fullmatch(r"^[-_.@#$%^&*!+=~`|<>{}\[\]()?/\\'\"]+$", v):
         raise ValueError("Description cannot consist only of special characters")
 
     # Reject if numeric-only
-    if v.isdigit() or re.fullmatch(r"^\d+$", v):
+    if v.isdigit() or bool(re.fullmatch(r"^\d+$", v)):
         raise ValueError("Description cannot consist only of numbers")
 
     # Must contain at least one letter
@@ -127,7 +127,7 @@ class CategoryUpdate(BaseModel):
     @classmethod
     def validate_name(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
-            return None
+            raise ValueError("Category name cannot be null")
         return validate_category_name(value)
 
     @field_validator("description")
