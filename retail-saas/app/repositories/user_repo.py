@@ -63,6 +63,7 @@ class UserRepository:
         skip: int = 0,
         limit: int = 100,
         include_inactive: bool = False,
+        store_id: Optional[int] = None,
     ) -> list[User]:
         query = (
             self.db.query(User)
@@ -72,6 +73,9 @@ class UserRepository:
                 User.is_deleted.is_(False),
             )
         )
+
+        if store_id is not None:
+            query = query.filter(User.store_id == store_id)
 
         if not include_inactive:
             query = query.filter(

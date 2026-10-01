@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, JSON, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -28,18 +28,24 @@ class Role(Base, TimestampMixin):
     )
 
     name: Mapped[str] = mapped_column(
-        String(50),
+        String(100),
         nullable=False,
     )
 
-    description: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
+    is_system: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
     )
 
-    permissions: Mapped[list] = mapped_column(
+    @property
+    def description(self) -> str | None:
+        return None
+
+    permissions: Mapped[list | None] = mapped_column(
         JSON,
         default=list,
+        nullable=True,
     )
 
     users: Mapped[list["User"]] = relationship(

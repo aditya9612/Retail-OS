@@ -56,6 +56,12 @@ class Settings(BaseSettings):
 
     AUTH_EXPOSE_OTP_IN_DEVELOPMENT: bool = True
 
+    SAAS_UPI_VPA: str = "retailos@icici"
+    SAAS_UPI_PAYEE_NAME: str = "RetailOS"
+    SAAS_UPI_CHECKOUT_REUSE_WINDOW_SECONDS: int = 900
+    SAAS_SUBSCRIPTION_GRACE_PERIOD_DAYS: int = 7
+    SAAS_INVOICE_ADVANCE_DAYS: int = 7
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors(cls, v):

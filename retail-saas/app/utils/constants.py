@@ -102,6 +102,8 @@ DEFAULT_ROLE_PERMISSIONS = {
     ],
 
     UserRole.MANAGER: [
+        "stores:read",
+        "users:read",
         "products:read",
         "inventory:read",
         "orders:read",

@@ -1,7 +1,7 @@
 from datetime import date
 from datetime import datetime
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, String , Text,DECIMAL, DateTime, Enum ,Column
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, String , Text,DECIMAL, DateTime, Enum ,Column, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.core.database import Base, TimestampMixin
@@ -9,12 +9,24 @@ from app.core.database import Base, TimestampMixin
 
 class Customer(Base, TimestampMixin):
     __tablename__= "customers"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "phone",
+            name="uq_customer_tenant_phone",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "email",
+            name="uq_customer_tenant_email",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
-    phone: Mapped[str] = mapped_column(String(20),unique=True, nullable=False, index=True)
+    email: Mapped[str | None] = mapped_column(String(255), index=True)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     address: Mapped[str | None] = mapped_column(String(500))
     gstin: Mapped[str | None] = mapped_column(String(20), index=True)
     birthday: Mapped[date | None] = mapped_column(Date)

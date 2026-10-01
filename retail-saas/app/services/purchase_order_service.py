@@ -65,10 +65,10 @@ class PurchaseOrderService:
         po = PurchaseOrder(
             tenant_id=tenant_id,
             supplier_id=data.supplier_id,
-            store_id=data.store_id,
-            po_number=f"PO-{uuid.uuid4().hex[:8].upper()}",
+            order_number=f"PO-{uuid.uuid4().hex[:8].upper()}",
             status="draft",
-            remarks=data.remarks,
+            notes=data.notes or data.remarks,
+            expected_delivery_date=data.expected_delivery_date,
         )
 
         total_amount = Decimal("0.00")
@@ -89,18 +89,19 @@ class PurchaseOrderService:
                    f"Product {item.product_id} not found"
                 )
 
-            total = item.quantity * item.unit_price
+            unit_cost = item.unit_cost if item.unit_cost is not None else item.unit_price
+            total_cost = item.quantity * unit_cost
 
             po.items.append(
                 PurchaseOrderItem(
                     product_id=item.product_id,
                     quantity=item.quantity,
-                    unit_price=item.unit_price,
-                    total=total,
+                    unit_cost=unit_cost,
+                    total_cost=total_cost,
                 )
             )
 
-            total_amount += total
+            total_amount += total_cost
 
         po.total_amount = total_amount
 

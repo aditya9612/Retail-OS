@@ -3,9 +3,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_operational_write
 from app.models.user import User
 from app.schemas.store_transfer import (
+    StoreTransferApprove,
     StoreTransferCreate,
     StoreTransferResponse
 )
@@ -21,7 +22,8 @@ router = APIRouter(
 @router.post(
     "",
     response_model=StoreTransferResponse,
-    status_code=status.HTTP_201_CREATED
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_operational_write)],
 )
 def create_transfer(
     data: StoreTransferCreate,
@@ -33,7 +35,8 @@ def create_transfer(
             db=db,
             source_store_id=data.source_store_id,
             destination_store_id=data.destination_store_id,
-            items=data.items
+            items=data.items,
+            tenant_id=current_user.tenant_id,
         )
     except ValueError as e:
         raise HTTPException(
@@ -55,6 +58,7 @@ def list_transfers(
 ):
     return StoreTransferService.get_transfers(
         db=db,
+        tenant_id=current_user.tenant_id,
         source_store_id=source_store_id,
         destination_store_id=destination_store_id,
         status=status
@@ -73,7 +77,8 @@ def get_transfer(
     try:
         return StoreTransferService.get_transfer(
             db,
-            transfer_id
+            transfer_id,
+            tenant_id=current_user.tenant_id,
         )
     except ValueError as e:
         raise HTTPException(
@@ -84,21 +89,29 @@ def get_transfer(
 
 @router.put(
     "/{transfer_id}/approve",
-    response_model=StoreTransferResponse
+    response_model=StoreTransferResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def approve_transfer(
     transfer_id: int,
-    approved_by: int,
+    data: StoreTransferApprove = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    approver_id = data.approved_by if (data and data.approved_by) else current_user.id
     try:
         return StoreTransferService.approve_transfer(
             db=db,
             transfer_id=transfer_id,
-            approved_by=approved_by
+            approved_by=approver_id,
+            tenant_id=current_user.tenant_id,
         )
     except ValueError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=str(e)
+            )
         raise HTTPException(
             status_code=400,
             detail=str(e)
@@ -107,7 +120,8 @@ def approve_transfer(
 
 @router.put(
     "/{transfer_id}/reject",
-    response_model=StoreTransferResponse
+    response_model=StoreTransferResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def reject_transfer(
     transfer_id: int,
@@ -117,9 +131,15 @@ def reject_transfer(
     try:
         return StoreTransferService.reject_transfer(
             db,
-            transfer_id
+            transfer_id,
+            tenant_id=current_user.tenant_id,
         )
     except ValueError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=str(e)
+            )
         raise HTTPException(
             status_code=400,
             detail=str(e)
@@ -128,7 +148,8 @@ def reject_transfer(
 
 @router.put(
     "/{transfer_id}/dispatch",
-    response_model=StoreTransferResponse
+    response_model=StoreTransferResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def dispatch_transfer(
     transfer_id: int,
@@ -138,9 +159,15 @@ def dispatch_transfer(
     try:
         return StoreTransferService.dispatch_transfer(
             db,
-            transfer_id
+            transfer_id,
+            tenant_id=current_user.tenant_id,
         )
     except ValueError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=str(e)
+            )
         raise HTTPException(
             status_code=400,
             detail=str(e)
@@ -149,7 +176,8 @@ def dispatch_transfer(
 
 @router.put(
     "/{transfer_id}/receive",
-    response_model=StoreTransferResponse
+    response_model=StoreTransferResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def receive_transfer(
     transfer_id: int,
@@ -159,9 +187,15 @@ def receive_transfer(
     try:
         return StoreTransferService.receive_transfer(
             db,
-            transfer_id
+            transfer_id,
+            tenant_id=current_user.tenant_id,
         )
     except ValueError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail=str(e)
+            )
         raise HTTPException(
             status_code=400,
             detail=str(e)

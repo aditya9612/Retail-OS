@@ -57,7 +57,7 @@ class Refund(Base, TimestampMixin):
     )
 
     refund_status: Mapped[str | None] = mapped_column(
-        String(20),
+        String(30),
         nullable=True,
         index=True,
     )

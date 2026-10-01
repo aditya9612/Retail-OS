@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 VALID_GST_SLABS = [
@@ -14,35 +14,10 @@ VALID_GST_SLABS = [
 ]
 
 
-class CategoryBase(BaseModel):
-    name: str = Field(min_length=2, max_length=255)
-    description: Optional[str] = Field(default=None, max_length=500)
-    parent_id: Optional[int] = Field(default=None, gt=0)
-
-    @field_validator("name")
-    @classmethod
-    def validate_name(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("Category name cannot be empty or whitespace")
-        return v
-
-
-class CategoryCreate(CategoryBase):
-    pass
-
-
-class CategoryResponse(CategoryBase):
-    id: int
-    tenant_id: int
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 class ProductImageCreate(BaseModel):
     image_url: str = Field(min_length=1, max_length=500)
-    display_order: int = Field(default=0, ge=0)
+    is_primary: bool = Field(default=False, description="Whether this is the primary product image")
+    display_order: Optional[int] = Field(default=0, ge=0)
 
     @field_validator("image_url")
     @classmethod
@@ -57,7 +32,8 @@ class ProductImageResponse(BaseModel):
     id: int
     product_id: int
     image_url: str
-    display_order: int
+    is_primary: bool = False
+    display_order: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -77,10 +53,10 @@ class ProductBase(BaseModel):
         description="SKU must be 2 to 100 characters",
     )
 
-    barcode: str = Field(
-        min_length=1,
-        max_length=50,
-        description="Barcode is required and cannot be blank",
+    barcode: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Barcode",
     )
 
     description: Optional[str] = Field(
@@ -99,11 +75,7 @@ class ProductBase(BaseModel):
         max_length=8,
     )
 
-    gst_rate: Decimal = Field(
-        default=Decimal("18.00"),
-        ge=0,
-        le=100,
-    )
+    brand: Optional[str] = Field(default=None, max_length=100)
 
     selling_price: Decimal = Field(
         gt=0,
@@ -118,14 +90,39 @@ class ProductBase(BaseModel):
         description="MRP cannot be negative",
     )
 
+    tax_rate: Decimal = Field(
+        default=Decimal("0.00"),
+        ge=0,
+        le=100,
+        description="Tax rate percentage",
+    )
+
+    min_stock_alert: int = Field(default=5, ge=0)
+    stock_status: str = Field(default="in_stock", max_length=50)
+    unit: str = Field(default="pcs", max_length=50)
+    is_active: bool = True
+
+    # Compatibility fields
+    price: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("999999.99"))
+    gst_rate: Optional[Decimal] = Field(default=None, ge=0, le=100)
     variants: Optional[Dict[str, Any]] = None
     track_batch: bool = False
     track_expiry: bool = False
+    image_url: Optional[str] = Field(default=None, max_length=500)
 
-    image_url: Optional[str] = Field(
-        default=None,
-        max_length=500,
-    )
+    @model_validator(mode="before")
+    @classmethod
+    def reconcile_prices_and_taxes(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("selling_price") and data.get("price"):
+                data["selling_price"] = data["price"]
+            elif data.get("selling_price") and not data.get("price"):
+                data["price"] = data["selling_price"]
+            if not data.get("tax_rate") and data.get("gst_rate"):
+                data["tax_rate"] = data["gst_rate"]
+            elif data.get("tax_rate") and not data.get("gst_rate"):
+                data["gst_rate"] = data["tax_rate"]
+        return data
 
     @field_validator("name")
     @classmethod
@@ -247,11 +244,7 @@ class ProductUpdate(BaseModel):
         max_length=8,
     )
 
-    gst_rate: Optional[Decimal] = Field(
-        default=None,
-        ge=0,
-        le=100,
-    )
+    brand: Optional[str] = None
 
     selling_price: Optional[Decimal] = Field(
         default=None,
@@ -265,16 +258,49 @@ class ProductUpdate(BaseModel):
         le=Decimal("999999.99"),
     )
 
+    tax_rate: Optional[Decimal] = Field(
+        default=None,
+        ge=0,
+        le=100,
+    )
+
+    min_stock_alert: Optional[int] = None
+    stock_status: Optional[str] = None
+    unit: Optional[str] = None
+    is_active: Optional[bool] = None
+
+    # Compatibility fields
+    price: Optional[Decimal] = Field(
+        default=None,
+        gt=0,
+        le=Decimal("999999.99"),
+    )
+    gst_rate: Optional[Decimal] = Field(
+        default=None,
+        ge=0,
+        le=100,
+    )
     variants: Optional[Dict[str, Any]] = None
     track_batch: Optional[bool] = None
     track_expiry: Optional[bool] = None
-
     image_url: Optional[str] = Field(
         default=None,
         max_length=500,
     )
 
-    is_active: Optional[bool] = None
+    @model_validator(mode="before")
+    @classmethod
+    def reconcile_update_prices_and_taxes(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("selling_price") and data.get("price"):
+                data["selling_price"] = data["price"]
+            elif data.get("selling_price") and not data.get("price"):
+                data["price"] = data["selling_price"]
+            if not data.get("tax_rate") and data.get("gst_rate"):
+                data["tax_rate"] = data["gst_rate"]
+            elif data.get("tax_rate") and not data.get("gst_rate"):
+                data["gst_rate"] = data["tax_rate"]
+        return data
 
     @field_validator("name")
     @classmethod
@@ -365,15 +391,21 @@ class ProductResponse(BaseModel):
     name: str
     sku: str
     barcode: Optional[str] = None
+    brand: Optional[str] = None
     description: Optional[str] = None
     category_id: Optional[int] = None
     hsn_code: Optional[str] = None
     gst_rate: Decimal
     selling_price: Decimal
     mrp: Decimal
+    tax_rate: Decimal
+    min_stock_alert: int = 5
+    stock_status: str = "in_stock"
+    unit: str = "pcs"
+    price: Decimal
     variants: Optional[Dict[str, Any]] = None
-    track_batch: bool
-    track_expiry: bool
+    track_batch: bool = False
+    track_expiry: bool = False
     image_url: Optional[str] = None
     is_active: bool
     created_at: datetime

@@ -1,4 +1,5 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import func
 
 from app.core.exceptions import AppException, NotFoundException
 from app.models.purchase_order import PurchaseOrder
@@ -145,29 +146,29 @@ class SupplierService:
         search: str,
     ) -> list[Supplier]:
 
-       search = search.strip()
+        search = search.strip()
 
-       if not search:
-           raise AppException(
-               "Search term cannot be empty"
+        if not search:
+            raise AppException(
+                "Search term cannot be empty"
             )
 
-       suppliers = (
-           self.db.query(Supplier)
-           .filter(
-               Supplier.tenant_id == tenant_id,
-               Supplier.name.ilike(f"%{search}%"),
+        suppliers = (
+            self.db.query(Supplier)
+            .filter(
+                Supplier.tenant_id == tenant_id,
+                func.lower(Supplier.name) == search.lower(),
             )
             .order_by(Supplier.name.asc())
             .all()
         )
 
-       if not suppliers:
-          raise NotFoundException(
-            "No suppliers found matching the search"
-        )
+        if not suppliers:
+            raise NotFoundException(
+                "No suppliers found matching the search"
+            )
 
-       return suppliers
+        return suppliers
 
     def supplier_stats(
         self,
@@ -219,6 +220,7 @@ class SupplierService:
 
         purchases = (
             self.db.query(PurchaseOrder)
+            .options(selectinload(PurchaseOrder.items))
             .filter(
                 PurchaseOrder.tenant_id == tenant_id,
                 PurchaseOrder.supplier_id == supplier_id,

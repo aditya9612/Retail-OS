@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.core.database import get_db
-from app.core.security import require_permission
+from app.core.security import require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.sale import SaleCreate, SaleResponse
 from app.services.sale_service import SaleService
@@ -18,7 +18,8 @@ router = APIRouter(
 @router.post(
     "",
     response_model=SaleResponse,
-    status_code=status.HTTP_201_CREATED
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_operational_write)],
 )
 def create_sale(
     data: SaleCreate,
@@ -26,8 +27,7 @@ def create_sale(
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.create_sale(db, data)
-
+        return SaleService.create_sale(db, data, current_user=user)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -55,8 +55,7 @@ def get_sales(
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.get_sales(db, store_id)
-
+        return SaleService.get_sales(db, tenant_id=user.tenant_id, store_id=store_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -84,8 +83,7 @@ def get_sale(
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.get_sale(db, sale_id)
-
+        return SaleService.get_sale(db, sale_id, tenant_id=user.tenant_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -101,7 +99,8 @@ def get_sale(
 
 @router.put(
     "/{sale_id}",
-    response_model=SaleResponse
+    response_model=SaleResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def update_sale(
     data: SaleCreate,
@@ -114,9 +113,13 @@ def update_sale(
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.update_sale(db, sale_id, data)
-
+        return SaleService.update_sale(db, sale_id, data, tenant_id=user.tenant_id)
     except ValueError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(e)
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
@@ -130,7 +133,8 @@ def update_sale(
 
 
 @router.delete(
-    "/{sale_id}"
+    "/{sale_id}",
+    dependencies=[Depends(require_operational_write)],
 )
 def delete_sale(
     sale_id: int = Path(
@@ -142,8 +146,7 @@ def delete_sale(
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.delete_sale(db, sale_id)
-
+        return SaleService.delete_sale(db, sale_id, tenant_id=user.tenant_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
