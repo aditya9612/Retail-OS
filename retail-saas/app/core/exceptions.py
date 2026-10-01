@@ -39,6 +39,38 @@ class ConflictException(AppException):
             status_code=status.HTTP_409_CONFLICT
         )
 
+class QuotaExceededException(AppException):
+    def __init__(
+        self,
+        dimension: str,
+        current_usage: int,
+        limit: int,
+        requested: int = 1,
+        detail: str = None,
+    ):
+        message = (
+            detail
+            or f"Plan quota exceeded for '{dimension}'. Current usage: {current_usage}, Limit: {limit}, Requested: {requested}."
+        )
+        super().__init__(
+            detail=message,
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+        self.dimension = dimension
+        self.current_usage = current_usage
+        self.limit = limit
+        self.requested = requested
+        self.detail = {
+            "success": False,
+            "error_code": "QUOTA_EXCEEDED",
+            "message": message,
+            "dimension": dimension,
+            "current_usage": current_usage,
+            "limit": limit,
+            "requested": requested,
+        }
+
+
 def register_exception_handlers(app):
     @app.exception_handler(AppException)
     async def app_exception_handler(request: Request, exc: AppException):

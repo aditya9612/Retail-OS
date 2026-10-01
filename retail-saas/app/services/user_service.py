@@ -3,10 +3,12 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import ConflictException, NotFoundException
 from app.core.security import get_password_hash
 from app.models.role import Role
+from app.models.saas_plan_entitlement import EntitlementDimension
 from app.models.store import Store
 from app.models.user import User
 from app.repositories.user_repo import UserRepository
 from app.schemas.user import MyProfileUpdate, UserCreate, UserUpdate
+from app.services.saas_entitlement_service import SaaSEntitlementService
 
 
 class UserService:
@@ -34,19 +36,33 @@ class UserService:
                 "Email already registered"
             )
 
-        role = (
-            self.db.query(Role)
-            .filter(
-                Role.id == data.role_id,
-                Role.tenant_id == tenant_id,
+        role = None
+        if data.role_id is not None:
+            role = (
+                self.db.query(Role)
+                .filter(
+                    Role.id == data.role_id,
+                    Role.tenant_id == tenant_id,
+                )
+                .first()
             )
-            .first()
-        )
+        elif getattr(data, "role", None):
+            role_str = str(data.role).strip().lower()
+            role = (
+                self.db.query(Role)
+                .filter(
+                    Role.name == role_str,
+                    Role.tenant_id == tenant_id,
+                )
+                .first()
+            )
 
         if not role:
             raise NotFoundException(
-                "Role not found. Use GET /api/v1/users/roles to get valid Role IDs."
+                "Role not found. Use GET /api/v1/users/roles to get valid Roles."
             )
+
+        resolved_role_id = role.id
 
         if data.store_id is not None:
             store = (
@@ -64,13 +80,22 @@ class UserService:
                     "Store not found"
                 )
 
+        # Atomic tenant lock & quota check
+        entitlement_svc = SaaSEntitlementService(self.db)
+        entitlement_svc.require_limit(
+            tenant_id=tenant_id,
+            dimension=EntitlementDimension.USERS,
+            requested_amount=1,
+            lock_tenant=True,
+        )
+
         user = User(
             tenant_id=tenant_id,
             email=email,
             full_name=data.full_name.strip(),
             phone=data.phone,
             store_id=data.store_id,
-            role_id=data.role_id,
+            role_id=resolved_role_id,
             hashed_password=get_password_hash(
                 data.password
             ),
@@ -78,7 +103,10 @@ class UserService:
             is_deleted=False,
         )
 
-        return self.repo.create(user)
+        user = self.repo.create(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
     def list_roles(
         self,
@@ -136,6 +164,7 @@ class UserService:
         skip: int = 0,
         limit: int = 20,
         include_inactive: bool = False,
+        store_id: int | None = None,
     ) -> list[User]:
         if skip < 0:
             skip = 0
@@ -151,6 +180,7 @@ class UserService:
             skip=skip,
             limit=limit,
             include_inactive=include_inactive,
+            store_id=store_id,
         )
 
         return users
@@ -238,7 +268,10 @@ class UserService:
                 value,
             )
 
-        return self.repo.update(user)
+        user = self.repo.update(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
     def update_my_profile(
         self,
@@ -279,7 +312,10 @@ class UserService:
                 value,
             )
 
-        return self.repo.update(user)
+        user = self.repo.update(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
     def activate_user(
         self,
@@ -307,9 +343,20 @@ class UserService:
                 "User is already active"
             )
 
-        user.is_active = True
+        # Atomic tenant lock & quota check
+        entitlement_svc = SaaSEntitlementService(self.db)
+        entitlement_svc.require_limit(
+            tenant_id=tenant_id,
+            dimension=EntitlementDimension.USERS,
+            requested_amount=1,
+            lock_tenant=True,
+        )
 
-        return self.repo.update(user)
+        user.is_active = True
+        user = self.repo.update(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
     def deactivate_user(
         self,
@@ -333,8 +380,10 @@ class UserService:
             )
 
         user.is_active = False
-
-        return self.repo.update(user)
+        user = self.repo.update(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
     def delete_user(
         self,
@@ -367,3 +416,36 @@ class UserService:
         user.is_active = False
 
         self.repo.update(user)
+        self.db.commit()
+
+    def assign_store(
+        self,
+        tenant_id: int,
+        user_id: int,
+        store_id: int,
+    ) -> User:
+        user = self.get_user(
+            tenant_id,
+            user_id,
+        )
+
+        store = (
+            self.db.query(Store)
+            .filter(
+                Store.id == store_id,
+                Store.tenant_id == tenant_id,
+                Store.is_active.is_(True),
+            )
+            .first()
+        )
+
+        if not store:
+            raise NotFoundException(
+                "Store not found or inactive"
+            )
+
+        user.store_id = store.id
+        user = self.repo.update(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user

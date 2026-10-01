@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import require_permission
+from app.core.security import require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.purchase_order_return import (
     PurchaseOrderReturnCreate,
@@ -25,6 +25,7 @@ router = APIRouter(
     "",
     response_model=PurchaseOrderReturnResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_operational_write)],
 )
 def create_purchase_order_return(
     data: PurchaseOrderReturnCreate,
@@ -84,6 +85,7 @@ def get_purchase_order_return(
 @router.patch(
     "/{return_id}",
     response_model=PurchaseOrderReturnResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def update_purchase_order_return(
     return_id: int,
@@ -105,6 +107,7 @@ def update_purchase_order_return(
 @router.patch(
     "/{return_id}/status",
     response_model=PurchaseOrderReturnResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def update_purchase_order_return_status(
     return_id: int,
@@ -126,6 +129,7 @@ def update_purchase_order_return_status(
 @router.post(
     "/{return_id}/approve",
     response_model=PurchaseOrderReturnResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def approve_purchase_order_return(
     return_id: int,
@@ -145,6 +149,7 @@ def approve_purchase_order_return(
 @router.post(
     "/{return_id}/reject",
     response_model=PurchaseOrderReturnResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def reject_purchase_order_return(
     return_id: int,
@@ -164,6 +169,7 @@ def reject_purchase_order_return(
 @router.post(
     "/{return_id}/complete",
     response_model=PurchaseOrderReturnResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def complete_purchase_order_return(
     return_id: int,

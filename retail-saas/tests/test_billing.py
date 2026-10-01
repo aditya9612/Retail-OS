@@ -292,6 +292,7 @@ def test_invoice_search_by_gstin_and_payment_status(billing_setup):
             "name": "GST Customer",
             "phone": "9876543210",
             "gstin": "27AAAAA0000A1Z5",
+            "address": "123 Market Road, Mumbai",
         },
         headers=headers,
     ).json()

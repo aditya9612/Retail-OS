@@ -1,11 +1,12 @@
 from decimal import Decimal
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.exceptions import AppException, ForbiddenException
-from app.core.security import require_permission
+from app.core.security import require_operational_write, require_permission
 from app.models.product import Product
 from app.models.user import User
 from app.schemas.billing import ReturnItemRequest
@@ -188,23 +189,22 @@ def _ensure_price_override_allowed(
 @router.post(
     "/cart/add-item",
     response_model=CartSummaryResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def cart_add_item(
     payload: CartItemCreate,
-    store_id: int = Query(..., gt=0),
-    same_state: bool = Query(default=True),
+    store_id: Optional[int] = Query(default=None, gt=0),
+    same_state: Optional[bool] = Query(default=None),
     user: User = Depends(
         require_permission("billing:write")
     ),
     db: Session = Depends(get_db),
 ):
-    if (
-        payload.store_id is not None
-        and payload.store_id != store_id
-    ):
-        raise AppException(
-            "Payload store_id does not match query store_id"
-        )
+    effective_store_id = payload.store_id or store_id
+    if effective_store_id is None:
+        raise AppException("store_id is required in body or query")
+
+    effective_same_state = payload.same_state if payload.same_state is not None else (same_state if same_state is not None else True)
 
     _ensure_price_override_allowed(
         user,
@@ -217,12 +217,12 @@ def cart_add_item(
     cart = CartService(db).add_item(
         user.tenant_id,
         user.id,
-        store_id,
+        effective_store_id,
         payload.product_id,
         payload.quantity,
         payload.unit_price,
         payload.discount,
-        same_state,
+        effective_same_state,
     )
 
     return _to_cart_response(cart)
@@ -231,6 +231,7 @@ def cart_add_item(
 @router.put(
     "/cart/update-item",
     response_model=CartSummaryResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def cart_update_item(
     payload: CartItemUpdate,
@@ -262,6 +263,7 @@ def cart_update_item(
 @router.delete(
     "/cart/remove-item",
     response_model=CartSummaryResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def cart_remove_item(
     product_id: int = Query(..., gt=0),
@@ -300,6 +302,7 @@ def get_cart(
 @router.post(
     "/cart/apply-discount",
     response_model=CartSummaryResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def cart_apply_discount(
     payload: CartDiscountApply,
@@ -322,6 +325,7 @@ def cart_apply_discount(
 @router.post(
     "/returns",
     response_model=dict,
+    dependencies=[Depends(require_operational_write)],
 )
 def process_item_return(
     payload: ReturnItemRequest,

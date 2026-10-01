@@ -40,11 +40,18 @@ class UserBase(BaseModel):
     store_id: Optional[int] = Field(
         default=None,
         gt=0,
+        description="Optional Store ID. Can be assigned later via /users/{user_id}/assign-store",
     )
 
-    role_id: int = Field(
+    role_id: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Role ID from GET /api/v1/users/roles. The role must belong to the current tenant.",
+        description="Role ID from GET /api/v1/users/roles. Optional if 'role' name is provided.",
+    )
+
+    role: Optional[str] = Field(
+        default=None,
+        description="Role name (e.g. manager, staff, admin, owner). Automatically mapped to role_id.",
     )
 
     @field_validator("email")
@@ -175,6 +182,12 @@ class UserCreate(UserBase):
             )
 
         return value
+
+    @model_validator(mode="after")
+    def validate_role_specified(self):
+        if not self.role_id and not (self.role and self.role.strip()):
+            raise ValueError("Either 'role' (e.g. 'manager', 'staff') or 'role_id' must be provided")
+        return self
 
 
 class UserUpdate(BaseModel):
@@ -462,196 +475,17 @@ class UserResponse(BaseModel):
     )
 
 
-class StoreBase(BaseModel):
-
-    name: str = Field(
-        min_length=2,
-        max_length=255,
+class AssignStoreRequest(BaseModel):
+    store_id: int = Field(
+        ...,
+        gt=0,
+        description="Store ID to assign to the user",
     )
 
-    code: str = Field(
-        min_length=1,
-        max_length=20,
-    )
 
-    address: Optional[str] = Field(
-        default=None,
-        max_length=500,
-    )
-
-    city: Optional[str] = Field(
-        default=None,
-        max_length=100,
-    )
-
-    state: Optional[str] = Field(
-        default=None,
-        max_length=100,
-    )
-
-    pincode: Optional[str] = Field(
-        default=None,
-        min_length=6,
-        max_length=6,
-    )
-
-    phone: Optional[str] = Field(
-        default=None,
-        min_length=10,
-        max_length=15,
-    )
-
-    gstin: Optional[str] = Field(
-        default=None,
-        min_length=15,
-        max_length=15,
-    )
-
-    is_warehouse: bool = False
-
-    @field_validator(
-        "name",
-        "code",
-        "address",
-        "city",
-        "state",
-    )
-    @classmethod
-    def validate_text(
-        cls,
-        value: Optional[str],
-    ) -> Optional[str]:
-
-        if value is None:
-            return None
-
-        value = value.strip()
-
-        if not value:
-            raise ValueError("Field cannot be empty")
-
-        return value
-
-    @field_validator("pincode")
-    @classmethod
-    def validate_pincode(
-        cls,
-        value: Optional[str],
-    ) -> Optional[str]:
-
-        if value is None:
-            return None
-
-        if not value.isdigit():
-            raise ValueError("Pincode must contain digits only")
-
-        if len(value) != 6:
-            raise ValueError(
-                "Pincode must contain exactly 6 digits"
-            )
-
-        return value
-
-    @field_validator("phone")
-    @classmethod
-    def validate_store_phone(
-        cls,
-        value: Optional[str],
-    ) -> Optional[str]:
-
-        if value is None:
-            return None
-
-        if not value.isdigit():
-            raise ValueError("Phone must contain digits only")
-
-        if len(value) < 10 or len(value) > 15:
-            raise ValueError(
-                "Phone must contain 10 to 15 digits"
-            )
-
-        return value
-
-    @field_validator("gstin")
-    @classmethod
-    def validate_gstin(
-        cls,
-        value: Optional[str],
-    ) -> Optional[str]:
-
-        if value is None:
-            return None
-
-        value = value.strip().upper()
-
-        if len(value) != 15:
-            raise ValueError(
-                "GSTIN must contain exactly 15 characters"
-            )
-
-        if not value.isalnum():
-            raise ValueError(
-                "GSTIN must contain only letters and digits"
-            )
-
-        return value
-
-
-class StoreCreate(StoreBase):
-    pass
-
-
-class StoreUpdate(BaseModel):
-
-    name: Optional[str] = Field(
-        default=None,
-        min_length=2,
-        max_length=255,
-    )
-
-    address: Optional[str] = Field(
-        default=None,
-        max_length=500,
-    )
-
-    city: Optional[str] = Field(
-        default=None,
-        max_length=100,
-    )
-
-    state: Optional[str] = Field(
-        default=None,
-        max_length=100,
-    )
-
-    pincode: Optional[str] = Field(
-        default=None,
-        min_length=6,
-        max_length=6,
-    )
-
-    phone: Optional[str] = Field(
-        default=None,
-        min_length=10,
-        max_length=15,
-    )
-
-    gstin: Optional[str] = Field(
-        default=None,
-        min_length=15,
-        max_length=15,
-    )
-
-    is_active: Optional[bool] = None
-
-    is_warehouse: Optional[bool] = None
-
-    @model_validator(mode="after")
-    def validate_update(self):
-
-        if not self.model_fields_set:
-            raise ValueError(
-                "At least one field must be provided for update"
-            )
-
-        return self
+class AssignStoreResponse(BaseModel):
+    message: str = "Store assigned successfully"
+    user_id: int
+    store_id: int
+    store_name: Optional[str] = None
+    role: Optional[str] = None

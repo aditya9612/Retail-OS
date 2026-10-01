@@ -1,36 +1,23 @@
+from typing import Optional
 
-from fastapi import APIRouter, Depends, Body
-
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-
+from app.core.exceptions import ForbiddenException
 from app.core.security import require_permission
-
 from app.models.user import User
-
 from app.schemas.store import (
     StoreCreate,
     StoreResponse,
     StoreUpdate,
 )
-
-from app.schemas.staff import (
-    StaffCreate,
-    StaffUpdate,
-    StaffResponse,
+from app.schemas.user import (
+    UserCreate,
+    UserResponse,
 )
-
 from app.services.store_service import StoreService
-from app.services.staff_service import (
-    create_staff_service,
-    list_staff_service,
-    get_staff_service,
-    update_staff_service,
-    assign_staff_service,
-    transfer_staff_service,
-    delete_staff_service,
-)
+from app.services.user_service import UserService
 
 router = APIRouter(
     prefix="/stores",
@@ -51,6 +38,8 @@ def get_store_service(
 @router.get(
     "/",
     response_model=list[StoreResponse],
+    summary="List Stores",
+    description="Store Owner sees all stores in their organization. Store-assigned staff only see their assigned store.",
 )
 def list_stores(
     user: User = Depends(
@@ -60,15 +49,19 @@ def list_stores(
         get_store_service
     ),
 ):
+    # Store Owner (store_id=None) sees all their stores; store-assigned staff only sees their assigned store
     return service.list_stores(
-        user.tenant_id
+        tenant_id=user.tenant_id,
+        store_id=user.store_id,
     )
 
 
 @router.post(
     "/",
     response_model=StoreResponse,
-    status_code=201,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Store",
+    description="Store Owner creates a new store for their organization under plan limits.",
 )
 def create_store(
     data: StoreCreate,
@@ -79,6 +72,9 @@ def create_store(
         get_store_service
     ),
 ):
+    if user.store_id is not None:
+        raise ForbiddenException("Only Store Owner can create new stores")
+
     return service.create_store(
         user.tenant_id,
         data,
@@ -88,6 +84,7 @@ def create_store(
 @router.get(
     "/{store_id}",
     response_model=StoreResponse,
+    summary="Get Store Details",
 )
 def get_store(
     store_id: int,
@@ -98,6 +95,9 @@ def get_store(
         get_store_service
     ),
 ):
+    if user.store_id is not None and user.store_id != store_id:
+        raise ForbiddenException("Access denied to this store")
+
     return service.get_store(
         user.tenant_id,
         store_id,
@@ -107,6 +107,7 @@ def get_store(
 @router.patch(
     "/{store_id}",
     response_model=StoreResponse,
+    summary="Update Store Details",
 )
 def update_store(
     store_id: int,
@@ -118,6 +119,9 @@ def update_store(
         get_store_service
     ),
 ):
+    if user.store_id is not None and user.store_id != store_id:
+        raise ForbiddenException("Access denied to this store")
+
     return service.update_store(
         user.tenant_id,
         store_id,
@@ -127,6 +131,7 @@ def update_store(
 
 @router.delete(
     "/{store_id}",
+    summary="Delete Store",
 )
 def delete_store(
     store_id: int,
@@ -137,6 +142,9 @@ def delete_store(
         get_store_service
     ),
 ):
+    if user.store_id is not None:
+        raise ForbiddenException("Only Store Owner can delete stores")
+
     service.delete_store(
         user.tenant_id,
         store_id,
@@ -148,144 +156,72 @@ def delete_store(
 
 
 # ============================================================
-# STAFF APIs
+# ROLE-BASED STORE USER APIs (PER STORE)
 # ============================================================
 
-# 1. Create Staff
+@router.get(
+    "/{store_id}/users",
+    response_model=list[UserResponse],
+    summary="List Store Users",
+    description="List all role-based users assigned to a specific store.",
+)
+def list_store_users(
+    store_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    include_inactive: bool = Query(False),
+    user: User = Depends(
+        require_permission("users:read")
+    ),
+    service: StoreService = Depends(
+        get_store_service
+    ),
+    db: Session = Depends(get_db),
+):
+    # Verify store belongs to caller's tenant
+    service.get_store(user.tenant_id, store_id)
+
+    if user.store_id is not None and user.store_id != store_id:
+        raise ForbiddenException("Access denied to users of this store")
+
+    skip = (page - 1) * page_size
+    return UserService(db).list_users(
+        tenant_id=user.tenant_id,
+        skip=skip,
+        limit=page_size,
+        include_inactive=include_inactive,
+        store_id=store_id,
+    )
+
+
 @router.post(
-    "/{store_id}/staff",
-    response_model=StaffResponse,
-    status_code=201,
+    "/{store_id}/users",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Store User",
+    description="Store Owner creates a role-based user for a specific store.",
 )
-def create_staff(
+def create_store_user(
     store_id: int,
-    data: StaffCreate,
+    data: UserCreate,
     user: User = Depends(
-        require_permission("employees:write")
+        require_permission("users:write")
+    ),
+    service: StoreService = Depends(
+        get_store_service
     ),
     db: Session = Depends(get_db),
 ):
-    return create_staff_service(
-        db,
-        store_id,
-        data,
-    )
+    # Verify store belongs to caller's tenant
+    service.get_store(user.tenant_id, store_id)
 
+    if user.store_id is not None and user.store_id != store_id:
+        raise ForbiddenException("You can only create users for your assigned store")
 
-# 2. List Staff
-@router.get(
-    "/{store_id}/staff",
-    response_model=list[StaffResponse],
-)
-def list_staff(
-    store_id: int,
-    user: User = Depends(
-        require_permission("employees:read")
-    ),
-    db: Session = Depends(get_db),
-):
-    return list_staff_service(
-        db,
-        store_id,
-    )
+    # Force store_id to match the path store_id
+    data.store_id = store_id
 
-
-# 3. Get Staff
-@router.get(
-    "/{store_id}/staff/{staff_id}",
-    response_model=StaffResponse,
-)
-def get_staff(
-    store_id: int,
-    staff_id: int,
-    user: User = Depends(
-        require_permission("employees:read")
-    ),
-    db: Session = Depends(get_db),
-):
-    return get_staff_service(
-        db,
-        store_id,
-        staff_id,
-    )
-
-
-# 4. Patch Staff
-@router.patch(
-    "/{store_id}/staff/{staff_id}",
-    response_model=StaffResponse,
-)
-def patch_staff(
-    store_id: int,
-    staff_id: int,
-    data: StaffUpdate,
-    user: User = Depends(
-        require_permission("employees:write")
-    ),
-    db: Session = Depends(get_db),
-):
-    return update_staff_service(
-        db,
-        store_id,
-        staff_id,
-        data,
-    )
-
-
-# 5. Assign Staff
-@router.patch(
-    "/assign/{staff_id}/{store_id}",
-    response_model=StaffResponse,
-)
-def assign_staff(
-    staff_id: int,
-    store_id: int,
-    user: User = Depends(
-        require_permission("employees:write")
-    ),
-    db: Session = Depends(get_db),
-):
-    return assign_staff_service(
-        db,
-        staff_id,
-        store_id,
-    )
-
-
-# 6. Transfer Staff
-@router.patch(
-    "/transfer/{staff_id}/{store_id}",
-    response_model=StaffResponse,
-)
-def transfer_staff(
-    staff_id: int,
-    store_id: int,
-    user: User = Depends(
-        require_permission("employees:write")
-    ),
-    db: Session = Depends(get_db),
-):
-    return transfer_staff_service(
-        db,
-        staff_id,
-        store_id,
-    )
-
-
-# 7. Delete Staff - LAST
-@router.delete(
-    "/{store_id}/staff/{staff_id}",
-)
-def delete_staff(
-    store_id: int,
-    staff_id: int,
-    user: User = Depends(
-        require_permission("employees:write")
-    ),
-    db: Session = Depends(get_db),
-):
-    return delete_staff_service(
-        db,
-        store_id,
-        staff_id,
+    return UserService(db).create_user(
+        tenant_id=user.tenant_id,
+        data=data,
     )
