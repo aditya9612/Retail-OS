@@ -49,7 +49,7 @@ class UserBase(BaseModel):
     role_id: Optional[int] = Field(
         default=None,
         gt=0,
-        description="Role ID from GET /api/v1/users/roles. Optional if 'role' name is provided.",
+        description="Role ID from GET /api/v1/roles. Optional if 'role' name is provided.",
     )
 
     role: Optional[str] = Field(
@@ -234,7 +234,7 @@ class UserUpdate(BaseModel):
     role_id: Optional[int] = Field(
         default=None,
         gt=0,
-        description="Role ID from GET /api/v1/users/roles.",
+        description="Role ID from GET /api/v1/roles.",
     )
 
     is_active: Optional[bool] = None
@@ -534,4 +534,45 @@ class RemoveStoreResponse(BaseModel):
     store_id: Optional[int] = None
     previous_store_id: Optional[int] = None
     role: Optional[str] = None
+
+
+class StoreUserItem(BaseModel):
+    id: int
+    full_name: str
+    email: str
+    phone: Optional[str] = None
+    role_id: int
+    role_name: str
+    is_active: bool
+    created_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class StoreUsersSummary(BaseModel):
+    store_id: Optional[int] = Field(
+        default=None,
+        description="Store ID, or null for unassigned / head office users",
+    )
+    store_name: str
+    store_code: Optional[str] = None
+    is_main: bool = False
+    total_users: int
+    users: list[StoreUserItem] = Field(default_factory=list)
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class UsersByStoreResponse(BaseModel):
+    total_stores: int
+    total_users: int
+    stores: list[StoreUsersSummary]
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 

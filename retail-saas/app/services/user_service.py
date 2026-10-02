@@ -63,7 +63,7 @@ class UserService:
 
         if not role:
             raise NotFoundException(
-                "Role not found. Use GET /api/v1/users/roles to get valid Roles."
+                "Role not found. Use GET /api/v1/roles to get valid Roles."
             )
 
         resolved_role_id = role.id
@@ -239,7 +239,7 @@ class UserService:
 
             if not role:
                 raise NotFoundException(
-                    "Role not found. Use GET /api/v1/users/roles to get valid Role IDs."
+                    "Role not found. Use GET /api/v1/roles to get valid Role IDs."
                 )
 
         if "store_id" in update_data:
@@ -535,4 +535,133 @@ class UserService:
         self.db.commit()
         self.db.refresh(user)
         return user, previous_store_id
+
+    def get_users_by_store(
+        self,
+        tenant_id: int,
+        current_user_store_id: Optional[int] = None,
+        store_id: Optional[int] = None,
+        role: Optional[str] = None,
+        role_id: Optional[int] = None,
+        is_active: Optional[bool] = None,
+        search: Optional[str] = None,
+        include_unassigned: bool = True,
+    ):
+        from collections import defaultdict
+        from sqlalchemy import func, or_
+        from sqlalchemy.orm import joinedload
+        from app.core.exceptions import ForbiddenException, NotFoundException
+        from app.models.role import Role
+        from app.models.store import Store
+        from app.schemas.user import StoreUserItem, StoreUsersSummary, UsersByStoreResponse
+
+        # Determine effective store filter
+        effective_store_id = store_id
+        if current_user_store_id is not None:
+            if store_id is not None and store_id != current_user_store_id:
+                raise ForbiddenException("Access denied to another store")
+            effective_store_id = current_user_store_id
+            include_unassigned = False
+
+        # 1. Fetch stores belonging to tenant
+        store_query = self.db.query(Store).filter(
+            Store.tenant_id == tenant_id,
+            Store.is_active.is_(True),
+        )
+        if effective_store_id is not None:
+            store_query = store_query.filter(Store.id == effective_store_id)
+
+        stores = store_query.order_by(Store.id.asc()).all()
+
+        if effective_store_id is not None and not stores:
+            raise NotFoundException("Store not found or inactive")
+
+        # 2. Fetch non-deleted users belonging to tenant
+        user_query = (
+            self.db.query(User)
+            .options(joinedload(User.role))
+            .filter(
+                User.tenant_id == tenant_id,
+                User.is_deleted.is_(False),
+            )
+        )
+        if effective_store_id is not None:
+            user_query = user_query.filter(User.store_id == effective_store_id)
+
+        if role_id is not None:
+            user_query = user_query.filter(User.role_id == role_id)
+
+        if role is not None and role.strip():
+            role_clean = role.strip().lower()
+            user_query = user_query.join(User.role).filter(func.lower(Role.name) == role_clean)
+
+        if is_active is not None:
+            user_query = user_query.filter(User.is_active.is_(is_active))
+
+        if search and search.strip():
+            term = f"%{search.strip().lower()}%"
+            user_query = user_query.filter(
+                or_(
+                    func.lower(User.full_name).like(term),
+                    func.lower(User.email).like(term),
+                    User.phone.like(term),
+                )
+            )
+
+        users = user_query.order_by(User.id.asc()).all()
+
+        # 3. Group users by store_id
+        users_by_store: dict[Optional[int], list[StoreUserItem]] = defaultdict(list)
+        for u in users:
+            role_name = u.role.name if u.role else "unknown"
+            item = StoreUserItem(
+                id=u.id,
+                full_name=u.full_name,
+                email=u.email,
+                phone=u.phone,
+                role_id=u.role_id,
+                role_name=role_name,
+                is_active=u.is_active,
+                created_at=u.created_at,
+            )
+            users_by_store[u.store_id].append(item)
+
+        # 4. Build store summaries
+        store_summaries: list[StoreUsersSummary] = []
+        total_assigned_count = 0
+        for s in stores:
+            s_users = users_by_store.get(s.id, [])
+            total_assigned_count += len(s_users)
+            store_summaries.append(
+                StoreUsersSummary(
+                    store_id=s.id,
+                    store_name=s.name,
+                    store_code=s.code,
+                    is_main=s.is_main,
+                    total_users=len(s_users),
+                    users=s_users,
+                )
+            )
+
+        # 5. Handle unassigned users (Head Office / Store-less)
+        if include_unassigned and effective_store_id is None and current_user_store_id is None:
+            unassigned_users = users_by_store.get(None, [])
+            if unassigned_users or not stores:
+                total_assigned_count += len(unassigned_users)
+                store_summaries.append(
+                    StoreUsersSummary(
+                        store_id=None,
+                        store_name="Unassigned / Head Office",
+                        store_code=None,
+                        is_main=False,
+                        total_users=len(unassigned_users),
+                        users=unassigned_users,
+                    )
+                )
+
+        return UsersByStoreResponse(
+            total_stores=len(stores),
+            total_users=total_assigned_count,
+            stores=store_summaries,
+        )
 

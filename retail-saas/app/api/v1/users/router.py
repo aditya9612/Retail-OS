@@ -20,6 +20,7 @@ from app.schemas.user import (
     AssignStoreResponse,
     RemoveStoreRequest,
     RemoveStoreResponse,
+    UsersByStoreResponse,
 )
 from app.services.user_service import UserService
 from app.utils.validators import validate_pan_number, validate_aadhaar_number
@@ -76,6 +77,8 @@ async def create_user(
     full_name: str = Form(..., min_length=2, max_length=100, description="Full name of the user"),
     password: str = Form(..., min_length=8, max_length=100, description="Password (min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char)"),
     role: str = Form("staff", description="Role name (e.g. staff, manager, cashier, admin)"),
+    role_id: Optional[int] = Form(None, description="Role ID from GET /api/v1/roles"),
+    store_id: Optional[int] = Form(None, description="Store ID to assign the user to"),
     phone: Optional[str] = Form(None, description="Optional 10-digit phone number"),
     pan_number: Optional[str] = Form(None, description="PAN card number (e.g. ABCDE1234F)"),
     addhar_number: Optional[str] = Form(None, description="Aadhaar card 12-digit number (e.g. 987654321012)"),
@@ -99,18 +102,21 @@ async def create_user(
     addhar_card_path = await _save_user_file(addhar_card, "addhar_card")
     profile_photo_path = await _save_user_file(profile_photo, "profile_photo")
 
+    effective_store_id = current_user.store_id if current_user.store_id is not None else store_id
+
     user_data = UserCreate(
         email=email,
         full_name=full_name,
         password=password,
         role=role,
+        role_id=role_id,
         phone=phone,
         pan_number=validated_pan,
         addhar_number=validated_aadhaar,
         pancard=pancard_path,
         addhar_card=addhar_card_path,
         profile_photo=profile_photo_path,
-        store_id=current_user.store_id,
+        store_id=effective_store_id,
     )
 
     return UserService(db).create_user(
@@ -149,18 +155,6 @@ def list_users(
     )
 
 
-@router.get(
-    "/roles",
-    response_model=list[RoleResponse],
-)
-def list_roles(
-    current_user: User = Depends(require_permission("users:write")),
-    db: Session = Depends(get_db),
-):
-    return UserService(db).list_roles(
-        tenant_id=current_user.tenant_id,
-    )
-
 
 @router.get(
     "/me",
@@ -194,6 +188,34 @@ def update_my_profile(
         current_user.tenant_id,
         current_user.id,
         data,
+    )
+
+
+@router.get(
+    "/by-store",
+    response_model=UsersByStoreResponse,
+    summary="List Users Grouped By Store",
+    description="Shows how many and which users are assigned to each store with store, role, active status, and search filters.",
+)
+def get_users_by_store(
+    store_id: Optional[int] = Query(None, description="Filter by a specific Store ID"),
+    role: Optional[str] = Query(None, description="Filter users by Role name (e.g. staff, manager, accountant, cashier)"),
+    role_id: Optional[int] = Query(None, description="Filter users by Role ID"),
+    is_active: Optional[bool] = Query(None, description="Filter users by active status (true/false)"),
+    search: Optional[str] = Query(None, description="Search users by name, email, or phone number"),
+    include_unassigned: bool = Query(True, description="Include unassigned/head office users (store_id=null)"),
+    current_user: User = Depends(require_permission("users:read")),
+    db: Session = Depends(get_db),
+):
+    return UserService(db).get_users_by_store(
+        tenant_id=current_user.tenant_id,
+        current_user_store_id=current_user.store_id,
+        store_id=store_id,
+        role=role,
+        role_id=role_id,
+        is_active=is_active,
+        search=search,
+        include_unassigned=include_unassigned,
     )
 
 

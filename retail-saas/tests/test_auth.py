@@ -138,8 +138,8 @@ def test_users_crud_and_profile_flow(unique_slug):
     token = login.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    # 1. GET /api/v1/users/roles
-    roles_r = client.get("/api/v1/users/roles", headers=headers)
+    # 1. GET /api/v1/roles
+    roles_r = client.get("/api/v1/roles", headers=headers)
     assert roles_r.status_code == 200
     roles = roles_r.json()
     assert len(roles) >= 1
