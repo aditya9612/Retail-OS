@@ -248,4 +248,5 @@ def create_store_user(
     return UserService(db).create_user(
         tenant_id=user.tenant_id,
         data=data,
+        current_user_store_id=user.store_id,
     )

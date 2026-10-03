@@ -126,6 +126,7 @@ async def create_user(
     return UserService(db).create_user(
         current_user.tenant_id,
         user_data,
+        current_user_store_id=current_user.store_id,
     )
 
 
@@ -269,6 +270,7 @@ def update_user(
         current_user.tenant_id,
         user_id,
         data,
+        current_user_store_id=current_user.store_id,
     )
 
 

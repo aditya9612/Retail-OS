@@ -161,7 +161,8 @@ def test_user_service_create_user_normalizes_and_succeeds(db):
     tenant, owner, role = _setup_tenant(db, "crt-ok")
     user_svc = UserService(db)
 
-    phone_raw = "+91 98765 43210"
+    base_phone = _gen_phone(db)
+    phone_raw = f"+91 {base_phone[:5]} {base_phone[5:]}"
     canonical = normalize_phone_number(phone_raw)
 
     user_in = UserCreate(

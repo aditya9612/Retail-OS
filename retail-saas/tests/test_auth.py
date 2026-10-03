@@ -1,9 +1,17 @@
+import random
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 
 client = TestClient(app)
+
+
+def _random_phone() -> str:
+    while True:
+        p = f"{random.choice('6789')}{random.randint(100000000, 999999999)}"
+        if p != "9876543210":
+            return p
 
 
 def test_health_check():
@@ -45,7 +53,7 @@ def test_register_with_store_owner_aliases(unique_slug):
         "owner_email": email,
         "owner_name": "Store Owner Name",
         "password": "Password@123!",
-        "owner_phone": "9876543210",
+        "owner_phone": _random_phone(),
     }
     r = client.post("/api/v1/auth/register", json=payload)
     assert r.status_code == 200
@@ -156,16 +164,18 @@ def test_users_crud_and_profile_flow(unique_slug):
     assert put_me.status_code == 200
     assert put_me.json()["full_name"] == "Updated Admin Owner"
 
-    patch_me = client.patch("/api/v1/users/me", json={"phone": "9811223344"}, headers=headers)
+    phone_me = _random_phone()
+    patch_me = client.patch("/api/v1/users/me", json={"phone": phone_me}, headers=headers)
     assert patch_me.status_code == 200
-    assert patch_me.json()["phone"] == "9811223344"
+    assert patch_me.json()["phone"] == phone_me
 
     # 4. POST /api/v1/users (Create user)
     staff_email = f"staff-{unique_slug}@example.com"
+    phone_staff = _random_phone()
     staff_payload = {
         "email": staff_email,
         "full_name": "Staff Cashier",
-        "phone": "9822334455",
+        "phone": phone_staff,
         "role_id": cashier_role["id"],
         "password": "StaffPassword@123!",
     }
@@ -192,9 +202,10 @@ def test_users_crud_and_profile_flow(unique_slug):
     assert update_r.status_code == 200
     assert update_r.json()["full_name"] == "Renamed Staff"
 
-    patch_u = client.patch(f"/api/v1/users/{staff_id}", json={"phone": "9899887766"}, headers=headers)
+    phone_staff_upd = _random_phone()
+    patch_u = client.patch(f"/api/v1/users/{staff_id}", json={"phone": phone_staff_upd}, headers=headers)
     assert patch_u.status_code == 200
-    assert patch_u.json()["phone"] == "9899887766"
+    assert patch_u.json()["phone"] == phone_staff_upd
 
     # 8. PATCH /api/v1/users/{user_id}/deactivate
     deact_r = client.patch(f"/api/v1/users/{staff_id}/deactivate", headers=headers)

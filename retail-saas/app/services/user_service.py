@@ -3,7 +3,7 @@ from typing import Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ConflictException, NotFoundException
+from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException
 from app.core.security import get_password_hash
 from app.models.role import Role
 from app.models.saas_plan_entitlement import EntitlementDimension
@@ -20,10 +20,31 @@ class UserService:
         self.db = db
         self.repo = UserRepository(db)
 
+    @staticmethod
+    def _is_privileged_role(role: Role) -> bool:
+        """
+        Determines if a role confers tenant-level administrative privileges.
+        - System / administrative role names: admin, owner, superadmin
+        - Wildcard permissions: "*"
+        - Tenant-level administrative permissions: "stores:write"
+        """
+        role_name = (role.name or "").strip().lower()
+        if role_name in {"admin", "owner", "superadmin"}:
+            return True
+
+        perms = role.permissions or []
+        if "*" in perms:
+            return True
+        if "stores:write" in perms:
+            return True
+
+        return False
+
     def create_user(
         self,
         tenant_id: int,
         data: UserCreate,
+        current_user_store_id: Optional[int] = None,
     ) -> User:
         if tenant_id is None:
             raise ConflictException("Tenant is required")
@@ -64,6 +85,11 @@ class UserService:
         if not role:
             raise NotFoundException(
                 "Role not found. Use GET /api/v1/roles to get valid Roles."
+            )
+
+        if current_user_store_id is not None and self._is_privileged_role(role):
+            raise ForbiddenException(
+                "Store-scoped users cannot assign tenant administrator or owner roles"
             )
 
         resolved_role_id = role.id
@@ -212,6 +238,7 @@ class UserService:
         tenant_id: int,
         user_id: int,
         data: UserUpdate,
+        current_user_store_id: Optional[int] = None,
     ) -> User:
         user = self.get_user(
             tenant_id,
@@ -240,6 +267,11 @@ class UserService:
             if not role:
                 raise NotFoundException(
                     "Role not found. Use GET /api/v1/roles to get valid Role IDs."
+                )
+
+            if current_user_store_id is not None and self._is_privileged_role(role):
+                raise ForbiddenException(
+                    "Store-scoped users cannot assign tenant administrator or owner roles"
                 )
 
         if "store_id" in update_data:
