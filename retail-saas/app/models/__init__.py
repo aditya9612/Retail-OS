@@ -31,7 +31,6 @@ from app.models.store_target import StoreTarget
 from app.models.store_expense import StoreExpense
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.models.staff import Staff
 from app.models.warehouse import Warehouse
 from app.models.grn import GRN, GRNItem
 from app.models.coupon import Coupon
@@ -87,7 +86,6 @@ __all__ = [
     "StoreTransferItem",
     "Tenant",
     "User",
-    "Staff",
     "Warehouse",
     "GRN",
     "GRNItem",

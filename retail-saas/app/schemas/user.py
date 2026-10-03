@@ -156,7 +156,7 @@ class UserBase(BaseModel):
         cls,
         value: Optional[str],
     ) -> Optional[str]:
-        if value is None:
+        if value is None or (isinstance(value, str) and not value.strip()):
             return None
         return normalize_phone_number(value)
 
@@ -314,7 +314,7 @@ class UserUpdate(BaseModel):
         cls,
         value: Optional[str],
     ) -> Optional[str]:
-        if value is None:
+        if value is None or (isinstance(value, str) and not value.strip()):
             return None
         return normalize_phone_number(value)
 
@@ -443,7 +443,7 @@ class MyProfileUpdate(BaseModel):
         cls,
         value: Optional[str],
     ) -> Optional[str]:
-        if value is None:
+        if value is None or (isinstance(value, str) and not value.strip()):
             return None
         return normalize_phone_number(value)
 

@@ -74,11 +74,15 @@ async def lifespan(app: FastAPI):
     yield
 
 
+from app.core.exceptions import register_exception_handlers
+
 app = FastAPI(
     title=settings.APP_NAME,
     version="1.0.0",
     lifespan=lifespan,
 )
+
+register_exception_handlers(app)
 
 
 import json

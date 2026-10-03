@@ -3,7 +3,8 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from pydantic import EmailStr
+from fastapi.exceptions import RequestValidationError
+from pydantic import EmailStr, ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -104,20 +105,23 @@ async def create_user(
 
     effective_store_id = current_user.store_id if current_user.store_id is not None else store_id
 
-    user_data = UserCreate(
-        email=email,
-        full_name=full_name,
-        password=password,
-        role=role,
-        role_id=role_id,
-        phone=phone,
-        pan_number=validated_pan,
-        addhar_number=validated_aadhaar,
-        pancard=pancard_path,
-        addhar_card=addhar_card_path,
-        profile_photo=profile_photo_path,
-        store_id=effective_store_id,
-    )
+    try:
+        user_data = UserCreate(
+            email=email,
+            full_name=full_name,
+            password=password,
+            role=role,
+            role_id=role_id,
+            phone=phone,
+            pan_number=validated_pan,
+            addhar_number=validated_aadhaar,
+            pancard=pancard_path,
+            addhar_card=addhar_card_path,
+            profile_photo=profile_photo_path,
+            store_id=effective_store_id,
+        )
+    except ValidationError as e:
+        raise RequestValidationError(e.errors())
 
     return UserService(db).create_user(
         current_user.tenant_id,
@@ -339,6 +343,11 @@ def delete_user(
     summary="Assign Store to User",
     description="Assigns or moves a user to a specific store within the tenant organization.",
 )
+@router.patch(
+    "/{user_id}/assign-store",
+    response_model=AssignStoreResponse,
+    include_in_schema=False,
+)
 def assign_store(
     user_id: int,
     data: AssignStoreRequest,
@@ -371,6 +380,11 @@ def assign_store(
     response_model=RemoveStoreResponse,
     summary="Remove User from Store",
     description="Removes/unassigns a user from their currently assigned store, setting store_id to null.",
+)
+@router.patch(
+    "/{user_id}/remove-store",
+    response_model=RemoveStoreResponse,
+    include_in_schema=False,
 )
 def remove_store(
     user_id: int,

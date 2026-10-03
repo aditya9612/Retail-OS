@@ -283,3 +283,100 @@ def test_role_management_full_flow(unique_slug):
     # 18. Verify role no longer exists
     get_after_del = client.get(f"/api/v1/roles/{custom_role_id}", headers=owner_headers)
     assert get_after_del.status_code == 404
+
+
+def test_create_user_phone_validation_error(unique_slug):
+    # Register and login owner
+    owner_email = f"owner-val-{unique_slug}@retailstore.com"
+    owner_phone = f"97{abs(hash(unique_slug + 'owner')) % 100000000:08d}"
+    reg_res = client.post(
+        "/api/v1/auth/register",
+        json={
+            "store_name": f"ValMart {unique_slug}",
+            "domain": f"vm-{unique_slug}",
+            "owner_email": owner_email,
+            "owner_name": "Store Owner",
+            "password": "Password@123!",
+            "owner_phone": owner_phone,
+        },
+    )
+    assert reg_res.status_code == 200
+    login_res = client.post(
+        "/api/v1/auth/login",
+        json={"email": owner_email, "password": "Password@123!"},
+    )
+    assert login_res.status_code == 200
+    owner_token = login_res.json()["access_token"]
+    owner_headers = {"Authorization": f"Bearer {owner_token}"}
+
+    # 1. Test POST /api/v1/users with invalid phone containing * -> returns 422, NEVER 500
+    res_bad_phone = client.post(
+        "/api/v1/users",
+        headers=owner_headers,
+        data={
+            "email": f"badphone-{unique_slug}@store.com",
+            "full_name": "Bad Phone User",
+            "password": "Password@123!",
+            "role": "staff",
+            "phone": "969696969*6",
+        },
+    )
+    assert res_bad_phone.status_code == 422
+    assert "Invalid Indian mobile number" in str(res_bad_phone.json())
+
+    # 2. Test POST /api/v1/users with empty phone string "" -> succeeds (optional field)
+    from app.core.database import SessionLocal
+    from app.models.tenant import Tenant
+    from app.models.saas_billing import SaaSSubscription
+    from app.models.saas_plan_entitlement import SaaSPlanEntitlement, EntitlementDimension
+
+    db = SessionLocal()
+    try:
+        tenant = db.query(Tenant).filter(Tenant.domain == f"vm-{unique_slug}").first()
+        sub = db.query(SaaSSubscription).filter(SaaSSubscription.tenant_id == tenant.id).first()
+        if sub and sub.plan_id:
+            ent = db.query(SaaSPlanEntitlement).filter(
+                SaaSPlanEntitlement.plan_id == sub.plan_id,
+                SaaSPlanEntitlement.dimension == EntitlementDimension.USERS,
+            ).first()
+            if not ent:
+                db.add(
+                    SaaSPlanEntitlement(
+                        plan_id=sub.plan_id,
+                        dimension=EntitlementDimension.USERS,
+                        is_unlimited=True,
+                    )
+                )
+                db.commit()
+    finally:
+        db.close()
+
+    res_empty_phone = client.post(
+        "/api/v1/users",
+        headers=owner_headers,
+        data={
+            "email": f"emptyphone-{unique_slug}@store.com",
+            "full_name": "Empty Phone User",
+            "password": "Password@123!",
+            "role": "staff",
+            "phone": "",
+        },
+    )
+    assert res_empty_phone.status_code == 201
+
+    # 3. Test POST /api/v1/users with valid phone -> succeeds
+    valid_phone = f"96{abs(hash(unique_slug + 'valid')) % 100000000:08d}"
+    res_valid_phone = client.post(
+        "/api/v1/users",
+        headers=owner_headers,
+        data={
+            "email": f"validphone-{unique_slug}@store.com",
+            "full_name": "Valid Phone User",
+            "password": "Password@123!",
+            "role": "staff",
+            "phone": valid_phone,
+        },
+    )
+    assert res_valid_phone.status_code == 201
+    assert res_valid_phone.json()["phone"] == valid_phone
+
