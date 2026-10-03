@@ -7,6 +7,7 @@ from app.models.user import User
 
 from app.schemas.purchase_order import (
     PurchaseOrderCreate,
+    PurchaseOrderDeleteResponse,
     PurchaseOrderResponse,
     PurchaseOrderUpdate,
     PurchaseOrderReceive,
@@ -109,3 +110,24 @@ def update_purchase_order_status(
         purchase_order_id=purchase_order_id,
         data=data,
     )
+
+
+@router.delete(
+    "/{purchase_order_id}",
+    response_model=PurchaseOrderDeleteResponse,
+    dependencies=[Depends(require_operational_write)],
+)
+def delete_purchase_order(
+    purchase_order_id: int,
+    user: User = Depends(require_permission("purchase_orders:write")),
+    db: Session = Depends(get_db),
+):
+    result = PurchaseOrderService(db).delete_purchase_order(
+        tenant_id=user.tenant_id,
+        purchase_order_id=purchase_order_id,
+    )
+    return {
+        "success": True,
+        "message": "Purchase order deleted successfully",
+        "data": result,
+    }

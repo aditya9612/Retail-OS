@@ -59,6 +59,18 @@ class PurchaseOrderCreate(BaseModel):
         description="Store ID (optional)",
     )
 
+    invoice_number: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Invoice number",
+    )
+
+    invoice_id: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Alias for invoice_number",
+    )
+
     notes: Optional[str] = Field(
         default=None,
         max_length=500,
@@ -80,12 +92,16 @@ class PurchaseOrderCreate(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def reconcile_notes(cls, data):
+    def reconcile_notes_and_invoices(cls, data):
         if isinstance(data, dict):
             if data.get("notes") is None and data.get("remarks") is not None:
                 data["notes"] = data["remarks"]
             elif data.get("notes") is not None and data.get("remarks") is None:
                 data["remarks"] = data["notes"]
+            if data.get("invoice_number") is None and data.get("invoice_id") is not None:
+                data["invoice_number"] = data["invoice_id"]
+            elif data.get("invoice_number") is not None and data.get("invoice_id") is None:
+                data["invoice_id"] = data["invoice_number"]
         return data
 
     @field_validator("items")
@@ -109,6 +125,16 @@ class PurchaseOrderUpdate(BaseModel):
         gt=0,
     )
 
+    invoice_number: str | None = Field(
+        default=None,
+        max_length=100,
+    )
+
+    invoice_id: str | None = Field(
+        default=None,
+        max_length=100,
+    )
+
     notes: str | None = Field(
         default=None,
         max_length=500,
@@ -123,16 +149,28 @@ class PurchaseOrderUpdate(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def reconcile_notes(cls, data):
+    def reconcile_notes_and_invoices(cls, data):
         if isinstance(data, dict):
             if data.get("notes") is None and data.get("remarks") is not None:
                 data["notes"] = data["remarks"]
             elif data.get("notes") is not None and data.get("remarks") is None:
                 data["remarks"] = data["notes"]
+            if data.get("invoice_number") is None and data.get("invoice_id") is not None:
+                data["invoice_number"] = data["invoice_id"]
+            elif data.get("invoice_number") is not None and data.get("invoice_id") is None:
+                data["invoice_id"] = data["invoice_number"]
         return data
 
 
 class PurchaseOrderReceive(BaseModel):
+    invoice_number: str | None = Field(
+        default=None,
+        max_length=100,
+    )
+    invoice_id: str | None = Field(
+        default=None,
+        max_length=100,
+    )
     remarks: str | None = Field(
         default=None,
         max_length=500,
@@ -144,13 +182,18 @@ class PurchaseOrderReceive(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def reconcile_notes(cls, data):
+    def reconcile_notes_and_invoices(cls, data):
         if isinstance(data, dict):
             if data.get("notes") is None and data.get("remarks") is not None:
                 data["notes"] = data["remarks"]
             elif data.get("notes") is not None and data.get("remarks") is None:
                 data["remarks"] = data["notes"]
+            if data.get("invoice_number") is None and data.get("invoice_id") is not None:
+                data["invoice_number"] = data["invoice_id"]
+            elif data.get("invoice_number") is not None and data.get("invoice_id") is None:
+                data["invoice_id"] = data["invoice_number"]
         return data
+
 
 
 class PurchaseOrderStatusUpdate(BaseModel):
@@ -210,6 +253,8 @@ class PurchaseOrderResponse(BaseModel):
     store_id: Optional[int] = None
     order_number: str
     po_number: Optional[str] = None
+    invoice_number: Optional[str] = None
+    invoice_id: Optional[str] = None
     status: str
     total_amount: Decimal
     notes: Optional[str] = None
@@ -225,8 +270,23 @@ class PurchaseOrderResponse(BaseModel):
             self.po_number = self.order_number
         if self.notes is not None and self.remarks is None:
             self.remarks = self.notes
+        if self.invoice_number and not self.invoice_id:
+            self.invoice_id = self.invoice_number
+        elif self.invoice_id and not self.invoice_number:
+            self.invoice_number = self.invoice_id
         return self
 
     model_config = {
         "from_attributes": True,
     }
+
+
+class PurchaseOrderDeleteData(BaseModel):
+    id: int
+    order_number: str
+
+
+class PurchaseOrderDeleteResponse(BaseModel):
+    success: bool = True
+    message: str = "Purchase order deleted successfully"
+    data: PurchaseOrderDeleteData

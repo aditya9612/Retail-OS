@@ -60,6 +60,12 @@ class PurchaseOrder(Base, TimestampMixin):
         nullable=True,
     )
 
+    invoice_number: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+
     supplier = relationship("Supplier")
     store = relationship("Store")
 
@@ -75,6 +81,8 @@ class PurchaseOrder(Base, TimestampMixin):
             kwargs["order_number"] = kwargs.pop("po_number")
         if "remarks" in kwargs and "notes" not in kwargs:
             kwargs["notes"] = kwargs.pop("remarks")
+        if "invoice_id" in kwargs and "invoice_number" not in kwargs:
+            kwargs["invoice_number"] = kwargs.pop("invoice_id")
         super().__init__(**kwargs)
 
     @property
@@ -92,6 +100,15 @@ class PurchaseOrder(Base, TimestampMixin):
     @remarks.setter
     def remarks(self, value: Optional[str]) -> None:
         self.notes = value
+
+    @property
+    def invoice_id(self) -> Optional[str]:
+        return self.invoice_number
+
+    @invoice_id.setter
+    def invoice_id(self, value: Optional[str]) -> None:
+        self.invoice_number = value
+
 
 
 class PurchaseOrderItem(Base):

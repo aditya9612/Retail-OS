@@ -65,9 +65,40 @@ def get_targets(
         default=None,
         description="Filter targets by target type (e.g. Sales, Orders)",
     ),
+    skip: Optional[int] = Query(
+        default=None,
+        ge=0,
+        description="Number of records to skip for pagination",
+    ),
+    limit: Optional[int] = Query(
+        default=None,
+        gt=0,
+        le=100,
+        description="Maximum number of records to return",
+    ),
+    page: Optional[int] = Query(
+        default=None,
+        gt=0,
+        description="Page number (alternative to skip/limit)",
+    ),
+    page_size: Optional[int] = Query(
+        default=None,
+        gt=0,
+        le=100,
+        description="Page size (alternative to skip/limit)",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("stores:read")),
 ):
+    resolved_skip = skip
+    resolved_limit = limit
+    if page is not None and resolved_skip is None:
+        p_size = page_size or 20
+        resolved_skip = (page - 1) * p_size
+        resolved_limit = p_size
+    elif page_size is not None and resolved_limit is None:
+        resolved_limit = page_size
+
     return StoreTargetService.get_targets(
         db=db,
         tenant_id=current_user.tenant_id,
@@ -75,8 +106,11 @@ def get_targets(
         status=status,
         period=period,
         target_type=target_type,
+        skip=resolved_skip,
+        limit=resolved_limit,
         current_user_store_id=current_user.store_id,
     )
+
 
 
 @router.get(
@@ -181,4 +215,3 @@ def get_target_progress(
         target_id=target_id,
         current_user_store_id=current_user.store_id,
     )
-        )

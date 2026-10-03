@@ -41,6 +41,7 @@ class StoreTargetCreate(BaseModel):
     target_value: Decimal = Field(
         ...,
         gt=0,
+        le=Decimal("9999999999.99"),
         description="Target goal value (must be greater than 0 with at most 2 decimal places)",
     )
 
@@ -59,6 +60,12 @@ class StoreTargetCreate(BaseModel):
     end_date: datetime = Field(
         ...,
         description="End date and time of the target period",
+    )
+
+    status: Optional[str] = Field(
+        default="active",
+        max_length=20,
+        description="Target status: active, inactive, completed, cancelled",
     )
 
     @field_validator("target_type")
@@ -82,6 +89,8 @@ class StoreTargetCreate(BaseModel):
     def validate_target_value(cls, value: Decimal) -> Decimal:
         if value <= 0:
             raise ValueError("Target value must be greater than 0")
+        if value > Decimal("9999999999.99"):
+            raise ValueError("Target value exceeds the maximum allowable limit of 9,999,999,999.99")
         # Check maximum 2 decimal places
         if value.as_tuple().exponent < -2:
             raise ValueError("Target value must not have more than 2 decimal places")
@@ -96,12 +105,24 @@ class StoreTargetCreate(BaseModel):
             raise ValueError(f"Period must be one of: {sorted_periods}")
         return cleaned
 
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: Optional[str]) -> str:
+        if value is None:
+            return "active"
+        cleaned = value.strip().lower()
+        if cleaned not in ALLOWED_STATUSES:
+            sorted_statuses = ", ".join(sorted(ALLOWED_STATUSES))
+            raise ValueError(f"Status must be one of: {sorted_statuses}")
+        return cleaned
+
     @model_validator(mode="after")
     def validate_date_range(self) -> "StoreTargetCreate":
         if self.start_date and self.end_date:
             if self.end_date <= self.start_date:
                 raise ValueError("End date must be greater than start date")
         return self
+
 
 
 class StoreTargetUpdate(BaseModel):
@@ -115,6 +136,7 @@ class StoreTargetUpdate(BaseModel):
     target_value: Optional[Decimal] = Field(
         default=None,
         gt=0,
+        le=Decimal("9999999999.99"),
         description="Updated target goal value",
     )
 
@@ -166,6 +188,8 @@ class StoreTargetUpdate(BaseModel):
             return None
         if value <= 0:
             raise ValueError("Target value must be greater than 0")
+        if value > Decimal("9999999999.99"):
+            raise ValueError("Target value exceeds the maximum allowable limit of 9,999,999,999.99")
         if value.as_tuple().exponent < -2:
             raise ValueError("Target value must not have more than 2 decimal places")
         return value

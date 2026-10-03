@@ -487,3 +487,581 @@ def test_target_progress_tracking(tenant, stores):
     assert p["is_achieved"] is False
     assert p["days_remaining"] >= 27
 
+
+# ==============================================================================
+# 3. COMPREHENSIVE PRODUCTION AUDIT EDGE-CASE TESTS
+# ==============================================================================
+
+def test_unauthorized_access_rejected():
+    # Calling endpoints without auth header -> 401 Unauthorized
+    assert client.get("/api/v1/store-targets").status_code == 401
+    assert client.post("/api/v1/store-targets", json={}).status_code == 401
+    assert client.get("/api/v1/store-targets/1").status_code == 401
+    assert client.put("/api/v1/store-targets/1", json={}).status_code == 401
+    assert client.patch("/api/v1/store-targets/1", json={}).status_code == 401
+    assert client.delete("/api/v1/store-targets/1").status_code == 401
+    assert client.get("/api/v1/store-targets/1/progress").status_code == 401
+
+    # Invalid token -> 401 Unauthorized
+    bad_headers = {"Authorization": "Bearer invalid_token_12345"}
+    assert client.get("/api/v1/store-targets", headers=bad_headers).status_code == 401
+
+
+def test_inactive_store_rejected(tenant):
+    db = SessionLocal()
+    try:
+        inactive_store = Store(
+            name="Closed Store",
+            code=f"CLS-{uuid.uuid4().hex[:6]}",
+            tenant_id=tenant["tenant_id"],
+            is_active=False,
+        )
+        db.add(inactive_store)
+        db.commit()
+        db.refresh(inactive_store)
+        in_id = inactive_store.id
+    finally:
+        db.close()
+
+    now = datetime.utcnow()
+    later = now + timedelta(days=30)
+
+    # Creating target for inactive store returns 404
+    resp = client.post(
+        "/api/v1/store-targets",
+        json={
+            "store_id": in_id,
+            "target_type": "Sales",
+            "target_value": 5000.00,
+            "period": "monthly",
+            "start_date": now.isoformat(),
+            "end_date": later.isoformat(),
+        },
+        headers=tenant["headers"],
+    )
+    assert resp.status_code == 404, resp.text
+    assert "inactive" in resp.text.lower() or "not found" in resp.text.lower()
+
+
+def test_date_validation_equal_and_reversed_dates(tenant, stores):
+    s1, _ = stores
+    now = datetime.utcnow()
+
+    # Equal start and end date -> 422
+    resp_equal = client.post(
+        "/api/v1/store-targets",
+        json={
+            "store_id": s1.id,
+            "target_type": "Sales",
+            "target_value": 5000.00,
+            "period": "monthly",
+            "start_date": now.isoformat(),
+            "end_date": now.isoformat(),
+        },
+        headers=tenant["headers"],
+    )
+    assert resp_equal.status_code == 422, resp_equal.text
+
+    # Reversed dates -> 422
+    resp_reversed = client.post(
+        "/api/v1/store-targets",
+        json={
+            "store_id": s1.id,
+            "target_type": "Sales",
+            "target_value": 5000.00,
+            "period": "monthly",
+            "start_date": (now + timedelta(days=10)).isoformat(),
+            "end_date": now.isoformat(),
+        },
+        headers=tenant["headers"],
+    )
+    assert resp_reversed.status_code == 422, resp_reversed.text
+
+
+def test_target_value_validation_zero_negative_and_excessive(tenant, stores):
+    s1, _ = stores
+    now = datetime.utcnow()
+    later = now + timedelta(days=30)
+
+    base = {
+        "store_id": s1.id,
+        "target_type": "Sales",
+        "period": "monthly",
+        "start_date": now.isoformat(),
+        "end_date": later.isoformat(),
+    }
+
+    # Zero target value -> 422
+    r_zero = client.post("/api/v1/store-targets", json={**base, "target_value": 0.00}, headers=tenant["headers"])
+    assert r_zero.status_code == 422, r_zero.text
+
+    # Negative target value -> 422
+    r_neg = client.post("/api/v1/store-targets", json={**base, "target_value": -100.00}, headers=tenant["headers"])
+    assert r_neg.status_code == 422, r_neg.text
+
+    # Excessive decimal places -> 422
+    r_dec = client.post("/api/v1/store-targets", json={**base, "target_value": 100.555}, headers=tenant["headers"])
+    assert r_dec.status_code == 422, r_dec.text
+
+    # Exceeding column capacity (> 9,999,999,999.99) -> 422
+    r_huge = client.post("/api/v1/store-targets", json={**base, "target_value": 10000000000.00}, headers=tenant["headers"])
+    assert r_huge.status_code == 422, r_huge.text
+
+
+def test_invalid_status_period_and_target_type_rejected(tenant, stores):
+    s1, _ = stores
+    now = datetime.utcnow()
+    later = now + timedelta(days=30)
+
+    base = {
+        "store_id": s1.id,
+        "target_value": 5000.00,
+        "start_date": now.isoformat(),
+        "end_date": later.isoformat(),
+    }
+
+    # Invalid status on create -> 422
+    r_status = client.post(
+        "/api/v1/store-targets",
+        json={**base, "target_type": "Sales", "period": "monthly", "status": "bogus_status"},
+        headers=tenant["headers"],
+    )
+    assert r_status.status_code == 422, r_status.text
+
+    # Invalid period -> 422
+    r_period = client.post(
+        "/api/v1/store-targets",
+        json={**base, "target_type": "Sales", "period": "century"},
+        headers=tenant["headers"],
+    )
+    assert r_period.status_code == 422, r_period.text
+
+    # Invalid target type (symbols) -> 422
+    r_ttype = client.post(
+        "/api/v1/store-targets",
+        json={**base, "target_type": "Sales@#$!", "period": "monthly"},
+        headers=tenant["headers"],
+    )
+    assert r_ttype.status_code == 422, r_ttype.text
+
+
+def test_overlap_on_put_and_patch(tenant, stores):
+    s1, _ = stores
+    t0 = datetime.utcnow()
+
+    # Target 1: Month 1
+    t1_resp = client.post(
+        "/api/v1/store-targets",
+        json={
+            "store_id": s1.id,
+            "target_type": "Audit Overlap Target",
+            "target_value": 10000.00,
+            "period": "monthly",
+            "start_date": t0.isoformat(),
+            "end_date": (t0 + timedelta(days=30)).isoformat(),
+        },
+        headers=tenant["headers"],
+    )
+    assert t1_resp.status_code == 201
+    target1_id = t1_resp.json()["id"]
+
+    # Target 2: Month 2 (Non-overlapping)
+    t2_resp = client.post(
+        "/api/v1/store-targets",
+        json={
+            "store_id": s1.id,
+            "target_type": "Audit Overlap Target",
+            "target_value": 15000.00,
+            "period": "monthly",
+            "start_date": (t0 + timedelta(days=31)).isoformat(),
+            "end_date": (t0 + timedelta(days=60)).isoformat(),
+        },
+        headers=tenant["headers"],
+    )
+    assert t2_resp.status_code == 201
+    target2_id = t2_resp.json()["id"]
+
+    # PUT Target 2 to overlap with Target 1 -> 409 Conflict
+    put_overlap = client.put(
+        f"/api/v1/store-targets/{target2_id}",
+        json={
+            "start_date": (t0 + timedelta(days=15)).isoformat(),
+            "end_date": (t0 + timedelta(days=45)).isoformat(),
+        },
+        headers=tenant["headers"],
+    )
+    assert put_overlap.status_code == 409, put_overlap.text
+    assert "already exists" in put_overlap.text
+
+    # PATCH Target 2 to overlap with Target 1 -> 409 Conflict
+    patch_overlap = client.patch(
+        f"/api/v1/store-targets/{target2_id}",
+        json={
+            "start_date": (t0 + timedelta(days=20)).isoformat(),
+        },
+        headers=tenant["headers"],
+    )
+    assert patch_overlap.status_code == 409, patch_overlap.text
+
+    # Updating Target 2 without changing dates does NOT conflict with itself
+    patch_self = client.patch(
+        f"/api/v1/store-targets/{target2_id}",
+        json={"target_value": 18000.00},
+        headers=tenant["headers"],
+    )
+    assert patch_self.status_code == 200, patch_self.text
+    assert float(patch_self.json()["target_value"]) == 18000.00
+
+    # Case-insensitive overlap check ("audit overlap target" vs "Audit Overlap Target")
+    case_overlap = client.post(
+        "/api/v1/store-targets",
+        json={
+            "store_id": s1.id,
+            "target_type": "audit overlap target",
+            "target_value": 5000.00,
+            "period": "monthly",
+            "start_date": t0.isoformat(),
+            "end_date": (t0 + timedelta(days=30)).isoformat(),
+        },
+        headers=tenant["headers"],
+    )
+    assert case_overlap.status_code == 409, case_overlap.text
+
+
+def test_progress_with_zero_sales(tenant, stores):
+    s1, _ = stores
+    now = datetime.utcnow() - timedelta(days=5)
+    later = now + timedelta(days=25)
+
+    r = client.post(
+        "/api/v1/store-targets",
+        json={
+            "store_id": s1.id,
+            "target_type": "Zero Sales Target",
+            "target_value": 50000.00,
+            "period": "monthly",
+            "start_date": now.isoformat(),
+            "end_date": later.isoformat(),
+        },
+        headers=tenant["headers"],
+    )
+    assert r.status_code == 201
+    tid = r.json()["id"]
+
+    prog = client.get(f"/api/v1/store-targets/{tid}/progress", headers=tenant["headers"]).json()
+    assert float(prog["target_value"]) == 50000.00
+    assert float(prog["current_value"]) == 0.00
+    assert float(prog["achievement_percentage"]) == 0.0
+    assert float(prog["remaining_value"]) == 50000.00
+    assert prog["is_achieved"] is False
+
+
+def test_progress_exceeding_100_percent(tenant, stores):
+    s1, _ = stores
+    now = datetime.utcnow() - timedelta(days=5)
+    later = now + timedelta(days=25)
+
+    r = client.post(
+        "/api/v1/store-targets",
+        json={
+            "store_id": s1.id,
+            "target_type": "Overachieved Target",
+            "target_value": 200.00,
+            "period": "monthly",
+            "start_date": now.isoformat(),
+            "end_date": later.isoformat(),
+        },
+        headers=tenant["headers"],
+    )
+    assert r.status_code == 201
+    tid = r.json()["id"]
+
+    # Insert sales totaling 300.00 (150% achievement)
+    db = SessionLocal()
+    try:
+        s = Sale(
+            tenant_id=tenant["tenant_id"],
+            store_id=s1.id,
+            sale_number=f"SALE-OVER-{uuid.uuid4().hex[:6]}",
+            subtotal=Decimal("300.00"),
+            total_amount=Decimal("300.00"),
+            payment_method="card",
+            payment_status="paid",
+            created_at=datetime.utcnow(),
+        )
+        db.add(s)
+        db.commit()
+    finally:
+        db.close()
+
+    prog = client.get(f"/api/v1/store-targets/{tid}/progress", headers=tenant["headers"]).json()
+    assert float(prog["target_value"]) == 200.00
+    assert float(prog["current_value"]) == 300.00
+    assert float(prog["achievement_percentage"]) == 150.0
+    assert float(prog["remaining_value"]) == 0.00
+    assert prog["is_achieved"] is True
+
+
+def test_progress_excludes_cancelled_and_out_of_range_sales(tenant, stores):
+    s1, _ = stores
+    t_start = datetime.utcnow() - timedelta(days=10)
+    t_end = datetime.utcnow() + timedelta(days=10)
+
+    r = client.post(
+        "/api/v1/store-targets",
+        json={
+            "store_id": s1.id,
+            "target_type": "Filter Sales Target",
+            "target_value": 1000.00,
+            "period": "monthly",
+            "start_date": t_start.isoformat(),
+            "end_date": t_end.isoformat(),
+        },
+        headers=tenant["headers"],
+    )
+    assert r.status_code == 201
+    tid = r.json()["id"]
+
+    db = SessionLocal()
+    try:
+        # 1. Valid paid sale in range -> 250.00
+        s1_valid = Sale(
+            tenant_id=tenant["tenant_id"],
+            store_id=s1.id,
+            sale_number=f"S-VAL-{uuid.uuid4().hex[:6]}",
+            subtotal=Decimal("250.00"),
+            total_amount=Decimal("250.00"),
+            payment_method="upi",
+            payment_status="paid",
+            created_at=datetime.utcnow(),
+        )
+        # 2. Cancelled sale in range -> 500.00 (MUST BE EXCLUDED)
+        s2_cancelled = Sale(
+            tenant_id=tenant["tenant_id"],
+            store_id=s1.id,
+            sale_number=f"S-CAN-{uuid.uuid4().hex[:6]}",
+            subtotal=Decimal("500.00"),
+            total_amount=Decimal("500.00"),
+            payment_method="cash",
+            payment_status="cancelled",
+            created_at=datetime.utcnow(),
+        )
+        # 3. Refunded sale in range -> 300.00 (MUST BE EXCLUDED)
+        s3_refunded = Sale(
+            tenant_id=tenant["tenant_id"],
+            store_id=s1.id,
+            sale_number=f"S-REF-{uuid.uuid4().hex[:6]}",
+            subtotal=Decimal("300.00"),
+            total_amount=Decimal("300.00"),
+            payment_method="card",
+            payment_status="refunded",
+            created_at=datetime.utcnow(),
+        )
+        # 4. Paid sale BEFORE start date -> 400.00 (MUST BE EXCLUDED)
+        s4_before = Sale(
+            tenant_id=tenant["tenant_id"],
+            store_id=s1.id,
+            sale_number=f"S-BEF-{uuid.uuid4().hex[:6]}",
+            subtotal=Decimal("400.00"),
+            total_amount=Decimal("400.00"),
+            payment_method="cash",
+            payment_status="paid",
+            created_at=t_start - timedelta(days=2),
+        )
+        # 5. Paid sale AFTER end date -> 600.00 (MUST BE EXCLUDED)
+        s5_after = Sale(
+            tenant_id=tenant["tenant_id"],
+            store_id=s1.id,
+            sale_number=f"S-AFT-{uuid.uuid4().hex[:6]}",
+            subtotal=Decimal("600.00"),
+            total_amount=Decimal("600.00"),
+            payment_method="cash",
+            payment_status="paid",
+            created_at=t_end + timedelta(days=2),
+        )
+        db.add_all([s1_valid, s2_cancelled, s3_refunded, s4_before, s5_after])
+        db.commit()
+    finally:
+        db.close()
+
+    prog = client.get(f"/api/v1/store-targets/{tid}/progress", headers=tenant["headers"]).json()
+    # ONLY s1_valid (250.00) should be included!
+    assert float(prog["current_value"]) == 250.00
+    assert float(prog["remaining_value"]) == 750.00
+    assert float(prog["achievement_percentage"]) == 25.0
+    assert prog["is_achieved"] is False
+
+
+def test_pagination_and_filtering(tenant, stores):
+    s1, _ = stores
+    t0 = datetime.utcnow()
+
+    # Create 3 targets
+    names = ["Alpha Target", "Beta Target", "Gamma Target"]
+    for i in range(3):
+        res = client.post(
+            "/api/v1/store-targets",
+            json={
+                "store_id": s1.id,
+                "target_type": names[i],
+                "target_value": 1000.00 * (i + 1),
+                "period": "weekly" if i == 0 else "monthly",
+                "start_date": (t0 + timedelta(days=i * 10)).isoformat(),
+                "end_date": (t0 + timedelta(days=(i + 1) * 10)).isoformat(),
+            },
+            headers=tenant["headers"],
+        )
+        assert res.status_code == 201, res.text
+
+    # 1. Filter by period=weekly
+    r_weekly = client.get(f"/api/v1/store-targets?store_id={s1.id}&period=weekly", headers=tenant["headers"])
+    assert r_weekly.status_code == 200
+    assert all(t["period"] == "weekly" for t in r_weekly.json())
+
+    # 2. Filter by status=active
+    r_act = client.get(f"/api/v1/store-targets?store_id={s1.id}&status=active", headers=tenant["headers"])
+    assert r_act.status_code == 200
+    assert all(t["status"] == "active" for t in r_act.json())
+
+    # 3. Pagination with skip=0&limit=1
+    r_page1 = client.get(f"/api/v1/store-targets?store_id={s1.id}&skip=0&limit=1", headers=tenant["headers"])
+    assert r_page1.status_code == 200
+    assert len(r_page1.json()) == 1
+
+    # 4. Pagination with page=1&page_size=2
+    r_page = client.get(f"/api/v1/store-targets?store_id={s1.id}&page=1&page_size=2", headers=tenant["headers"])
+    assert r_page.status_code == 200
+    assert len(r_page.json()) <= 2
+
+
+def test_auto_complete_expired_targets_lifecycle(tenant, stores):
+    from app.services.store_target_service import StoreTargetService
+    from app.tasks.store_target_tasks import process_expired_store_targets_task
+
+    s1, _ = stores
+    fixed_now = datetime(2026, 10, 15, 12, 0, 0)
+    db = SessionLocal()
+
+    try:
+        # 1. Active target before end_date (ends in future -> should NOT expire)
+        t_active_future = StoreTarget(
+            store_id=s1.id,
+            target_type="Future Target",
+            target_value=Decimal("1000.00"),
+            period="monthly",
+            start_date=fixed_now - timedelta(days=5),
+            end_date=fixed_now + timedelta(days=10),
+            status="active",
+        )
+        # 2. Active target after end_date (ended in past -> MUST transition to 'completed')
+        t_active_past = StoreTarget(
+            store_id=s1.id,
+            target_type="Expired Target",
+            target_value=Decimal("2000.00"),
+            period="monthly",
+            start_date=fixed_now - timedelta(days=20),
+            end_date=fixed_now - timedelta(days=2),
+            status="active",
+        )
+        # 3. Already completed target (ended in past -> should remain 'completed')
+        t_completed = StoreTarget(
+            store_id=s1.id,
+            target_type="Already Completed",
+            target_value=Decimal("3000.00"),
+            period="monthly",
+            start_date=fixed_now - timedelta(days=25),
+            end_date=fixed_now - timedelta(days=5),
+            status="completed",
+        )
+        # 4. Cancelled target (ended in past -> should remain 'cancelled')
+        t_cancelled = StoreTarget(
+            store_id=s1.id,
+            target_type="Cancelled Target",
+            target_value=Decimal("4000.00"),
+            period="monthly",
+            start_date=fixed_now - timedelta(days=25),
+            end_date=fixed_now - timedelta(days=5),
+            status="cancelled",
+        )
+        # 5. Inactive target (ended in past -> should remain 'inactive')
+        t_inactive = StoreTarget(
+            store_id=s1.id,
+            target_type="Inactive Target",
+            target_value=Decimal("5000.00"),
+            period="monthly",
+            start_date=fixed_now - timedelta(days=25),
+            end_date=fixed_now - timedelta(days=5),
+            status="inactive",
+        )
+
+        db.add_all([t_active_future, t_active_past, t_completed, t_cancelled, t_inactive])
+        db.commit()
+        db.refresh(t_active_future)
+        db.refresh(t_active_past)
+        db.refresh(t_completed)
+        db.refresh(t_cancelled)
+        db.refresh(t_inactive)
+
+        # First execution: should only transition t_active_past for this store
+        summary1 = StoreTargetService.auto_complete_expired_targets(db, now=fixed_now, store_id=s1.id)
+        assert summary1["transitioned_count"] == 1
+        assert summary1["target_ids"] == [t_active_past.id]
+
+        db.refresh(t_active_future)
+        db.refresh(t_active_past)
+        db.refresh(t_completed)
+        db.refresh(t_cancelled)
+        db.refresh(t_inactive)
+
+        assert t_active_future.status == "active"
+        assert t_active_past.status == "completed"
+        assert t_completed.status == "completed"
+        assert t_cancelled.status == "cancelled"
+        assert t_inactive.status == "inactive"
+
+        # Repeated execution: idempotent, 0 transitioned
+        summary2 = StoreTargetService.auto_complete_expired_targets(db, now=fixed_now, store_id=s1.id)
+        assert summary2["transitioned_count"] == 0
+        assert summary2["target_ids"] == []
+
+        # Celery task wrapper execution verification
+        task_res = process_expired_store_targets_task()
+        assert task_res["status"] == "success"
+        assert "transitioned_count" in task_res
+
+    finally:
+        db.close()
+
+
+def test_concurrent_overlapping_target_creation(tenant, stores):
+    from concurrent.futures import ThreadPoolExecutor
+
+    s1, _ = stores
+    t_start = datetime.utcnow() + timedelta(days=5)
+    t_end = t_start + timedelta(days=20)
+
+    payload = {
+        "store_id": s1.id,
+        "target_type": "Simultaneous Target",
+        "target_value": 75000.00,
+        "period": "monthly",
+        "start_date": t_start.isoformat(),
+        "end_date": t_end.isoformat(),
+    }
+
+    def attempt_create():
+        return client.post("/api/v1/store-targets", json=payload, headers=tenant["headers"])
+
+    # Launch two concurrent attempts
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(attempt_create)
+        f2 = executor.submit(attempt_create)
+        r1 = f1.result()
+        r2 = f2.result()
+
+    statuses = sorted([r1.status_code, r2.status_code])
+    # Exactly one must succeed (201) and the second must be rejected as conflict (409)
+    assert statuses == [201, 409], f"Unexpected statuses: {statuses}, r1={r1.text}, r2={r2.text}"
+
+
+

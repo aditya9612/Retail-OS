@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.store import Store
@@ -54,6 +54,8 @@ class StoreTargetRepository:
         status: Optional[str] = None,
         period: Optional[str] = None,
         target_type: Optional[str] = None,
+        skip: Optional[int] = None,
+        limit: Optional[int] = None,
     ) -> list[StoreTarget]:
         query = (
             db.query(StoreTarget)
@@ -74,9 +76,16 @@ class StoreTargetRepository:
             query = query.filter(StoreTarget.period == period)
 
         if target_type is not None:
-            query = query.filter(StoreTarget.target_type == target_type)
+            query = query.filter(func.lower(StoreTarget.target_type) == target_type.strip().lower())
 
-        return query.order_by(StoreTarget.id.desc()).all()
+        query = query.order_by(StoreTarget.id.desc())
+
+        if skip is not None:
+            query = query.offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+
+        return query.all()
 
     @staticmethod
     def update(
@@ -116,7 +125,7 @@ class StoreTargetRepository:
             .filter(
                 Store.tenant_id == tenant_id,
                 StoreTarget.store_id == store_id,
-                StoreTarget.target_type == target_type,
+                func.lower(StoreTarget.target_type) == target_type.strip().lower(),
                 StoreTarget.status == "active",
                 # Overlap condition: existing.start < new.end AND existing.end > new.start
                 and_(
@@ -130,4 +139,5 @@ class StoreTargetRepository:
             query = query.filter(StoreTarget.id != exclude_target_id)
 
         return query.first()
+
 

@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Any
-from sqlalchemy import Column, Integer, String, ForeignKey, Numeric, DateTime
+from sqlalchemy import Column, Integer, String, ForeignKey, Numeric, DateTime, Index
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -9,6 +9,9 @@ from app.core.database import Base
 
 class Sale(Base):
     __tablename__ = "sales"
+    __table_args__ = (
+        Index("ix_sales_store_status_created", "store_id", "payment_status", "created_at"),
+    )
 
     id = Column(
         Integer,
