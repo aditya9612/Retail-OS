@@ -1,17 +1,16 @@
+import uuid
 from pathlib import Path
 from typing import Optional
-import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.exceptions import AppException, ForbiddenException, NotFoundException
+from app.core.exceptions import ForbiddenException, NotFoundException
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.document_setting import (
     BrandingContext,
-    DocumentSettingCreate,
     DocumentSettingResponse,
     DocumentSettingUpdate,
 )
@@ -46,7 +45,7 @@ def _require_tenant_id(user: User) -> int:
 
 @router.get("", response_model=Optional[DocumentSettingResponse])
 def get_document_setting(
-    store_id: Optional[int] = Query(default=None, gt=0),
+    store_id: int | None = Query(default=None, gt=0),
     user: User = Depends(require_settings_read),
     db: Session = Depends(get_db),
 ):
@@ -63,7 +62,7 @@ def get_document_setting(
 
 @router.get("/effective", response_model=BrandingContext)
 def get_effective_branding(
-    store_id: Optional[int] = Query(default=None, gt=0),
+    store_id: int | None = Query(default=None, gt=0),
     user: User = Depends(require_settings_read),
     db: Session = Depends(get_db),
 ):
@@ -81,7 +80,7 @@ def get_effective_branding(
 @router.put("", response_model=DocumentSettingResponse)
 def update_document_setting(
     payload: DocumentSettingUpdate,
-    store_id: Optional[int] = Query(default=None, gt=0),
+    store_id: int | None = Query(default=None, gt=0),
     user: User = Depends(require_settings_write),
     db: Session = Depends(get_db),
 ):
@@ -99,7 +98,7 @@ def update_document_setting(
 @router.post("/logo")
 async def upload_document_logo(
     file: UploadFile = File(...),
-    store_id: Optional[int] = Query(default=None, gt=0),
+    store_id: int | None = Query(default=None, gt=0),
     user: User = Depends(require_settings_write),
     db: Session = Depends(get_db),
 ):
@@ -176,7 +175,7 @@ async def upload_document_logo(
 
 @router.delete("/logo")
 def delete_logo(
-    store_id: Optional[int] = Query(default=None, gt=0),
+    store_id: int | None = Query(default=None, gt=0),
     user: User = Depends(require_settings_write),
     db: Session = Depends(get_db),
 ):

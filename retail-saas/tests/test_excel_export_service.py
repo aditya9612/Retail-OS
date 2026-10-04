@@ -1,6 +1,7 @@
+import io
 from datetime import date, datetime
 from decimal import Decimal
-import io
+
 import openpyxl
 
 from app.services.excel_export_service import ExcelExportService

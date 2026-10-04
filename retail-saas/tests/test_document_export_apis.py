@@ -1,5 +1,6 @@
-from datetime import date
 import io
+from datetime import date
+
 import openpyxl
 import pytest
 from fastapi.testclient import TestClient

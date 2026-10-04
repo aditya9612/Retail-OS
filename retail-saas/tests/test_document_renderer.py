@@ -1,16 +1,17 @@
-import os
-import sys
 import re
 from pathlib import Path
+
 import pytest
 
-from app.services.document_renderer_service import DocumentRenderer, RendererError
-from app.schemas.document_setting import BrandingContext
-from app.services.document_settings_service import DocumentSettingsService
-from app.models.tenant import Tenant
 from app.models.store import Store
-from app.models.document_setting import DocumentSetting
-from app.schemas.document_setting import DocumentSettingCreate, DocumentSettingUpdate
+from app.models.tenant import Tenant
+from app.schemas.document_setting import (
+    BrandingContext,
+    DocumentSettingCreate,
+    DocumentSettingUpdate,
+)
+from app.services.document_renderer_service import DocumentRenderer, RendererError
+from app.services.document_settings_service import DocumentSettingsService
 
 
 def parse_pdf_structure(pdf_bytes: bytes) -> dict:

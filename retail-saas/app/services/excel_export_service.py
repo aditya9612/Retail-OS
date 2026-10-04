@@ -1,12 +1,12 @@
 import io
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, List
+from typing import Any
 
 import openpyxl
+from fastapi.responses import StreamingResponse
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-from fastapi.responses import StreamingResponse
 
 
 class ExcelExportService:
@@ -50,8 +50,8 @@ class ExcelExportService:
     def create_workbook(
         self,
         sheet_title: str,
-        headers: List[str],
-        rows: List[List[Any]],
+        headers: list[str],
+        rows: list[list[Any]],
         enable_zebra: bool = True,
         min_col_width: int = 12,
         max_col_width: int = 50,
@@ -112,17 +112,16 @@ class ExcelExportService:
             max_len = 0
             for cell in col:
                 val_str = str(cell.value or "")
-                if len(val_str) > max_len:
-                    max_len = len(val_str)
+                max_len = max(max_len, len(val_str))
             col_letter = get_column_letter(col[0].column)
             calc_width = max(max_len + 4, min_col_width)
             ws.column_dimensions[col_letter].width = min(calc_width, max_col_width)
 
         return wb
 
-    def _sanitize_row(self, row: List[Any]) -> List[Any]:
+    def _sanitize_row(self, row: list[Any]) -> list[Any]:
         """Convert objects or unsupported types to Excel-friendly representations."""
-        sanitized: List[Any] = []
+        sanitized: list[Any] = []
         for val in row:
             if val is None:
                 sanitized.append("")
@@ -137,8 +136,8 @@ class ExcelExportService:
     def export_to_stream(
         self,
         sheet_title: str,
-        headers: List[str],
-        rows: List[List[Any]],
+        headers: list[str],
+        rows: list[list[Any]],
         enable_zebra: bool = True,
     ) -> io.BytesIO:
         """Generates an in-memory BytesIO stream containing the complete .xlsx file."""
@@ -156,8 +155,8 @@ class ExcelExportService:
     def export_to_bytes(
         self,
         sheet_title: str,
-        headers: List[str],
-        rows: List[List[Any]],
+        headers: list[str],
+        rows: list[list[Any]],
         enable_zebra: bool = True,
     ) -> bytes:
         """Generates raw .xlsx bytes."""
@@ -167,8 +166,8 @@ class ExcelExportService:
     def create_streaming_response(
         self,
         sheet_title: str,
-        headers: List[str],
-        rows: List[List[Any]],
+        headers: list[str],
+        rows: list[list[Any]],
         filename: str,
         enable_zebra: bool = True,
     ) -> StreamingResponse:
