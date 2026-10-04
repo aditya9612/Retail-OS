@@ -3,6 +3,7 @@ from app.models.category import Category
 from app.models.credit_note import CreditNote
 from app.models.customer import Customer
 from app.models.document_sequence import DocumentSequence
+from app.models.document_setting import DocumentSetting
 from app.models.gst_rate import GstRate
 from app.models.inventory import Inventory, StockMovement
 from app.models.supplier import Supplier
@@ -55,6 +56,7 @@ __all__ = [
     "CreditNote",
     "Customer",
     "DocumentSequence",
+    "DocumentSetting",
     "GstRate",
     "Inventory",
     "StockMovement",

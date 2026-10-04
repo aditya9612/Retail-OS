@@ -609,15 +609,48 @@ class BillingService:
             .all()
         )
 
-        pdf_bytes = generate_invoice_pdf(
-            order,
-            invoice,
-            tenant,
-            store=store,
-            customer=customer,
-            items=self._invoice_pdf_items(invoice),
-            payments=payments,
+        # Use DocumentSettingsService and DocumentRenderer for PDF generation
+        from app.services.document_settings_service import DocumentSettingsService
+        from app.services.document_renderer_service import DocumentRenderer
+        from app.utils.pdf_generator import _build_qr_payload
+
+        store_id = getattr(invoice, "store_id", None) or (store.id if store else None)
+        branding = DocumentSettingsService(self.db).resolve_branding(
+            tenant_id=tenant.id,
+            store_id=store_id,
         )
+
+        qr_data = _build_qr_payload(invoice, store, customer)
+
+        data = {
+            "invoice_number": invoice.invoice_number,
+            "created_at": invoice.created_at,
+            "subtotal": float(invoice.subtotal),
+            "discount_amount": float(invoice.discount_amount),
+            "cgst_amount": float(invoice.cgst_amount),
+            "sgst_amount": float(invoice.sgst_amount),
+            "igst_amount": float(invoice.igst_amount),
+            "total_amount": float(invoice.total_amount),
+            "total": float(invoice.total_amount),
+            "qr_data": qr_data,
+            "customer": {
+                "name": customer.name if customer else "Walk-in Customer",
+                "phone": customer.phone if customer else "",
+                "address": customer.address if customer else "",
+                "gstin": customer.gstin if customer else "",
+            } if customer else None,
+            "items": self._invoice_pdf_items(invoice),
+            "payments": [
+                {
+                    "method": p.payment_method,
+                    "amount": float(p.amount),
+                    "transaction_id": p.transaction_id,
+                }
+                for p in payments
+            ],
+        }
+        renderer = DocumentRenderer()
+        pdf_bytes = renderer.render("invoice", data, branding)
 
         if (
             settings.AWS_S3_BUCKET
