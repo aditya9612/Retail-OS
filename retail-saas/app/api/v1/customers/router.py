@@ -410,15 +410,6 @@ def export_directory(
         }
     )
 
-    return StreamingResponse(
-        file,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition":
-            "attachment; filename=customer_directory.pdf"
-        }
-    )
-
 
 @router.get("/{customer_id}", response_model=CustomerResponse)
 def get_customer(

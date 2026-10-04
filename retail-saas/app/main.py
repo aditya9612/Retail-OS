@@ -43,6 +43,7 @@ from app.api.v1.super_admins.router import router as super_admin_router
 from app.api.v1.saas_billing.router import router as saas_billing_router
 from app.api.v1.saas.router import router as saas_router
 from app.api.v1.multi_store.router import router as multi_store_router
+from app.api.v1.document_settings.router import router as document_settings_router
 
 from app.core.config import get_settings
 from app.core.database import init_db
@@ -239,6 +240,9 @@ app.include_router(super_admin_router, prefix=API_PREFIX)
 # SaaS Billing APIs (Tenant-facing)
 app.include_router(saas_billing_router, prefix=API_PREFIX)
 app.include_router(saas_router, prefix=API_PREFIX)
+
+# Document Settings & Branding APIs
+app.include_router(document_settings_router, prefix=API_PREFIX)
 
 
 # =========================

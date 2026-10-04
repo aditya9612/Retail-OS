@@ -6,14 +6,14 @@ from typing import Any, Dict, List, Optional, Union
 
 from fastapi import HTTPException, status
 from fastapi.responses import StreamingResponse
-import openpyxl
-from openpyxl.styles import Font, PatternFill
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy import case, distinct, func
 from sqlalchemy.orm import Session
+
+from app.services.excel_export_service import ExcelExportService
 
 from app.models.audit_log import AuditLog
 from app.models.customer import Customer
@@ -1497,34 +1497,11 @@ class ReportService:
         # EXCEL FORMAT
         # -------------------------------------------------------------
         elif fmt == "excel":
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = title[:30]
-
-            ws.append(headers)
-            header_font = Font(bold=True, color="FFFFFF")
-            header_fill = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
-            for col_idx in range(1, len(headers) + 1):
-                cell = ws.cell(row=1, column=col_idx)
-                cell.font = header_font
-                cell.fill = header_fill
-
-            for r in rows:
-                ws.append(r)
-
-            # Auto-adjust column widths
-            for col in ws.columns:
-                max_len = max(len(str(cell.value or "")) for cell in col)
-                col_letter = openpyxl.utils.get_column_letter(col[0].column)
-                ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
-
-            out_stream = io.BytesIO()
-            wb.save(out_stream)
-            out_stream.seek(0)
-            return StreamingResponse(
-                out_stream,
-                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": f"attachment; filename={filename}.xlsx"},
+            return ExcelExportService().create_streaming_response(
+                sheet_title=title,
+                headers=headers,
+                rows=rows,
+                filename=filename,
             )
 
         # -------------------------------------------------------------

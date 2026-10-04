@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, status
+from typing import Literal
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -61,6 +62,34 @@ def get_purchase_order(
     return PurchaseOrderService(db).get_purchase_order(
         tenant_id=user.tenant_id,
         purchase_order_id=purchase_order_id,
+    )
+
+
+@router.get("/{purchase_order_id}/pdf")
+def get_purchase_order_pdf(
+    purchase_order_id: int,
+    mode: Literal["download", "preview"] = Query(default="download"),
+    user: User = Depends(require_permission("purchase_orders:read")),
+    db: Session = Depends(get_db),
+):
+    po = PurchaseOrderService(db).get_purchase_order(
+        tenant_id=user.tenant_id,
+        purchase_order_id=purchase_order_id,
+    )
+
+    pdf_bytes = PurchaseOrderService(db).generate_pdf(
+        tenant_id=user.tenant_id,
+        purchase_order_id=purchase_order_id,
+    )
+
+    disposition = "inline" if mode == "preview" else "attachment"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"{disposition}; filename=PO-{po.order_number}.pdf"
+        },
     )
     
     

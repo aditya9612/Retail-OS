@@ -308,3 +308,49 @@ class PurchaseOrderService:
             raise ConflictException(
                 f"Cannot delete purchase order: {str(exc)}"
             )
+
+    def generate_pdf(self, tenant_id: int, purchase_order_id: int) -> bytes:
+        from app.services.document_settings_service import DocumentSettingsService
+        from app.services.document_renderer_service import DocumentRenderer
+
+        po = self.get_purchase_order(tenant_id, purchase_order_id)
+        supplier = po.supplier
+        store_id = po.store_id
+
+        branding = DocumentSettingsService(self.db).resolve_branding(
+            tenant_id=tenant_id,
+            store_id=store_id,
+        )
+
+        items_data = []
+        for item in po.items:
+            product_name = item.product.name if item.product else f"Product #{item.product_id}"
+            sku = item.product.sku if item.product else ""
+            items_data.append({
+                "product_name": product_name,
+                "sku": sku,
+                "quantity": item.quantity,
+                "unit_cost": float(item.unit_cost),
+                "total_cost": float(item.total_cost),
+            })
+
+        data = {
+            "order_number": po.order_number,
+            "po_number": po.order_number,
+            "order_date": po.created_at,
+            "status": po.status,
+            "notes": po.notes,
+            "total_amount": float(po.total_amount),
+            "supplier": {
+                "name": supplier.name if supplier else "Vendor",
+                "phone": supplier.phone if supplier else "",
+                "email": supplier.email if supplier else "",
+                "address": supplier.address if supplier else "",
+                "gstin": getattr(supplier, "gstin", "") if supplier else "",
+            } if supplier else None,
+            "items": items_data,
+        }
+
+        renderer = DocumentRenderer()
+        return renderer.render("purchase_order", data, branding)
+

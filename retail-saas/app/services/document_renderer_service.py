@@ -139,6 +139,10 @@ class DocumentRenderer:
                 return self._render_invoice(data, branding)
             elif clean_type in ("bill", "receipt"):
                 return self._render_bill(data, branding)
+            elif clean_type in ("credit_note", "credit-note"):
+                return self._render_credit_note(data, branding)
+            elif clean_type in ("purchase_order", "purchase-order", "po"):
+                return self._render_purchase_order(data, branding)
             else:
                 raise RendererError(f"Unsupported template type: {template_type}")
         except RendererError:
@@ -337,9 +341,9 @@ class DocumentRenderer:
         c.setFont(self.bold_font, 10)
         totals_x = margin + 340
 
-        subtotal_val = data.get("subtotal") if data.get("subtotal") is not None else data.get("total", 0)
+        subtotal_val = data.get("subtotal") if data.get("subtotal") is not None else (data.get("total") or 0)
         c.drawString(totals_x, y, "Subtotal:")
-        c.drawString(totals_x + 60, y, f"{float(subtotal_val):.2f}")
+        c.drawString(totals_x + 60, y, f"{float(subtotal_val or 0):.2f}")
         y -= 15
 
         if data.get("discount_amount"):
@@ -362,9 +366,9 @@ class DocumentRenderer:
             c.drawString(totals_x + 60, y, f"{float(data['igst_amount']):.2f}")
             y -= 15
 
-        grand_total = data.get("total_amount") if data.get("total_amount") is not None else data.get("total", 0)
+        grand_total = data.get("total_amount") if data.get("total_amount") is not None else (data.get("total") or 0)
         c.drawString(totals_x, y, "Grand Total:")
-        c.drawString(totals_x + 60, y, f"{float(grand_total):.2f}")
+        c.drawString(totals_x + 60, y, f"{float(grand_total or 0):.2f}")
         y -= 25
 
         # -- PAYMENT DETAILS --
@@ -397,3 +401,303 @@ class DocumentRenderer:
         if branding.footer_text:
             c.setFont(self._get_font(branding.footer_text, False), 8)
             c.drawCentredString(width / 2.0, 30, branding.footer_text)
+
+    def _render_credit_note(self, data: Dict[str, Any], branding: BrandingContext) -> bytes:
+        """Renders an A4 credit note PDF using ReportLab."""
+        buffer = io.BytesIO()
+        c = canvas.Canvas(buffer, pagesize=A4, pageCompression=0)
+        self._draw_credit_note(c, data, branding)
+        c.save()
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    def _draw_credit_note(self, c: canvas.Canvas, data: Dict[str, Any], branding: BrandingContext):
+        """Draws a branded GST Credit Note."""
+        width, height = A4
+        margin = 50
+        y = height - margin
+
+        # Logo
+        logo_path = self._validate_logo_path(branding.logo_url)
+        if logo_path:
+            try:
+                img = ImageReader(logo_path)
+                img_w, img_h = img.getSize()
+                aspect = img_w / float(img_h)
+                draw_w = min(100, 50 * aspect)
+                draw_h = draw_w / aspect
+                c.drawImage(img, width - margin - draw_w, y - draw_h + 15, width=draw_w, height=draw_h)
+            except Exception as e:
+                logger.warning(f"Failed to draw logo: {str(e)}")
+
+        # Business Details
+        c.setFont(self._get_font(branding.business_name, True), 16)
+        c.drawString(margin, y, branding.business_name or "")
+        y -= 20
+
+        c.setFont(self._get_font(branding.address, False), 10)
+        c.drawString(margin, y, branding.address or "")
+        y -= 15
+
+        contact_info = []
+        if branding.phone:
+            contact_info.append(branding.phone)
+        if branding.email:
+            contact_info.append(branding.email)
+        if contact_info:
+            c.setFont(self.default_font, 9)
+            c.drawString(margin, y, " | ".join(contact_info))
+            y -= 15
+
+        if branding.show_gstin and branding.gstin:
+            c.setFont(self.default_font, 9)
+            c.drawString(margin, y, f"GSTIN: {branding.gstin}")
+            y -= 15
+
+        y -= 20
+
+        # Title
+        c.setFont(self.bold_font, 14)
+        c.drawCentredString(width / 2.0, y, "CREDIT NOTE")
+        y -= 25
+
+        # Document Details
+        c.setFont(self.bold_font, 10)
+        cn_number = data.get("credit_note_no", "")
+        c.drawString(margin, y, f"Credit Note No: {cn_number}")
+
+        created_at_val = data.get("created_at")
+        if created_at_val:
+            date_str = created_at_val.strftime("%d-%m-%Y") if hasattr(created_at_val, "strftime") else str(created_at_val)[:10]
+            c.drawString(margin + 240, y, f"Date: {date_str}")
+        y -= 20
+
+        orig_inv = data.get("original_invoice_number")
+        if orig_inv:
+            c.setFont(self.default_font, 10)
+            c.drawString(margin, y, f"Against Original Invoice No: {orig_inv}")
+            y -= 18
+
+        reason = data.get("reason")
+        if reason:
+            c.setFont(self.default_font, 10)
+            c.drawString(margin, y, f"Reason for Credit Note: {reason}")
+            y -= 25
+
+        # Customer Details
+        customer = data.get("customer", {})
+        if customer:
+            c.setFont(self.bold_font, 10)
+            c.drawString(margin, y, "Issued To:")
+            y -= 15
+            cust_name = customer.get("name", "Customer")
+            c.setFont(self._get_font(cust_name, False), 10)
+            c.drawString(margin, y, cust_name)
+            y -= 15
+            if customer.get("phone"):
+                c.setFont(self.default_font, 9)
+                c.drawString(margin, y, f"Mobile: {customer.get('phone')}")
+                y -= 15
+            if customer.get("gstin"):
+                c.setFont(self.default_font, 9)
+                c.drawString(margin, y, f"GSTIN: {customer.get('gstin')}")
+                y -= 15
+
+        y -= 15
+
+        # Credit Summary Table
+        c.setFont(self.bold_font, 10)
+        c.drawString(margin, y, "Description")
+        c.drawString(margin + 340, y, "Amount (INR)")
+        y -= 8
+        c.line(margin, y, width - margin, y)
+        y -= 18
+
+        c.setFont(self.default_font, 10)
+        c.drawString(margin, y, "Refund / Returned Value")
+        refund_amount = float(data.get("refund_amount", 0))
+        c.drawString(margin + 340, y, f"{refund_amount:.2f}")
+        y -= 16
+
+        if data.get("cgst_amount"):
+            c.drawString(margin, y, "CGST Credit Adjustment")
+            c.drawString(margin + 340, y, f"{float(data['cgst_amount']):.2f}")
+            y -= 16
+
+        if data.get("sgst_amount"):
+            c.drawString(margin, y, "SGST Credit Adjustment")
+            c.drawString(margin + 340, y, f"{float(data['sgst_amount']):.2f}")
+            y -= 16
+
+        if data.get("igst_amount"):
+            c.drawString(margin, y, "IGST Credit Adjustment")
+            c.drawString(margin + 340, y, f"{float(data['igst_amount']):.2f}")
+            y -= 16
+
+        c.line(margin, y, width - margin, y)
+        y -= 18
+
+        c.setFont(self.bold_font, 11)
+        c.drawString(margin, y, "Total Credited Amount:")
+        c.drawString(margin + 340, y, f"{refund_amount:.2f}")
+        y -= 40
+
+        # Signatory
+        c.setFont(self.bold_font, 10)
+        c.drawString(width - margin - 140, y, "Authorized Signatory")
+        y -= 10
+        c.line(width - margin - 150, y, width - margin, y)
+
+        self._draw_footer(c, branding)
+
+    def _render_purchase_order(self, data: Dict[str, Any], branding: BrandingContext) -> bytes:
+        """Renders an A4 purchase order PDF using ReportLab."""
+        buffer = io.BytesIO()
+        c = canvas.Canvas(buffer, pagesize=A4, pageCompression=0)
+        self._draw_purchase_order(c, data, branding)
+        c.save()
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    def _draw_purchase_order(self, c: canvas.Canvas, data: Dict[str, Any], branding: BrandingContext):
+        """Draws a branded Purchase Order for vendors."""
+        width, height = A4
+        margin = 50
+        y = height - margin
+
+        # Logo
+        logo_path = self._validate_logo_path(branding.logo_url)
+        if logo_path:
+            try:
+                img = ImageReader(logo_path)
+                img_w, img_h = img.getSize()
+                aspect = img_w / float(img_h)
+                draw_w = min(100, 50 * aspect)
+                draw_h = draw_w / aspect
+                c.drawImage(img, width - margin - draw_w, y - draw_h + 15, width=draw_w, height=draw_h)
+            except Exception as e:
+                logger.warning(f"Failed to draw logo: {str(e)}")
+
+        # Business Details
+        c.setFont(self._get_font(branding.business_name, True), 16)
+        c.drawString(margin, y, branding.business_name or "")
+        y -= 20
+
+        c.setFont(self._get_font(branding.address, False), 10)
+        c.drawString(margin, y, branding.address or "")
+        y -= 15
+
+        contact_info = []
+        if branding.phone:
+            contact_info.append(branding.phone)
+        if branding.email:
+            contact_info.append(branding.email)
+        if contact_info:
+            c.setFont(self.default_font, 9)
+            c.drawString(margin, y, " | ".join(contact_info))
+            y -= 15
+
+        if branding.show_gstin and branding.gstin:
+            c.setFont(self.default_font, 9)
+            c.drawString(margin, y, f"GSTIN: {branding.gstin}")
+            y -= 15
+
+        y -= 20
+
+        # Title
+        c.setFont(self.bold_font, 14)
+        c.drawCentredString(width / 2.0, y, "PURCHASE ORDER")
+        y -= 25
+
+        # Document Details
+        c.setFont(self.bold_font, 10)
+        po_number = data.get("order_number") or data.get("po_number", "")
+        c.drawString(margin, y, f"PO Number: {po_number}")
+
+        order_date_val = data.get("order_date") or data.get("created_at")
+        if order_date_val:
+            date_str = order_date_val.strftime("%d-%m-%Y") if hasattr(order_date_val, "strftime") else str(order_date_val)[:10]
+            c.drawString(margin + 240, y, f"Date: {date_str}")
+        y -= 20
+
+        # Supplier Info
+        supplier = data.get("supplier", {})
+        c.setFont(self.bold_font, 10)
+        c.drawString(margin, y, "Vendor / Supplier:")
+        y -= 15
+
+        supp_name = supplier.get("name", "Vendor")
+        c.setFont(self._get_font(supp_name, False), 10)
+        c.drawString(margin, y, supp_name)
+        y -= 15
+
+        if supplier.get("address"):
+            c.setFont(self._get_font(supplier.get("address"), False), 9)
+            c.drawString(margin, y, supplier.get("address"))
+            y -= 15
+
+        if supplier.get("phone") or supplier.get("email"):
+            s_contact = " | ".join(filter(None, [supplier.get("phone"), supplier.get("email")]))
+            c.setFont(self.default_font, 9)
+            c.drawString(margin, y, s_contact)
+            y -= 15
+
+        if supplier.get("gstin"):
+            c.setFont(self.default_font, 9)
+            c.drawString(margin, y, f"GSTIN: {supplier.get('gstin')}")
+            y -= 15
+
+        y -= 15
+
+        # Items Table Header
+        c.setFont(self.bold_font, 10)
+        c.drawString(margin, y, "Item Description")
+        c.drawString(margin + 230, y, "SKU")
+        c.drawString(margin + 330, y, "Qty")
+        c.drawString(margin + 380, y, "Unit Cost")
+        c.drawString(margin + 440, y, "Total")
+        y -= 8
+        c.line(margin, y, width - margin, y)
+        y -= 15
+
+        # Items Table Rows
+        items = data.get("items", [])
+        for it in items:
+            if y < 100:
+                self._draw_footer(c, branding)
+                c.showPage()
+                y = height - margin - 20
+
+            it_name = str(it.get("product_name") or it.get("name") or "Product")
+            c.setFont(self._get_font(it_name, False), 9)
+            c.drawString(margin, y, it_name[:32])
+
+            c.setFont(self.default_font, 9)
+            c.drawString(margin + 230, y, str(it.get("sku") or ""))
+            qty = it.get("quantity") or 0
+            c.drawString(margin + 330, y, str(qty))
+
+            uc = float(it.get("unit_cost") or 0)
+            c.drawString(margin + 380, y, f"{uc:.2f}")
+
+            line_tot = float(it.get("total_cost") or (qty * uc))
+            c.drawString(margin + 440, y, f"{line_tot:.2f}")
+            y -= 15
+
+        c.line(margin, y, width - margin, y)
+        y -= 18
+
+        # Total PO Amount
+        total_amount = float(data.get("total_amount") or 0)
+        c.setFont(self.bold_font, 11)
+        c.drawString(margin + 330, y, "Total Order Value:")
+        c.drawString(margin + 440, y, f"{total_amount:.2f}")
+        y -= 35
+
+        # Authorized Signatory
+        c.setFont(self.bold_font, 10)
+        c.drawString(width - margin - 140, y, "Authorized Signatory")
+        y -= 10
+        c.line(width - margin - 150, y, width - margin, y)
+
+        self._draw_footer(c, branding)

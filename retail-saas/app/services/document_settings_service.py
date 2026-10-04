@@ -82,13 +82,13 @@ class DocumentSettingsService:
         elif tenant_setting and tenant_setting.address is not None:
             address = tenant_setting.address
         elif store and store.address:
-            addr_parts = [store.address]
+            addr_parts: list[str] = [str(store.address)]
             if getattr(store, "city", None):
-                addr_parts.append(store.city)
+                addr_parts.append(str(store.city))
             if getattr(store, "state", None):
-                addr_parts.append(store.state)
+                addr_parts.append(str(store.state))
             if getattr(store, "pincode", None):
-                addr_parts.append(store.pincode)
+                addr_parts.append(str(store.pincode))
             address = ", ".join(filter(None, addr_parts))
         elif t_settings.get("address"):
             address = str(t_settings.get("address"))
@@ -179,7 +179,7 @@ class DocumentSettingsService:
         elif tenant_setting and tenant_setting.logo_path is not None:
             logo_url = tenant_setting.logo_path
         elif store and getattr(store, "logo_url", None):
-            logo_url = store.logo_url
+            logo_url = getattr(store, "logo_url")
         elif t_settings.get("logo_url"):
             logo_url = str(t_settings.get("logo_url"))
 
