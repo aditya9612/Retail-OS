@@ -3,6 +3,7 @@ from app.models.category import Category
 from app.models.credit_note import CreditNote
 from app.models.customer import Customer
 from app.models.document_sequence import DocumentSequence
+from app.models.document_setting import DocumentSetting
 from app.models.gst_rate import GstRate
 from app.models.inventory import Inventory, StockMovement
 from app.models.supplier import Supplier
@@ -31,7 +32,6 @@ from app.models.store_target import StoreTarget
 from app.models.store_expense import StoreExpense
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.models.staff import Staff
 from app.models.warehouse import Warehouse
 from app.models.grn import GRN, GRNItem
 from app.models.coupon import Coupon
@@ -56,6 +56,7 @@ __all__ = [
     "CreditNote",
     "Customer",
     "DocumentSequence",
+    "DocumentSetting",
     "GstRate",
     "Inventory",
     "StockMovement",
@@ -87,7 +88,6 @@ __all__ = [
     "StoreTransferItem",
     "Tenant",
     "User",
-    "Staff",
     "Warehouse",
     "GRN",
     "GRNItem",

@@ -3,8 +3,9 @@ from datetime import date
 from decimal import Decimal
 from io import BytesIO
 
-from openpyxl import Workbook
 from sqlalchemy import extract, func
+
+from app.services.excel_export_service import ExcelExportService
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -2173,38 +2174,30 @@ class CustomerService:
         self,
         customers,
     ):
-
-        workbook = Workbook()
-
-        worksheet = workbook.active
-        worksheet.title = "Customer Directory"
-
-        worksheet.append([
+        headers = [
             "ID",
             "Name",
             "Email",
             "Phone",
             "Status",
             "Loyalty Points",
-        ])
-
-        for customer in customers:
-
-            worksheet.append([
+        ]
+        rows = [
+            [
                 customer.id,
                 customer.name,
                 customer.email or "",
                 customer.phone or "",
                 customer.status,
                 customer.loyalty_points or 0,
-            ])
-
-        output = BytesIO()
-
-        workbook.save(output)
-        output.seek(0)
-
-        return output
+            ]
+            for customer in customers
+        ]
+        return ExcelExportService().export_to_stream(
+            sheet_title="Customer Directory",
+            headers=headers,
+            rows=rows,
+        )
 
     def _create_pdf(
         self,

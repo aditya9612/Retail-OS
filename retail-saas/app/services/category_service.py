@@ -57,7 +57,45 @@ class CategoryService:
         )
         if not category:
             raise NotFoundException("Category not found")
+
+        parent_name = None
+        if category.parent_id:
+            parent = self.repository.get_by_id(
+                tenant_id=tenant_id,
+                category_id=category.parent_id,
+            )
+            if parent:
+                parent_name = parent.name
+
+        product_count = (
+            self.db.query(Product)
+            .filter(
+                Product.tenant_id == tenant_id,
+                Product.category_id == category_id,
+            )
+            .count()
+        )
+
+        subcategory_count = (
+            self.db.query(Category)
+            .filter(
+                Category.tenant_id == tenant_id,
+                Category.parent_id == category_id,
+            )
+            .count()
+        )
+
+        category.parent_name = parent_name
+        category.product_count = product_count
+        category.subcategory_count = subcategory_count
         return category
+
+    def get_category_details(
+        self,
+        tenant_id: int,
+        category_id: int,
+    ) -> Category:
+        return self.get_category(tenant_id, category_id)
 
     def update_category(
         self,
@@ -129,13 +167,10 @@ class CategoryService:
         if not category:
             raise NotFoundException("Category not found")
 
-        # Check for associated products
+        # Check for associated products globally to prevent FK constraint failures
         product_count = (
             self.db.query(Product)
-            .filter(
-                Product.tenant_id == tenant_id,
-                Product.category_id == category_id,
-            )
+            .filter(Product.category_id == category_id)
             .count()
         )
         if product_count > 0:
@@ -146,10 +181,7 @@ class CategoryService:
         # Check for child subcategories
         child_count = (
             self.db.query(Category)
-            .filter(
-                Category.tenant_id == tenant_id,
-                Category.parent_id == category_id,
-            )
+            .filter(Category.parent_id == category_id)
             .count()
         )
         if child_count > 0:
@@ -164,4 +196,9 @@ class CategoryService:
             self.db.rollback()
             raise ConflictException(
                 "Cannot delete category due to database constraints"
+            )
+        except Exception as exc:
+            self.db.rollback()
+            raise ConflictException(
+                f"Cannot delete category: {str(exc)}"
             )

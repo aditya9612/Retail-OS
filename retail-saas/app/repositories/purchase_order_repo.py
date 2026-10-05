@@ -50,3 +50,10 @@ class PurchaseOrderRepository:
         self.db.commit()
         self.db.refresh(purchase_order)
         return purchase_order
+
+    def delete(
+        self,
+        purchase_order: PurchaseOrder,
+    ) -> None:
+        self.db.delete(purchase_order)
+        self.db.commit()

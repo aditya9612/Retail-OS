@@ -14,10 +14,18 @@ from app.schemas.auth import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
+    MobileOTPRequestSchema,
+    MobileOTPVerifySchema,
+    MobilePINLoginRequest,
+    PINChangeRequest,
+    PINResetRequestSchema,
+    PINResetVerifySchema,
+    PINSetupRequest,
     RefreshRequest,
     RegisterRequest,
     RegisterResponse,
     ResetPasswordRequest,
+    ResetPINRequest,
     TokenResponse,
     VerifyOTPRequest,
 )
@@ -166,14 +174,13 @@ def forgot_password(
     data: ForgotPasswordRequest,
     db: Session = Depends(get_db),
 ):
-    otp = AuthService(db).forgot_password(
+    AuthService(db).forgot_password(
         data
     )
 
     return {
         "success": True,
-        "message": "OTP generated successfully.",
-        "otp": otp,
+        "message": "OTP sent successfully.",
         "expires_in": 300,
     }
 
@@ -236,6 +243,150 @@ def change_password(
         current_token,
     )
 
+    return {
+        "success": True,
+        "message": message,
+    }
+
+
+@router.post(
+    "/login/mobile-otp/request",
+    summary="Request Mobile OTP Login",
+    description=(
+        "Generates a time-limited OTP for mobile number login. "
+        "Returns a generic response regardless of whether the phone number "
+        "is registered, to prevent phone enumeration attacks."
+    ),
+)
+def mobile_otp_request(
+    data: MobileOTPRequestSchema,
+    db: Session = Depends(get_db),
+):
+    AuthService(db).mobile_otp_request(data)
+    return {
+        "success": True,
+        "message": "If the account exists, an OTP has been sent.",
+        "expires_in": 300,
+    }
+
+
+@router.post(
+    "/login/mobile-otp/verify",
+    response_model=TokenResponse,
+    summary="Verify Mobile OTP and Login",
+    description=(
+        "Verifies the OTP for the given phone number. "
+        "On success, marks the phone as verified and issues JWT access + refresh tokens."
+    ),
+)
+def mobile_otp_verify(
+    data: MobileOTPVerifySchema,
+    db: Session = Depends(get_db),
+):
+    return AuthService(db).mobile_otp_verify(data)
+
+
+@router.post(
+    "/login/mobile-pin",
+    response_model=TokenResponse,
+    summary="Login with Mobile + PIN",
+    description="Authenticates active user globally with canonical phone number and 4-digit PIN.",
+)
+def mobile_pin_login(
+    data: MobilePINLoginRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    return AuthService(db).mobile_pin_login(
+        data,
+        ip_address=_get_client_ip(request),
+        user_agent=_get_user_agent(request),
+    )
+
+
+@router.post(
+    "/pin/setup",
+    summary="Setup Initial Security PIN",
+    description="Sets the initial 4-digit PIN for the authenticated user. Fails if PIN is already set.",
+)
+def pin_setup(
+    data: PINSetupRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    message = AuthService(db).pin_setup(current_user, data)
+    return {
+        "success": True,
+        "message": message,
+    }
+
+
+@router.post(
+    "/pin/change",
+    summary="Change Security PIN",
+    description="Changes the 4-digit PIN for the authenticated user after verifying the current PIN.",
+)
+def pin_change(
+    data: PINChangeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    message = AuthService(db).pin_change(current_user, data)
+    return {
+        "success": True,
+        "message": message,
+    }
+
+
+@router.post(
+    "/pin/reset/request",
+    summary="Request PIN Reset OTP",
+    description=(
+        "Generates a time-limited OTP for resetting the security PIN. "
+        "Returns a generic response regardless of whether the phone number "
+        "is registered, to prevent phone enumeration attacks."
+    ),
+)
+def pin_reset_request(
+    data: PINResetRequestSchema,
+    db: Session = Depends(get_db),
+):
+    AuthService(db).pin_reset_request(data)
+    return {
+        "success": True,
+        "message": "If the account exists, an OTP has been sent.",
+        "expires_in": 300,
+    }
+
+
+@router.post(
+    "/pin/reset/verify",
+    summary="Verify PIN Reset OTP",
+    description="Verifies the OTP for PIN reset and issues a temporary single-use reset token.",
+)
+def pin_reset_verify(
+    data: PINResetVerifySchema,
+    db: Session = Depends(get_db),
+):
+    reset_token = AuthService(db).pin_reset_verify(data)
+    return {
+        "success": True,
+        "message": "OTP verified successfully.",
+        "reset_token": reset_token,
+        "expires_in": 600,
+    }
+
+
+@router.post(
+    "/pin/reset",
+    summary="Reset Security PIN",
+    description="Sets a new 4-digit security PIN using the authorization token from /pin/reset/verify.",
+)
+def pin_reset(
+    data: ResetPINRequest,
+    db: Session = Depends(get_db),
+):
+    message = AuthService(db).pin_reset(data)
     return {
         "success": True,
         "message": message,

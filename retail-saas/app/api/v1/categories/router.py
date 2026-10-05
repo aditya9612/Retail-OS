@@ -7,6 +7,8 @@ from app.models.user import User
 from app.schemas.category import (
     CategoryCreate,
     CategoryDeleteResponse,
+    CategoryDetailResponse,
+    CategoryDetailWrapperResponse,
     CategoryListResponse,
     CategoryResponse,
     CategoryUpdate,
@@ -55,7 +57,7 @@ def list_categories(
 
 @router.get(
     "/{category_id}",
-    response_model=CategoryResponse,
+    response_model=CategoryDetailResponse,
 )
 def get_category(
     category_id: int = Path(
@@ -70,6 +72,31 @@ def get_category(
         tenant_id=user.tenant_id,
         category_id=category_id,
     )
+
+
+@router.get(
+    "/{category_id}/details",
+    response_model=CategoryDetailWrapperResponse,
+)
+def get_category_details(
+    category_id: int = Path(
+        ...,
+        gt=0,
+        description="Category ID must be greater than 0",
+    ),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("products:read")),
+):
+    details = CategoryService(db).get_category_details(
+        tenant_id=user.tenant_id,
+        category_id=category_id,
+    )
+    return {
+        "success": True,
+        "message": "Category details retrieved successfully",
+        "data": details,
+    }
+
 
 
 @router.put(

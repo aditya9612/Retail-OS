@@ -1,6 +1,6 @@
-from typing import Optional
+from typing import Optional, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -48,4 +48,32 @@ def get_credit_note(
     return BillingService(db).get_credit_note(
         user.tenant_id,
         credit_note_id,
+    )
+
+
+@router.get("/{credit_note_id}/pdf")
+def credit_note_pdf(
+    credit_note_id: int,
+    mode: Literal["download", "preview"] = Query(default="download"),
+    user: User = Depends(require_permission("billing:read")),
+    db: Session = Depends(get_db),
+):
+    credit_note = BillingService(db).get_credit_note(
+        user.tenant_id,
+        credit_note_id,
+    )
+
+    pdf_bytes = BillingService(db).generate_credit_note_pdf(
+        user.tenant_id,
+        credit_note_id,
+    )
+
+    disposition = "inline" if mode == "preview" else "attachment"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"{disposition}; filename=CN-{credit_note.credit_note_no}.pdf"
+        },
     )

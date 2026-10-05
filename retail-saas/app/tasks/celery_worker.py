@@ -14,6 +14,7 @@ celery_app = Celery(
         "app.tasks.whatsapp_tasks",
         "app.tasks.report_tasks",
         "app.tasks.saas_lifecycle_tasks",
+        "app.tasks.store_target_tasks",
     ],
 )
 
@@ -27,6 +28,10 @@ celery_app.conf.update(
         "saas-subscription-lifecycle-hourly": {
             "task": "process_saas_subscription_lifecycle",
             "schedule": crontab(minute=0, hour="*"),
+        },
+        "store-target-expiration-hourly": {
+            "task": "process_expired_store_targets",
+            "schedule": crontab(minute=15, hour="*"),
         },
     },
 )

@@ -1,0 +1,20 @@
+/* Base stylesheet for PDF rendering */
+@page {
+    size: A4;
+    margin: 20mm;
+}
+body {
+    font-family: "Helvetica", "Arial", sans-serif;
+    font-size: 10pt;
+    line-height: 1.2;
+    color: #000;
+}
+/* Optional font embedding – comment out if font file not present */
+/*
+@font-face {
+    font-family: "NotoSans";
+    src: url('fonts/NotoSans-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+*/

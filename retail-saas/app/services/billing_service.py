@@ -58,9 +58,18 @@ class BillingService:
             self.db.add(row)
             self.db.flush()
 
-        row.last_number += 1
-        self.db.flush()
-        return f"{prefix}-{year}-{row.last_number:06d}"
+        while True:
+            row.last_number += 1
+            num = f"{prefix}-{year}-{row.last_number:06d}"
+            if doc_type == "credit_note":
+                from app.models.credit_note import CreditNote
+                if self.db.query(CreditNote).filter(CreditNote.credit_note_no == num).first():
+                    continue
+            elif doc_type == "invoice":
+                if self.db.query(Invoice).filter(Invoice.invoice_number == num).first():
+                    continue
+            self.db.flush()
+            return num
 
     def _generate_invoice_number(self, tenant_id: int) -> str:
         return self._next_document_number(tenant_id, "invoice", "INV")
@@ -229,41 +238,80 @@ class BillingService:
         user_id: int,
         data: InvoiceCreate,
     ) -> Invoice:
-        cart_svc = CartService(self.db)
-        cart = cart_svc.get_cart(tenant_id, user_id)
-
-        if not cart.get("items"):
-            raise AppException("Cart is empty")
-
-        if cart.get("store_id") != data.store_id:
-            raise AppException("Cart store does not match request")
-
         order_svc = OrderService(self.db)
 
-        items = [
-            OrderItemCreate(
-                product_id=item["product_id"],
-                quantity=int(Decimal(item["quantity"])),
-                unit_price=Decimal(item["unit_price"]),
-                discount=Decimal(item.get("discount", "0")),
-            )
-            for item in cart["items"]
-        ]
+        if data.items:
+            items = []
+            for item in data.items:
+                unit_price = item.unit_price
+                if unit_price is None:
+                    prod = (
+                        self.db.query(Product)
+                        .filter(
+                            Product.id == item.product_id,
+                            Product.tenant_id == tenant_id,
+                        )
+                        .first()
+                    )
+                    if not prod:
+                        raise NotFoundException(f"Product ID {item.product_id} not found")
+                    unit_price = getattr(prod, "selling_price", None) or getattr(prod, "price", Decimal("0.00"))
 
-        order = order_svc.create_order(
-            tenant_id,
-            user_id,
-            OrderCreate(
-                store_id=data.store_id,
-                customer_id=data.customer_id or cart.get("customer_id"),
-                order_type="pos",
-                discount_amount=Decimal(
-                    cart.get("discount_amount", "0")
+                items.append(
+                    OrderItemCreate(
+                        product_id=item.product_id,
+                        quantity=item.quantity,
+                        unit_price=unit_price,
+                        discount=item.discount or Decimal("0.00"),
+                    )
+                )
+
+            order = order_svc.create_order(
+                tenant_id,
+                user_id,
+                OrderCreate(
+                    store_id=data.store_id,
+                    customer_id=data.customer_id,
+                    order_type="pos",
+                    discount_amount=Decimal("0.00"),
+                    coupon_code=None,
+                    items=items,
                 ),
-                coupon_code=cart.get("coupon_code"),
-                items=items,
-            ),
-        )
+            )
+        else:
+            cart_svc = CartService(self.db)
+            cart = cart_svc.get_cart(tenant_id, user_id)
+
+            if not cart.get("items"):
+                raise AppException("Cart is empty. Provide 'items' in request body or add items to cart.")
+
+            if cart.get("store_id") != data.store_id:
+                raise AppException("Cart store does not match request")
+
+            items = [
+                OrderItemCreate(
+                    product_id=item["product_id"],
+                    quantity=int(Decimal(item["quantity"])),
+                    unit_price=Decimal(item["unit_price"]),
+                    discount=Decimal(item.get("discount", "0")),
+                )
+                for item in cart["items"]
+            ]
+
+            order = order_svc.create_order(
+                tenant_id,
+                user_id,
+                OrderCreate(
+                    store_id=data.store_id,
+                    customer_id=data.customer_id or cart.get("customer_id"),
+                    order_type="pos",
+                    discount_amount=Decimal(
+                        cart.get("discount_amount", "0")
+                    ),
+                    coupon_code=cart.get("coupon_code"),
+                    items=items,
+                ),
+            )
 
         order = order_svc.confirm_order(
             tenant_id,
@@ -278,7 +326,7 @@ class BillingService:
 
             if total_paid != order.total_amount:
                 raise AppException(
-                    "Payment total must match order total for split payments"
+                    f"Payment total ({total_paid}) must match order total ({order.total_amount})"
                 )
 
             for payment in data.payments:
@@ -314,10 +362,11 @@ class BillingService:
             },
         )
 
-        cart_svc.clear_cart(
-            tenant_id,
-            user_id,
-        )
+        if not data.items:
+            CartService(self.db).clear_cart(
+                tenant_id,
+                user_id,
+            )
 
         return invoice
 
@@ -569,6 +618,7 @@ class BillingService:
         self,
         tenant_id: int,
         invoice_id: int,
+        document_type: str = "invoice",
     ) -> bytes:
         invoice = self.get_invoice(
             tenant_id,
@@ -609,15 +659,48 @@ class BillingService:
             .all()
         )
 
-        pdf_bytes = generate_invoice_pdf(
-            order,
-            invoice,
-            tenant,
-            store=store,
-            customer=customer,
-            items=self._invoice_pdf_items(invoice),
-            payments=payments,
+        # Use DocumentSettingsService and DocumentRenderer for PDF generation
+        from app.services.document_settings_service import DocumentSettingsService
+        from app.services.document_renderer_service import DocumentRenderer
+        from app.utils.pdf_generator import _build_qr_payload
+
+        store_id = getattr(invoice, "store_id", None) or (store.id if store else None)
+        branding = DocumentSettingsService(self.db).resolve_branding(
+            tenant_id=tenant.id,
+            store_id=store_id,
         )
+
+        qr_data = _build_qr_payload(invoice, store, customer)
+
+        data = {
+            "invoice_number": invoice.invoice_number,
+            "created_at": invoice.created_at,
+            "subtotal": float(invoice.subtotal),
+            "discount_amount": float(invoice.discount_amount),
+            "cgst_amount": float(invoice.cgst_amount),
+            "sgst_amount": float(invoice.sgst_amount),
+            "igst_amount": float(invoice.igst_amount),
+            "total_amount": float(invoice.total_amount),
+            "total": float(invoice.total_amount),
+            "qr_data": qr_data,
+            "customer": {
+                "name": customer.name if customer else "Walk-in Customer",
+                "phone": customer.phone if customer else "",
+                "address": customer.address if customer else "",
+                "gstin": customer.gstin if customer else "",
+            } if customer else None,
+            "items": self._invoice_pdf_items(invoice),
+            "payments": [
+                {
+                    "method": p.payment_method,
+                    "amount": float(p.amount),
+                    "transaction_id": p.transaction_id,
+                }
+                for p in payments
+            ],
+        }
+        renderer = DocumentRenderer()
+        pdf_bytes = renderer.render(document_type, data, branding)
 
         if (
             settings.AWS_S3_BUCKET
@@ -629,6 +712,70 @@ class BillingService:
             )
 
         return pdf_bytes
+
+    def generate_credit_note_pdf(
+        self,
+        tenant_id: int,
+        credit_note_id: int,
+    ) -> bytes:
+        from app.models.credit_note import CreditNote
+        from app.services.document_settings_service import DocumentSettingsService
+        from app.services.document_renderer_service import DocumentRenderer
+
+        credit_note = (
+            self.db.query(CreditNote)
+            .filter(CreditNote.id == credit_note_id, CreditNote.tenant_id == tenant_id)
+            .first()
+        )
+        if not credit_note:
+            raise NotFoundException("Credit note not found")
+
+        invoice = (
+            self.db.query(Invoice)
+            .filter(Invoice.id == credit_note.invoice_id, Invoice.tenant_id == tenant_id)
+            .first()
+        )
+        order = (
+            self.db.query(Order).filter(Order.id == invoice.order_id).first()
+            if invoice
+            else None
+        )
+        store = (
+            self.db.query(Store).filter(Store.id == order.store_id).first()
+            if order and order.store_id
+            else None
+        )
+        customer = (
+            self.db.query(Customer).filter(Customer.id == order.customer_id).first()
+            if order and order.customer_id
+            else None
+        )
+
+        store_id = store.id if store else (getattr(invoice, "store_id", None) if invoice else None)
+        branding = DocumentSettingsService(self.db).resolve_branding(
+            tenant_id=tenant_id,
+            store_id=store_id,
+        )
+
+        data = {
+            "credit_note_no": credit_note.credit_note_no,
+            "invoice_number": invoice.invoice_number if invoice else "",
+            "created_at": credit_note.created_at,
+            "refund_amount": float(credit_note.refund_amount),
+            "cgst_amount": float(credit_note.cgst_amount) if credit_note.cgst_amount else 0.0,
+            "sgst_amount": float(credit_note.sgst_amount) if credit_note.sgst_amount else 0.0,
+            "igst_amount": float(credit_note.igst_amount) if credit_note.igst_amount else 0.0,
+            "reason": getattr(credit_note.refund, "reason", None) or "Returned goods / adjustment",
+            "customer": {
+                "name": customer.name if customer else "Customer",
+                "phone": customer.phone if customer else "",
+                "address": customer.address if customer else "",
+                "gstin": customer.gstin if customer else "",
+            } if customer else None,
+        }
+
+        renderer = DocumentRenderer()
+        return renderer.render("credit_note", data, branding)
 
     def _upload_to_s3(
         self,

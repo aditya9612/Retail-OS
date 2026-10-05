@@ -410,6 +410,11 @@ class TenantStatusUpdate(BaseModel):
     is_active: bool
 
 
+class SuperAdminTenantDeleteResponse(BaseModel):
+    success: bool
+    message: str
+
+
 class SuperAdminTenantUserResponse(BaseModel):
     id: int
     tenant_id: int
@@ -450,6 +455,12 @@ class SuperAdminDashboardResponse(BaseModel):
     active_tenants: int
     inactive_tenants: int
     total_users: int
+    total_stores: int = 0
+    active_stores: int = 0
+    active_plans: int = 0
+    pending_upi_transactions: int = 0
+    verified_upi_transactions: int = 0
+    rejected_upi_transactions: int = 0
     # P2 Task 10: SaaS Subscription & Revenue Oversight Metrics
     subscriptions_by_status: dict[str, int] = Field(
         default_factory=dict,

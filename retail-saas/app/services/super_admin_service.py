@@ -1,3 +1,5 @@
+from datetime import datetime
+from typing import Optional, Union, Tuple, List, Dict, Any
 import math
 import re
 from sqlalchemy import case, func, or_
@@ -7,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.exceptions import (
     AppException,
     ConflictException,
+    ForbiddenException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -25,6 +28,9 @@ from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.saas_plan_entitlement import EntitlementDimension, SaaSPlanEntitlement
 from app.schemas.saas_entitlement import (
+    LimitItemDetail,
+    PlanLimitsConfigureRequest,
+    PlanLimitsConfigureResponse,
     SaaSPlanEntitlementCreate,
     SaaSPlanEntitlementUpdate,
 )
@@ -51,6 +57,8 @@ from app.schemas.super_admin import (
 from app.services.saas_entitlement_service import SaaSEntitlementService
 from app.services.saas_subscription_service import SaaSSubscriptionService
 from app.utils.constants import DEFAULT_ROLE_PERMISSIONS, UserRole
+from app.repositories.user_repo import UserRepository
+from app.utils.phone import normalize_phone_number
 
 
 class SuperAdminService:
@@ -263,6 +271,17 @@ class SuperAdminService:
             super_admin_id
         )
 
+        if not is_active:
+            active_count = (
+                self.db.query(SuperAdmin)
+                .filter(SuperAdmin.is_active.is_(True))
+                .count()
+            )
+            if active_count <= 1:
+                raise ForbiddenException(
+                    "Cannot deactivate the only active Super Admin"
+                )
+
         super_admin.is_active = is_active
 
         self.db.commit()
@@ -282,6 +301,16 @@ class SuperAdminService:
         if super_admin.id == current_super_admin_id:
             raise ConflictException(
                 "You cannot delete your own Super Admin account"
+            )
+
+        active_count = (
+            self.db.query(SuperAdmin)
+            .filter(SuperAdmin.is_active.is_(True))
+            .count()
+        )
+        if active_count <= 1:
+            raise ForbiddenException(
+                "Cannot delete the only Super Admin"
             )
 
         self.db.delete(super_admin)
@@ -307,6 +336,14 @@ class SuperAdminService:
         ):
             raise UnauthorizedException(
                 "Current password is incorrect"
+            )
+
+        if verify_password(
+            data.new_password,
+            super_admin.hashed_password,
+        ):
+            raise AppException(
+                "New password cannot be the same as the current password"
             )
 
         super_admin.hashed_password = get_password_hash(
@@ -555,6 +592,17 @@ class SuperAdminService:
         if existing_user:
             raise ConflictException("Email address is already registered")
 
+        if owner_phone:
+            owner_phone = owner_phone.strip()
+            if owner_phone:
+                try:
+                    owner_phone = normalize_phone_number(owner_phone)
+                except ValueError:
+                    pass
+                existing_phone_user = UserRepository(self.db).get_active_user_by_phone(owner_phone)
+                if existing_phone_user:
+                    raise ConflictException("Phone number is already registered")
+
         try:
             settings_dict = {}
             if data.address:
@@ -645,6 +693,8 @@ class SuperAdminService:
             raise
         except IntegrityError as exc:
             self.db.rollback()
+            if "uq_users_active_phone" in str(exc) or "active_phone" in str(exc).lower():
+                raise ConflictException("Phone number is already registered") from exc
             raise ConflictException("Tenant or user information already exists") from exc
         except Exception:
             self.db.rollback()
@@ -697,10 +747,28 @@ class SuperAdminService:
                 if owner_name is not None:
                     owner_user.full_name = owner_name.strip()
                 if owner_phone is not None:
-                    owner_user.phone = owner_phone.strip()
+                    cleaned_phone = owner_phone.strip() if owner_phone else ""
+                    if cleaned_phone:
+                        try:
+                            norm_phone = normalize_phone_number(cleaned_phone)
+                        except ValueError:
+                            norm_phone = cleaned_phone
+                        if norm_phone != owner_user.phone:
+                            existing_phone_user = UserRepository(self.db).get_active_user_by_phone(norm_phone)
+                            if existing_phone_user and existing_phone_user.id != owner_user.id:
+                                raise ConflictException("Phone number is already in use")
+                        owner_user.phone = norm_phone
+                    else:
+                        owner_user.phone = None
 
-        self.db.commit()
-        return self.get_tenant(tenant.id)
+        try:
+            self.db.commit()
+            return self.get_tenant(tenant.id)
+        except IntegrityError as exc:
+            self.db.rollback()
+            if "uq_users_active_phone" in str(exc) or "active_phone" in str(exc).lower():
+                raise ConflictException("Phone number is already in use") from exc
+            raise ConflictException("Tenant update conflict") from exc
 
     def delete_tenant(
         self,
@@ -992,6 +1060,14 @@ class SuperAdminService:
         )
         total_saas_revenue = Decimal(str(total_rev)) if total_rev is not None else Decimal("0.00")
 
+        total_stores = self.db.query(Store).count()
+        active_stores = self.db.query(Store).filter(Store.is_active.is_(True)).count()
+        active_plans = self.db.query(SaaSPlan).filter(SaaSPlan.is_active.is_(True)).count()
+
+        pending_upi_transactions = self.db.query(SaaSUPITransaction).filter(SaaSUPITransaction.status.in_(["pending", "submitted"])).count()
+        verified_upi_transactions = self.db.query(SaaSUPITransaction).filter(SaaSUPITransaction.status == "verified").count()
+        rejected_upi_transactions = self.db.query(SaaSUPITransaction).filter(SaaSUPITransaction.status == "rejected").count()
+
         return {
             "total_super_admins": total_super_admins,
             "active_super_admins": active_super_admins,
@@ -1000,6 +1076,12 @@ class SuperAdminService:
             "active_tenants": active_tenants,
             "inactive_tenants": inactive_tenants,
             "total_users": total_users,
+            "total_stores": total_stores,
+            "active_stores": active_stores,
+            "active_plans": active_plans,
+            "pending_upi_transactions": pending_upi_transactions,
+            "verified_upi_transactions": verified_upi_transactions,
+            "rejected_upi_transactions": rejected_upi_transactions,
             "subscriptions_by_status": subscriptions_by_status,
             "expired_subscriptions_count": expired_subscriptions_count,
             "pending_upgrades_count": pending_upgrades_count,
@@ -1160,6 +1242,8 @@ class SuperAdminService:
         plan_id: int,
     ) -> SaaSPlan:
         plan = self.get_plan(plan_id)
+        if plan.code.lower() == "basic":
+            raise AppException("The default 'basic' plan cannot be deactivated")
         plan.is_active = False
         self.db.commit()
         self.db.refresh(plan)
@@ -1311,6 +1395,110 @@ class SuperAdminService:
         except Exception:
             self.db.rollback()
             raise
+
+    def configure_plan_limits(
+        self,
+        plan_identifier: int | str | None,
+        data: PlanLimitsConfigureRequest,
+    ) -> PlanLimitsConfigureResponse:
+        """
+        Configure all limits (users, stores, products, monthly_orders, etc.)
+        for a plan in a single API call (bulk create/update).
+        """
+        target = plan_identifier if plan_identifier is not None else (data.plan_id or data.plan_code)
+        if target is None:
+            raise AppException("plan_id or plan_code must be provided")
+
+        plan = None
+        if isinstance(target, int) or (isinstance(target, str) and target.isdigit()):
+            plan = self.db.query(SaaSPlan).filter(SaaSPlan.id == int(target)).first()
+        elif isinstance(target, str):
+            plan = (
+                self.db.query(SaaSPlan)
+                .filter(func.lower(SaaSPlan.code) == target.strip().lower())
+                .first()
+            )
+
+        if not plan:
+            raise NotFoundException(f"SaaS Plan '{target}' not found")
+
+        dim_map: dict[str, tuple[Optional[int], bool]] = {}
+
+        def process_dim(dim_name: str, val: Optional[int], is_unl: Optional[bool]):
+            if is_unl is True:
+                dim_map[dim_name] = (None, True)
+            elif is_unl is False:
+                if val is None:
+                    raise AppException(f"Dimension '{dim_name}' has is_unlimited=False but no value was provided")
+                dim_map[dim_name] = (val, False)
+            elif val is not None:
+                dim_map[dim_name] = (val, False)
+            elif dim_name in data.model_fields_set:
+                dim_map[dim_name] = (None, True)
+
+        process_dim("users", data.users, data.is_users_unlimited)
+        process_dim("stores", data.stores, data.is_stores_unlimited)
+        process_dim("products", data.products, data.is_products_unlimited)
+        process_dim("monthly_orders", data.monthly_orders, data.is_monthly_orders_unlimited)
+
+        if data.items:
+            for item in data.items:
+                dim_map[item.dimension] = (None if item.is_unlimited else item.value, item.is_unlimited)
+
+        if not dim_map:
+            raise AppException("No limits or dimensions were specified to configure")
+
+        try:
+            for dim, (val, is_unl) in dim_map.items():
+                entitlement = (
+                    self.db.query(SaaSPlanEntitlement)
+                    .filter(
+                        SaaSPlanEntitlement.plan_id == plan.id,
+                        SaaSPlanEntitlement.dimension == dim,
+                    )
+                    .first()
+                )
+                if entitlement:
+                    entitlement.value = val
+                    entitlement.is_unlimited = is_unl
+                    entitlement.updated_at = datetime.utcnow()
+                else:
+                    entitlement = SaaSPlanEntitlement(
+                        plan_id=plan.id,
+                        dimension=dim,
+                        value=val,
+                        is_unlimited=is_unl,
+                    )
+                    self.db.add(entitlement)
+
+            self.db.flush()
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+
+        current_ents = (
+            self.db.query(SaaSPlanEntitlement)
+            .filter(SaaSPlanEntitlement.plan_id == plan.id)
+            .order_by(SaaSPlanEntitlement.id.asc())
+            .all()
+        )
+
+        return PlanLimitsConfigureResponse(
+            success=True,
+            message=f"Limits configured successfully for plan '{plan.name}' (ID: {plan.id})",
+            plan_id=plan.id,
+            plan_name=plan.name,
+            plan_code=plan.code,
+            limits=[
+                LimitItemDetail(
+                    dimension=e.dimension,
+                    value=e.value,
+                    is_unlimited=e.is_unlimited,
+                )
+                for e in current_ents
+            ],
+        )
 
     # ==========================================
     # P2 TASK 10: SAAS SUBSCRIPTION & BILLING OVERSIGHT

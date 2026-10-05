@@ -57,6 +57,39 @@ class UserRepository:
 
         return query.first()
 
+    def get_active_user_by_phone(
+        self,
+        canonical_phone: str,
+    ) -> Optional[User]:
+        """
+        Look up the single active, non-deleted user that owns the given
+        canonical phone number across all tenants.
+
+        Relies on the global UNIQUE(active_phone) constraint
+        (migration b0621e5f93f9) to guarantee at most one result.
+
+        Parameters
+        ----------
+        canonical_phone : str
+            The 10-digit normalized Indian mobile number
+            (already run through ``normalize_phone_number``).
+
+        Returns
+        -------
+        User | None
+            The matching active user, or ``None`` if no active user
+            owns this phone.
+        """
+        return (
+            self.db.query(User)
+            .options(joinedload(User.role))
+            .filter(
+                User.phone == canonical_phone,
+                User.is_deleted.is_(False),
+            )
+            .first()
+        )
+
     def list_users(
         self,
         tenant_id: int,
