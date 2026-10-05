@@ -16,6 +16,7 @@ from app.models.order_item import OrderItem
 from app.models.product import Product
 from app.models.role import Role
 from app.models.store import Store
+from app.models.tenant import Tenant
 from app.models.user import User
 
 client = TestClient(app)
@@ -705,4 +706,78 @@ def test_cashier_role_forbidden_from_dashboard(multi_store_data):
         assert res_ov.status_code == 403, res_ov.text
     finally:
         db.close()
+
+
+def test_legacy_owner_role_without_dashboard_permission_succeeds():
+    """
+    Backward-compatibility verification:
+    If an existing tenant in DB has an 'owner' role created before 'dashboard:view'
+    was added (i.e. permissions JSON in DB does not contain 'dashboard:view'),
+    they must still be allowed to access the dashboard.
+    """
+    suffix = uuid.uuid4().hex[:6]
+    owner_email = f"leg_reg_{suffix}@retailtest.com"
+    owner_pass = "LegacyPass123!"
+    reg_res = client.post(
+        "/api/v1/auth/register",
+        json={
+            "store_name": f"Legacy Retail {suffix}",
+            "domain": f"leg-{suffix}",
+            "owner_email": owner_email,
+            "owner_name": f"Owner {suffix}",
+            "password": owner_pass,
+            "owner_phone": _gen_phone(),
+            "plan_code": "enterprise",
+        },
+    )
+    assert reg_res.status_code == 200
+
+    db = SessionLocal()
+    try:
+        tenant = db.query(Tenant).filter(Tenant.domain == f"leg-{suffix}").first()
+        owner_role = (
+            db.query(Role)
+            .filter(Role.tenant_id == tenant.id, Role.name == "owner")
+            .first()
+        )
+        # Strip dashboard permissions to simulate legacy database role state
+        owner_role.permissions = ["users:read", "stores:read", "orders:read"]
+        db.commit()
+
+        legacy_email = f"user_leg_{suffix}@retailtest.com"
+        owner_user = User(
+            tenant_id=tenant.id,
+            store_id=None,
+            role_id=owner_role.id,
+            email=legacy_email,
+            password_hash=get_password_hash(owner_pass),
+            full_name=f"Legacy User {suffix}",
+            phone=_gen_phone(),
+            is_active=True,
+            is_deleted=False,
+        )
+        db.add(owner_user)
+        db.commit()
+
+        login_res = client.post(
+            "/api/v1/auth/login",
+            json={"email": legacy_email, "password": owner_pass},
+        )
+        assert login_res.status_code == 200
+        headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
+
+        # Must succeed with 200 OK
+        res = client.get("/api/v1/dashboard", headers=headers)
+        assert res.status_code == 200, res.text
+        data = res.json()
+        assert data["mode"] == "all_stores"
+        assert "stores_summary" in data
+
+        # Sub-endpoints must also succeed
+        assert client.get("/api/v1/dashboard/overview", headers=headers).status_code == 200
+        assert client.get("/api/v1/dashboard/revenue-vs-cost", headers=headers).status_code == 200
+        assert client.get("/api/v1/dashboard/top-products", headers=headers).status_code == 200
+    finally:
+        db.close()
+
 

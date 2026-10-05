@@ -417,6 +417,10 @@ def require_permission(permission: str):
         if "*" in perms or permission in perms:
             return user
 
+        # Backward compatibility for existing owner and admin roles in DB
+        if user.role and user.role.name in ["admin", "owner"] and permission.startswith("dashboard:"):
+            return user
+
         raise ForbiddenException(
             f"Missing permission: {permission}"
         )
