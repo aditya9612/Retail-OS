@@ -82,15 +82,18 @@ class StockMovement(Base, TimestampMixin):
 
     @property
     def reference(self) -> str | None:
+        if self.reference_type:
+            return self.reference_type
         return str(self.reference_id) if self.reference_id else None
 
     @reference.setter
     def reference(self, val: Any) -> None:
         if val is not None:
+            self.reference_type = str(val)
             try:
                 self.reference_id = int(val)
             except (ValueError, TypeError):
-                self.reference_type = str(val)
+                pass
 
     @property
     def unit_cost(self) -> Decimal | None:

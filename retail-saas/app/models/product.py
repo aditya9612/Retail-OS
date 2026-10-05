@@ -189,6 +189,21 @@ class Product(Base, TimestampMixin):
     @mrp.setter
     def mrp(self, val: Any) -> None:
         self._mrp = Decimal(str(val)) if val is not None else Decimal("0.00")
+    @property
+    def batch_number(self) -> str | None:
+        return getattr(self, "_batch_number", None)
+
+    @batch_number.setter
+    def batch_number(self, val: str | None) -> None:
+        self._batch_number = val
+
+    @property
+    def expiry_date(self) -> Any:
+        return getattr(self, "_expiry_date", None)
+
+    @expiry_date.setter
+    def expiry_date(self, val: Any) -> None:
+        self._expiry_date = val
 
     category: Mapped["Category | None"] = relationship(
         "Category",
@@ -197,7 +212,8 @@ class Product(Base, TimestampMixin):
 
     inventory_items: Mapped[list["Inventory"]] = relationship(
         "Inventory",
-        back_populates="product"
+        back_populates="product",
+        cascade="all, delete-orphan"
     )
 
     images: Mapped[list["ProductImage"]] = relationship(

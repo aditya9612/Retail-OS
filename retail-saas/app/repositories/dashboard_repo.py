@@ -1,7 +1,9 @@
-from datetime import datetime
+
+from calendar import monthrange
+from datetime import date, datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import desc, extract, func
+from sqlalchemy import extract, func
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundException
@@ -14,327 +16,499 @@ from app.models.store import Store
 
 
 class DashboardRepository:
-
     def __init__(self, db: Session):
         self.db = db
 
-    def get_dashboard(self, tenant_id: int, store_id: Optional[int] = None):
-        today = datetime.now().date()
-        current_month = datetime.now().month
-        current_year = datetime.now().year
+    def _validate_store(
+        self,
+        tenant_id: int,
+        store_id: Optional[int],
+    ) -> Optional[Store]:
+        if store_id is None:
+            return None
+
+        store = (
+            self.db.query(Store)
+            .filter(
+                Store.id == store_id,
+                Store.tenant_id == tenant_id,
+            )
+            .first()
+        )
+
+        if not store:
+            raise NotFoundException("Store not found")
+
+        return store
+
+    def get_dashboard(
+        self,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+    ):
+        store = self._validate_store(
+            tenant_id=tenant_id,
+            store_id=store_id,
+        )
+
+        today = date.today()
+        tomorrow = today + timedelta(days=1)
+
+        month_start = today.replace(day=1)
+
+        today_query = (
+            self.db.query(
+                func.coalesce(
+                    func.sum(Order.total_amount),
+                    0,
+                )
+            )
+            .filter(
+                Order.tenant_id == tenant_id,
+                Order.created_at >= today,
+                Order.created_at < tomorrow,
+            )
+        )
+
+        monthly_query = (
+            self.db.query(
+                func.coalesce(
+                    func.sum(Order.total_amount),
+                    0,
+                )
+            )
+            .filter(
+                Order.tenant_id == tenant_id,
+                Order.created_at >= month_start,
+                Order.created_at < tomorrow,
+            )
+        )
+
+        total_revenue_query = (
+            self.db.query(
+                func.coalesce(
+                    func.sum(Order.total_amount),
+                    0,
+                )
+            )
+            .filter(Order.tenant_id == tenant_id)
+        )
+
+        orders_count_query = (
+            self.db.query(func.count(Order.id))
+            .filter(Order.tenant_id == tenant_id)
+        )
+
+        customers_query = (
+            self.db.query(func.count(Customer.id))
+            .filter(Customer.tenant_id == tenant_id)
+        )
+
+        low_stock_query = (
+            self.db.query(func.count(Inventory.id))
+            .join(Product, Product.id == Inventory.product_id)
+            .filter(
+                Product.tenant_id == tenant_id,
+                Inventory.quantity <= Product.min_stock_alert,
+            )
+        )
 
         if store_id is not None:
-            # Validate store belongs to this tenant
-            store = (
-                self.db.query(Store)
-                .filter(Store.id == store_id, Store.tenant_id == tenant_id)
-                .first()
+            today_query = today_query.filter(Order.store_id == store_id)
+            monthly_query = monthly_query.filter(Order.store_id == store_id)
+            total_revenue_query = total_revenue_query.filter(
+                Order.store_id == store_id
             )
-            if not store:
-                raise NotFoundException(f"Store with id {store_id} not found")
-
-            # Today's Sales
-            today_sales = (
-                self.db.query(func.coalesce(func.sum(Order.total_amount), 0))
-                .filter(
-                    Order.tenant_id == tenant_id,
-                    Order.store_id == store_id,
-                    func.date(Order.created_at) == today,
-                )
-                .scalar()
+            orders_count_query = orders_count_query.filter(
+                Order.store_id == store_id
+            )
+            customers_query = customers_query.filter(
+                Customer.store_id == store_id
+            )
+            low_stock_query = low_stock_query.filter(
+                Inventory.store_id == store_id
             )
 
-            # Monthly Sales
-            monthly_sales = (
-                self.db.query(func.coalesce(func.sum(Order.total_amount), 0))
-                .filter(
-                    Order.tenant_id == tenant_id,
-                    Order.store_id == store_id,
-                    func.extract("month", Order.created_at) == current_month,
-                    func.extract("year", Order.created_at) == current_year,
-                )
-                .scalar()
-            )
+        today_sales = float(today_query.scalar() or 0)
+        monthly_sales = float(monthly_query.scalar() or 0)
+        total_revenue = float(total_revenue_query.scalar() or 0)
 
-            # Store Unique Customers
-            total_customers = (
-                self.db.query(func.count(func.distinct(Order.customer_id)))
-                .filter(
-                    Order.tenant_id == tenant_id,
-                    Order.store_id == store_id,
-                    Order.customer_id.isnot(None),
-                )
-                .scalar()
-            ) or 0
-
-            # Store Total Revenue
-            total_revenue = (
-                self.db.query(func.coalesce(func.sum(Order.total_amount), 0))
-                .filter(
-                    Order.tenant_id == tenant_id,
-                    Order.store_id == store_id,
-                )
-                .scalar()
-            )
-
-            # Store Low Stock Products
-            low_stock_products = (
-                self.db.query(Inventory)
-                .filter(
-                    Inventory.tenant_id == tenant_id,
-                    Inventory.store_id == store_id,
-                    Inventory.quantity <= Inventory.min_stock_level,
-                )
-                .count()
-            )
-
-            return {
-                "mode": "single_store",
-                "store_id": store.id,
-                "store_name": store.name,
-                "today_sales": float(today_sales),
-                "monthly_sales": float(monthly_sales),
-                "total_customers": int(total_customers),
-                "total_revenue": float(total_revenue),
-                "low_stock_products": int(low_stock_products),
-                "stores_summary": None,
-            }
-
-        # All stores mode (consolidated across tenant)
-        today_sales = (
-            self.db.query(func.coalesce(func.sum(Order.total_amount), 0))
-            .filter(
-                Order.tenant_id == tenant_id,
-                func.date(Order.created_at) == today,
-            )
-            .scalar()
-        )
-
-        monthly_sales = (
-            self.db.query(func.coalesce(func.sum(Order.total_amount), 0))
-            .filter(
-                Order.tenant_id == tenant_id,
-                func.extract("month", Order.created_at) == current_month,
-                func.extract("year", Order.created_at) == current_year,
-            )
-            .scalar()
-        )
-
-        total_customers = (
-            self.db.query(Customer)
-            .filter(Customer.tenant_id == tenant_id)
-            .count()
-        )
-
-        total_revenue = (
-            self.db.query(func.coalesce(func.sum(Order.total_amount), 0))
-            .filter(Order.tenant_id == tenant_id)
-            .scalar()
-        )
-
-        low_stock_products = (
-            self.db.query(Inventory)
-            .filter(
-                Inventory.tenant_id == tenant_id,
-                Inventory.quantity <= Inventory.min_stock_level,
-            )
-            .count()
-        )
-
-        # Zero N+1 grouped summary for active stores
-        stores = (
-            self.db.query(Store)
-            .filter(Store.tenant_id == tenant_id)
-            .order_by(Store.id)
-            .all()
-        )
-
-        today_rows = (
-            self.db.query(
-                Order.store_id,
-                func.coalesce(func.sum(Order.total_amount), 0).label("sales"),
-                func.count(Order.id).label("orders"),
-            )
-            .filter(
-                Order.tenant_id == tenant_id,
-                func.date(Order.created_at) == today,
-            )
-            .group_by(Order.store_id)
-            .all()
-        )
-        today_map = {row.store_id: (float(row.sales), int(row.orders)) for row in today_rows}
-
-        month_rows = (
-            self.db.query(
-                Order.store_id,
-                func.coalesce(func.sum(Order.total_amount), 0).label("sales"),
-            )
-            .filter(
-                Order.tenant_id == tenant_id,
-                func.extract("month", Order.created_at) == current_month,
-                func.extract("year", Order.created_at) == current_year,
-            )
-            .group_by(Order.store_id)
-            .all()
-        )
-        month_map = {row.store_id: float(row.sales) for row in month_rows}
-
-        low_stock_rows = (
-            self.db.query(
-                Inventory.store_id,
-                func.count(Inventory.id).label("low_count"),
-            )
-            .filter(
-                Inventory.tenant_id == tenant_id,
-                Inventory.quantity <= Inventory.min_stock_level,
-            )
-            .group_by(Inventory.store_id)
-            .all()
-        )
-        low_stock_map = {row.store_id: int(row.low_count) for row in low_stock_rows}
-
-        stores_summary = []
-        for st in stores:
-            t_sales, t_orders = today_map.get(st.id, (0.0, 0))
-            m_sales = month_map.get(st.id, 0.0)
-            ls_count = low_stock_map.get(st.id, 0)
-            stores_summary.append({
-                "store_id": st.id,
-                "store_name": st.name,
-                "today_sales": t_sales,
-                "monthly_sales": m_sales,
-                "orders_count": t_orders,
-                "low_stock_count": ls_count,
-                "is_active": st.is_active,
-            })
+        orders_count = int(orders_count_query.scalar() or 0)
+        total_customers = int(customers_query.scalar() or 0)
+        low_stock_products = int(low_stock_query.scalar() or 0)
 
         return {
-            "mode": "all_stores",
-            "store_id": None,
-            "store_name": None,
-            "today_sales": float(today_sales),
-            "monthly_sales": float(monthly_sales),
+            "mode": "store" if store_id is not None else "all_stores",
+            "store_id": store_id,
+            "store_name": store.name if store else None,
+            "today_sales": today_sales,
+            "monthly_sales": monthly_sales,
             "total_customers": total_customers,
-            "total_revenue": float(total_revenue),
+            "total_revenue": total_revenue,
             "low_stock_products": low_stock_products,
-            "stores_summary": stores_summary,
+            "stores_summary": None,
         }
 
-    def get_dashboard_overview(self, tenant_id: int, store_id: Optional[int] = None):
-        if store_id is not None:
-            store = (
-                self.db.query(Store)
-                .filter(Store.id == store_id, Store.tenant_id == tenant_id)
-                .first()
-            )
-            if not store:
-                raise NotFoundException(f"Store with id {store_id} not found")
-
-        query = (
-            self.db.query(
-                extract("month", Order.created_at).label("month"),
-                func.sum(Order.total_amount).label("sales"),
-            )
-            .filter(Order.tenant_id == tenant_id)
+    def get_dashboard_overview(
+        self,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+        period: str = "this_year",
+    ):
+        self._validate_store(
+            tenant_id=tenant_id,
+            store_id=store_id,
         )
-        if store_id is not None:
-            query = query.filter(Order.store_id == store_id)
 
-        result = (
-            query.group_by(extract("month", Order.created_at))
-            .order_by(extract("month", Order.created_at))
-            .all()
+        allowed_periods = {
+            "this_month",
+            "last_month",
+            "this_year",
+        }
+
+        if period not in allowed_periods:
+            raise ValueError(
+                "Invalid period. Use this_month, last_month, or this_year."
+            )
+
+        today = date.today()
+
+        query = self.db.query(
+            Order.created_at,
+            Order.total_amount,
+        ).filter(
+            Order.tenant_id == tenant_id,
         )
+
+        if store_id is not None:
+            query = query.filter(
+                Order.store_id == store_id,
+            )
+
+        if period == "this_month":
+            start_date = today.replace(day=1)
+            end_date = today + timedelta(days=1)
+
+            query = query.filter(
+                Order.created_at >= start_date,
+                Order.created_at < end_date,
+            ).order_by(Order.created_at)
+
+            rows = query.all()
+
+            sales_by_day = {}
+
+            for row in rows:
+                created_at = row.created_at
+
+                if isinstance(created_at, datetime):
+                    day = created_at.date()
+                elif isinstance(created_at, date):
+                    day = created_at
+                else:
+                    day = datetime.fromisoformat(
+                        str(created_at)
+                    ).date()
+
+                sales_by_day[day] = (
+                    sales_by_day.get(day, 0.0)
+                    + float(row.total_amount or 0)
+                )
+
+            overview = []
+
+            current_day = start_date
+
+            while current_day <= today:
+                overview.append(
+                    {
+                        "month": current_day.strftime("%d %b"),
+                        "sales": float(
+                            sales_by_day.get(current_day, 0.0)
+                        ),
+                    }
+                )
+
+                current_day += timedelta(days=1)
+
+            return {
+                "period": period,
+                "overview": overview,
+            }
+
+        if period == "last_month":
+            first_day_this_month = today.replace(day=1)
+
+            last_month_last_day = (
+                first_day_this_month - timedelta(days=1)
+            )
+
+            start_date = last_month_last_day.replace(day=1)
+            end_date = first_day_this_month
+
+            query = query.filter(
+                Order.created_at >= start_date,
+                Order.created_at < end_date,
+            ).order_by(Order.created_at)
+
+            rows = query.all()
+
+            sales_by_day = {}
+
+            for row in rows:
+                created_at = row.created_at
+
+                if isinstance(created_at, datetime):
+                    day = created_at.date()
+                elif isinstance(created_at, date):
+                    day = created_at
+                else:
+                    day = datetime.fromisoformat(
+                        str(created_at)
+                    ).date()
+
+                sales_by_day[day] = (
+                    sales_by_day.get(day, 0.0)
+                    + float(row.total_amount or 0)
+                )
+
+            overview = []
+
+            current_day = start_date
+
+            while current_day < end_date:
+                overview.append(
+                    {
+                        "month": current_day.strftime("%d %b"),
+                        "sales": float(
+                            sales_by_day.get(current_day, 0.0)
+                        ),
+                    }
+                )
+
+                current_day += timedelta(days=1)
+
+            return {
+                "period": period,
+                "overview": overview,
+            }
+
+        start_date = today.replace(
+            month=1,
+            day=1,
+        )
+
+        end_date = today + timedelta(days=1)
+
+        query = query.filter(
+            Order.created_at >= start_date,
+            Order.created_at < end_date,
+        )
+
+        rows = query.all()
+
+        sales_by_month = {}
+
+        for row in rows:
+            created_at = row.created_at
+
+            if isinstance(created_at, datetime):
+                month = created_at.month
+            elif isinstance(created_at, date):
+                month = created_at.month
+            else:
+                month = datetime.fromisoformat(
+                    str(created_at)
+                ).month
+
+            sales_by_month[month] = (
+                sales_by_month.get(month, 0.0)
+                + float(row.total_amount or 0)
+            )
 
         months = [
-            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
         ]
 
         overview = []
-        for i in range(12):
-            sales = 0.0
-            for row in result:
-                if int(row.month) == i + 1:
-                    sales = float(row.sales or 0)
-                    break
 
-            overview.append({
-                "month": months[i],
-                "sales": sales
-            })
-
-        return {"overview": overview}
-
-    def get_revenue_vs_cost(self, tenant_id: int, store_id: Optional[int] = None):
-        if store_id is not None:
-            store = (
-                self.db.query(Store)
-                .filter(Store.id == store_id, Store.tenant_id == tenant_id)
-                .first()
-            )
-            if not store:
-                raise NotFoundException(f"Store with id {store_id} not found")
-
-        rev_query = (
-            self.db.query(func.coalesce(func.sum(Order.total_amount), 0))
-            .filter(Order.tenant_id == tenant_id)
-        )
-        if store_id is not None:
-            rev_query = rev_query.filter(Order.store_id == store_id)
-        revenue = rev_query.scalar()
-
-        if store_id is not None:
-            cost = (
-                self.db.query(func.coalesce(func.sum(Product.cost_price), 0))
-                .select_from(Product)
-                .join(Inventory, Inventory.product_id == Product.id)
-                .filter(
-                    Product.tenant_id == tenant_id,
-                    Inventory.store_id == store_id,
-                )
-                .scalar()
-            )
-        else:
-            cost = (
-                self.db.query(func.coalesce(func.sum(Product.cost_price), 0))
-                .filter(Product.tenant_id == tenant_id)
-                .scalar()
+        for month_number in range(1, 13):
+            overview.append(
+                {
+                    "month": months[month_number - 1],
+                    "sales": float(
+                        sales_by_month.get(month_number, 0.0)
+                    ),
+                }
             )
 
         return {
-            "revenue": float(revenue),
-            "cost": float(cost),
+            "period": period,
+            "overview": overview,
         }
 
-    def get_top_products(self, tenant_id: int, store_id: Optional[int] = None):
-        if store_id is not None:
-            store = (
-                self.db.query(Store)
-                .filter(Store.id == store_id, Store.tenant_id == tenant_id)
-                .first()
-            )
-            if not store:
-                raise NotFoundException(f"Store with id {store_id} not found")
+    def get_revenue_vs_cost(
+        self,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+        period: str = "this_month",
+    ):
+        self._validate_store(
+            tenant_id=tenant_id,
+            store_id=store_id,
+        )
 
+        allowed_periods = {
+            "this_month",
+            "last_month",
+            "this_year",
+        }
+
+        if period not in allowed_periods:
+            raise ValueError(
+                "Invalid period. Use this_month, last_month, or this_year."
+            )
+
+        today = date.today()
+
+        if period == "this_month":
+            start_date = today.replace(day=1)
+            end_date = today + timedelta(days=1)
+
+        elif period == "last_month":
+            start_date = (
+                today.replace(day=1)
+                - timedelta(days=1)
+            ).replace(day=1)
+
+            end_date = today.replace(day=1)
+
+        else:
+            start_date = today.replace(
+                month=1,
+                day=1,
+            )
+
+            end_date = today + timedelta(days=1)
+
+        revenue_query = (
+            self.db.query(
+                func.coalesce(
+                    func.sum(Order.total_amount),
+                    0,
+                )
+            )
+            .filter(
+                Order.tenant_id == tenant_id,
+                Order.created_at >= start_date,
+                Order.created_at < end_date,
+            )
+        )
+
+        if store_id is not None:
+            revenue_query = revenue_query.filter(
+                Order.store_id == store_id
+            )
+
+        revenue = float(
+            revenue_query.scalar() or 0
+        )
+
+        cost_query = (
+            self.db.query(
+                func.coalesce(
+                    func.sum(
+                        OrderItem.quantity
+                        * Product.cost_price
+                    ),
+                    0,
+                )
+            )
+            .join(
+                Order,
+                Order.id == OrderItem.order_id,
+            )
+            .join(
+                Product,
+                Product.id == OrderItem.product_id,
+            )
+            .filter(
+                Order.tenant_id == tenant_id,
+                Order.created_at >= start_date,
+                Order.created_at < end_date,
+                Product.tenant_id == tenant_id,
+            )
+        )
+
+        if store_id is not None:
+            cost_query = cost_query.filter(
+                Order.store_id == store_id
+            )
+
+        cost = float(
+            cost_query.scalar() or 0
+        )
+
+        return {
+            "period": period,
+            "revenue": revenue,
+            "cost": cost,
+        }
+
+    def get_top_products(
+        self,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+        limit: int = 10,
+    ):
         query = (
             self.db.query(
                 Product.name.label("product_name"),
-                func.sum(OrderItem.quantity).label("quantity_sold"),
-                func.sum(OrderItem.total_amount).label("revenue"),
+                func.coalesce(
+                    func.sum(OrderItem.quantity),
+                    0,
+                ).label("quantity_sold"),
+                func.coalesce(
+                    func.sum(OrderItem.total_amount),
+                    0,
+                ).label("revenue"),
             )
-            .select_from(OrderItem)
-            .join(Order, Order.id == OrderItem.order_id)
-            .join(Product, Product.id == OrderItem.product_id)
-            .filter(Order.tenant_id == tenant_id)
+            .join(
+                OrderItem,
+                Product.id == OrderItem.product_id,
+            )
+            .join(
+                Order,
+                Order.id == OrderItem.order_id,
+            )
+            .filter(
+                Product.tenant_id == tenant_id,
+                Order.tenant_id == tenant_id,
+            )
         )
-        if store_id is not None:
-            query = query.filter(Order.store_id == store_id)
 
-        result = (
-            query.group_by(Product.name)
-            .order_by(desc(func.sum(OrderItem.quantity)))
-            .limit(10)
+        if store_id is not None:
+            query = query.filter(
+                Order.store_id == store_id
+            )
+
+        rows = (
+            query.group_by(Product.id, Product.name)
+            .order_by(
+                func.sum(OrderItem.total_amount).desc()
+            )
+            .limit(limit)
             .all()
         )
 
@@ -342,9 +516,13 @@ class DashboardRepository:
             "top_products": [
                 {
                     "product_name": row.product_name,
-                    "quantity_sold": int(row.quantity_sold or 0),
-                    "revenue": float(row.revenue or 0)
+                    "quantity_sold": int(
+                        row.quantity_sold or 0
+                    ),
+                    "revenue": float(
+                        row.revenue or 0
+                    ),
                 }
-                for row in result
+                for row in rows
             ]
         }

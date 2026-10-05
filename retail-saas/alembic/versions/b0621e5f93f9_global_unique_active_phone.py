@@ -14,15 +14,11 @@ Prerequisites:
     IF(is_deleted = 0 AND phone IS NOT NULL AND phone != '', phone, NULL)
   - Soft-deleted users have active_phone = NULL and do not participate
     in the unique constraint.
-
-This migration does NOT alter:
-  - The active_phone generated expression
-  - The phone column type or definition
-  - tenant_id, is_deleted, or any unrelated columns/indexes
 """
 from typing import Sequence, Union
 
 from alembic import op
+import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
@@ -32,25 +28,46 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _constraint_or_index_exists(table_name: str, name: str) -> bool:
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    uq_names = {c["name"] for c in insp.get_unique_constraints(table_name) if c.get("name")}
+    idx_names = {i["name"] for i in insp.get_indexes(table_name) if i.get("name")}
+    return name in uq_names or name in idx_names
+
+
+def _drop_constraint_or_index_if_exists(table_name: str, name: str) -> None:
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    uq_names = {c["name"] for c in insp.get_unique_constraints(table_name) if c.get("name")}
+    idx_names = {i["name"] for i in insp.get_indexes(table_name) if i.get("name")}
+    if name in uq_names:
+        op.drop_constraint(name, table_name, type_="unique")
+    elif name in idx_names:
+        op.drop_index(name, table_name=table_name)
+
+
 def upgrade() -> None:
-    # 1. Drop the tenant-scoped unique constraint
-    op.drop_constraint("uq_users_tenant_active_phone", "users", type_="unique")
+    # 1. Drop the tenant-scoped unique constraint if it exists
+    _drop_constraint_or_index_if_exists("users", "uq_users_tenant_active_phone")
 
     # 2. Create global unique constraint on active_phone only
-    op.create_unique_constraint(
-        "uq_users_active_phone",
-        "users",
-        ["active_phone"],
-    )
+    if not _constraint_or_index_exists("users", "uq_users_active_phone"):
+        op.create_unique_constraint(
+            "uq_users_active_phone",
+            "users",
+            ["active_phone"],
+        )
 
 
 def downgrade() -> None:
-    # 1. Drop the global unique constraint
-    op.drop_constraint("uq_users_active_phone", "users", type_="unique")
+    # 1. Drop the global unique constraint if it exists
+    _drop_constraint_or_index_if_exists("users", "uq_users_active_phone")
 
-    # 2. Restore tenant-scoped unique constraint
-    op.create_unique_constraint(
-        "uq_users_tenant_active_phone",
-        "users",
-        ["tenant_id", "active_phone"],
-    )
+    # 2. Restore tenant-scoped unique constraint for down_revision 631e3011e13c
+    if not _constraint_or_index_exists("users", "uq_users_tenant_active_phone"):
+        op.create_unique_constraint(
+            "uq_users_tenant_active_phone",
+            "users",
+            ["tenant_id", "active_phone"],
+        )

@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from typing import Union
+
+from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -6,9 +8,12 @@ from app.core.security import get_current_user, require_operational_write, requi
 from app.models.user import User
 from app.schemas.inventory import (
     InventoryResponse,
+    InventoryEmptyResponse,
+    ExpiryEmptyResponse,
     LowStockResponse,
     StockInRequest,
     StockMovementResponse,
+    StockMovementEmptyResponse,
     StockOutRequest,
     StockTransferRequest,
     InventoryValuationResponse,
@@ -20,18 +25,17 @@ from app.services.inventory_service import InventoryService
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
 
-@router.get("", response_model=list[InventoryResponse])
+@router.get("", response_model=Union[list[InventoryResponse], InventoryEmptyResponse])
 def list_inventory(
-    store_id: int | None = None,
     user: User = Depends(require_permission("inventory:read")),
     db: Session = Depends(get_db),
 ):
-    return InventoryService(db).list_inventory(user.tenant_id, store_id)
+    return InventoryService(db).list_inventory(user.tenant_id)
 
 
 @router.get("/low-stock", response_model=LowStockResponse)
 def low_stock(
-    store_id: int | None = None,
+    store_id: int | None = Query(default=None, gt=0),
     user: User = Depends(require_permission("inventory:read")),
     db: Session = Depends(get_db),
 ):
@@ -75,7 +79,7 @@ def inventory_valuation(
     )
 
 
-@router.get("/expiry", response_model=list[InventoryResponse])
+@router.get("/expiry", response_model=Union[list[InventoryResponse], ExpiryEmptyResponse])
 def expiry_inventory(
     user: User = Depends(require_permission("inventory:read")),
     db: Session = Depends(get_db),
@@ -85,9 +89,9 @@ def expiry_inventory(
     )
     
     
-@router.get("/movements", response_model=list[StockMovementResponse])
+@router.get("/movements", response_model=Union[list[StockMovementResponse], StockMovementEmptyResponse])
 def list_movements(
-    store_id: int | None = None,
+    store_id: int | None = Query(default=None, gt=0),
     user: User = Depends(require_permission("inventory:read")),
     db: Session = Depends(get_db),
 ):
@@ -116,7 +120,7 @@ def inventory_dashboard(
     
 @router.get("/{product_id}", response_model=InventoryResponse)
 def get_inventory(
-    product_id: int,
+    product_id: int = Path(..., gt=0, description="Product ID must be positive"),
     user: User = Depends(require_permission("inventory:read")),
     db: Session = Depends(get_db),
 ):

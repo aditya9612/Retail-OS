@@ -1,11 +1,11 @@
 from datetime import date
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
-from sqlalchemy import or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.inventory import Inventory
-from app.models.product import Product
+from app.models.product import Product, ProductImage
 from app.models.product_variant import ProductVariant
 
 
@@ -20,7 +20,7 @@ class ProductRepository:
     ) -> Optional[Product]:
         return (
             self.db.query(Product)
-            .options(joinedload(Product.images))
+            .options(selectinload(Product.images))
             .filter(
                 Product.id == product_id,
                 Product.tenant_id == tenant_id,
@@ -36,7 +36,7 @@ class ProductRepository:
         return (
             self.db.query(Product)
             .filter(
-                Product.sku == sku,
+                func.upper(Product.sku) == sku.strip().upper(),
                 Product.tenant_id == tenant_id,
             )
             .first()
@@ -50,7 +50,7 @@ class ProductRepository:
         return (
             self.db.query(Product)
             .filter(
-                Product.barcode == barcode,
+                Product.barcode == barcode.strip(),
                 Product.tenant_id == tenant_id,
             )
             .first()
@@ -63,19 +63,29 @@ class ProductRepository:
         skip: int = 0,
         limit: int = 20,
     ) -> List[Product]:
+        q = query.strip()
+        conditions = [
+            Product.name.ilike(f"%{q}%"),
+            Product.sku.ilike(f"%{q}%"),
+        ]
+
+        if q.isdigit():
+            conditions.append(Product.barcode.ilike(f"%{q}%"))
+            # Prefix or exact match for HSN code to avoid matching irrelevant codes
+            conditions.append(Product.hsn_code.like(f"{q}%"))
+        else:
+            conditions.append(Product.barcode.ilike(f"%{q}%"))
+            conditions.append(Product.brand.ilike(f"%{q}%"))
+
         return (
             self.db.query(Product)
-            .options(joinedload(Product.images))
+            .options(selectinload(Product.images))
             .filter(
                 Product.tenant_id == tenant_id,
                 Product.is_active.is_(True),
-                or_(
-                    Product.name.ilike(f"%{query}%"),
-                    Product.sku.ilike(f"%{query}%"),
-                    Product.barcode.ilike(f"%{query}%"),
-                    Product.hsn_code.ilike(f"%{query}%"),
-                ),
+                or_(*conditions),
             )
+            .distinct()
             .offset(skip)
             .limit(limit)
             .all()
@@ -90,7 +100,7 @@ class ProductRepository:
     ) -> List[Product]:
         query = (
             self.db.query(Product)
-            .options(joinedload(Product.images))
+            .options(selectinload(Product.images))
             .filter(Product.tenant_id == tenant_id)
         )
 
@@ -110,10 +120,10 @@ class ProductRepository:
         tenant_id: int,
         store_id: int,
         threshold: int = 10,
-    ) -> List[Product]:
+    ) -> List[Tuple[Product, int]]:
         return (
-            self.db.query(Product)
-            .options(joinedload(Product.images))
+            self.db.query(Product, Inventory.quantity)
+            .options(selectinload(Product.images))
             .join(
                 Inventory,
                 Product.id == Inventory.product_id,
@@ -133,7 +143,6 @@ class ProductRepository:
         store_id: int,
         days: int = 30,
     ) -> List[Product]:
-        # Note: MySQL products/inventory tables do not contain expiry_date or track_expiry columns
         return []
 
     def create(self, product: Product) -> Product:
@@ -147,7 +156,9 @@ class ProductRepository:
         return product
 
     def delete(self, product: Product) -> None:
-        product.is_active = False
+        self.db.query(ProductImage).filter(ProductImage.product_id == product.id).delete()
+        self.db.query(Inventory).filter(Inventory.product_id == product.id).delete()
+        self.db.delete(product)
         self.db.commit()
 
     # Product Variant Repository Methods
