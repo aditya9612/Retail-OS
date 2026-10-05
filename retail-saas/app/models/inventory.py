@@ -20,6 +20,7 @@ class Inventory(Base, TimestampMixin):
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("product_batches.id", ondelete="SET NULL"), nullable=True, index=True)
     quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     min_stock_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_stock_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -67,6 +68,7 @@ class StockMovement(Base, TimestampMixin):
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("product_batches.id", ondelete="SET NULL"), nullable=True, index=True)
 
     movement_type: Mapped[str] = mapped_column(String(50), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)

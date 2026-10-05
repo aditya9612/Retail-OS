@@ -1,5 +1,8 @@
 from decimal import Decimal
-from typing import Any
+from typing import Any, TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from app.models.product_variant import ProductVariant
 
 
 from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, Numeric, String, Text
@@ -120,11 +123,29 @@ class Product(Base, TimestampMixin):
         self.tax_rate = val
 
     @property
-    def variants(self) -> dict | None:
-        return getattr(self, "_variants", None)
+    def variants(self) -> Any:
+        explicit_variants = getattr(self, "_variants", None)
+        if explicit_variants is not None:
+            return explicit_variants
+        if hasattr(self, "variant_list") and self.variant_list:
+            return [
+                {
+                    "id": v.id,
+                    "variant_name": v.variant_name,
+                    "sku": v.sku,
+                    "barcode": v.barcode,
+                    "size": v.size,
+                    "color": v.color,
+                    "selling_price": str(v.selling_price) if v.selling_price is not None else str(self.selling_price),
+                    "cost_price": str(v.cost_price) if v.cost_price is not None else str(self.cost_price),
+                    "is_active": v.is_active,
+                }
+                for v in self.variant_list
+            ]
+        return None
 
     @variants.setter
-    def variants(self, val: dict | None) -> None:
+    def variants(self, val: Any) -> None:
         self._variants = val
 
     @property
@@ -183,6 +204,12 @@ class Product(Base, TimestampMixin):
         "ProductImage",
         back_populates="product",
         cascade="all, delete-orphan"
+    )
+
+    variant_list: Mapped[list["ProductVariant"]] = relationship(
+        "ProductVariant",
+        back_populates="product",
+        cascade="all, delete-orphan",
     )
 
 

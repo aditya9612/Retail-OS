@@ -23,6 +23,7 @@ from app.models.delivery_partner import DeliveryPartner
 from app.models.password_reset_token import PasswordResetToken
 from app.models.login_activity import LoginActivity
 from app.models.product import Product, ProductImage
+from app.models.product_variant import ProductVariant
 from app.models.refund import Refund
 from app.models.role import Role
 from app.models.store import Store
@@ -108,4 +109,5 @@ __all__ = [
     "POSShift",
     "POSCashMovement",
     "POSHeldCart",
+    "ProductVariant",
 ]

@@ -13,7 +13,13 @@ from app.schemas.product import (
     ProductResponse,
     ProductUpdate,
 )
+from app.schemas.product_variant import (
+    ProductVariantCreate,
+    ProductVariantListResponse,
+    ProductVariantResponse,
+)
 from app.services.product_service import ProductService
+from app.services.product_variant_service import ProductVariantService
 
 
 router = APIRouter(
@@ -392,3 +398,67 @@ def delete_product_image(
     if image:
         db.delete(image)
         db.commit()
+
+
+# =========================
+# PRODUCT VARIANTS
+# =========================
+
+@router.post(
+    "/{product_id}/variants",
+    response_model=ProductVariantResponse,
+    status_code=201,
+    tags=["product-variants"],
+    dependencies=[Depends(require_operational_write)],
+)
+def create_product_variant(
+    product_id: int,
+    data: ProductVariantCreate,
+    user: User = Depends(require_permission("products:write")),
+    db: Session = Depends(get_db),
+):
+    return ProductVariantService(db).create_variant(
+        tenant_id=user.tenant_id,
+        product_id=product_id,
+        data=data,
+    )
+
+
+@router.get(
+    "/{product_id}/variants",
+    response_model=ProductVariantListResponse,
+    tags=["product-variants"],
+)
+def list_product_variants(
+    product_id: int,
+    page: int = Query(default=1, gt=0),
+    page_size: int = Query(default=20, gt=0, le=100),
+    include_inactive: bool = Query(default=False),
+    user: User = Depends(require_permission("products:read")),
+    db: Session = Depends(get_db),
+):
+    return ProductVariantService(db).list_variants(
+        tenant_id=user.tenant_id,
+        product_id=product_id,
+        page=page,
+        page_size=page_size,
+        include_inactive=include_inactive,
+    )
+
+
+@router.get(
+    "/{product_id}/variants/{variant_id}",
+    response_model=ProductVariantResponse,
+    tags=["product-variants"],
+)
+def get_product_variant_nested(
+    product_id: int,
+    variant_id: int,
+    user: User = Depends(require_permission("products:read")),
+    db: Session = Depends(get_db),
+):
+    ProductService(db).get_product(user.tenant_id, product_id)
+    return ProductVariantService(db).get_variant(
+        tenant_id=user.tenant_id,
+        variant_id=variant_id,
+    )

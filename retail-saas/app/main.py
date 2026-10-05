@@ -45,6 +45,7 @@ from app.api.v1.saas.router import router as saas_router
 from app.api.v1.multi_store.router import router as multi_store_router
 from app.api.v1.document_settings.router import router as document_settings_router
 from app.api.v1.pos.router import router as pos_router
+from app.api.v1.variants.router import router as variants_router
 
 from app.core.config import get_settings
 from app.core.database import init_db
@@ -247,6 +248,9 @@ app.include_router(document_settings_router, prefix=API_PREFIX)
 
 # POS Shift / Cash Register APIs
 app.include_router(pos_router, prefix=API_PREFIX)
+
+# Product Variants APIs
+app.include_router(variants_router, prefix=API_PREFIX)
 
 
 # =========================

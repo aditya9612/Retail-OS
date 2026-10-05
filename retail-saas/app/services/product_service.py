@@ -35,10 +35,10 @@ class ProductService:
                     "Barcode must contain between 8 and 50 digits"
                 )
 
-            if self.repo.get_by_barcode(barcode, tenant_id):
+            if self.repo.is_barcode_taken(barcode, tenant_id):
                 raise ConflictException("Barcode already exists")
 
-        if self.repo.get_by_sku(sku, tenant_id):
+        if self.repo.is_sku_taken(sku, tenant_id):
             raise ConflictException("SKU already exists")
 
         # Atomic tenant lock & quota check
@@ -180,12 +180,11 @@ class ProductService:
                     "Barcode must contain between 8 and 50 digits"
                 )
 
-            existing = self.repo.get_by_barcode(
+            if self.repo.is_barcode_taken(
                 barcode,
                 tenant_id,
-            )
-
-            if existing and existing.id != product.id:
+                exclude_product_id=product.id,
+            ):
                 raise ConflictException("Barcode already exists")
 
             update_data["barcode"] = barcode
