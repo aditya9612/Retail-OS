@@ -1,4 +1,5 @@
 from typing import List, Optional
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -15,7 +16,7 @@ class StoreSummaryItem(BaseModel):
 
 
 class DashboardResponse(BaseModel):
-    mode: str = "all_stores"  # "all_stores" or "single_store"
+    mode: str = "all_stores"
     store_id: Optional[int] = None
     store_name: Optional[str] = None
     today_sales: float
@@ -34,16 +35,19 @@ class MonthlySales(BaseModel):
 
 
 class DashboardOverviewResponse(BaseModel):
+    period: str
     overview: List[MonthlySales]
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class RevenueVsCostResponse(BaseModel):
+    period: str
     revenue: float
     cost: float
 
     model_config = ConfigDict(from_attributes=True)
+
 
 class TopProduct(BaseModel):
     product_name: str
@@ -52,6 +56,4 @@ class TopProduct(BaseModel):
 
 
 class TopProductsResponse(BaseModel):
-    top_products: list[TopProduct]        
-
-
+    top_products: list[TopProduct]
