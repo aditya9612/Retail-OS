@@ -37,6 +37,9 @@ from app.models.grn import GRN, GRNItem
 from app.models.coupon import Coupon
 from app.models.sale import Sale, SaleItem
 from app.models.super_admin import SuperAdmin
+from app.models.pos_shift import POSShift
+from app.models.pos_cash_movement import POSCashMovement
+from app.models.pos_held_cart import POSHeldCart
 from app.models.saas_billing import (
     SaaSPlan,
     SaaSSubscription,
@@ -102,4 +105,7 @@ __all__ = [
     "SaaSInvoiceSequence",
     "SaaSPlanEntitlement",
     "EntitlementDimension",
+    "POSShift",
+    "POSCashMovement",
+    "POSHeldCart",
 ]

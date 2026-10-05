@@ -9,15 +9,26 @@ from app.core.exceptions import AppException, ForbiddenException
 from app.core.security import require_operational_write, require_permission
 from app.models.product import Product
 from app.models.user import User
-from app.schemas.billing import ReturnItemRequest
+from app.schemas.billing import (
+    ReturnItemRequest,
+    TenderChangeRequest,
+    TenderChangeResponse,
+)
 from app.schemas.cart import (
     CartDiscountApply,
     CartItemCreate,
     CartItemUpdate,
     CartSummaryResponse,
 )
+from app.schemas.pos_held_cart import (
+    POSHeldCartListResponse,
+    POSHeldCartResponse,
+    POSHoldCartRequest,
+    POSRecallCartRequest,
+)
 from app.services.billing_service import BillingService
 from app.services.cart_service import CartService
+from app.services.pos_held_cart_service import POSHeldCartService
 
 
 router = APIRouter(
@@ -340,4 +351,120 @@ def process_item_return(
         payload.product_id,
         payload.return_quantity,
         payload.reason,
+    )
+
+
+# ============================================================================
+# POS HOLD / PARK CART ENDPOINTS (Phase 4.2)
+# ============================================================================
+
+@router.post(
+    "/cart/hold",
+    response_model=POSHeldCartResponse,
+    dependencies=[Depends(require_operational_write)],
+)
+def hold_cart(
+    payload: POSHoldCartRequest,
+    user: User = Depends(require_permission("billing:write")),
+    db: Session = Depends(get_db),
+):
+    """Parks the user's active cart and assigns a unique hold reference."""
+    return POSHeldCartService(db).hold_active_cart(user, payload)
+
+
+@router.get(
+    "/cart/held",
+    response_model=POSHeldCartListResponse,
+)
+def list_held_carts(
+    store_id: Optional[int] = Query(default=None, gt=0),
+    status: Optional[str] = Query(default="held"),
+    search: Optional[str] = Query(default=None),
+    page: int = Query(default=1, gt=0),
+    page_size: int = Query(default=20, gt=0, le=100),
+    user: User = Depends(require_permission("billing:read")),
+    db: Session = Depends(get_db),
+):
+    """Lists held/parked carts for the tenant/store."""
+    return POSHeldCartService(db).list_held_carts(
+        user,
+        store_id=store_id,
+        status=status,
+        search=search,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
+    "/cart/held/{hold_id}",
+    response_model=POSHeldCartResponse,
+)
+def get_held_cart(
+    hold_id: int,
+    user: User = Depends(require_permission("billing:read")),
+    db: Session = Depends(get_db),
+):
+    """Retrieves specific held cart details."""
+    return POSHeldCartService(db).get_held_cart(user, hold_id)
+
+
+@router.post(
+    "/cart/held/{hold_id}/recall",
+    response_model=CartSummaryResponse,
+    dependencies=[Depends(require_operational_write)],
+)
+def recall_held_cart(
+    hold_id: int,
+    payload: POSRecallCartRequest = POSRecallCartRequest(),
+    user: User = Depends(require_permission("billing:write")),
+    db: Session = Depends(get_db),
+):
+    """Restores a held cart back into the active cart for checkout."""
+    recalled_cart = POSHeldCartService(db).recall_held_cart(user, hold_id, payload)
+    return _to_cart_response(recalled_cart)
+
+
+@router.delete(
+    "/cart/held/{hold_id}",
+    response_model=POSHeldCartResponse,
+    dependencies=[Depends(require_operational_write)],
+)
+def cancel_held_cart(
+    hold_id: int,
+    reason: Optional[str] = Query(default=None),
+    user: User = Depends(require_permission("billing:write")),
+    db: Session = Depends(get_db),
+):
+    """Cancels/discards a held cart."""
+    return POSHeldCartService(db).cancel_held_cart(user, hold_id, reason)
+
+
+# ============================================================================
+# TENDER CASH / CHANGE CALCULATION ENDPOINT (Phase 4.3)
+# ============================================================================
+
+@router.post(
+    "/tender-change/calculate",
+    response_model=TenderChangeResponse,
+)
+def calculate_tender_change(
+    payload: TenderChangeRequest,
+    user: User = Depends(require_permission("billing:read")),
+):
+    """Validates cash tendered and calculates change returned to customer."""
+    if payload.tendered_amount < payload.payable_amount:
+        raise AppException(
+            f"Insufficient cash tendered: tendered amount ({payload.tendered_amount}) is less than payable amount ({payload.payable_amount})"
+        )
+
+    change_due = (payload.tendered_amount - payload.payable_amount).quantize(Decimal("0.01"))
+    is_exact = change_due == Decimal("0.00")
+
+    return TenderChangeResponse(
+        payable_amount=payload.payable_amount,
+        tendered_amount=payload.tendered_amount,
+        change_due=change_due,
+        is_exact=is_exact,
+        status="success",
     )

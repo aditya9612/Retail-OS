@@ -330,12 +330,28 @@ class BillingService:
                 )
 
             for payment in data.payments:
+                amount_tendered = payment.amount_tendered
+                change_due = payment.change_due
+                if payment.payment_mode.lower() == "cash" and amount_tendered is not None:
+                    if amount_tendered < payment.amount:
+                        raise AppException(
+                            f"Cash tendered ({amount_tendered}) cannot be less than payable amount ({payment.amount})"
+                        )
+                    computed_change = (amount_tendered - payment.amount).quantize(Decimal("0.01"))
+                    if change_due is not None and change_due != computed_change:
+                        raise AppException(
+                            f"Provided change_due ({change_due}) does not match calculated change ({computed_change})"
+                        )
+                    change_due = computed_change
+
                 self.db.add(
                     Payment(
                         tenant_id=tenant_id,
                         order_id=order.id,
                         payment_method=payment.payment_mode,
                         amount=payment.amount,
+                        amount_tendered=amount_tendered,
+                        change_due=change_due,
                         transaction_id=payment.transaction_reference,
                         status=PaymentStatus.COMPLETED.value,
                     )

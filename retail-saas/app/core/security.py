@@ -421,6 +421,10 @@ def require_permission(permission: str):
         if user.role and user.role.name in ["admin", "owner"] and permission.startswith("dashboard:"):
             return user
 
+        # Backward compatibility for pos:shift_manage for existing cashier, manager, owner roles in DB
+        if user.role and user.role.name in ["admin", "owner", "manager", "cashier"] and permission == "pos:shift_manage":
+            return user
+
         raise ForbiddenException(
             f"Missing permission: {permission}"
         )

@@ -84,6 +84,16 @@ class Payment(Base, TimestampMixin):
         nullable=True,
     )
 
+    amount_tendered: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 2),
+        nullable=True,
+    )
+
+    change_due: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 2),
+        nullable=True,
+    )
+
     order: Mapped["Order"] = relationship(
         "Order",
         back_populates="payments",

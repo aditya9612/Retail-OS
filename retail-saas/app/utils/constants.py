@@ -68,6 +68,17 @@ class RefundStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class POSShiftStatus(str, Enum):
+    OPEN = "open"
+    CLOSED = "closed"
+
+
+class POSCashMovementType(str, Enum):
+    CASH_DROP = "CASH_DROP"
+    CASH_PAYOUT = "CASH_PAYOUT"
+    CASH_IN = "CASH_IN"
+
+
 DEFAULT_ROLE_PERMISSIONS = {
     UserRole.SUPERADMIN: [
         "*",
@@ -103,6 +114,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "analytics:read",
         "purchase_orders:read",
         "purchase_orders:write",
+        "pos:shift_manage",
     ],
 
     UserRole.MANAGER: [
@@ -121,6 +133,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "reports:read",
         "purchase_orders:read",
         "purchase_orders:write",
+        "pos:shift_manage",
     ],
 
     UserRole.ACCOUNTANT: [
@@ -152,6 +165,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "customers:write",
         "sales:read",
         "sales:write",
+        "pos:shift_manage",
     ],
 
     UserRole.STAFF: [

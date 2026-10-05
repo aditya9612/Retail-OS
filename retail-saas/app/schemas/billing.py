@@ -90,6 +90,17 @@ class PaymentSplit(BaseModel):
         default=None,
         max_length=255,
     )
+    amount_tendered: Optional[Decimal] = Field(
+        default=None,
+        ge=0,
+        le=Decimal("999999.99"),
+        description="Cash tendered amount by customer (applicable for cash payments)",
+    )
+    change_due: Optional[Decimal] = Field(
+        default=None,
+        ge=0,
+        description="Change due returned to customer",
+    )
 
     @field_validator("payment_mode")
     @classmethod
@@ -99,6 +110,19 @@ class PaymentSplit(BaseModel):
                 f"payment_mode must be one of {VALID_PAYMENT_MODES}"
             )
         return v
+
+
+class TenderChangeRequest(BaseModel):
+    payable_amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2, description="Total amount payable")
+    tendered_amount: Decimal = Field(ge=0, max_digits=12, decimal_places=2, description="Cash tendered by customer")
+
+
+class TenderChangeResponse(BaseModel):
+    payable_amount: Decimal
+    tendered_amount: Decimal
+    change_due: Decimal
+    is_exact: bool
+    status: str = "success"
 
 
 class InvoiceItemCreate(BaseModel):
