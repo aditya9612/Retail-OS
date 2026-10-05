@@ -1,3 +1,4 @@
+from datetime import datetime
 import re
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -139,12 +140,27 @@ class CategoryUpdate(BaseModel):
 class CategoryResponse(BaseModel):
     id: int
     tenant_id: int
-    parent_id: int | None
+    parent_id: int | None = None
+    parent_name: str | None = None
     name: str
     is_active: bool = True
     description: str | None = None
+    product_count: int = 0
+    subcategory_count: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CategoryDetailResponse(CategoryResponse):
+    pass
+
+
+class CategoryDetailWrapperResponse(BaseModel):
+    success: bool = True
+    message: str = "Category details retrieved successfully"
+    data: CategoryDetailResponse
 
 
 class CategoryListResponse(BaseModel):

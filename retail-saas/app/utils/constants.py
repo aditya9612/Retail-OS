@@ -6,6 +6,8 @@ class UserRole(str, Enum):
     ADMIN = "admin"
     OWNER = "owner"
     MANAGER = "manager"
+    ACCOUNTANT = "accountant"
+    CASHIER = "cashier"
     STAFF = "staff"
 
 
@@ -76,6 +78,8 @@ DEFAULT_ROLE_PERMISSIONS = {
     ],
 
     UserRole.OWNER: [
+        "dashboard:view",
+        "dashboard:read",
         "users:read",
         "users:write",
         "stores:read",
@@ -102,6 +106,8 @@ DEFAULT_ROLE_PERMISSIONS = {
     ],
 
     UserRole.MANAGER: [
+        "dashboard:view",
+        "dashboard:read",
         "stores:read",
         "users:read",
         "products:read",
@@ -115,6 +121,37 @@ DEFAULT_ROLE_PERMISSIONS = {
         "reports:read",
         "purchase_orders:read",
         "purchase_orders:write",
+    ],
+
+    UserRole.ACCOUNTANT: [
+        "billing:read",
+        "billing:write",
+        "billing:refund",
+        "billing:gst_config",
+        "payments:read",
+        "payments:write",
+        "reports:read",
+        "analytics:read",
+        "credit_notes:read",
+        "credit_notes:write",
+        "purchase_orders:read",
+        "customers:read",
+        "invoices:read",
+    ],
+
+    UserRole.CASHIER: [
+        "products:read",
+        "inventory:read",
+        "orders:read",
+        "orders:write",
+        "billing:read",
+        "billing:write",
+        "payments:read",
+        "payments:write",
+        "customers:read",
+        "customers:write",
+        "sales:read",
+        "sales:write",
     ],
 
     UserRole.STAFF: [

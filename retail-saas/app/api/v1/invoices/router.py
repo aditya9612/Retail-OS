@@ -155,6 +155,7 @@ def get_invoice(
 def invoice_pdf(
     invoice_id: int,
     mode: Literal["download", "preview"] = Query(default="download"),
+    document_type: Literal["invoice", "bill"] = Query(default="invoice"),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
@@ -166,15 +167,17 @@ def invoice_pdf(
     pdf_bytes = BillingService(db).generate_pdf(
         user.tenant_id,
         invoice_id,
+        document_type=document_type,
     )
 
     disposition = "inline" if mode == "preview" else "attachment"
+    filename_prefix = "bill_" if document_type == "bill" else ""
 
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"{disposition}; filename={invoice.invoice_number}.pdf"
+            "Content-Disposition": f"{disposition}; filename={filename_prefix}{invoice.invoice_number}.pdf"
         },
     )
 

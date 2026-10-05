@@ -1,12 +1,15 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, Numeric, String, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, Numeric, String, DateTime, ForeignKey, Index
 
 from app.core.database import Base
 
 
 class StoreTarget(Base):
     __tablename__ = "store_targets"
+    __table_args__ = (
+        Index("ix_store_targets_store_status_dates", "store_id", "status", "start_date", "end_date"),
+    )
 
     id = Column(
         Integer,

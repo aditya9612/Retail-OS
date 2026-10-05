@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     AUTH_RESET_TOKEN_TTL_SECONDS: int = 600
 
     AUTH_EXPOSE_OTP_IN_DEVELOPMENT: bool = True
+    # Development feature: fixed OTP for deterministic testing
+    AUTH_FIXED_OTP_ENABLED: bool = False
+    AUTH_FIXED_OTP: str = "123456"
+    
+    # SMS provider configuration (development defaults to mock)
+    SMS_PROVIDER: str = "mock"
+    SMS_API_KEY: str = ""
+    SMS_API_SECRET: str = ""
+    SMS_SENDER_ID: str = ""
+    SMS_BASE_URL: str = ""
 
     SAAS_UPI_VPA: str = "retailos@icici"
     SAAS_UPI_PAYEE_NAME: str = "RetailOS"

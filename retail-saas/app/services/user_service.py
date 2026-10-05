@@ -1,6 +1,9 @@
+from typing import Optional
+
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ConflictException, NotFoundException
+from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException
 from app.core.security import get_password_hash
 from app.models.role import Role
 from app.models.saas_plan_entitlement import EntitlementDimension
@@ -9,6 +12,7 @@ from app.models.user import User
 from app.repositories.user_repo import UserRepository
 from app.schemas.user import MyProfileUpdate, UserCreate, UserUpdate
 from app.services.saas_entitlement_service import SaaSEntitlementService
+from app.utils.phone import normalize_phone_number
 
 
 class UserService:
@@ -16,10 +20,31 @@ class UserService:
         self.db = db
         self.repo = UserRepository(db)
 
+    @staticmethod
+    def _is_privileged_role(role: Role) -> bool:
+        """
+        Determines if a role confers tenant-level administrative privileges.
+        - System / administrative role names: admin, owner, superadmin
+        - Wildcard permissions: "*"
+        - Tenant-level administrative permissions: "stores:write"
+        """
+        role_name = (role.name or "").strip().lower()
+        if role_name in {"admin", "owner", "superadmin"}:
+            return True
+
+        perms = role.permissions or []
+        if "*" in perms:
+            return True
+        if "stores:write" in perms:
+            return True
+
+        return False
+
     def create_user(
         self,
         tenant_id: int,
         data: UserCreate,
+        current_user_store_id: Optional[int] = None,
     ) -> User:
         if tenant_id is None:
             raise ConflictException("Tenant is required")
@@ -59,7 +84,12 @@ class UserService:
 
         if not role:
             raise NotFoundException(
-                "Role not found. Use GET /api/v1/users/roles to get valid Roles."
+                "Role not found. Use GET /api/v1/roles to get valid Roles."
+            )
+
+        if current_user_store_id is not None and self._is_privileged_role(role):
+            raise ForbiddenException(
+                "Store-scoped users cannot assign tenant administrator or owner roles"
             )
 
         resolved_role_id = role.id
@@ -89,11 +119,18 @@ class UserService:
             lock_tenant=True,
         )
 
+        canonical_phone = None
+        if data.phone:
+            canonical_phone = normalize_phone_number(data.phone)
+            existing_phone_user = self.repo.get_active_user_by_phone(canonical_phone)
+            if existing_phone_user:
+                raise ConflictException("Phone number is already registered")
+
         user = User(
             tenant_id=tenant_id,
             email=email,
             full_name=data.full_name.strip(),
-            phone=data.phone,
+            phone=canonical_phone,
             store_id=data.store_id,
             role_id=resolved_role_id,
             hashed_password=get_password_hash(
@@ -101,12 +138,23 @@ class UserService:
             ),
             is_active=True,
             is_deleted=False,
+            pancard=getattr(data, "pancard", None),
+            addhar_card=getattr(data, "addhar_card", None),
+            profile_photo=getattr(data, "profile_photo", None),
+            pan_number=getattr(data, "pan_number", None),
+            addhar_number=getattr(data, "addhar_number", None),
         )
 
-        user = self.repo.create(user)
-        self.db.commit()
-        self.db.refresh(user)
-        return user
+        try:
+            user = self.repo.create(user)
+            self.db.commit()
+            self.db.refresh(user)
+            return user
+        except IntegrityError as exc:
+            self.db.rollback()
+            if "uq_users_active_phone" in str(exc) or "active_phone" in str(exc).lower():
+                raise ConflictException("Phone number is already registered") from exc
+            raise ConflictException("User already exists") from exc
 
     def list_roles(
         self,
@@ -190,6 +238,7 @@ class UserService:
         tenant_id: int,
         user_id: int,
         data: UserUpdate,
+        current_user_store_id: Optional[int] = None,
     ) -> User:
         user = self.get_user(
             tenant_id,
@@ -217,7 +266,12 @@ class UserService:
 
             if not role:
                 raise NotFoundException(
-                    "Role not found. Use GET /api/v1/users/roles to get valid Role IDs."
+                    "Role not found. Use GET /api/v1/roles to get valid Role IDs."
+                )
+
+            if current_user_store_id is not None and self._is_privileged_role(role):
+                raise ForbiddenException(
+                    "Store-scoped users cannot assign tenant administrator or owner roles"
                 )
 
         if "store_id" in update_data:
@@ -261,17 +315,35 @@ class UserService:
                     "hashed_password"
                 ] = get_password_hash(password)
 
-        for key, value in update_data.items():
-            setattr(
-                user,
-                key,
-                value,
-            )
+        if "phone" in update_data:
+            raw_phone = update_data["phone"]
+            if raw_phone:
+                canonical_phone = normalize_phone_number(raw_phone)
+                update_data["phone"] = canonical_phone
+                if canonical_phone != user.phone:
+                    existing_phone_user = self.repo.get_active_user_by_phone(canonical_phone)
+                    if existing_phone_user and existing_phone_user.id != user.id:
+                        raise ConflictException("Phone number is already in use")
+            else:
+                update_data["phone"] = None
 
-        user = self.repo.update(user)
-        self.db.commit()
-        self.db.refresh(user)
-        return user
+        try:
+            for key, value in update_data.items():
+                setattr(
+                    user,
+                    key,
+                    value,
+                )
+
+            user = self.repo.update(user)
+            self.db.commit()
+            self.db.refresh(user)
+            return user
+        except IntegrityError as exc:
+            self.db.rollback()
+            if "uq_users_active_phone" in str(exc) or "active_phone" in str(exc).lower():
+                raise ConflictException("Phone number is already in use") from exc
+            raise ConflictException("Failed to update user due to a conflict") from exc
 
     def update_my_profile(
         self,
@@ -305,17 +377,35 @@ class UserService:
 
             update_data["full_name"] = full_name
 
-        for key, value in update_data.items():
-            setattr(
-                user,
-                key,
-                value,
-            )
+        if "phone" in update_data:
+            raw_phone = update_data["phone"]
+            if raw_phone:
+                canonical_phone = normalize_phone_number(raw_phone)
+                update_data["phone"] = canonical_phone
+                if canonical_phone != user.phone:
+                    existing_phone_user = self.repo.get_active_user_by_phone(canonical_phone)
+                    if existing_phone_user and existing_phone_user.id != user.id:
+                        raise ConflictException("Phone number is already in use")
+            else:
+                update_data["phone"] = None
 
-        user = self.repo.update(user)
-        self.db.commit()
-        self.db.refresh(user)
-        return user
+        try:
+            for key, value in update_data.items():
+                setattr(
+                    user,
+                    key,
+                    value,
+                )
+
+            user = self.repo.update(user)
+            self.db.commit()
+            self.db.refresh(user)
+            return user
+        except IntegrityError as exc:
+            self.db.rollback()
+            if "uq_users_active_phone" in str(exc) or "active_phone" in str(exc).lower():
+                raise ConflictException("Phone number is already in use") from exc
+            raise ConflictException("Failed to update profile due to a conflict") from exc
 
     def activate_user(
         self,
@@ -449,3 +539,161 @@ class UserService:
         self.db.commit()
         self.db.refresh(user)
         return user
+
+    def remove_store(
+        self,
+        tenant_id: int,
+        user_id: int,
+        store_id: Optional[int] = None,
+    ) -> tuple[User, int]:
+        user = self.get_user(
+            tenant_id,
+            user_id,
+        )
+
+        if user.store_id is None:
+            raise ConflictException(
+                "User is not currently assigned to any store"
+            )
+
+        if store_id is not None and user.store_id != store_id:
+            raise ConflictException(
+                f"User is assigned to store {user.store_id}, not store {store_id}"
+            )
+
+        previous_store_id = user.store_id
+        user.store_id = None
+        user = self.repo.update(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user, previous_store_id
+
+    def get_users_by_store(
+        self,
+        tenant_id: int,
+        current_user_store_id: Optional[int] = None,
+        store_id: Optional[int] = None,
+        role: Optional[str] = None,
+        role_id: Optional[int] = None,
+        is_active: Optional[bool] = None,
+        search: Optional[str] = None,
+        include_unassigned: bool = True,
+    ):
+        from collections import defaultdict
+        from sqlalchemy import func, or_
+        from sqlalchemy.orm import joinedload
+        from app.core.exceptions import ForbiddenException, NotFoundException
+        from app.models.role import Role
+        from app.models.store import Store
+        from app.schemas.user import StoreUserItem, StoreUsersSummary, UsersByStoreResponse
+
+        # Determine effective store filter
+        effective_store_id = store_id
+        if current_user_store_id is not None:
+            if store_id is not None and store_id != current_user_store_id:
+                raise ForbiddenException("Access denied to another store")
+            effective_store_id = current_user_store_id
+            include_unassigned = False
+
+        # 1. Fetch stores belonging to tenant
+        store_query = self.db.query(Store).filter(
+            Store.tenant_id == tenant_id,
+            Store.is_active.is_(True),
+        )
+        if effective_store_id is not None:
+            store_query = store_query.filter(Store.id == effective_store_id)
+
+        stores = store_query.order_by(Store.id.asc()).all()
+
+        if effective_store_id is not None and not stores:
+            raise NotFoundException("Store not found or inactive")
+
+        # 2. Fetch non-deleted users belonging to tenant
+        user_query = (
+            self.db.query(User)
+            .options(joinedload(User.role))
+            .filter(
+                User.tenant_id == tenant_id,
+                User.is_deleted.is_(False),
+            )
+        )
+        if effective_store_id is not None:
+            user_query = user_query.filter(User.store_id == effective_store_id)
+
+        if role_id is not None:
+            user_query = user_query.filter(User.role_id == role_id)
+
+        if role is not None and role.strip():
+            role_clean = role.strip().lower()
+            user_query = user_query.join(User.role).filter(func.lower(Role.name) == role_clean)
+
+        if is_active is not None:
+            user_query = user_query.filter(User.is_active.is_(is_active))
+
+        if search and search.strip():
+            term = f"%{search.strip().lower()}%"
+            user_query = user_query.filter(
+                or_(
+                    func.lower(User.full_name).like(term),
+                    func.lower(User.email).like(term),
+                    User.phone.like(term),
+                )
+            )
+
+        users = user_query.order_by(User.id.asc()).all()
+
+        # 3. Group users by store_id
+        users_by_store: dict[Optional[int], list[StoreUserItem]] = defaultdict(list)
+        for u in users:
+            role_name = u.role.name if u.role else "unknown"
+            item = StoreUserItem(
+                id=u.id,
+                full_name=u.full_name,
+                email=u.email,
+                phone=u.phone,
+                role_id=u.role_id,
+                role_name=role_name,
+                is_active=u.is_active,
+                created_at=u.created_at,
+            )
+            users_by_store[u.store_id].append(item)
+
+        # 4. Build store summaries
+        store_summaries: list[StoreUsersSummary] = []
+        total_assigned_count = 0
+        for s in stores:
+            s_users = users_by_store.get(s.id, [])
+            total_assigned_count += len(s_users)
+            store_summaries.append(
+                StoreUsersSummary(
+                    store_id=s.id,
+                    store_name=s.name,
+                    store_code=s.code,
+                    is_main=s.is_main,
+                    total_users=len(s_users),
+                    users=s_users,
+                )
+            )
+
+        # 5. Handle unassigned users (Head Office / Store-less)
+        if include_unassigned and effective_store_id is None and current_user_store_id is None:
+            unassigned_users = users_by_store.get(None, [])
+            if unassigned_users or not stores:
+                total_assigned_count += len(unassigned_users)
+                store_summaries.append(
+                    StoreUsersSummary(
+                        store_id=None,
+                        store_name="Unassigned / Head Office",
+                        store_code=None,
+                        is_main=False,
+                        total_users=len(unassigned_users),
+                        users=unassigned_users,
+                    )
+                )
+
+        return UsersByStoreResponse(
+            total_stores=len(stores),
+            total_users=total_assigned_count,
+            stores=store_summaries,
+        )
+

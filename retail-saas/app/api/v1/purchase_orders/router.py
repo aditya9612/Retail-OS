@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, status
+from typing import Literal
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -7,6 +8,7 @@ from app.models.user import User
 
 from app.schemas.purchase_order import (
     PurchaseOrderCreate,
+    PurchaseOrderDeleteResponse,
     PurchaseOrderResponse,
     PurchaseOrderUpdate,
     PurchaseOrderReceive,
@@ -61,6 +63,34 @@ def get_purchase_order(
         tenant_id=user.tenant_id,
         purchase_order_id=purchase_order_id,
     )
+
+
+@router.get("/{purchase_order_id}/pdf")
+def get_purchase_order_pdf(
+    purchase_order_id: int,
+    mode: Literal["download", "preview"] = Query(default="download"),
+    user: User = Depends(require_permission("purchase_orders:read")),
+    db: Session = Depends(get_db),
+):
+    po = PurchaseOrderService(db).get_purchase_order(
+        tenant_id=user.tenant_id,
+        purchase_order_id=purchase_order_id,
+    )
+
+    pdf_bytes = PurchaseOrderService(db).generate_pdf(
+        tenant_id=user.tenant_id,
+        purchase_order_id=purchase_order_id,
+    )
+
+    disposition = "inline" if mode == "preview" else "attachment"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"{disposition}; filename=PO-{po.order_number}.pdf"
+        },
+    )
     
     
 @router.patch("/{purchase_order_id}", response_model=PurchaseOrderResponse, dependencies=[Depends(require_operational_write)])
@@ -109,3 +139,24 @@ def update_purchase_order_status(
         purchase_order_id=purchase_order_id,
         data=data,
     )
+
+
+@router.delete(
+    "/{purchase_order_id}",
+    response_model=PurchaseOrderDeleteResponse,
+    dependencies=[Depends(require_operational_write)],
+)
+def delete_purchase_order(
+    purchase_order_id: int,
+    user: User = Depends(require_permission("purchase_orders:write")),
+    db: Session = Depends(get_db),
+):
+    result = PurchaseOrderService(db).delete_purchase_order(
+        tenant_id=user.tenant_id,
+        purchase_order_id=purchase_order_id,
+    )
+    return {
+        "success": True,
+        "message": "Purchase order deleted successfully",
+        "data": result,
+    }

@@ -272,7 +272,7 @@ class TestSuperAdminCompleteFlow:
         # STEP 6: STORE OWNER CREATES ROLE-BASED USERS PER STORE
         # ==========================================
         # Get roles for Tenant 1
-        roles_res = client.get("/api/v1/users/roles", headers=owner1_headers)
+        roles_res = client.get("/api/v1/roles", headers=owner1_headers)
         assert roles_res.status_code == 200
         roles_list = roles_res.json()
         roles_map = {r["name"].lower(): r["id"] for r in roles_list}

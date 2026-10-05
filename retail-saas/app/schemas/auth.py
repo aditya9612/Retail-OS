@@ -3,6 +3,8 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 import re
 
+from app.utils.phone import normalize_phone_number
+
 EMAIL_PATTERN = re.compile(
     r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$"
 )
@@ -76,6 +78,26 @@ class RegisterRequest(BaseModel):
         if not re.match(r"^[a-z0-9-]+$", val):
             raise ValueError("Domain must contain only lowercase alphanumeric characters and hyphens")
         return val
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = str(value).strip()
+        if not value:
+            return None
+        return normalize_phone_number(value)
+
+    @field_validator("owner_phone")
+    @classmethod
+    def validate_owner_phone(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = str(value).strip()
+        if not value:
+            return None
+        return normalize_phone_number(value)
 
 
 class RegisterResponse(BaseModel):
@@ -196,3 +218,178 @@ class ChangePasswordRequest(BaseModel):
         if not value:
             raise ValueError("Confirm password is required")
         return value
+
+
+class MobileOTPRequestSchema(BaseModel):
+    """Request schema for POST /api/v1/auth/login/mobile-otp/request."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Phone number is required")
+        return normalize_phone_number(value)
+
+
+class MobileOTPVerifySchema(BaseModel):
+    """Request schema for POST /api/v1/auth/login/mobile-otp/verify."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
+    otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code")
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Phone number is required")
+        return normalize_phone_number(value)
+
+    @field_validator("otp")
+    @classmethod
+    def validate_otp(cls, value: str) -> str:
+        if not value.isdigit():
+            raise ValueError("OTP must contain only digits")
+        return value
+
+
+class MobilePINLoginRequest(BaseModel):
+    """Request schema for POST /api/v1/auth/login/mobile-pin."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
+    pin: str = Field(..., min_length=4, max_length=4, description="4-digit security PIN")
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Phone number is required")
+        return normalize_phone_number(value)
+
+    @field_validator("pin")
+    @classmethod
+    def validate_pin(cls, value: str) -> str:
+        val = str(value).strip()
+        if len(val) != 4 or not val.isdigit():
+            raise ValueError("PIN must be exactly 4 digits")
+        return val
+
+
+MobilePinLoginRequest = MobilePINLoginRequest
+
+
+class PINSetupRequest(BaseModel):
+    """Request schema for POST /api/v1/auth/pin/setup."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    pin: str = Field(..., min_length=4, max_length=4, description="4-digit security PIN")
+
+    @field_validator("pin")
+    @classmethod
+    def validate_pin(cls, value: str) -> str:
+        val = str(value).strip()
+        if len(val) != 4 or not val.isdigit():
+            raise ValueError("PIN must be exactly 4 digits")
+        return val
+
+
+class PINChangeRequest(BaseModel):
+    """Request schema for POST /api/v1/auth/pin/change."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    current_pin: str = Field(..., min_length=4, max_length=4, description="Current 4-digit security PIN")
+    new_pin: str = Field(..., min_length=4, max_length=4, description="New 4-digit security PIN")
+
+    @field_validator("current_pin")
+    @classmethod
+    def validate_current_pin(cls, value: str) -> str:
+        val = str(value).strip()
+        if len(val) != 4 or not val.isdigit():
+            raise ValueError("Current PIN must be exactly 4 digits")
+        return val
+
+    @field_validator("new_pin")
+    @classmethod
+    def validate_new_pin(cls, value: str) -> str:
+        val = str(value).strip()
+        if len(val) != 4 or not val.isdigit():
+            raise ValueError("New PIN must be exactly 4 digits")
+        return val
+
+
+class PINResetRequestSchema(BaseModel):
+    """Request schema for POST /api/v1/auth/pin/reset/request."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Phone number is required")
+        return normalize_phone_number(value)
+
+
+class PINResetVerifySchema(BaseModel):
+    """Request schema for POST /api/v1/auth/pin/reset/verify."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
+    otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code")
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Phone number is required")
+        return normalize_phone_number(value)
+
+    @field_validator("otp")
+    @classmethod
+    def validate_otp(cls, value: str) -> str:
+        if not value.isdigit():
+            raise ValueError("OTP must contain only digits")
+        return value
+
+
+class ResetPINRequest(BaseModel):
+    """Request schema for POST /api/v1/auth/pin/reset."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    token: str = Field(..., min_length=1, description="Reset authorization token")
+    new_pin: str = Field(..., min_length=4, max_length=4, description="New 4-digit security PIN")
+
+    @field_validator("token")
+    @classmethod
+    def validate_token(cls, value: str) -> str:
+        val = value.strip()
+        if not val:
+            raise ValueError("Reset token is required")
+        return val
+
+    @field_validator("new_pin")
+    @classmethod
+    def validate_new_pin(cls, value: str) -> str:
+        val = str(value).strip()
+        if len(val) != 4 or not val.isdigit():
+            raise ValueError("New PIN must be exactly 4 digits")
+        return val
+

@@ -1583,3 +1583,140 @@ def test_store_owners_alias_endpoints(super_admin_fixture, tenant_fixture):
     r_stores = client.get(f"/api/v1/super-admins/store-owners/{tenant_id}/stores", headers=headers)
     assert r_stores.status_code == 200
     assert "items" in r_stores.json()
+
+
+def test_super_admin_patch_me_endpoint(super_admin_fixture):
+    """Verify PATCH /api/v1/super-admins/me successfully updates profile."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": super_admin_fixture["password"],
+        },
+    )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    update_payload = {
+        "full_name": "Updated Super Name",
+        "phone": "9876543210",
+    }
+    r = client.patch("/api/v1/super-admins/me", json=update_payload, headers=headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["full_name"] == "Updated Super Name"
+    assert data["phone"] == "9876543210"
+
+
+def test_super_admin_change_password_reject_same_and_revoke_token(super_admin_fixture):
+    """Verify change-password rejects same password and revokes the active token upon success."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": super_admin_fixture["password"],
+        },
+    )
+    token = login_r.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Attempt to set the same password
+    r_same = client.post(
+        "/api/v1/super-admins/change-password",
+        json={
+            "current_password": super_admin_fixture["password"],
+            "new_password": super_admin_fixture["password"],
+        },
+        headers=headers,
+    )
+    assert r_same.status_code == 400
+    assert "cannot be the same" in r_same.text
+
+    # 2. Change password to new valid password
+    new_pw = "NewSecurePass123!"
+    r_change = client.post(
+        "/api/v1/super-admins/change-password",
+        json={
+            "current_password": super_admin_fixture["password"],
+            "new_password": new_pw,
+        },
+        headers=headers,
+    )
+    assert r_change.status_code == 200
+
+    # 3. Old token must now be revoked (blacklisted)
+    r_old_token = client.get("/api/v1/super-admins/me", headers=headers)
+    assert r_old_token.status_code == 401
+
+    # 4. Login with new password works
+    login_new = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": new_pw,
+        },
+    )
+    assert login_new.status_code == 200
+
+
+def test_super_admin_single_admin_deactivation_guard(super_admin_fixture, db_session):
+    """Verify that deactivating the only active super admin returns 403 Forbidden."""
+    from app.models.super_admin import SuperAdmin
+    admin_id = super_admin_fixture["super_admin"].id
+    # Ensure only 1 active super admin exists in DB
+    db_session.query(SuperAdmin).filter(SuperAdmin.id != admin_id).update({"is_active": False})
+    db_session.commit()
+
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": "NewSecurePass123!",
+        },
+    )
+    if login_r.status_code != 200:
+        login_r = client.post(
+            "/api/v1/super-admins/login",
+            json={
+                "email": super_admin_fixture["email"],
+                "password": super_admin_fixture["password"],
+            },
+        )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    r = client.patch(
+        f"/api/v1/super-admins/{admin_id}/status",
+        json={"is_active": False},
+        headers=headers,
+    )
+    # Self deactivation is forbidden (401 or 403)
+    assert r.status_code in (401, 403)
+
+
+def test_super_admin_dashboard_extended_metrics(super_admin_fixture):
+    """Verify that GET /dashboard contains extended store, plan, and upi metrics."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": "NewSecurePass123!",
+        },
+    )
+    if login_r.status_code != 200:
+        login_r = client.post(
+            "/api/v1/super-admins/login",
+            json={
+                "email": super_admin_fixture["email"],
+                "password": super_admin_fixture["password"],
+            },
+        )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    r = client.get("/api/v1/super-admins/dashboard", headers=headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert "total_stores" in data
+    assert "active_stores" in data
+    assert "active_plans" in data
+    assert "pending_upi_transactions" in data
+    assert "verified_upi_transactions" in data
+    assert "rejected_upi_transactions" in data

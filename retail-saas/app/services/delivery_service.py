@@ -2,8 +2,10 @@ import csv
 from datetime import datetime
 from io import BytesIO, StringIO
 
-from openpyxl import Workbook, load_workbook
+from openpyxl import load_workbook
 from sqlalchemy.orm.attributes import flag_modified
+
+from app.services.excel_export_service import ExcelExportService
 
 from app.core.exceptions import AppException, ConflictException, NotFoundException
 from app.models.delivery import Delivery
@@ -399,10 +401,7 @@ class DeliveryService:
         deliveries = self.repo.get_for_export(tenant_id, status=status)
 
         if format == "excel":
-            workbook = Workbook()
-            worksheet = workbook.active
-            worksheet.title = "Deliveries"
-            worksheet.append([
+            headers = [
                 "ID",
                 "Order Number",
                 "Status",
@@ -411,9 +410,10 @@ class DeliveryService:
                 "Delivery Address",
                 "Delivered At",
                 "Created At",
-            ])
+            ]
+            rows = []
             for d in deliveries:
-                worksheet.append([
+                rows.append([
                     d.id,
                     d.order.order_number if d.order else "",
                     d.status,
@@ -423,9 +423,11 @@ class DeliveryService:
                     d.delivered_at.strftime("%Y-%m-%d %H:%M:%S") if d.delivered_at else "",
                     d.created_at.strftime("%Y-%m-%d %H:%M:%S") if d.created_at else "",
                 ])
-            output = BytesIO()
-            workbook.save(output)
-            output.seek(0)
+            output = ExcelExportService().export_to_stream(
+                sheet_title="Deliveries",
+                headers=headers,
+                rows=rows,
+            )
             return (
                 output,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -966,4 +968,3 @@ class DeliveryService:
             zones_updated=sorted(list(zones_affected)),
         )
 
-

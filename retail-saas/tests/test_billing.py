@@ -328,3 +328,38 @@ def test_invoice_search_by_gstin_and_payment_status(billing_setup):
     assert any(i["id"] == invoice["id"] for i in by_payment)
 
 
+def test_create_invoice_direct_items(billing_setup):
+    headers, store, product = billing_setup
+
+    resp = client.post(
+        "/api/v1/invoices",
+        json={
+            "store_id": store["id"],
+            "same_state": True,
+            "items": [
+                {
+                    "product_id": product["id"],
+                    "quantity": 2,
+                    "unit_price": "200.00",
+                    "discount": "0.00",
+                }
+            ],
+            "payments": [
+                {
+                    "payment_mode": "cash",
+                    "amount": "472.00",
+                    "transaction_reference": "TXN_DIRECT",
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["invoice_number"].startswith("INV-")
+    assert data["total_amount"] == "472.00"
+    assert data["subtotal"] == "400.00"
+    assert data["cgst_amount"] == "36.00"
+    assert data["sgst_amount"] == "36.00"
+
+

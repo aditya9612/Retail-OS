@@ -1,16 +1,31 @@
-from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
+from pydantic import BaseModel, ConfigDict
+
+
+class StoreSummaryItem(BaseModel):
+    store_id: int
+    store_name: str
+    today_sales: float
+    monthly_sales: float
+    orders_count: int
+    low_stock_count: int
+    is_active: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DashboardResponse(BaseModel):
+    mode: str = "all_stores"  # "all_stores" or "single_store"
+    store_id: Optional[int] = None
+    store_name: Optional[str] = None
     today_sales: float
     monthly_sales: float
     total_customers: int
     total_revenue: float
     low_stock_products: int
+    stores_summary: Optional[List[StoreSummaryItem]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MonthlySales(BaseModel):
@@ -21,15 +36,14 @@ class MonthlySales(BaseModel):
 class DashboardOverviewResponse(BaseModel):
     overview: List[MonthlySales]
 
-    class Config:
-        from_attributes = True 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class RevenueVsCostResponse(BaseModel):
     revenue: float
     cost: float
 
-    class Config:
-        from_attributes = True   
+    model_config = ConfigDict(from_attributes=True)
 
 class TopProduct(BaseModel):
     product_name: str

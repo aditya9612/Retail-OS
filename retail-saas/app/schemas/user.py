@@ -1,6 +1,6 @@
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 import re
 
 from pydantic import (
@@ -11,6 +11,9 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from app.utils.validators import validate_pan_number, validate_aadhaar_number
+from app.utils.phone import normalize_phone_number
 
 
 PHONE_PATTERN = re.compile(r"^(?:\+91)?[6-9]\d{9}$")
@@ -46,13 +49,49 @@ class UserBase(BaseModel):
     role_id: Optional[int] = Field(
         default=None,
         gt=0,
-        description="Role ID from GET /api/v1/users/roles. Optional if 'role' name is provided.",
+        description="Role ID from GET /api/v1/roles. Optional if 'role' name is provided.",
     )
 
     role: Optional[str] = Field(
         default=None,
         description="Role name (e.g. manager, staff, admin, owner). Automatically mapped to role_id.",
     )
+
+    pancard: Optional[str] = Field(
+        default=None,
+        description="PAN card number or uploaded document URL",
+    )
+
+    addhar_card: Optional[str] = Field(
+        default=None,
+        description="Aadhaar card number or uploaded document URL",
+    )
+
+    profile_photo: Optional[str] = Field(
+        default=None,
+        description="Profile photo URL or file path",
+    )
+
+    pan_number: Optional[str] = Field(
+        default=None,
+        description="PAN card number (e.g. ABCDE1234F)",
+    )
+
+    addhar_number: Optional[str] = Field(
+        default=None,
+        description="Aadhaar card 12-digit number",
+    )
+
+    @field_validator("pan_number")
+    @classmethod
+    def validate_pan(cls, value: Optional[str]) -> Optional[str]:
+        return validate_pan_number(value)
+
+    @field_validator("addhar_number", mode="before")
+    @classmethod
+    def validate_aadhaar(cls, value: Any) -> Optional[str]:
+        return validate_aadhaar_number(value)
+
 
     @field_validator("email")
     @classmethod
@@ -117,24 +156,9 @@ class UserBase(BaseModel):
         cls,
         value: Optional[str],
     ) -> Optional[str]:
-
-        if value is None:
+        if value is None or (isinstance(value, str) and not value.strip()):
             return None
-
-        value = str(value).strip()
-
-        if not value:
-            raise ValueError("Phone cannot be empty")
-
-        if not PHONE_PATTERN.fullmatch(value):
-            raise ValueError(
-                "Phone must be 10 digits starting with 6-9 or +91 followed by 10 digits"
-            )
-
-        if value.startswith("+91"):
-            value = value[3:]
-
-        return value
+        return normalize_phone_number(value)
 
 
 class UserCreate(UserBase):
@@ -210,7 +234,7 @@ class UserUpdate(BaseModel):
     role_id: Optional[int] = Field(
         default=None,
         gt=0,
-        description="Role ID from GET /api/v1/users/roles.",
+        description="Role ID from GET /api/v1/roles.",
     )
 
     is_active: Optional[bool] = None
@@ -220,6 +244,36 @@ class UserUpdate(BaseModel):
         min_length=8,
         max_length=100,
     )
+
+    pancard: Optional[str] = Field(
+        default=None,
+    )
+
+    addhar_card: Optional[str] = Field(
+        default=None,
+    )
+
+    profile_photo: Optional[str] = Field(
+        default=None,
+    )
+
+    pan_number: Optional[str] = Field(
+        default=None,
+    )
+
+    addhar_number: Optional[str] = Field(
+        default=None,
+    )
+
+    @field_validator("pan_number")
+    @classmethod
+    def validate_pan(cls, value: Optional[str]) -> Optional[str]:
+        return validate_pan_number(value)
+
+    @field_validator("addhar_number", mode="before")
+    @classmethod
+    def validate_aadhaar(cls, value: Any) -> Optional[str]:
+        return validate_aadhaar_number(value)
 
     model_config = ConfigDict(
         extra="forbid",
@@ -260,24 +314,9 @@ class UserUpdate(BaseModel):
         cls,
         value: Optional[str],
     ) -> Optional[str]:
-
-        if value is None:
+        if value is None or (isinstance(value, str) and not value.strip()):
             return None
-
-        value = str(value).strip()
-
-        if not value:
-            raise ValueError("Phone cannot be empty")
-
-        if not PHONE_PATTERN.fullmatch(value):
-            raise ValueError(
-                "Phone must be 10 digits starting with 6-9 or +91 followed by 10 digits"
-            )
-
-        if value.startswith("+91"):
-            value = value[3:]
-
-        return value
+        return normalize_phone_number(value)
 
     @field_validator("password")
     @classmethod
@@ -404,24 +443,9 @@ class MyProfileUpdate(BaseModel):
         cls,
         value: Optional[str],
     ) -> Optional[str]:
-
-        if value is None:
+        if value is None or (isinstance(value, str) and not value.strip()):
             return None
-
-        value = str(value).strip()
-
-        if not value:
-            raise ValueError("Phone cannot be empty")
-
-        if not PHONE_PATTERN.fullmatch(value):
-            raise ValueError(
-                "Phone must be 10 digits starting with 6-9 or +91 followed by 10 digits"
-            )
-
-        if value.startswith("+91"):
-            value = value[3:]
-
-        return value
+        return normalize_phone_number(value)
 
     @model_validator(mode="after")
     def validate_updates(self):
@@ -469,6 +493,11 @@ class UserResponse(BaseModel):
     is_active: bool
     role: Optional[RoleResponse] = None
     created_at: datetime
+    pancard: Optional[str] = None
+    addhar_card: Optional[str] = None
+    profile_photo: Optional[str] = None
+    pan_number: Optional[str] = None
+    addhar_number: Optional[str] = None
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -489,3 +518,61 @@ class AssignStoreResponse(BaseModel):
     store_id: int
     store_name: Optional[str] = None
     role: Optional[str] = None
+
+
+class RemoveStoreRequest(BaseModel):
+    store_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Optional Store ID to verify before removing user from store. If provided, ensures user is assigned to this store.",
+    )
+
+
+class RemoveStoreResponse(BaseModel):
+    message: str = "User removed from store successfully"
+    user_id: int
+    store_id: Optional[int] = None
+    previous_store_id: Optional[int] = None
+    role: Optional[str] = None
+
+
+class StoreUserItem(BaseModel):
+    id: int
+    full_name: str
+    email: str
+    phone: Optional[str] = None
+    role_id: int
+    role_name: str
+    is_active: bool
+    created_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class StoreUsersSummary(BaseModel):
+    store_id: Optional[int] = Field(
+        default=None,
+        description="Store ID, or null for unassigned / head office users",
+    )
+    store_name: str
+    store_code: Optional[str] = None
+    is_main: bool = False
+    total_users: int
+    users: list[StoreUserItem] = Field(default_factory=list)
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class UsersByStoreResponse(BaseModel):
+    total_stores: int
+    total_users: int
+    stores: list[StoreUsersSummary]
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+

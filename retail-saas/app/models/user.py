@@ -1,4 +1,5 @@
-from sqlalchemy import Boolean, ForeignKey, Index, String
+from datetime import datetime
+from sqlalchemy import Boolean, Computed, DateTime, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -8,6 +9,7 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
     __table_args__ = (
         Index("ix_users_tenant_entitlement", "tenant_id", "is_deleted", "is_active"),
+        UniqueConstraint("active_phone", name="uq_users_active_phone"),
     )
 
     id: Mapped[int] = mapped_column(
@@ -43,6 +45,16 @@ class User(Base, TimestampMixin):
         nullable=False,
     )
 
+    pin_hash: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    pin_set_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
     @property
     def hashed_password(self) -> str:
         return self.password_hash
@@ -60,6 +72,77 @@ class User(Base, TimestampMixin):
         String(20),
         nullable=True,
     )
+
+    is_mobile_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    mobile_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    active_phone: Mapped[str | None] = mapped_column(
+        String(20),
+        Computed(
+            "CASE WHEN is_deleted = 0 AND phone IS NOT NULL AND phone != '' THEN phone ELSE NULL END",
+            persisted=False,
+        ),
+        nullable=True,
+    )
+
+    pancard: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    addhar_card: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    profile_photo: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
+    pan_number: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    addhar_number: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    @property
+    def aadhar_card(self) -> str | None:
+        return self.addhar_card
+
+    @aadhar_card.setter
+    def aadhar_card(self, val: str | None) -> None:
+        self.addhar_card = val
+
+    @property
+    def aadhar_number(self) -> str | None:
+        return self.addhar_number
+
+    @aadhar_number.setter
+    def aadhar_number(self, val: str | None) -> None:
+        self.addhar_number = val
+
+    @property
+    def pancard_number(self) -> str | None:
+        return self.pan_number
+
+    @pancard_number.setter
+    def pancard_number(self, val: str | None) -> None:
+        self.pan_number = val
+
+
 
     is_active: Mapped[bool] = mapped_column(
         Boolean,

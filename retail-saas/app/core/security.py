@@ -280,6 +280,7 @@ def get_current_user(
         .filter(
             User.id == user_id,
             User.is_active.is_(True),
+            User.is_deleted.is_(False),
         )
         .first()
     )
@@ -314,6 +315,24 @@ def get_current_user(
         raise UnauthorizedException(
             "Tenant account is disabled"
         )
+
+    if user.store_id is not None:
+        from app.models.store import Store
+
+        store = (
+            db.query(Store)
+            .filter(
+                Store.id == user.store_id,
+                Store.tenant_id == user.tenant_id,
+                Store.is_active.is_(True),
+            )
+            .first()
+        )
+
+        if not store:
+            raise UnauthorizedException(
+                "Store account is disabled"
+            )
 
     set_current_user_id(user.id)
     set_current_tenant_id(user.tenant_id)
@@ -398,6 +417,10 @@ def require_permission(permission: str):
         if "*" in perms or permission in perms:
             return user
 
+        # Backward compatibility for existing owner and admin roles in DB
+        if user.role and user.role.name in ["admin", "owner"] and permission.startswith("dashboard:"):
+            return user
+
         raise ForbiddenException(
             f"Missing permission: {permission}"
         )
@@ -429,4 +452,4 @@ def require_operational_write(
     from app.services.saas_access_service import SaaSSubscriptionAccessService
 
     SaaSSubscriptionAccessService(db).require_operational_write_access(user)
-    return user
+    return user

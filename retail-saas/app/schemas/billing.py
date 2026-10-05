@@ -101,10 +101,29 @@ class PaymentSplit(BaseModel):
         return v
 
 
+class InvoiceItemCreate(BaseModel):
+    product_id: int = Field(gt=0, description="Product ID must be positive")
+    quantity: int = Field(gt=0, description="Quantity must be positive")
+    unit_price: Optional[Decimal] = Field(
+        default=None,
+        gt=0,
+        description="Unit price; fetched from product if omitted",
+    )
+    discount: Decimal = Field(
+        default=Decimal("0.0"),
+        ge=0,
+        description="Line item discount",
+    )
+
+
 class InvoiceCreate(BaseModel):
     store_id: int = Field(gt=0, description="Store ID must be positive")
     customer_id: Optional[int] = Field(default=None, gt=0)
     same_state: bool = True
+    items: Optional[list[InvoiceItemCreate]] = Field(
+        default=None,
+        description="Optional direct line items. If omitted, items from user's active cart will be used.",
+    )
     payments: list["PaymentSplit"] = Field(
         default_factory=list,
         max_length=5,
