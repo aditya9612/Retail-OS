@@ -78,6 +78,8 @@ DEFAULT_ROLE_PERMISSIONS = {
     ],
 
     UserRole.OWNER: [
+        "dashboard:view",
+        "dashboard:read",
         "users:read",
         "users:write",
         "stores:read",
@@ -104,6 +106,8 @@ DEFAULT_ROLE_PERMISSIONS = {
     ],
 
     UserRole.MANAGER: [
+        "dashboard:view",
+        "dashboard:read",
         "stores:read",
         "users:read",
         "products:read",

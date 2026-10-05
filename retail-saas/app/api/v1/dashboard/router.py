@@ -43,7 +43,7 @@ def _resolve_effective_store_id(user: User, store_id: Optional[int]) -> Optional
     summary="Dashboard Summary"
 )
 def get_dashboard(
-    store_id: Optional[int] = Query(default=None, description="Optional store ID filter"),
+    store_id: Optional[int] = Query(default=None, gt=0, description="Optional store ID filter"),
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("dashboard:view")),
 ):
@@ -57,7 +57,7 @@ def get_dashboard(
     summary="Dashboard Overview Chart",
 )
 def dashboard_overview(
-    store_id: Optional[int] = Query(default=None, description="Optional store ID filter"),
+    store_id: Optional[int] = Query(default=None, gt=0, description="Optional store ID filter"),
     user: User = Depends(require_permission("dashboard:read")),
     db: Session = Depends(get_db),
 ):
@@ -71,7 +71,7 @@ def dashboard_overview(
     summary="Revenue vs Cost",
 )
 def revenue_vs_cost(
-    store_id: Optional[int] = Query(default=None, description="Optional store ID filter"),
+    store_id: Optional[int] = Query(default=None, gt=0, description="Optional store ID filter"),
     user: User = Depends(require_permission("dashboard:read")),
     db: Session = Depends(get_db),
 ):
@@ -85,7 +85,7 @@ def revenue_vs_cost(
     summary="Top Products",
 )
 def get_top_products(
-    store_id: Optional[int] = Query(default=None, description="Optional store ID filter"),
+    store_id: Optional[int] = Query(default=None, gt=0, description="Optional store ID filter"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("dashboard:view")),
 ):

@@ -507,3 +507,202 @@ def test_sub_endpoints_store_filtering(multi_store_data):
 
     # Top Products staff accessing store 2 -> 403
     assert client.get(f"/api/v1/dashboard/top-products?store_id={store2_id}", headers=staff_headers).status_code == 403
+
+
+def test_dashboard_store_id_validation_errors(multi_store_data):
+    """
+    Validation error testing:
+    - store_id = 0 -> 422
+    - store_id = -1 -> 422
+    - store_id = 'invalid' -> 422
+    Sub-endpoints also return 422 for store_id <= 0
+    """
+    headers = multi_store_data["owner_headers"]
+    assert client.get("/api/v1/dashboard?store_id=0", headers=headers).status_code == 422
+    assert client.get("/api/v1/dashboard?store_id=-5", headers=headers).status_code == 422
+    assert client.get("/api/v1/dashboard?store_id=abc", headers=headers).status_code == 422
+    assert client.get("/api/v1/dashboard/overview?store_id=0", headers=headers).status_code == 422
+    assert client.get("/api/v1/dashboard/revenue-vs-cost?store_id=-1", headers=headers).status_code == 422
+    assert client.get("/api/v1/dashboard/top-products?store_id=0", headers=headers).status_code == 422
+
+
+def test_empty_tenant_zero_stores():
+    """
+    Tenant with zero stores created:
+    - Must return 200 OK
+    - metrics all 0.0
+    - stores_summary == []
+    """
+    suffix = uuid.uuid4().hex[:6]
+    owner_email = f"empty_{suffix}@retailtest.com"
+    owner_pass = "OwnerPass123!"
+    reg_res = client.post(
+        "/api/v1/auth/register",
+        json={
+            "store_name": f"Empty Retail {suffix}",
+            "domain": f"empty-{suffix}",
+            "owner_email": owner_email,
+            "owner_name": f"Owner {suffix}",
+            "password": owner_pass,
+            "owner_phone": _gen_phone(),
+            "plan_code": "enterprise",
+        },
+    )
+    assert reg_res.status_code == 200
+    login_res = client.post(
+        "/api/v1/auth/login",
+        json={"email": owner_email, "password": owner_pass},
+    )
+    headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
+
+    res = client.get("/api/v1/dashboard", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["mode"] == "all_stores"
+    assert data["today_sales"] == 0.0
+    assert data["monthly_sales"] == 0.0
+    assert data["total_revenue"] == 0.0
+    assert data["total_customers"] == 0
+    assert data["low_stock_products"] == 0
+    assert data["stores_summary"] == []
+
+
+def test_store_with_zero_orders_and_zero_inventory(multi_store_data):
+    """
+    Drilldown into a store with zero orders, zero customers, and zero inventory:
+    - Must return 200 OK with all 0s
+    - stores_summary must be None
+    """
+    headers = multi_store_data["owner_headers"]
+    suffix = uuid.uuid4().hex[:6]
+    s3_res = client.post(
+        "/api/v1/stores/",
+        headers=headers,
+        json={"name": f"Zero Store {suffix}", "code": f"Z0{suffix[:4].upper()}"},
+    )
+    assert s3_res.status_code == 201
+    store3_id = s3_res.json()["id"]
+
+    res = client.get(f"/api/v1/dashboard?store_id={store3_id}", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["mode"] == "single_store"
+    assert data["store_id"] == store3_id
+    assert data["today_sales"] == 0.0
+    assert data["monthly_sales"] == 0.0
+    assert data["total_customers"] == 0
+    assert data["total_revenue"] == 0.0
+    assert data["low_stock_products"] == 0
+    assert data["stores_summary"] is None
+
+    # Sub-endpoints should also handle zero data cleanly
+    res_ov = client.get(f"/api/v1/dashboard/overview?store_id={store3_id}", headers=headers)
+    assert res_ov.status_code == 200
+    assert all(m["sales"] == 0.0 for m in res_ov.json()["overview"])
+
+    res_rc = client.get(f"/api/v1/dashboard/revenue-vs-cost?store_id={store3_id}", headers=headers)
+    assert res_rc.status_code == 200
+    assert res_rc.json()["revenue"] == 0.0
+    assert res_rc.json()["cost"] == 0.0
+
+    res_tp = client.get(f"/api/v1/dashboard/top-products?store_id={store3_id}", headers=headers)
+    assert res_tp.status_code == 200
+    assert res_tp.json()["top_products"] == []
+
+
+def test_inactive_store_behavior(multi_store_data):
+    """
+    Inactive store:
+    - Included in stores_summary with is_active=False
+    - Owner can still view historical metrics via drilldown
+    """
+    headers = multi_store_data["owner_headers"]
+    suffix = uuid.uuid4().hex[:6]
+    s_res = client.post(
+        "/api/v1/stores/",
+        headers=headers,
+        json={"name": f"Inactive Store {suffix}", "code": f"IN{suffix[:4].upper()}"},
+    )
+    assert s_res.status_code == 201
+    store_id = s_res.json()["id"]
+
+    # Deactivate the store
+    patch_res = client.patch(
+        f"/api/v1/stores/{store_id}",
+        headers=headers,
+        json={"is_active": False},
+    )
+    assert patch_res.status_code == 200
+    assert patch_res.json()["is_active"] is False
+
+    # All stores dashboard should list it with is_active = False
+    dash_res = client.get("/api/v1/dashboard", headers=headers)
+    assert dash_res.status_code == 200
+    item = next((s for s in dash_res.json()["stores_summary"] if s["store_id"] == store_id), None)
+    assert item is not None
+    assert item["is_active"] is False
+
+    # Owner can still drill down
+    drill_res = client.get(f"/api/v1/dashboard?store_id={store_id}", headers=headers)
+    assert drill_res.status_code == 200
+    assert drill_res.json()["mode"] == "single_store"
+
+
+def test_cashier_role_forbidden_from_dashboard(multi_store_data):
+    """
+    Cashier user without dashboard:view permission must be rejected with 403 Forbidden.
+    """
+    db = SessionLocal()
+    suffix = uuid.uuid4().hex[:6]
+    tenant_id = multi_store_data["tenant1_id"]
+    try:
+        cashier_role = (
+            db.query(Role)
+            .filter(Role.tenant_id == tenant_id, Role.name == "cashier")
+            .first()
+        )
+        if not cashier_role:
+            cashier_role = Role(
+                tenant_id=tenant_id,
+                name="cashier",
+                is_system=False,
+                permissions=["billing:read", "billing:write", "orders:read"],
+            )
+            db.add(cashier_role)
+            db.commit()
+            db.refresh(cashier_role)
+
+        cashier_email = f"cashier_{suffix}@retailtest.com"
+        cashier_pass = "CashierPass123!"
+        cashier_user = User(
+            tenant_id=tenant_id,
+            store_id=multi_store_data["store1_id"],
+            role_id=cashier_role.id,
+            email=cashier_email,
+            password_hash=get_password_hash(cashier_pass),
+            full_name=f"Cashier {suffix}",
+            phone=_gen_phone(),
+            is_active=True,
+            is_deleted=False,
+        )
+        db.add(cashier_user)
+        db.commit()
+
+        login_res = client.post(
+            "/api/v1/auth/login",
+            json={"email": cashier_email, "password": cashier_pass},
+        )
+        assert login_res.status_code == 200
+        cashier_headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
+
+        # Attempt dashboard access
+        res = client.get("/api/v1/dashboard", headers=cashier_headers)
+        assert res.status_code == 403, res.text
+        assert "permission" in res.json().get("message", "").lower()
+
+        # Attempt sub-endpoint access
+        res_ov = client.get("/api/v1/dashboard/overview", headers=cashier_headers)
+        assert res_ov.status_code == 403, res_ov.text
+    finally:
+        db.close()
+
