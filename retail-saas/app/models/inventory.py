@@ -42,13 +42,7 @@ class Inventory(Base, TimestampMixin):
     def batch_number(self, val: str | None) -> None:
         self._batch_number = val
 
-    @property
-    def expiry_date(self) -> date | None:
-        return getattr(self, "_expiry_date", None)
-
-    @expiry_date.setter
-    def expiry_date(self, val: date | None) -> None:
-        self._expiry_date = val
+    expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     product: Mapped["Product"] = relationship(
         "Product",
@@ -96,12 +90,28 @@ class StockMovement(Base, TimestampMixin):
                 pass
 
     @property
+    def batch_number(self) -> str | None:
+        return getattr(self, "_batch_number", None)
+
+    @batch_number.setter
+    def batch_number(self, val: str | None) -> None:
+        self._batch_number = val
+
+    @property
+    def expiry_date(self) -> date | None:
+        return getattr(self, "_expiry_date", None)
+
+    @expiry_date.setter
+    def expiry_date(self, val: date | None) -> None:
+        self._expiry_date = val
+
+    @property
     def unit_cost(self) -> Decimal | None:
-        return Decimal("0.00")
+        return getattr(self, "_unit_cost", None)
 
     @unit_cost.setter
     def unit_cost(self, val: Any) -> None:
-        pass
+        self._unit_cost = Decimal(str(val)) if val is not None else None
 
     @property
     def from_store_id(self) -> int | None:

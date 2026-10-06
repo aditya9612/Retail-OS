@@ -1,7 +1,7 @@
 import re
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
@@ -78,6 +78,29 @@ class InventoryValuationResponse(BaseModel):
     total_inventory_value: Decimal
 
 
+FORBIDDEN_BATCH_PLACEHOLDERS = {
+    "string",
+    "test",
+    "null",
+    "none",
+    "undefined",
+    "n/a",
+    "na",
+    "abc",
+    "----",
+    "---",
+    "--",
+    "...",
+    "???",
+    "!@#$",
+    "@#$%",
+    "dummy",
+    "placeholder",
+    "sample",
+    "temp",
+}
+
+
 class StockInRequest(BaseModel):
     store_id: int = Field(gt=0, description="Store ID must be positive")
     product_id: int = Field(gt=0, description="Product ID must be positive")
@@ -85,30 +108,53 @@ class StockInRequest(BaseModel):
     supplier_id: Optional[int] = Field(default=None, gt=0)
     batch_number: Optional[str] = Field(default=None, max_length=100)
     expiry_date: Optional[date] = None
-    unit_cost: Optional[Decimal] = Field(default=None, gt=0, le=Decimal("999999.99"), description="Unit cost must be greater than 0")
+    unit_cost: Optional[Decimal] = Field(default=None, ge=Decimal("1.00"), le=Decimal("999999.99"), description="Unit cost must be at least 1.00")
     notes: Optional[str] = Field(default=None, max_length=500)
 
     @field_validator("batch_number")
     @classmethod
     def validate_batch_number(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
-            return None
-        cleaned = _validate_semantic_text(v, "batch_number")
+            raise ValueError("batch_number cannot be null")
+        if not isinstance(v, str):
+            raise ValueError("batch_number must be a string")
+        if v != v.strip():
+            raise ValueError("batch_number cannot have leading or trailing whitespace")
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("batch_number cannot be empty or whitespace")
+
+        lower = cleaned.lower()
+        if lower in FORBIDDEN_BATCH_PLACEHOLDERS:
+            raise ValueError("batch_number contains an invalid placeholder value")
+
+        norm = re.sub(r"[-_\s/.]", "", lower)
+        if norm in FORBIDDEN_BATCH_PLACEHOLDERS or (norm and norm in {"na", "none", "null", "undefined", "dummy", "test", "string", "abc"}):
+            raise ValueError("batch_number contains an invalid placeholder value")
+
         if not re.search(r"[a-zA-Z0-9]", cleaned):
             raise ValueError("batch_number must contain alphanumeric characters")
+
+        alnum_only = re.sub(r"[^a-zA-Z0-9]", "", cleaned)
+        if alnum_only and len(set(alnum_only)) == 1 and alnum_only[0] == "0":
+            raise ValueError("batch_number cannot be all zeros or a dummy value")
+
+        if alnum_only.isdigit() and len(set(alnum_only)) == 1 and len(alnum_only) > 1:
+            raise ValueError("batch_number cannot be repeated dummy digits")
+
+        if alnum_only in {"123", "1234", "12345", "123456", "1234567", "12345678", "987654321", "012345"}:
+            raise ValueError("batch_number cannot be a sequential dummy value")
+
         return cleaned
 
-    @field_validator("unit_cost")
+    @field_validator("expiry_date", mode="before")
     @classmethod
-    def validate_unit_cost(cls, v: Optional[Decimal]) -> Optional[Decimal]:
-        if v is not None and v <= Decimal("0"):
-            raise ValueError("unit_cost must be greater than 0")
+    def validate_expiry_date_raw(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError("expiry_date cannot be null")
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("expiry_date cannot be empty or whitespace")
         return v
-
-    @field_validator("notes")
-    @classmethod
-    def validate_notes(cls, v: Optional[str]) -> Optional[str]:
-        return _validate_semantic_text(v, "notes")
 
     @field_validator("expiry_date")
     @classmethod
@@ -116,6 +162,29 @@ class StockInRequest(BaseModel):
         if v is not None and v < date.today():
             raise ValueError("Expiry date cannot be in the past")
         return v
+
+    @field_validator("unit_cost", mode="before")
+    @classmethod
+    def validate_unit_cost_raw(cls, v: Any) -> Any:
+        if isinstance(v, bool):
+            raise ValueError("unit_cost must be a numeric value, not boolean")
+        if v is None:
+            raise ValueError("unit_cost cannot be null")
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("unit_cost cannot be empty or whitespace")
+        return v
+
+    @field_validator("unit_cost")
+    @classmethod
+    def validate_unit_cost(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        if v is not None and v < Decimal("1.00"):
+            raise ValueError("unit_cost must be at least 1.00")
+        return v
+
+    @field_validator("notes")
+    @classmethod
+    def validate_notes(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_semantic_text(v, "notes")
 
 
 class StockOutRequest(BaseModel):
@@ -166,6 +235,12 @@ class StockMovementResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+ 
+ 
+class StockInResponse(StockMovementResponse):
+    batch_number: Optional[str] = None
+    expiry_date: Optional[date] = None
+    unit_cost: Optional[Decimal] = None
 
 
 class StockMovementEmptyResponse(BaseModel):

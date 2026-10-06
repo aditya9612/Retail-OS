@@ -12,6 +12,7 @@ from app.schemas.inventory import (
     ExpiryEmptyResponse,
     LowStockResponse,
     StockInRequest,
+    StockInResponse,
     StockMovementResponse,
     StockMovementEmptyResponse,
     StockOutRequest,
@@ -35,14 +36,14 @@ def list_inventory(
 
 @router.get("/low-stock", response_model=LowStockResponse)
 def low_stock(
-    store_id: int | None = Query(default=None, gt=0),
+    store_id: int = Query(..., gt=0, description="Store ID must be positive"),
     user: User = Depends(require_permission("inventory:read")),
     db: Session = Depends(get_db),
 ):
     return InventoryService(db).get_low_stock(user.tenant_id, store_id)
 
 
-@router.post("/stock-in", response_model=StockMovementResponse, status_code=201, dependencies=[Depends(require_operational_write)])
+@router.post("/stock-in", response_model=StockInResponse, status_code=201, dependencies=[Depends(require_operational_write)])
 def stock_in(
     data: StockInRequest,
     user: User = Depends(require_permission("inventory:write")),
@@ -91,7 +92,7 @@ def expiry_inventory(
     
 @router.get("/movements", response_model=Union[list[StockMovementResponse], StockMovementEmptyResponse])
 def list_movements(
-    store_id: int | None = Query(default=None, gt=0),
+    store_id: int = Query(..., gt=0, description="Store ID must be positive"),
     user: User = Depends(require_permission("inventory:read")),
     db: Session = Depends(get_db),
 ):

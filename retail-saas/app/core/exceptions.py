@@ -72,6 +72,7 @@ class QuotaExceededException(AppException):
 
 
 import logging
+import re
 from typing import Any, Dict, List, Optional, Union
 
 from fastapi import HTTPException, Request, status
@@ -185,7 +186,57 @@ def register_exception_handlers(app):
             request.url.path,
             exc.errors(),
         )
-        formatted = _format_pydantic_errors(exc.errors())
+        errors = exc.errors()
+        if request.method == "POST" and request.url.path.rstrip("/").endswith("/inventory/transfer"):
+            has_json_invalid = any(err.get("type") == "json_invalid" for err in errors)
+            if has_json_invalid:
+                try:
+                    raw_body = await request.body()
+                    body_text = raw_body.decode("utf-8", errors="replace")
+                except Exception:
+                    body_text = ""
+
+                is_quantity_err = False
+                for err in errors:
+                    if err.get("type") == "json_invalid":
+                        loc = err.get("loc", ())
+                        pos = loc[1] if len(loc) > 1 and isinstance(loc[1], int) else None
+                        before_pos = body_text[:pos] if pos is not None else body_text
+                        if re.search(r'["\']quantity["\']\s*:\s*$', before_pos.rstrip()):
+                            is_quantity_err = True
+                            break
+
+                if not is_quantity_err and re.search(r'["\']quantity["\']\s*:\s*[^0-9"\s{\[\]-]', body_text):
+                    is_quantity_err = True
+
+                if is_quantity_err:
+                    formatted = {
+                        "success": False,
+                        "message": "Validation failed: 'quantity': Invalid value for quantity. Expected a positive integer.",
+                        "detail": [
+                            {
+                                "type": "int_parsing",
+                                "loc": ["body", "quantity"],
+                                "msg": "Invalid value for quantity. Expected a positive integer.",
+                                "input": None,
+                                "ctx": {"error": "Expected a positive integer"},
+                            }
+                        ],
+                        "errors": [
+                            {
+                                "field": "quantity",
+                                "message": "Invalid value for quantity. Expected a positive integer.",
+                                "type": "int_parsing",
+                                "loc": ["body", "quantity"],
+                            }
+                        ],
+                    }
+                    return JSONResponse(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        content=formatted,
+                    )
+
+        formatted = _format_pydantic_errors(errors)
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content=formatted,

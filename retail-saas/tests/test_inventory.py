@@ -51,9 +51,9 @@ def auth_context(unique_slug):
         json={
             "name": "Widget A",
             "sku": f"WGT-{unique_slug}",
-            "price": "100.00",
-            "cost_price": "60.00",
-            "gst_rate": "18.00",
+            "price": 100.00,
+            "cost_price": 60.00,
+            "gst_rate": 18.00,
         },
         headers=headers,
     ).json()
@@ -80,6 +80,7 @@ def test_stock_in_success(auth_context):
             "product_id": product_id,
             "quantity": 100,
             "batch_number": "BATCH-2026-A",
+            "expiry_date": "2027-12-31",
             "unit_cost": "60.00",
             "notes": "Initial stock receipt",
         },
@@ -93,6 +94,10 @@ def test_stock_in_success(auth_context):
     assert data["reference"] is not None
     assert data["reference"].startswith("IN-")
     assert data["notes"] == "Initial stock receipt"
+    # Added response fields
+    assert data["batch_number"] == "BATCH-2026-A"
+    assert data["expiry_date"] == "2027-12-31"
+    assert float(data["unit_cost"]) == 60.00
 
     # Verify inventory record
     inv_resp = client.get(f"/api/v1/inventory/{product_id}", headers=headers)
@@ -128,7 +133,30 @@ def test_stock_in_accumulates_quantity(auth_context):
     assert inv_resp.json()["quantity"] == 150
 
 
-@pytest.mark.parametrize("invalid_batch", ["", "   ", "string", "test", "----", "!@#$", "@#$%", "..."])
+@pytest.mark.parametrize(
+    "invalid_batch",
+    [
+        "",
+        "   ",
+        "00000",
+        "000000",
+        "0000000",
+        "string",
+        "test",
+        "N/A",
+        "NA",
+        "----",
+        "null",
+        "none",
+        "undefined",
+        "11111",
+        "999999",
+        "!@#$",
+        "@#$%",
+        "...",
+        None,
+    ],
+)
 def test_stock_in_rejects_invalid_batch(auth_context, invalid_batch):
     headers = auth_context["headers"]
     store_id = auth_context["store1"]["id"]
@@ -147,7 +175,30 @@ def test_stock_in_rejects_invalid_batch(auth_context, invalid_batch):
     assert resp.status_code == 422
 
 
-@pytest.mark.parametrize("invalid_cost", [0, -10, "-5.00", 0.00])
+@pytest.mark.parametrize("valid_batch", ["BATCH-2026-A", "LOT-1002", "B2026-X"])
+def test_stock_in_accepts_valid_batch(auth_context, valid_batch):
+    headers = auth_context["headers"]
+    store_id = auth_context["store1"]["id"]
+    product_id = auth_context["product"]["id"]
+
+    resp = client.post(
+        "/api/v1/inventory/stock-in",
+        json={
+            "store_id": store_id,
+            "product_id": product_id,
+            "quantity": 10,
+            "batch_number": valid_batch,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    assert resp.json()["batch_number"] == valid_batch
+
+
+@pytest.mark.parametrize(
+    "invalid_cost",
+    [-10, -1, 0, 0.5, 0.99, "-10", "-1", "0", "0.5", "0.99", None, "", "abc", True],
+)
 def test_stock_in_rejects_invalid_unit_cost(auth_context, invalid_cost):
     headers = auth_context["headers"]
     store_id = auth_context["store1"]["id"]
@@ -160,6 +211,45 @@ def test_stock_in_rejects_invalid_unit_cost(auth_context, invalid_cost):
             "product_id": product_id,
             "quantity": 10,
             "unit_cost": invalid_cost,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize("valid_cost", [1.00, 10.00, 60.00, "1.00", "10.00", "60.00"])
+def test_stock_in_accepts_valid_unit_cost(auth_context, valid_cost):
+    headers = auth_context["headers"]
+    store_id = auth_context["store1"]["id"]
+    product_id = auth_context["product"]["id"]
+
+    resp = client.post(
+        "/api/v1/inventory/stock-in",
+        json={
+            "store_id": store_id,
+            "product_id": product_id,
+            "quantity": 10,
+            "unit_cost": valid_cost,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    assert float(resp.json()["unit_cost"]) == float(valid_cost)
+
+
+@pytest.mark.parametrize("invalid_expiry", ["2020-01-01", "not-a-date", "", None])
+def test_stock_in_rejects_invalid_expiry(auth_context, invalid_expiry):
+    headers = auth_context["headers"]
+    store_id = auth_context["store1"]["id"]
+    product_id = auth_context["product"]["id"]
+
+    resp = client.post(
+        "/api/v1/inventory/stock-in",
+        json={
+            "store_id": store_id,
+            "product_id": product_id,
+            "quantity": 10,
+            "expiry_date": invalid_expiry,
         },
         headers=headers,
     )
@@ -376,6 +466,56 @@ def test_stock_transfer_rejects_insufficient_stock(auth_context):
     assert "Insufficient stock in source store" in resp.text
 
 
+def test_stock_transfer_rejects_malformed_json_quantity(auth_context):
+    headers = dict(auth_context["headers"])
+    headers["Content-Type"] = "application/json"
+    s1 = auth_context["store1"]["id"]
+    s2 = auth_context["store2"]["id"]
+    p = auth_context["product"]["id"]
+
+    malformed_json = f"""{{
+  "product_id": {p},
+  "from_store_id": {s1},
+  "to_store_id": {s2},
+  "quantity": ###,
+  "notes": ""
+}}"""
+
+    resp = client.post(
+        "/api/v1/inventory/transfer",
+        content=malformed_json,
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    data = resp.json()
+    assert data["success"] is False
+    assert any(
+        err.get("field") == "quantity"
+        and "Invalid value for quantity. Expected a positive integer." in err.get("message", "")
+        for err in data.get("errors", [])
+    )
+
+
+@pytest.mark.parametrize("invalid_qty", [0, -1, 1.5, "abc"])
+def test_stock_transfer_rejects_invalid_quantity_types(auth_context, invalid_qty):
+    headers = auth_context["headers"]
+    s1 = auth_context["store1"]["id"]
+    s2 = auth_context["store2"]["id"]
+    p = auth_context["product"]["id"]
+
+    resp = client.post(
+        "/api/v1/inventory/transfer",
+        json={
+            "product_id": p,
+            "from_store_id": s1,
+            "to_store_id": s2,
+            "quantity": invalid_qty,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+
+
 # ==================== INVENTORY ADJUSTMENT TESTS ====================
 
 def test_inventory_adjustment_increase_and_decrease(auth_context):
@@ -560,6 +700,100 @@ def test_dashboard_and_valuation_empty_cases(auth_context):
     assert Decimal(str(val["total_inventory_value"])) == Decimal("0.00")
 
 
+def test_dashboard_expired_products_and_persistence(auth_context, unique_slug):
+    from app.core.database import SessionLocal
+    from app.models.inventory import Inventory
+
+    headers = auth_context["headers"]
+    s1 = auth_context["store1"]["id"]
+    p = auth_context["product"]["id"]
+
+    db = SessionLocal()
+    try:
+        # 1. Stock-in with valid future expiry_date persists the date in database
+        future_date = (date.today() + timedelta(days=30)).isoformat()
+        resp_in = client.post(
+            "/api/v1/inventory/stock-in",
+            json={
+                "store_id": s1,
+                "product_id": p,
+                "quantity": 10,
+                "batch_number": "BATCH-EXP-01",
+                "expiry_date": future_date,
+                "unit_cost": "15.00",
+            },
+            headers=headers,
+        )
+        assert resp_in.status_code == 201
+
+        # Verify persisted in database across sessions
+        inv_row = (
+            db.query(Inventory)
+            .filter(Inventory.store_id == s1, Inventory.product_id == p)
+            .first()
+        )
+        assert inv_row is not None
+        assert inv_row.expiry_date == date.fromisoformat(future_date)
+
+        # 2. Subsequent dashboard request: Future expiry date does NOT count as expired
+        dash_future = client.get("/api/v1/inventory/dashboard", headers=headers).json()
+        assert dash_future["expired_products"] == 0
+
+        # 3. Today's date does NOT count as expired
+        inv_row.expiry_date = date.today()
+        db.commit()
+        dash_today = client.get("/api/v1/inventory/dashboard", headers=headers).json()
+        assert dash_today["expired_products"] == 0
+
+        # 4. Expired date (< today) increments expired_products in dashboard
+        inv_row.expiry_date = date.today() - timedelta(days=5)
+        db.commit()
+        dash_expired = client.get("/api/v1/inventory/dashboard", headers=headers).json()
+        assert dash_expired["expired_products"] == 1
+
+        # Expired items are also returned by GET /api/v1/inventory/expiry
+        exp_resp = client.get("/api/v1/inventory/expiry", headers=headers)
+        assert exp_resp.status_code == 200
+        exp_data = exp_resp.json()
+        assert isinstance(exp_data, list)
+        assert len(exp_data) >= 1
+        assert exp_data[0]["product_id"] == p
+
+        # 5. NULL expiry_date does NOT count as expired
+        inv_row.expiry_date = None
+        db.commit()
+        dash_null = client.get("/api/v1/inventory/dashboard", headers=headers).json()
+        assert dash_null["expired_products"] == 0
+
+        # 6. Tenant isolation: Tenant B does not see Tenant A's expired inventory
+        inv_row.expiry_date = date.today() - timedelta(days=5)
+        db.commit()
+
+        # Register and login Tenant B
+        slug_b = f"b-{unique_slug[:6]}"
+        email_b = f"tb-{slug_b}@test.com"
+        client.post(
+            "/api/v1/auth/register",
+            params={
+                "tenant_name": "Tenant B Expiry",
+                "slug": slug_b,
+                "email": email_b,
+                "admin_name": "Admin B",
+                "password": "testpass123",
+            },
+        )
+        t_b = client.post(
+            "/api/v1/auth/login",
+            json={"email": email_b, "password": "testpass123"},
+        ).json()["access_token"]
+        headers_b = {"Authorization": f"Bearer {t_b}"}
+
+        dash_b = client.get("/api/v1/inventory/dashboard", headers=headers_b).json()
+        assert dash_b["expired_products"] == 0
+    finally:
+        db.close()
+
+
 # ==================== GET ENDPOINT ERROR & EMPTY CHECKS ====================
 
 def test_get_inventory_by_product_404_and_422(auth_context):
@@ -574,7 +808,7 @@ def test_get_inventory_by_product_404_and_422(auth_context):
     # Product exists but has no inventory record -> 404
     p2 = client.post(
         "/api/v1/products",
-        json={"name": "Widget No Inv", "sku": f"WGT-NOINV-{p}", "price": "50.00"},
+        json={"name": "Widget No Inv", "sku": f"WGT-NOINV-{p}", "price": 50.00},
         headers=headers,
     ).json()
     r_no_inv = client.get(f"/api/v1/inventory/{p2['id']}", headers=headers)
@@ -628,16 +862,11 @@ def test_movements_empty_and_populated(auth_context):
     s1 = auth_context["store1"]["id"]
     p = auth_context["product"]["id"]
 
-    # 1. Before movements: returns meaningful response (not bare [])
-    r_empty = client.get("/api/v1/inventory/movements", headers=headers)
-    assert r_empty.status_code == 200
-    data_empty = r_empty.json()
-    assert isinstance(data_empty, dict)
-    assert data_empty["success"] is True
-    assert data_empty["message"] == "No inventory movements found"
-    assert data_empty["data"] == []
+    # 1. Missing store_id -> 422
+    r_missing = client.get("/api/v1/inventory/movements", headers=headers)
+    assert r_missing.status_code == 422
 
-    # 2. Invalid store_id -> 422
+    # 2. Invalid store_id (0, -1) -> 422
     r_inv = client.get("/api/v1/inventory/movements", params={"store_id": 0}, headers=headers)
     assert r_inv.status_code == 422
     r_neg = client.get("/api/v1/inventory/movements", params={"store_id": -1}, headers=headers)
@@ -647,13 +876,22 @@ def test_movements_empty_and_populated(auth_context):
     r_nf = client.get("/api/v1/inventory/movements", params={"store_id": 999999}, headers=headers)
     assert r_nf.status_code == 404
 
-    # 4. After movement: returns populated list
+    # 4. Valid store_id before movements: returns meaningful response (not bare [])
+    r_empty = client.get("/api/v1/inventory/movements", params={"store_id": s1}, headers=headers)
+    assert r_empty.status_code == 200
+    data_empty = r_empty.json()
+    assert isinstance(data_empty, dict)
+    assert data_empty["success"] is True
+    assert data_empty["message"] == "No inventory movements found"
+    assert data_empty["data"] == []
+
+    # 5. After movement: returns populated list
     client.post(
         "/api/v1/inventory/stock-in",
         json={"store_id": s1, "product_id": p, "quantity": 10},
         headers=headers,
     )
-    r_pop = client.get("/api/v1/inventory/movements", headers=headers)
+    r_pop = client.get("/api/v1/inventory/movements", params={"store_id": s1}, headers=headers)
     assert r_pop.status_code == 200
     data_pop = r_pop.json()
     assert isinstance(data_pop, list)
@@ -662,23 +900,30 @@ def test_movements_empty_and_populated(auth_context):
 
 def test_low_stock_empty_and_validation(auth_context):
     headers = auth_context["headers"]
+    s1 = auth_context["store1"]["id"]
 
-    # 1. No low-stock items -> meaningful no-data response
-    r_empty = client.get("/api/v1/inventory/low-stock", headers=headers)
+    # 1. Missing store_id -> 422
+    r_missing = client.get("/api/v1/inventory/low-stock", headers=headers)
+    assert r_missing.status_code == 422
+
+    # 2. Invalid store_id (0, -1) -> 422
+    r_inv = client.get("/api/v1/inventory/low-stock", params={"store_id": 0}, headers=headers)
+    assert r_inv.status_code == 422
+    r_neg = client.get("/api/v1/inventory/low-stock", params={"store_id": -1}, headers=headers)
+    assert r_neg.status_code == 422
+
+    # 3. Non-existent store_id -> 404
+    r_nf = client.get("/api/v1/inventory/low-stock", params={"store_id": 999999}, headers=headers)
+    assert r_nf.status_code == 404
+
+    # 4. Valid store_id with no low-stock items -> meaningful no-data response
+    r_empty = client.get("/api/v1/inventory/low-stock", params={"store_id": s1}, headers=headers)
     assert r_empty.status_code == 200
     d_empty = r_empty.json()
     assert d_empty["success"] is True
     assert d_empty["message"] == "No low-stock items found"
     assert d_empty["count"] == 0
     assert d_empty["data"] == []
-
-    # 2. Invalid store_id -> 422
-    r_inv = client.get("/api/v1/inventory/low-stock", params={"store_id": 0}, headers=headers)
-    assert r_inv.status_code == 422
-
-    # 3. Non-existent store_id -> 404
-    r_nf = client.get("/api/v1/inventory/low-stock", params={"store_id": 999999}, headers=headers)
-    assert r_nf.status_code == 404
 
 
 # ==================== TENANT ISOLATION TESTS ====================
@@ -772,14 +1017,30 @@ def test_all_7_get_apis_tenant_isolation(auth_context, unique_slug):
     assert r3.json()["message"] == "No expired inventory found"
     assert r3.json()["data"] == []
 
+    # Store for Tenant B
+    store_b = client.post(
+        "/api/v1/stores",
+        json={"name": "Store Beta B", "code": f"SBB-{unique_slug[:4]}"},
+        headers=headers_b,
+    ).json()
+    sb_id = store_b["id"]
+
     # 4. GET /inventory/low-stock for Tenant B -> No low-stock items found
-    r4 = client.get("/api/v1/inventory/low-stock", headers=headers_b)
+    r4_missing = client.get("/api/v1/inventory/low-stock", headers=headers_b)
+    assert r4_missing.status_code == 422
+    r4_other = client.get("/api/v1/inventory/low-stock", params={"store_id": s1_a}, headers=headers_b)
+    assert r4_other.status_code == 404
+    r4 = client.get("/api/v1/inventory/low-stock", params={"store_id": sb_id}, headers=headers_b)
     assert r4.status_code == 200
     assert r4.json()["message"] == "No low-stock items found"
     assert r4.json()["data"] == []
 
     # 5. GET /inventory/movements for Tenant B -> No inventory movements found
-    r5 = client.get("/api/v1/inventory/movements", headers=headers_b)
+    r5_missing = client.get("/api/v1/inventory/movements", headers=headers_b)
+    assert r5_missing.status_code == 422
+    r5_other = client.get("/api/v1/inventory/movements", params={"store_id": s1_a}, headers=headers_b)
+    assert r5_other.status_code == 404
+    r5 = client.get("/api/v1/inventory/movements", params={"store_id": sb_id}, headers=headers_b)
     assert r5.status_code == 200
     assert r5.json()["message"] == "No inventory movements found"
     assert r5.json()["data"] == []
