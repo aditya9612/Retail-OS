@@ -53,7 +53,6 @@ class DashboardRepository:
 
         today = date.today()
         tomorrow = today + timedelta(days=1)
-
         month_start = today.replace(day=1)
 
         today_query = (
@@ -94,59 +93,143 @@ class DashboardRepository:
             .filter(Order.tenant_id == tenant_id)
         )
 
-        orders_count_query = (
-            self.db.query(func.count(Order.id))
-            .filter(Order.tenant_id == tenant_id)
-        )
-
-        customers_query = (
-            self.db.query(func.count(Customer.id))
-            .filter(Customer.tenant_id == tenant_id)
-        )
-
-        low_stock_query = (
-            self.db.query(func.count(Inventory.id))
-            .join(Product, Product.id == Inventory.product_id)
-            .filter(
-                Product.tenant_id == tenant_id,
-                Inventory.quantity <= Product.min_stock_alert,
-            )
-        )
-
         if store_id is not None:
             today_query = today_query.filter(Order.store_id == store_id)
             monthly_query = monthly_query.filter(Order.store_id == store_id)
-            total_revenue_query = total_revenue_query.filter(
-                Order.store_id == store_id
+            total_revenue_query = total_revenue_query.filter(Order.store_id == store_id)
+
+            total_customers = (
+                self.db.query(func.count(func.distinct(Order.customer_id)))
+                .filter(
+                    Order.tenant_id == tenant_id,
+                    Order.store_id == store_id,
+                    Order.customer_id.isnot(None),
+                )
+                .scalar() or 0
             )
-            orders_count_query = orders_count_query.filter(
-                Order.store_id == store_id
+
+            low_stock_products = (
+                self.db.query(func.count(Inventory.id))
+                .filter(
+                    Inventory.tenant_id == tenant_id,
+                    Inventory.store_id == store_id,
+                    Inventory.quantity <= Inventory.min_stock_level,
+                )
+                .scalar() or 0
             )
-            customers_query = customers_query.filter(
-                Customer.store_id == store_id
-            )
-            low_stock_query = low_stock_query.filter(
-                Inventory.store_id == store_id
-            )
+
+            today_sales = float(today_query.scalar() or 0)
+            monthly_sales = float(monthly_query.scalar() or 0)
+            total_revenue = float(total_revenue_query.scalar() or 0)
+
+            return {
+                "mode": "single_store",
+                "store_id": store.id,
+                "store_name": store.name,
+                "today_sales": today_sales,
+                "monthly_sales": monthly_sales,
+                "total_customers": int(total_customers),
+                "total_revenue": total_revenue,
+                "low_stock_products": int(low_stock_products),
+                "stores_summary": None,
+            }
 
         today_sales = float(today_query.scalar() or 0)
         monthly_sales = float(monthly_query.scalar() or 0)
         total_revenue = float(total_revenue_query.scalar() or 0)
 
-        orders_count = int(orders_count_query.scalar() or 0)
-        total_customers = int(customers_query.scalar() or 0)
-        low_stock_products = int(low_stock_query.scalar() or 0)
+        total_customers = (
+            self.db.query(func.count(Customer.id))
+            .filter(Customer.tenant_id == tenant_id)
+            .scalar() or 0
+        )
+
+        low_stock_products = (
+            self.db.query(func.count(Inventory.id))
+            .filter(
+                Inventory.tenant_id == tenant_id,
+                Inventory.quantity <= Inventory.min_stock_level,
+            )
+            .scalar() or 0
+        )
+
+        stores = (
+            self.db.query(Store)
+            .filter(Store.tenant_id == tenant_id)
+            .order_by(Store.id)
+            .all()
+        )
+
+        today_rows = (
+            self.db.query(
+                Order.store_id,
+                func.coalesce(func.sum(Order.total_amount), 0).label("sales"),
+                func.count(Order.id).label("orders"),
+            )
+            .filter(
+                Order.tenant_id == tenant_id,
+                Order.created_at >= today,
+                Order.created_at < tomorrow,
+            )
+            .group_by(Order.store_id)
+            .all()
+        )
+        today_map = {row.store_id: (float(row.sales), int(row.orders)) for row in today_rows}
+
+        month_rows = (
+            self.db.query(
+                Order.store_id,
+                func.coalesce(func.sum(Order.total_amount), 0).label("sales"),
+            )
+            .filter(
+                Order.tenant_id == tenant_id,
+                Order.created_at >= month_start,
+                Order.created_at < tomorrow,
+            )
+            .group_by(Order.store_id)
+            .all()
+        )
+        month_map = {row.store_id: float(row.sales) for row in month_rows}
+
+        low_stock_rows = (
+            self.db.query(
+                Inventory.store_id,
+                func.count(Inventory.id).label("low_count"),
+            )
+            .filter(
+                Inventory.tenant_id == tenant_id,
+                Inventory.quantity <= Inventory.min_stock_level,
+            )
+            .group_by(Inventory.store_id)
+            .all()
+        )
+        low_stock_map = {row.store_id: int(row.low_count) for row in low_stock_rows}
+
+        stores_summary = []
+        for st in stores:
+            t_sales, t_orders = today_map.get(st.id, (0.0, 0))
+            m_sales = month_map.get(st.id, 0.0)
+            ls_count = low_stock_map.get(st.id, 0)
+            stores_summary.append({
+                "store_id": st.id,
+                "store_name": st.name,
+                "today_sales": t_sales,
+                "monthly_sales": m_sales,
+                "orders_count": t_orders,
+                "low_stock_count": ls_count,
+                "is_active": st.is_active,
+            })
 
         return {
-            "mode": "store" if store_id is not None else "all_stores",
-            "store_id": store_id,
-            "store_name": store.name if store else None,
+            "mode": "all_stores",
+            "store_id": None,
+            "store_name": None,
             "today_sales": today_sales,
             "monthly_sales": monthly_sales,
-            "total_customers": total_customers,
+            "total_customers": int(total_customers),
             "total_revenue": total_revenue,
-            "low_stock_products": low_stock_products,
-            "stores_summary": None,
+            "low_stock_products": int(low_stock_products),
+            "stores_summary": stores_summary,
         }
 
     def get_dashboard_overview(
@@ -472,6 +555,11 @@ class DashboardRepository:
         store_id: Optional[int] = None,
         limit: int = 10,
     ):
+        self._validate_store(
+            tenant_id=tenant_id,
+            store_id=store_id,
+        )
+
         query = (
             self.db.query(
                 Product.name.label("product_name"),

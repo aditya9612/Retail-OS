@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.exceptions import ForbiddenException
 from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.dashboard import (
@@ -23,10 +24,14 @@ def _resolve_effective_store_id(
     user: User,
     store_id: Optional[int],
 ) -> Optional[int]:
-    if store_id is not None:
-        return store_id
+    if user.store_id is not None:
+        if store_id is not None and store_id != user.store_id:
+            raise ForbiddenException(
+                "Store staff are not authorized to access other stores' dashboard data"
+            )
+        return user.store_id
 
-    return getattr(user, "store_id", None)
+    return store_id
 
 
 @router.get(
