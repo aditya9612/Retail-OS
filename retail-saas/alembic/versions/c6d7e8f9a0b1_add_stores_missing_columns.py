@@ -61,3 +61,4 @@ def downgrade() -> None:
         columns = {c["name"] for c in inspector.get_columns("stores")}
         if "email" in columns:
             op.drop_column("stores", "email")
+
