@@ -179,6 +179,7 @@ class OrderItemResponse(BaseModel):
     igst_amount: Decimal = Decimal("0.00")
     notes: Optional[str] = None
     variant: Optional[str] = None
+    variant_id: Optional[int] = None
     batch_allocations: Optional[List[OrderItemBatchAllocationResponse]] = None
 
     model_config = {

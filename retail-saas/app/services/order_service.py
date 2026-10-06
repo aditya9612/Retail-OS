@@ -32,6 +32,7 @@ from app.models.order_item import OrderItem
 from app.models.order_item_batch_allocation import OrderItemBatchAllocation
 from app.models.product import Product
 from app.models.product_batch import ProductBatch
+from app.models.product_variant import ProductVariant
 from app.models.delivery import Delivery
 from app.repositories.order_repo import OrderRepository
 from app.repositories.order_item_batch_allocation_repo import OrderItemBatchAllocationRepository
@@ -414,6 +415,25 @@ class OrderService:
                 raise NotFoundException(
                     f"Product {item_data.product_id} not found"
                 )
+
+            variant_id = getattr(item_data, "variant_id", None)
+            if variant_id is not None:
+                variant = (
+                    self.db.query(ProductVariant)
+                    .filter(
+                        ProductVariant.id == variant_id,
+                        ProductVariant.tenant_id == tenant_id,
+                    )
+                    .first()
+                )
+                if not variant:
+                    raise NotFoundException(
+                        f"ProductVariant {variant_id} not found"
+                    )
+                if variant.product_id != product.id:
+                    raise AppException(
+                        f"ProductVariant {variant_id} does not belong to product {product.id}"
+                    )
 
             order.items.append(
                 self._calculate_item_totals(

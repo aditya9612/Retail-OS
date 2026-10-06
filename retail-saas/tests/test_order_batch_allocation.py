@@ -16,7 +16,9 @@ from app.models.product_batch import ProductBatch
 from app.models.product_variant import ProductVariant
 from app.models.store import Store
 from app.models.tenant import Tenant
+from app.models.user import User
 from app.repositories.order_item_batch_allocation_repo import OrderItemBatchAllocationRepository
+from app.schemas.order import OrderCreate, OrderItemCreate
 from app.services.batch_allocation_service import InsufficientStockException
 from app.services.order_service import OrderService
 from app.utils.constants import OrderStatus, StockMovementType
@@ -115,10 +117,14 @@ def make_batch(
     return b
 
 
-def make_order(db, tenant_id, store_id, items, status=OrderStatus.DRAFT.value):
+def make_order(db, tenant_id, store_id, items, status=OrderStatus.DRAFT.value, user_id=None):
+    if user_id is None:
+        user = db.query(User).first()
+        user_id = user.id if user else 1
     order = Order(
         tenant_id=tenant_id,
         store_id=store_id,
+        user_id=user_id,
         order_number=f"ORD-{uuid.uuid4().hex[:8].upper()}",
         order_type="pos",
         status=status,
@@ -610,4 +616,293 @@ def test_order_unit_cost_historical_persistence(db):
     # The historical allocation record unit_cost MUST remain 42.5000
     db.refresh(allocs[0])
     assert allocs[0].unit_cost == Decimal("42.5000")
+
+
+# =============================================================================
+# 13. Persistent variant_id Cross-Session Tests
+# =============================================================================
+def test_order_item_variant_id_cross_session_persistence():
+    """OrderItem.variant_id is persisted to DB and survives a fresh SQLAlchemy session."""
+    db1 = SessionLocal()
+    tenant = make_tenant(db1)
+    store = make_store(db1, tenant.id)
+    user = db1.query(User).first()
+    user_id = user.id if user else 1
+    product = make_product(db1, tenant.id)
+    variant = make_variant(db1, tenant.id, product.id, name="Size-M")
+    db1.commit()
+
+    service = OrderService(db1)
+    create_dto = OrderCreate(
+        store_id=store.id,
+        order_type="pos",
+        items=[
+            OrderItemCreate(
+                product_id=product.id,
+                variant_id=variant.id,
+                quantity=3,
+                unit_price=Decimal("150.00"),
+            )
+        ],
+    )
+    created_order = service.create_order(tenant.id, user_id, create_dto)
+    order_id = created_order.id
+    order_item_id = created_order.items[0].id
+    variant_id = variant.id
+    db1.close()
+
+    # Verify reload in genuinely fresh SQLAlchemy session
+    db2 = SessionLocal()
+    try:
+        reloaded_item = db2.query(OrderItem).filter(OrderItem.id == order_item_id).first()
+        assert reloaded_item is not None
+        assert reloaded_item.variant_id == variant_id
+        assert reloaded_item.order_id == order_id
+    finally:
+        db2.close()
+
+
+def test_order_create_validates_variant_belongs_to_product(db):
+    """Creating an order with variant belonging to a different product raises AppException."""
+    tenant = make_tenant(db)
+    store = make_store(db, tenant.id)
+    user = db.query(User).first()
+    user_id = user.id if user else 1
+    p1 = make_product(db, tenant.id, name="Product 1")
+    p2 = make_product(db, tenant.id, name="Product 2")
+    var2 = make_variant(db, tenant.id, p2.id, name="Var of P2")
+    db.commit()
+
+    service = OrderService(db)
+    create_dto = OrderCreate(
+        store_id=store.id,
+        order_type="pos",
+        items=[
+            OrderItemCreate(
+                product_id=p1.id,
+                variant_id=var2.id,
+                quantity=1,
+                unit_price=Decimal("100.00"),
+            )
+        ],
+    )
+    with pytest.raises(AppException) as exc_info:
+        service.create_order(tenant.id, user_id, create_dto)
+    assert "does not belong to product" in str(exc_info.value.detail)
+
+
+def test_order_create_validates_variant_tenant_isolation(db):
+    """Creating an order referencing a variant from a different tenant raises NotFoundException."""
+    t1 = make_tenant(db, "Tenant 1")
+    t2 = make_tenant(db, "Tenant 2")
+    s1 = make_store(db, t1.id, "Store 1")
+    user = db.query(User).first()
+    user_id = user.id if user else 1
+
+    p1 = make_product(db, t1.id, name="P1")
+    p2 = make_product(db, t2.id, name="P2")
+    var_t2 = make_variant(db, t2.id, p2.id, name="Var Tenant 2")
+    db.commit()
+
+    service = OrderService(db)
+    create_dto = OrderCreate(
+        store_id=s1.id,
+        order_type="pos",
+        items=[
+            OrderItemCreate(
+                product_id=p1.id,
+                variant_id=var_t2.id,
+                quantity=1,
+                unit_price=Decimal("100.00"),
+            )
+        ],
+    )
+    with pytest.raises(NotFoundException):
+        service.create_order(t1.id, user_id, create_dto)
+
+
+# =============================================================================
+# 14. Critical End-to-End Variant Allocation with Fresh Session
+# =============================================================================
+def test_order_confirm_end_to_end_variant_allocation_fresh_session():
+    """End-to-end order confirmation across separate DB sessions respects variant allocation."""
+    setup_db = SessionLocal()
+    tenant = make_tenant(setup_db)
+    store = make_store(setup_db, tenant.id)
+    product = make_product(setup_db, tenant.id, track_batch=True)
+    var_a = make_variant(setup_db, tenant.id, product.id, name="Variant A")
+    var_b = make_variant(setup_db, tenant.id, product.id, name="Variant B")
+
+    # Batch A1: 5 units of Variant A
+    batch_a1 = make_batch(
+        setup_db, tenant.id, store.id, product.id, "B-E2E-A1",
+        quantity=Decimal("5.0000"), variant_id=var_a.id,
+    )
+    # Batch B1: 20 units of Variant B
+    batch_b1 = make_batch(
+        setup_db, tenant.id, store.id, product.id, "B-E2E-B1",
+        quantity=Decimal("20.0000"), variant_id=var_b.id,
+    )
+    setup_db.commit()
+
+    tenant_id = tenant.id
+    order_svc = OrderService(setup_db)
+    user = setup_db.query(User).first()
+    user_id = user.id if user else 1
+
+    create_dto = OrderCreate(
+        store_id=store.id,
+        order_type="pos",
+        items=[
+            OrderItemCreate(
+                product_id=product.id,
+                variant_id=var_a.id,
+                quantity=5,
+                unit_price=Decimal("200.00"),
+            )
+        ],
+    )
+    order = order_svc.create_order(tenant_id, user_id, create_dto)
+    order_id = order.id
+    item_id = order.items[0].id
+    batch_a1_id = batch_a1.id
+    batch_b1_id = batch_b1.id
+    var_a_id = var_a.id
+
+    setup_db.commit()
+    setup_db.close()
+
+    # Confirm order in a fresh session
+    confirm_db = SessionLocal()
+    try:
+        service = OrderService(confirm_db)
+        confirmed = service.confirm_order(tenant_id, order_id)
+        assert confirmed.status == OrderStatus.CONFIRMED.value
+
+        reloaded_b_a1 = confirm_db.get(ProductBatch, batch_a1_id)
+        reloaded_b_b1 = confirm_db.get(ProductBatch, batch_b1_id)
+        assert reloaded_b_a1.remaining_quantity == Decimal("0.0000")
+        assert reloaded_b_b1.remaining_quantity == Decimal("20.0000")
+
+        reloaded_item = confirm_db.get(OrderItem, item_id)
+        assert reloaded_item.variant_id == var_a_id
+
+        alloc_repo = OrderItemBatchAllocationRepository(confirm_db)
+        allocs = alloc_repo.get_by_order_item_id(item_id)
+        assert len(allocs) == 1
+        assert allocs[0].batch_id == batch_a1_id
+        assert allocs[0].quantity == Decimal("5.0000")
+    finally:
+        confirm_db.close()
+
+
+def test_order_confirm_strict_variant_isolation_fresh_session():
+    """Strict variant isolation in fresh session: insufficient variant stock fails without fallback."""
+    setup_db = SessionLocal()
+    tenant = make_tenant(setup_db)
+    store = make_store(setup_db, tenant.id)
+    product = make_product(setup_db, tenant.id, track_batch=True)
+    var_a = make_variant(setup_db, tenant.id, product.id, name="Variant A")
+    var_b = make_variant(setup_db, tenant.id, product.id, name="Variant B")
+
+    batch_a1 = make_batch(
+        setup_db, tenant.id, store.id, product.id, "B-ISO-A1",
+        quantity=Decimal("5.0000"), variant_id=var_a.id,
+    )
+    batch_b1 = make_batch(
+        setup_db, tenant.id, store.id, product.id, "B-ISO-B1",
+        quantity=Decimal("20.0000"), variant_id=var_b.id,
+    )
+    setup_db.commit()
+
+    tenant_id = tenant.id
+    order_svc = OrderService(setup_db)
+    user = setup_db.query(User).first()
+    user_id = user.id if user else 1
+
+    create_dto = OrderCreate(
+        store_id=store.id,
+        order_type="pos",
+        items=[
+            OrderItemCreate(
+                product_id=product.id,
+                variant_id=var_a.id,
+                quantity=6,  # 6 requested, only 5 available in A, 20 in B
+                unit_price=Decimal("200.00"),
+            )
+        ],
+    )
+    order = order_svc.create_order(tenant_id, user_id, create_dto)
+    order_id = order.id
+    batch_a1_id = batch_a1.id
+    batch_b1_id = batch_b1.id
+
+    setup_db.commit()
+    setup_db.close()
+
+    # Fresh session confirmation
+    confirm_db = SessionLocal()
+    try:
+        service = OrderService(confirm_db)
+        with pytest.raises(InsufficientStockException):
+            service.confirm_order(tenant_id, order_id)
+
+        # Verify neither batch was mutated
+        reloaded_a = confirm_db.get(ProductBatch, batch_a1_id)
+        reloaded_b = confirm_db.get(ProductBatch, batch_b1_id)
+        assert reloaded_a.remaining_quantity == Decimal("5.0000")
+        assert reloaded_b.remaining_quantity == Decimal("20.0000")
+    finally:
+        confirm_db.close()
+
+
+def test_order_confirm_non_variant_product_level_batch_allocation_fresh_session():
+    """Non-variant order (variant_id=None) allocates from product-level batch (variant_id=None)."""
+    setup_db = SessionLocal()
+    tenant = make_tenant(setup_db)
+    store = make_store(setup_db, tenant.id)
+    product = make_product(setup_db, tenant.id, track_batch=True)
+
+    batch_null = make_batch(
+        setup_db, tenant.id, store.id, product.id, "B-PROD-NULL",
+        quantity=Decimal("15.0000"), variant_id=None,
+    )
+    setup_db.commit()
+
+    tenant_id = tenant.id
+    order_svc = OrderService(setup_db)
+    user = setup_db.query(User).first()
+    user_id = user.id if user else 1
+
+    create_dto = OrderCreate(
+        store_id=store.id,
+        order_type="pos",
+        items=[
+            OrderItemCreate(
+                product_id=product.id,
+                variant_id=None,
+                quantity=5,
+                unit_price=Decimal("200.00"),
+            )
+        ],
+    )
+    order = order_svc.create_order(tenant_id, user_id, create_dto)
+    order_id = order.id
+    batch_id = batch_null.id
+
+    setup_db.commit()
+    setup_db.close()
+
+    # Fresh session confirmation
+    confirm_db = SessionLocal()
+    try:
+        service = OrderService(confirm_db)
+        confirmed = service.confirm_order(tenant_id, order_id)
+        assert confirmed.status == OrderStatus.CONFIRMED.value
+
+        reloaded_batch = confirm_db.get(ProductBatch, batch_id)
+        assert reloaded_batch.remaining_quantity == Decimal("10.0000")
+    finally:
+        confirm_db.close()
+
 
