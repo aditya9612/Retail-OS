@@ -110,9 +110,36 @@ def ensure_database_exists(database_url: str | None = None) -> None:
     bootstrap_engine.dispose()
 
 
+def ensure_schema_compatibility() -> None:
+    if settings.DATABASE_URL.startswith("sqlite"):
+        return
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(engine)
+        tables = set(inspector.get_table_names())
+        if "roles" in tables:
+            columns = {c["name"] for c in inspector.get_columns("roles")}
+            if "is_system" not in columns:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE roles ADD COLUMN is_system TINYINT(1) NOT NULL DEFAULT 0")
+                    )
+        if "users" in tables:
+            columns = {c["name"] for c in inspector.get_columns("users")}
+            if "hashed_password" in columns and "password_hash" not in columns:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE users CHANGE COLUMN hashed_password password_hash VARCHAR(255) NOT NULL")
+                    )
+    except Exception:
+        pass
+
+
 def init_db() -> None:
 
     import app.models  # noqa: F401
 
     if not settings.DATABASE_URL.startswith("sqlite"):
         ensure_database_exists()
+        ensure_schema_compatibility()
+
