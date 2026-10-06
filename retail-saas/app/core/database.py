@@ -153,6 +153,38 @@ def ensure_schema_compatibility() -> None:
                     conn.execute(
                         text("ALTER TABLE tenants ADD COLUMN current_subscription_id INT NULL")
                     )
+        if "stores" in tables:
+            columns = {c["name"] for c in inspector.get_columns("stores")}
+            if "email" not in columns:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE stores ADD COLUMN email VARCHAR(255) NULL")
+                    )
+            if "is_main" not in columns:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE stores ADD COLUMN is_main TINYINT(1) NOT NULL DEFAULT 0")
+                    )
+            if "code" not in columns:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE stores ADD COLUMN code VARCHAR(50) NULL")
+                    )
+            if "city" not in columns:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE stores ADD COLUMN city VARCHAR(100) NULL")
+                    )
+            if "state" not in columns:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE stores ADD COLUMN state VARCHAR(100) NULL")
+                    )
+            if "pincode" not in columns:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE stores ADD COLUMN pincode VARCHAR(20) NULL")
+                    )
         if "order_items" in tables:
             columns = {c["name"] for c in inspector.get_columns("order_items")}
             if "variant_id" not in columns:
