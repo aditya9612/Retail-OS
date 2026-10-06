@@ -55,3 +55,4 @@ def downgrade() -> None:
         columns = {c["name"] for c in inspector.get_columns("tenants")}
         if "settings" in columns:
             op.drop_column("tenants", "settings")
+
