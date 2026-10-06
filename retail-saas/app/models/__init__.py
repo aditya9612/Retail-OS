@@ -25,6 +25,7 @@ from app.models.login_activity import LoginActivity
 from app.models.product import Product, ProductImage
 from app.models.product_variant import ProductVariant
 from app.models.product_batch import ProductBatch
+from app.models.order_item_batch_allocation import OrderItemBatchAllocation
 from app.models.refund import Refund
 from app.models.role import Role
 from app.models.store import Store
@@ -112,4 +113,5 @@ __all__ = [
     "POSHeldCart",
     "ProductVariant",
     "ProductBatch",
+    "OrderItemBatchAllocation",
 ]

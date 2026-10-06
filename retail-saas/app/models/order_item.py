@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -8,6 +8,7 @@ from app.core.database import Base, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.order import Order
+    from app.models.order_item_batch_allocation import OrderItemBatchAllocation
     from app.models.product import Product
 
 
@@ -29,6 +30,11 @@ class OrderItem(Base, TimestampMixin):
 
     order: Mapped["Order"] = relationship("Order", back_populates="items")
     product: Mapped[Optional["Product"]] = relationship("Product")
+    batch_allocations: Mapped[List["OrderItemBatchAllocation"]] = relationship(
+        "OrderItemBatchAllocation",
+        back_populates="order_item",
+        cascade="all, delete-orphan",
+    )
 
     def __init__(self, **kwargs):
         if "discount" in kwargs and "discount_amount" not in kwargs:
@@ -44,8 +50,17 @@ class OrderItem(Base, TimestampMixin):
         self._product_name = kwargs.pop("product_name", None)
         self._sku = kwargs.pop("sku", None)
         self._variant = kwargs.pop("variant", None)
+        self._variant_id = kwargs.pop("variant_id", None)
         self._tax_rate = kwargs.pop("tax_rate", None)
         super().__init__(**kwargs)
+
+    @property
+    def variant_id(self) -> Optional[int]:
+        return getattr(self, "_variant_id", None)
+
+    @variant_id.setter
+    def variant_id(self, val: Optional[int]) -> None:
+        self._variant_id = val
 
     @property
     def discount(self) -> Decimal:

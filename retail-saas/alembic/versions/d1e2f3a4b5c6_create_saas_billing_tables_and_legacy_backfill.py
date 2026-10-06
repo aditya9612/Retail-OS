@@ -184,6 +184,31 @@ def upgrade() -> None:
     plan_rows = bind.execute(text("SELECT id, code FROM saas_plans")).fetchall()
     plan_id_map = {row[1]: row[0] for row in plan_rows}
 
+    # 5b. Ensure legacy billing columns exist on tenants before backfill
+    inspector = sa.inspect(bind)
+    tenant_cols = {col["name"] for col in inspector.get_columns("tenants")}
+
+    if "created_at" not in tenant_cols:
+        op.add_column(
+            "tenants",
+            sa.Column("created_at", sa.DateTime(), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+        )
+    if "plan" not in tenant_cols:
+        op.add_column(
+            "tenants",
+            sa.Column("plan", sa.String(length=50), server_default=sa.text("'basic'"), nullable=False),
+        )
+    if "subscription_status" not in tenant_cols:
+        op.add_column(
+            "tenants",
+            sa.Column("subscription_status", sa.String(length=50), server_default=sa.text("'trial'"), nullable=False),
+        )
+    if "subscription_end_date" not in tenant_cols:
+        op.add_column(
+            "tenants",
+            sa.Column("subscription_end_date", sa.DateTime(), nullable=True),
+        )
+
     # 6. Backfill existing legacy tenants into saas_subscriptions
     tenants = bind.execute(text("SELECT id, plan, subscription_status, created_at FROM tenants")).fetchall()
     subscriptions_to_insert = []
