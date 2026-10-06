@@ -131,6 +131,35 @@ def ensure_schema_compatibility() -> None:
                     conn.execute(
                         text("ALTER TABLE users CHANGE COLUMN hashed_password password_hash VARCHAR(255) NOT NULL")
                     )
+        if "tenants" in tables:
+            columns = {c["name"] for c in inspector.get_columns("tenants")}
+            if "slug" in columns and "domain" not in columns:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE tenants CHANGE COLUMN slug domain VARCHAR(255) NOT NULL")
+                    )
+            elif "domain" not in columns:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE tenants ADD COLUMN domain VARCHAR(255) NOT NULL DEFAULT ''")
+                    )
+            if "settings" not in columns:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE tenants ADD COLUMN settings JSON NULL")
+                    )
+            if "current_subscription_id" not in columns:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE tenants ADD COLUMN current_subscription_id INT NULL")
+                    )
+        if "order_items" in tables:
+            columns = {c["name"] for c in inspector.get_columns("order_items")}
+            if "variant_id" not in columns:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE order_items ADD COLUMN variant_id INT NULL")
+                    )
     except Exception:
         pass
 
