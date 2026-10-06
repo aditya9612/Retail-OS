@@ -54,6 +54,25 @@ class ProductBatch(Base, TimestampMixin):
         CheckConstraint("quantity >= 0", name="ck_batch_quantity_nonneg"),
         CheckConstraint("remaining_quantity >= 0", name="ck_batch_remaining_nonneg"),
         CheckConstraint("remaining_quantity <= quantity", name="ck_batch_remaining_le_quantity"),
+        # FIFO and FEFO allocation query indexes
+        Index(
+            "ix_batch_fifo",
+            "tenant_id",
+            "store_id",
+            "product_id",
+            "is_active",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_batch_fefo",
+            "tenant_id",
+            "store_id",
+            "product_id",
+            "is_active",
+            "expiry_date",
+            "created_at",
+        ),
     )
 
     @property
