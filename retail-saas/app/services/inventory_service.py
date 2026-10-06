@@ -114,8 +114,8 @@ class InventoryService:
         if data.quantity <= 0:
             raise AppException("quantity must be greater than 0")
 
-        if data.unit_cost is not None and data.unit_cost <= Decimal("0"):
-            raise AppException("unit_cost must be greater than 0")
+        if data.unit_cost is not None and data.unit_cost < Decimal("1.00"):
+            raise AppException("unit_cost must be at least 1.00")
 
         if data.expiry_date and data.expiry_date < date.today():
             raise AppException("Expiry date cannot be in the past")
@@ -173,6 +173,10 @@ class InventoryService:
         except Exception:
             self.db.rollback()
             raise
+
+        movement.batch_number = data.batch_number
+        movement.expiry_date = data.expiry_date
+        movement.unit_cost = data.unit_cost
 
         cache_delete_pattern(f"inventory:{tenant_id}:*")
 
@@ -439,10 +443,19 @@ class InventoryService:
             .all()
         )
         today = date.today()
+        def _is_expired(inv):
+            exp = inv.expiry_date
+            if isinstance(exp, str):
+                try:
+                    exp = date.fromisoformat(exp)
+                except (ValueError, TypeError):
+                    return False
+            return exp is not None and exp < today
+
         expired = [
             inv
             for inv in inventories
-            if inv.expiry_date is not None and inv.expiry_date < today
+            if _is_expired(inv)
         ]
         if not expired:
             return {
@@ -591,7 +604,13 @@ class InventoryService:
                 )
             )
             inventory_value += inv.quantity * unit_val
-            if inv.expiry_date is not None and inv.expiry_date < today:
+            exp_date = inv.expiry_date
+            if isinstance(exp_date, str):
+                try:
+                    exp_date = date.fromisoformat(exp_date)
+                except (ValueError, TypeError):
+                    exp_date = None
+            if exp_date is not None and exp_date < today:
                 expired_products += 1
 
         pending_transfers = (
