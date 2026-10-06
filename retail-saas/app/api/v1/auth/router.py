@@ -111,7 +111,7 @@ def refresh(
 # ):
 #     return AuthService(db).refresh(
 #         data.refresh_token
-    )
+#     )
 
 
 @router.post("/logout")
