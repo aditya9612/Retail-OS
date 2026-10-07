@@ -391,9 +391,27 @@ def validate_decimal_amount(
         )
 
     if isinstance(value, str):
-        raise ValueError(
-            f"{field_name} must be a number, not a string"
-        )
+        # Accept numeric strings and attempt conversion
+        try:
+            d = Decimal(value)
+        except Exception:
+            raise ValueError(
+                f"{field_name} must be a valid decimal number represented as a string"
+            )
+        # Apply same validation logic as for numeric types
+        if gt_zero and d <= Decimal("0.00"):
+            raise ValueError(
+                f"{field_name} must be greater than 0"
+            )
+        if not gt_zero and d < Decimal("0.00"):
+            raise ValueError(
+                f"{field_name} cannot be negative"
+            )
+        if d > max_value:
+            raise ValueError(
+                f"{field_name} cannot exceed {max_value}"
+            )
+        return d
 
     if isinstance(value, int):
         d = Decimal(value)
