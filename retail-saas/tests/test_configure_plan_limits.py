@@ -88,12 +88,11 @@ def test_configure_plan_limits_unlimited_by_code(super_admin_auth):
     assert limits_dict["monthly_orders"]["is_unlimited"] is True
 
 
-def test_configure_plan_limits_by_body_endpoint(super_admin_auth):
-    resp = client.post(
-        "/api/v1/super-admins/saas-plans/configure-limits",
+def test_configure_plan_limits_by_code(super_admin_auth):
+    resp = client.put(
+        "/api/v1/super-admins/saas-plans/pro/configure-limits",
         headers=super_admin_auth,
         json={
-            "plan_code": "pro",
             "users": 30,
             "stores": 7,
             "products": 15000,
@@ -108,4 +107,22 @@ def test_configure_plan_limits_by_body_endpoint(super_admin_auth):
     limits_dict = {item["dimension"]: item for item in data["limits"]}
     assert limits_dict["users"]["value"] == 30
     assert limits_dict["stores"]["value"] == 7
+
+
+def test_deprecated_configure_limits_post_endpoints_are_deleted(super_admin_auth):
+    # 1. Deprecated path POST alias is deleted (returns 405 Method Not Allowed because PUT is allowed on that path)
+    resp_path_post = client.post(
+        "/api/v1/super-admins/saas-plans/1/configure-limits",
+        headers=super_admin_auth,
+        json={"users": 10},
+    )
+    assert resp_path_post.status_code in (404, 405)
+
+    # 2. Deprecated body POST alias is deleted (returns 404 Not Found)
+    resp_body_post = client.post(
+        "/api/v1/super-admins/saas-plans/configure-limits",
+        headers=super_admin_auth,
+        json={"plan_code": "pro", "users": 10},
+    )
+    assert resp_body_post.status_code in (404, 405)
 

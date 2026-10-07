@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Any, Dict, List, Optional
 
 import boto3
 from sqlalchemy import func, text
@@ -18,6 +19,7 @@ from app.models.product import Product
 from app.models.refund import Refund
 from app.models.store import Store
 from app.models.tenant import Tenant
+from app.models.user import User
 from app.schemas.billing import InvoiceCreate
 from app.schemas.order import OrderCreate, OrderItemCreate
 from app.services.audit_service import AuditService
@@ -119,7 +121,7 @@ class BillingService:
     def _gst_dict_serializable(self, gst: dict) -> dict:
         return {k: str(v) for k, v in gst.items()}
 
-    def _invoice_pdf_items(self, invoice: Invoice) -> list[dict]:
+    def _invoice_pdf_items(self, invoice: Invoice, order: Optional[Order] = None) -> list[dict]:
         items = []
 
         for item in invoice.items or []:
@@ -141,6 +143,26 @@ class BillingService:
                     "total_amount": item.total_amount,
                 }
             )
+
+        if not items and order and getattr(order, "items", None):
+            for oi in order.items:
+                product = (
+                    self.db.query(Product)
+                    .filter(Product.id == oi.product_id)
+                    .first()
+                )
+                items.append(
+                    {
+                        "product_name": product.name if product else "Item",
+                        "hsn_code": product.hsn_code if product else "",
+                        "quantity": oi.quantity,
+                        "unit_price": oi.unit_price,
+                        "discount_amount": getattr(oi, "discount_amount", 0.0),
+                        "gst_rate": getattr(oi, "tax_rate", 0.0),
+                        "gst_amount": getattr(oi, "tax_amount", 0.0),
+                        "total_amount": getattr(oi, "total_amount", oi.unit_price * oi.quantity),
+                    }
+                )
 
         return items
 
@@ -709,9 +731,17 @@ class BillingService:
 
         qr_data = _build_qr_payload(invoice, store, customer)
 
+        cashier_name = ""
+        if order and order.user_id:
+            cashier_user = self.db.query(User).filter(User.id == order.user_id).first()
+            if cashier_user:
+                cashier_name = cashier_user.full_name or cashier_user.email or ""
+
         data = {
             "invoice_number": invoice.invoice_number,
+            "order_number": order.order_number if order else getattr(invoice, "invoice_number", ""),
             "created_at": invoice.created_at,
+            "order_date": order.created_at if order else invoice.created_at,
             "subtotal": float(invoice.subtotal),
             "discount_amount": float(invoice.discount_amount),
             "cgst_amount": float(invoice.cgst_amount),
@@ -720,13 +750,19 @@ class BillingService:
             "total_amount": float(invoice.total_amount),
             "total": float(invoice.total_amount),
             "qr_data": qr_data,
+            "is_b2b": bool(customer and customer.gstin),
+            "cashier": cashier_name,
+            "store_name": store.name if store else (branding.business_name if branding else ""),
+            "store_address": store.address if store else (branding.address if branding else ""),
+            "store_phone": store.phone if store else (branding.phone if branding else ""),
+            "store_gstin": store.gstin if store else (branding.gstin if branding else ""),
             "customer": {
                 "name": customer.name if customer else "Walk-in Customer",
                 "phone": customer.phone if customer else "",
                 "address": customer.address if customer else "",
                 "gstin": customer.gstin if customer else "",
             } if customer else None,
-            "items": self._invoice_pdf_items(invoice),
+            "items": self._invoice_pdf_items(invoice, order),
             "payments": [
                 {
                     "method": p.payment_method,

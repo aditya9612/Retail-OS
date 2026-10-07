@@ -1,25 +1,70 @@
 import io
 import logging
+import re
+from decimal import Decimal
 from pathlib import Path
 from typing import Dict, Any, Optional
 
 import qrcode
 from reportlab.pdfgen import canvas
+from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table as PlatyTable,
+    TableStyle as PlatyTableStyle,
+)
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 from app.core.exceptions import AppException
 from app.schemas.document_setting import BrandingContext
+from app.utils.helpers import amount_to_indian_words
 
 logger = logging.getLogger(__name__)
+
+
+def format_document_number(raw_number: Any, prefix: Optional[str] = None, doc_type: str = "invoice") -> str:
+    """
+    Safely composes or adapts document numbers to prevent duplicate prefix composition
+    such as DM-BILL--INV-2026-000004 or DM-INV--INV-2026-000004.
+    """
+    raw = str(raw_number or "").strip()
+    if not raw:
+        return ""
+    if not prefix:
+        return raw
+
+    clean_prefix = prefix.rstrip("-_").strip()
+    if not clean_prefix:
+        return raw
+
+    # If raw already starts with clean_prefix-
+    if raw.startswith(f"{clean_prefix}-") or raw == clean_prefix:
+        return raw
+
+    # If raw already has a standard prefix structure like ABC-2026-000001, replace with clean_prefix
+    m = re.match(r"^[A-Za-z0-9_]+[-_]+(\d{4}[-_]\d+)$", raw)
+    if m:
+        return f"{clean_prefix}-{m.group(1)}"
+
+    # If raw has year-sequence like 2026-000001
+    m2 = re.match(r"^(\d{4}[-_]\d+)$", raw)
+    if m2:
+        return f"{clean_prefix}-{m2.group(1)}"
+
+    return f"{clean_prefix}-{raw}"
 
 
 class RendererError(AppException):
     """Exception raised for errors during document rendering."""
     def __init__(self, message: str):
         super().__init__(status_code=500, detail=message)
+
 
 
 class DocumentRenderer:
@@ -152,248 +197,732 @@ class DocumentRenderer:
             raise RendererError("Failed to generate PDF document due to an internal error.")
 
     def _render_invoice(self, data: Dict[str, Any], branding: BrandingContext) -> bytes:
-        """Renders an A4 invoice PDF using ReportLab."""
+        """Renders a formal A4 Tax Invoice PDF using ReportLab with corporate blue theme."""
         buffer = io.BytesIO()
         c = canvas.Canvas(buffer, pagesize=A4, pageCompression=0)
-        self._draw_document(c, data, branding, "TAX INVOICE", branding.invoice_prefix)
+        self._draw_tax_invoice(c, data, branding)
         c.save()
         buffer.seek(0)
         return buffer.getvalue()
 
     def _render_bill(self, data: Dict[str, Any], branding: BrandingContext) -> bytes:
-        """Renders a bill/receipt PDF."""
+        """Renders a retail POS-style A4 Bill / Receipt PDF with emerald green theme."""
         buffer = io.BytesIO()
         c = canvas.Canvas(buffer, pagesize=A4, pageCompression=0)
-        self._draw_document(c, data, branding, "BILL / RECEIPT", branding.bill_prefix)
+        self._draw_bill_receipt(c, data, branding)
         c.save()
         buffer.seek(0)
         return buffer.getvalue()
 
-    def _draw_document(self, c: canvas.Canvas, data: Dict[str, Any], branding: BrandingContext, title: str, prefix: str):
-        """Helper method to draw the shared structure of a document (Invoice/Bill)."""
+    def _draw_tax_invoice(self, c: canvas.Canvas, data: Dict[str, Any], branding: BrandingContext):
+        """Draws a formal Tax Invoice with corporate blue styling, Seller/Buyer cards, and detailed GST breakdown."""
         width, height = A4
-        margin = 50
+        margin = 40
         y = height - margin
 
-        # -- HEADER --
-        # Logo
+        primary_color = colors.HexColor("#1F497D")       # Corporate Navy Blue
+        box_bg = colors.HexColor("#F0F4F8")              # Light blue-gray fill
+        border_color = colors.HexColor("#CBD5E1")        # Slate border
+        text_dark = colors.HexColor("#1E293B")           # Deep slate text
+        text_muted = colors.HexColor("#64748B")          # Secondary text
+
+        # 1. Top Header: Logo & Seller Details
         logo_path = self._validate_logo_path(branding.logo_url)
         if logo_path:
             try:
                 img = ImageReader(logo_path)
                 img_w, img_h = img.getSize()
                 aspect = img_w / float(img_h)
-                draw_w = min(100, 50 * aspect)
+                draw_w = min(100, 48 * aspect)
                 draw_h = draw_w / aspect
-                c.drawImage(img, width - margin - draw_w, y - draw_h + 15, width=draw_w, height=draw_h)
+                c.drawImage(img, width - margin - draw_w, y - draw_h + 10, width=draw_w, height=draw_h)
             except Exception as e:
-                logger.warning(f"Failed to draw logo: {str(e)}")
+                logger.warning(f"Failed to draw logo: {e}")
 
-        # Business Details
+        # Seller Business Name
         c.setFont(self._get_font(branding.business_name, True), 16)
-        c.drawString(margin, y, branding.business_name or "")
-        y -= 20
+        c.setFillColor(primary_color)
+        c.drawString(margin, y, branding.business_name or "Retail Store")
+        y -= 18
 
-        c.setFont(self._get_font(branding.address, False), 10)
-        c.drawString(margin, y, branding.address or "")
-        y -= 15
+        c.setFont(self._get_font(branding.address, False), 9)
+        c.setFillColor(text_dark)
+        if branding.address:
+            c.drawString(margin, y, branding.address[:75])
+            y -= 14
 
         contact_info = []
         if branding.phone:
-            contact_info.append(branding.phone)
+            contact_info.append(f"Tel: {branding.phone}")
         if branding.email:
-            contact_info.append(branding.email)
-        if contact_info:
-            c.setFont(self.default_font, 9)
-            c.drawString(margin, y, " | ".join(contact_info))
-            y -= 15
-
+            contact_info.append(f"Email: {branding.email}")
         if branding.website:
-            c.setFont(self.default_font, 9)
-            c.drawString(margin, y, branding.website)
-            y -= 15
+            contact_info.append(f"Web: {branding.website}")
+        if contact_info:
+            c.setFont(self.default_font, 8.5)
+            c.setFillColor(text_muted)
+            c.drawString(margin, y, " | ".join(contact_info))
+            y -= 14
 
         if branding.show_gstin and branding.gstin:
-            c.setFont(self.default_font, 9)
+            c.setFont(self.bold_font, 9)
+            c.setFillColor(primary_color)
             c.drawString(margin, y, f"GSTIN: {branding.gstin}")
-            y -= 15
+            y -= 16
 
-        y -= 20
+        y -= 6
 
-        # Document Title
-        c.setFont(self._get_font(title, True), 14)
-        c.drawCentredString(width / 2.0, y, title)
-        y -= 25
+        # 2. Title Banner: TAX INVOICE
+        banner_height = 22
+        c.setFillColor(primary_color)
+        c.rect(margin, y - banner_height, width - 2 * margin, banner_height, fill=1, stroke=0)
+        c.setFont(self.bold_font, 12)
+        c.setFillColor(colors.white)
+        c.drawCentredString(width / 2.0, y - banner_height + 6, "TAX INVOICE")
+        y -= (banner_height + 10)
 
-        # Document Details & QR Code
-        c.setFont(self.bold_font, 10)
+        # 3. Document Metadata Bar
         invoice_num = data.get("invoice_number", "")
-        doc_no = f"{prefix}-{invoice_num}" if prefix and not str(invoice_num).startswith(prefix) else str(invoice_num)
-        c.drawString(margin, y, f"No: {doc_no}")
+        doc_no = format_document_number(invoice_num, branding.invoice_prefix, "invoice")
+
+        meta_box_h = 42
+        c.setFillColor(box_bg)
+        c.setStrokeColor(border_color)
+        c.rect(margin, y - meta_box_h, width - 2 * margin, meta_box_h, fill=1, stroke=1)
+
+        c.setFillColor(text_dark)
+        c.setFont(self.bold_font, 9)
+        c.drawString(margin + 10, y - 14, f"Invoice No: {doc_no}")
 
         created_at_val = data.get("created_at")
+        date_str = ""
         if created_at_val:
             date_str = created_at_val.strftime("%d-%m-%Y") if hasattr(created_at_val, "strftime") else str(created_at_val)[:10]
-            c.drawString(margin + 200, y, f"Date: {date_str}")
+            c.drawString(margin + 200, y - 14, f"Date: {date_str}")
 
-        # QR Code
+        order_no = data.get("order_number")
+        if order_no:
+            c.drawString(margin + 330, y - 14, f"Ref / Order: {order_no}")
+
+        inv_type = "B2B Tax Invoice" if data.get("is_b2b") else "B2C Retail Invoice"
+        c.setFont(self.default_font, 8.5)
+        c.drawString(margin + 10, y - 30, f"Category: {inv_type}")
+        payment_status = str(data.get("payment_status", "PAID")).upper()
+        c.drawString(margin + 200, y - 30, f"Payment Status: {payment_status}")
+
+        # QR Code on top right of metadata if enabled
         if branding.show_qr and data.get("qr_data"):
             try:
-                qr = qrcode.QRCode(box_size=4, border=1)
+                qr = qrcode.QRCode(box_size=3, border=1)
                 qr.add_data(data.get("qr_data"))
                 qr.make(fit=True)
                 img = qr.make_image(fill_color="black", back_color="white")
-
-                qr_buffer = io.BytesIO()
-                img.save(qr_buffer, format="PNG")
-                qr_buffer.seek(0)
-
-                qr_reader = ImageReader(qr_buffer)
-                c.drawImage(qr_reader, width - margin - 60, y - 40, width=60, height=60)
+                qr_buf = io.BytesIO()
+                img.save(qr_buf, format="PNG")
+                qr_buf.seek(0)
+                qr_reader = ImageReader(qr_buf)
+                c.drawImage(qr_reader, width - margin - 40, y - meta_box_h + 3, width=36, height=36)
             except Exception as e:
-                logger.warning(f"Failed to draw QR code: {str(e)}")
+                logger.warning(f"Failed to draw QR code: {e}")
 
-        y -= 25
+        y -= (meta_box_h + 12)
 
-        # Customer Details
-        customer = data.get("customer", {})
-        if customer:
-            c.setFont(self.bold_font, 10)
-            c.drawString(margin, y, "Billed To:")
-            y -= 15
+        # 4. Structured Seller & Buyer Cards
+        card_w = (width - 2 * margin - 15) / 2.0
+        card_h = 58
+        # Seller Card (Left)
+        c.setFillColor(colors.HexColor("#FAFAFA"))
+        c.setStrokeColor(border_color)
+        c.rect(margin, y - card_h, card_w, card_h, fill=1, stroke=1)
+        c.setFillColor(primary_color)
+        c.setFont(self.bold_font, 9)
+        c.drawString(margin + 8, y - 14, "SELLER DETAILS")
+        c.setFillColor(text_dark)
+        c.setFont(self._get_font(branding.business_name, False), 8.5)
+        c.drawString(margin + 8, y - 27, (branding.business_name or "")[:35])
+        c.setFont(self.default_font, 8)
+        if branding.phone:
+            c.drawString(margin + 8, y - 39, f"Phone: {branding.phone}")
+        if branding.show_gstin and branding.gstin:
+            c.drawString(margin + 8, y - 50, f"GSTIN: {branding.gstin}")
 
-            cust_name = customer.get("name", "Walk-in Customer")
-            c.setFont(self._get_font(cust_name, False), 10)
-            c.drawString(margin, y, cust_name)
-            y -= 15
+        # Buyer Card (Right)
+        customer = data.get("customer") or {}
+        c.setFillColor(colors.HexColor("#FAFAFA"))
+        c.setStrokeColor(border_color)
+        c.rect(margin + card_w + 15, y - card_h, card_w, card_h, fill=1, stroke=1)
+        c.setFillColor(primary_color)
+        c.setFont(self.bold_font, 9)
+        c.drawString(margin + card_w + 23, y - 14, "BILLED TO (BUYER)")
+        c.setFillColor(text_dark)
+        cust_name = customer.get("name") or "Walk-in Customer"
+        c.setFont(self._get_font(cust_name, False), 8.5)
+        c.drawString(margin + card_w + 23, y - 27, cust_name[:35])
+        c.setFont(self.default_font, 8)
+        cust_phone = customer.get("phone") or ""
+        if cust_phone:
+            c.drawString(margin + card_w + 23, y - 39, f"Mobile: {cust_phone}")
+        cust_gstin = customer.get("gstin") or ""
+        if cust_gstin:
+            c.drawString(margin + card_w + 23, y - 50, f"GSTIN: {cust_gstin}")
+        elif customer.get("address"):
+            c.drawString(margin + card_w + 23, y - 50, customer.get("address")[:35])
 
-            if customer.get("address"):
-                c.setFont(self._get_font(customer.get("address"), False), 9)
-                c.drawString(margin, y, customer.get("address"))
-                y -= 15
+        y -= (card_h + 14)
 
-            if customer.get("phone"):
-                c.setFont(self.default_font, 9)
-                c.drawString(margin, y, f"Mobile: {customer.get('phone')}")
-                y -= 15
+        # 5. Items Table Header
+        def _draw_inv_table_header(curr_y: float) -> float:
+            c.setFillColor(primary_color)
+            c.rect(margin, curr_y - 16, width - 2 * margin, 16, fill=1, stroke=0)
+            c.setFillColor(colors.white)
+            c.setFont(self.bold_font, 8.5)
+            c.drawString(margin + 5, curr_y - 12, "#")
+            c.drawString(margin + 25, curr_y - 12, "Item Description")
+            c.drawString(margin + 200, curr_y - 12, "HSN")
+            c.drawString(margin + 245, curr_y - 12, "Qty")
+            c.drawString(margin + 280, curr_y - 12, "Price")
+            c.drawString(margin + 330, curr_y - 12, "Disc")
+            c.drawString(margin + 375, curr_y - 12, "GST")
+            c.drawString(margin + 440, curr_y - 12, "Total")
+            return curr_y - 22
 
-            if customer.get("gstin"):
-                c.setFont(self.default_font, 9)
-                c.drawString(margin, y, f"GSTIN: {customer.get('gstin')}")
-                y -= 15
-        else:
-            c.setFont(self.default_font, 10)
-            c.drawString(margin, y, "Walk-in Customer")
-            y -= 15
+        y = _draw_inv_table_header(y)
 
-        y -= 15
-
-        # Helper to draw table header
-        def _draw_table_header(curr_y: float) -> float:
-            c.setFont(self.bold_font, 10)
-            c.drawString(margin, curr_y, "Item")
-            c.drawString(margin + 200, curr_y, "HSN")
-            c.drawString(margin + 250, curr_y, "Qty")
-            c.drawString(margin + 290, curr_y, "Price")
-            c.drawString(margin + 340, curr_y, "Disc")
-            c.drawString(margin + 390, curr_y, "GST")
-            c.drawString(margin + 440, curr_y, "Total")
-            curr_y -= 8
-            c.line(margin, curr_y, width - margin, curr_y)
-            curr_y -= 15
-            return curr_y
-
-        y = _draw_table_header(y)
-
-        # -- ITEMS TABLE --
+        # 6. Items Table Rows
         items = data.get("items", [])
-        for item in items:
-            if y < 100:
+        for idx, item in enumerate(items, start=1):
+            if y < 140:
                 self._draw_footer(c, branding)
                 c.showPage()
                 y = height - margin
-                y = _draw_table_header(y)
+                y = _draw_inv_table_header(y)
+
+            if idx % 2 == 0:
+                c.setFillColor(colors.HexColor("#F8FAFC"))
+                c.rect(margin, y - 11, width - 2 * margin, 14, fill=1, stroke=0)
+
+            c.setFillColor(text_dark)
+            c.setFont(self.default_font, 8.5)
+            c.drawString(margin + 5, y - 8, str(idx))
 
             p_name = str(item.get("product_name") or item.get("description") or "Item")
-            c.setFont(self._get_font(p_name, False), 9)
-            c.drawString(margin, y, p_name[:28])
+            c.setFont(self._get_font(p_name, False), 8.5)
+            c.drawString(margin + 25, y - 8, p_name[:30])
 
-            c.setFont(self.default_font, 9)
-            c.drawString(margin + 200, y, str(item.get("hsn_code") or ""))
-            c.drawString(margin + 250, y, str(item.get("quantity") or 1))
+            c.setFont(self.default_font, 8.5)
+            c.drawString(margin + 200, y - 8, str(item.get("hsn_code") or ""))
+            c.drawString(margin + 245, y - 8, str(item.get("quantity") or 1))
 
-            unit_price = item.get("unit_price") or item.get("rate") or item.get("amount") or 0
-            disc = item.get("discount_amount") or item.get("discount") or 0
-            gst = item.get("gst_amount") or item.get("tax") or 0
-            total = item.get("total_amount") or item.get("total") or item.get("amount") or 0
+            unit_price = float(item.get("unit_price") or item.get("rate") or item.get("amount") or 0)
+            disc = float(item.get("discount_amount") or item.get("discount") or 0)
+            gst = float(item.get("gst_amount") or item.get("tax") or 0)
+            line_total = float(item.get("total_amount") or item.get("total") or 0)
 
-            c.drawString(margin + 290, y, f"{float(unit_price):.2f}")
-            c.drawString(margin + 340, y, f"{float(disc):.2f}")
-            c.drawString(margin + 390, y, f"{float(gst):.2f}")
-            c.drawString(margin + 440, y, f"{float(total):.2f}")
+            c.drawString(margin + 280, y - 8, f"{unit_price:.2f}")
+            c.drawString(margin + 330, y - 8, f"{disc:.2f}")
+            c.drawString(margin + 375, y - 8, f"{gst:.2f}")
+            c.drawString(margin + 440, y - 8, f"{line_total:.2f}")
 
-            y -= 15
+            y -= 14
 
+        c.setStrokeColor(border_color)
         c.line(margin, y, width - margin, y)
-        y -= 15
+        y -= 14
 
-        # -- TOTALS --
-        c.setFont(self.bold_font, 10)
-        totals_x = margin + 340
+        # 7. Financial Summary Box (Right Aligned)
+        totals_x = margin + 320
+        c.setFont(self.bold_font, 9)
+        c.setFillColor(text_dark)
 
-        subtotal_val = data.get("subtotal") if data.get("subtotal") is not None else (data.get("total") or 0)
-        c.drawString(totals_x, y, "Subtotal:")
-        c.drawString(totals_x + 60, y, f"{float(subtotal_val or 0):.2f}")
-        y -= 15
+        subtotal_val = float(data.get("subtotal") if data.get("subtotal") is not None else (data.get("total") or 0))
+        c.drawString(totals_x, y, "Subtotal (Taxable):")
+        c.drawRightString(width - margin - 5, y, f"{subtotal_val:.2f}")
+        y -= 13
 
         if data.get("discount_amount"):
-            c.drawString(totals_x, y, "Discount:")
-            c.drawString(totals_x + 60, y, f"-{float(data['discount_amount']):.2f}")
-            y -= 15
+            disc_val = float(data["discount_amount"])
+            c.drawString(totals_x, y, "Total Discount:")
+            c.drawRightString(width - margin - 5, y, f"-{disc_val:.2f}")
+            y -= 13
 
         if data.get("cgst_amount"):
+            cgst_val = float(data["cgst_amount"])
             c.drawString(totals_x, y, "CGST:")
-            c.drawString(totals_x + 60, y, f"{float(data['cgst_amount']):.2f}")
-            y -= 15
+            c.drawRightString(width - margin - 5, y, f"{cgst_val:.2f}")
+            y -= 13
 
         if data.get("sgst_amount"):
+            sgst_val = float(data["sgst_amount"])
             c.drawString(totals_x, y, "SGST:")
-            c.drawString(totals_x + 60, y, f"{float(data['sgst_amount']):.2f}")
-            y -= 15
+            c.drawRightString(width - margin - 5, y, f"{sgst_val:.2f}")
+            y -= 13
 
         if data.get("igst_amount"):
+            igst_val = float(data["igst_amount"])
             c.drawString(totals_x, y, "IGST:")
-            c.drawString(totals_x + 60, y, f"{float(data['igst_amount']):.2f}")
-            y -= 15
+            c.drawRightString(width - margin - 5, y, f"{igst_val:.2f}")
+            y -= 13
 
-        grand_total = data.get("total_amount") if data.get("total_amount") is not None else (data.get("total") or 0)
-        c.drawString(totals_x, y, "Grand Total:")
-        c.drawString(totals_x + 60, y, f"{float(grand_total or 0):.2f}")
-        y -= 25
+        # Grand Total Highlight Box
+        grand_total = float(data.get("total_amount") if data.get("total_amount") is not None else (data.get("total") or 0))
+        c.setFillColor(primary_color)
+        c.rect(totals_x - 5, y - 16, (width - margin) - (totals_x - 5), 18, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setFont(self.bold_font, 10)
+        c.drawString(totals_x, y - 12, "Grand Total:")
+        c.drawRightString(width - margin - 5, y - 12, f"{grand_total:.2f}")
+        y -= 26
 
-        # -- PAYMENT DETAILS --
+        # 8. Amount in Words
+        c.setFillColor(text_dark)
+        words = amount_to_indian_words(Decimal(str(grand_total)))
+        c.setFont(self.bold_font, 8.5)
+        c.drawString(margin, y, "Amount in Words:")
+        c.setFont(self.default_font, 8.5)
+        c.drawString(margin + 90, y, words)
+        y -= 16
+
+        # 9. Payment Details
         if branding.show_payment_details:
             payments = data.get("payments", [])
             if payments:
-                c.setFont(self.bold_font, 10)
+                c.setFont(self.bold_font, 8.5)
                 c.drawString(margin, y, "Payment Details:")
-                y -= 15
-                c.setFont(self.default_font, 9)
+                pay_strs = []
                 for p in payments:
-                    method = p.get("method") or p.get("payment_method") or "Payment"
-                    amt = p.get("amount", 0)
+                    method = str(p.get("method") or p.get("payment_mode") or "Payment").upper()
+                    amt = float(p.get("amount", 0))
                     ref = f" (Ref: {p['transaction_id']})" if p.get("transaction_id") else ""
-                    c.drawString(margin, y, f"{str(method).upper()}: {float(amt):.2f}{ref}")
-                    y -= 15
+                    pay_strs.append(f"{method}: {amt:.2f}{ref}")
+                c.setFont(self.default_font, 8.5)
+                c.drawString(margin + 80, y, " | ".join(pay_strs))
+                y -= 16
 
-        # -- SIGNATURE --
+        # 10. Terms and Signature
+        if branding.footer_text:
+            c.setFont(self.default_font, 8)
+            c.setFillColor(text_muted)
+            c.drawString(margin, y, f"Terms: {branding.footer_text[:90]}")
+
         if branding.show_signature:
-            y -= 15
-            c.setFont(self.bold_font, 10)
-            c.drawString(width - margin - 120, y, "Authorized Signatory")
+            c.setFont(self.bold_font, 9)
+            c.setFillColor(primary_color)
+            c.drawRightString(width - margin, y - 10, "Authorized Signatory")
+            c.setStrokeColor(primary_color)
+            c.line(width - margin - 120, y - 13, width - margin, y - 13)
 
-        # Footer on the current page
         self._draw_footer(c, branding)
+
+    def _draw_bill_receipt(self, c: canvas.Canvas, data: Dict[str, Any], branding: BrandingContext):
+        """Draws a compact retail POS Bill / Receipt with emerald green styling."""
+        width, height = A4
+        margin = 40
+        y = height - margin
+
+        primary_green = colors.HexColor("#1B5E20")       # Dark Emerald Green
+        accent_green = colors.HexColor("#2E7D32")        # Emerald Accent
+        fill_light_green = colors.HexColor("#E8F5E9")    # Light Green fill
+        border_green = colors.HexColor("#A5D6A7")        # Soft green border
+        text_dark = colors.HexColor("#1E293B")
+        text_muted = colors.HexColor("#64748B")
+
+        # 1. POS Retail Header
+        logo_path = self._validate_logo_path(branding.logo_url)
+        if logo_path:
+            try:
+                img = ImageReader(logo_path)
+                img_w, img_h = img.getSize()
+                aspect = img_w / float(img_h)
+                draw_w = min(80, 40 * aspect)
+                draw_h = draw_w / aspect
+                c.drawImage(img, width - margin - draw_w, y - draw_h + 10, width=draw_w, height=draw_h)
+            except Exception as e:
+                logger.warning(f"Failed to draw logo: {e}")
+
+        c.setFont(self._get_font(branding.business_name, True), 15)
+        c.setFillColor(primary_green)
+        c.drawString(margin, y, branding.business_name or "Retail Store")
+        y -= 18
+
+        c.setFont(self._get_font(branding.address, False), 9)
+        c.setFillColor(text_dark)
+        if branding.address:
+            c.drawString(margin, y, branding.address[:75])
+            y -= 14
+
+        contact_info = []
+        if branding.phone:
+            contact_info.append(f"Tel: {branding.phone}")
+        if branding.email:
+            contact_info.append(f"Email: {branding.email}")
+        if contact_info:
+            c.setFont(self.default_font, 8.5)
+            c.setFillColor(text_muted)
+            c.drawString(margin, y, " | ".join(contact_info))
+            y -= 14
+
+        if branding.show_gstin and branding.gstin:
+            c.setFont(self.bold_font, 8.5)
+            c.setFillColor(primary_green)
+            c.drawString(margin, y, f"GSTIN: {branding.gstin}")
+            y -= 15
+
+        y -= 6
+
+        # 2. Title Banner: BILL / RECEIPT
+        banner_height = 20
+        c.setFillColor(accent_green)
+        c.rect(margin, y - banner_height, width - 2 * margin, banner_height, fill=1, stroke=0)
+        c.setFont(self.bold_font, 11)
+        c.setFillColor(colors.white)
+        c.drawCentredString(width / 2.0, y - banner_height + 5, "BILL / RECEIPT")
+        y -= (banner_height + 10)
+
+        # 3. Transaction Metadata Bar
+        invoice_num = data.get("invoice_number", "")
+        doc_no = format_document_number(invoice_num, branding.bill_prefix, "bill")
+
+        meta_box_h = 32
+        c.setFillColor(fill_light_green)
+        c.setStrokeColor(border_green)
+        c.rect(margin, y - meta_box_h, width - 2 * margin, meta_box_h, fill=1, stroke=1)
+
+        c.setFillColor(text_dark)
+        c.setFont(self.bold_font, 9)
+        c.drawString(margin + 10, y - 13, f"Bill No: {doc_no}")
+
+        created_at_val = data.get("created_at")
+        date_str = ""
+        if created_at_val:
+            date_str = created_at_val.strftime("%d-%m-%Y %H:%M") if hasattr(created_at_val, "strftime") else str(created_at_val)[:16]
+            c.drawString(margin + 180, y - 13, f"Date: {date_str}")
+
+        customer = data.get("customer") or {}
+        cust_name = customer.get("name") or "Walk-in Customer"
+        c.setFont(self._get_font(cust_name, False), 8.5)
+        c.drawString(margin + 330, y - 13, f"Customer: {cust_name[:25]}")
+
+        # QR Code on top right if enabled
+        if branding.show_qr and data.get("qr_data"):
+            try:
+                qr = qrcode.QRCode(box_size=3, border=1)
+                qr.add_data(data.get("qr_data"))
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white")
+                qr_buf = io.BytesIO()
+                img.save(qr_buf, format="PNG")
+                qr_buf.seek(0)
+                qr_reader = ImageReader(qr_buf)
+                c.drawImage(qr_reader, width - margin - 35, y - meta_box_h + 2, width=30, height=30)
+            except Exception as e:
+                logger.warning(f"Failed to draw QR code: {e}")
+
+        y -= (meta_box_h + 12)
+
+        # 4. Compact Item Table Header
+        def _draw_bill_table_header(curr_y: float) -> float:
+            c.setFillColor(accent_green)
+            c.rect(margin, curr_y - 15, width - 2 * margin, 15, fill=1, stroke=0)
+            c.setFillColor(colors.white)
+            c.setFont(self.bold_font, 8.5)
+            c.drawString(margin + 5, curr_y - 11, "#")
+            c.drawString(margin + 25, curr_y - 11, "Item Name")
+            c.drawString(margin + 210, curr_y - 11, "HSN")
+            c.drawString(margin + 260, curr_y - 11, "Qty")
+            c.drawString(margin + 300, curr_y - 11, "Price")
+            c.drawString(margin + 350, curr_y - 11, "Disc")
+            c.drawString(margin + 400, curr_y - 11, "Tax")
+            c.drawString(margin + 450, curr_y - 11, "Total")
+            return curr_y - 20
+
+        y = _draw_bill_table_header(y)
+
+        # 5. Items Table Rows
+        items = data.get("items", [])
+        for idx, item in enumerate(items, start=1):
+            if y < 140:
+                self._draw_footer(c, branding)
+                c.showPage()
+                y = height - margin
+                y = _draw_bill_table_header(y)
+
+            if idx % 2 == 0:
+                c.setFillColor(colors.HexColor("#F9FBF9"))
+                c.rect(margin, y - 10, width - 2 * margin, 13, fill=1, stroke=0)
+
+            c.setFillColor(text_dark)
+            c.setFont(self.default_font, 8.5)
+            c.drawString(margin + 5, y - 8, str(idx))
+
+            p_name = str(item.get("product_name") or item.get("description") or "Item")
+            c.setFont(self._get_font(p_name, False), 8.5)
+            c.drawString(margin + 25, y - 8, p_name[:32])
+
+            c.setFont(self.default_font, 8.5)
+            c.drawString(margin + 210, y - 8, str(item.get("hsn_code") or ""))
+            c.drawString(margin + 260, y - 8, str(item.get("quantity") or 1))
+
+            unit_price = float(item.get("unit_price") or item.get("rate") or item.get("amount") or 0)
+            disc = float(item.get("discount_amount") or item.get("discount") or 0)
+            gst = float(item.get("gst_amount") or item.get("tax") or 0)
+            line_total = float(item.get("total_amount") or item.get("total") or 0)
+
+            c.drawString(margin + 300, y - 8, f"{unit_price:.2f}")
+            c.drawString(margin + 350, y - 8, f"{disc:.2f}")
+            c.drawString(margin + 400, y - 8, f"{gst:.2f}")
+            c.drawString(margin + 450, y - 8, f"{line_total:.2f}")
+
+            y -= 13
+
+        c.setStrokeColor(border_green)
+        c.line(margin, y, width - margin, y)
+        y -= 14
+
+        # 6. Prominent Totals Summary Box
+        totals_x = margin + 320
+        c.setFont(self.bold_font, 9)
+        c.setFillColor(text_dark)
+
+        subtotal_val = float(data.get("subtotal") if data.get("subtotal") is not None else (data.get("total") or 0))
+        c.drawString(totals_x, y, "Subtotal:")
+        c.drawRightString(width - margin - 5, y, f"{subtotal_val:.2f}")
+        y -= 13
+
+        if data.get("discount_amount"):
+            disc_val = float(data["discount_amount"])
+            c.drawString(totals_x, y, "Discount:")
+            c.drawRightString(width - margin - 5, y, f"-{disc_val:.2f}")
+            y -= 13
+
+        tax_sum = float(data.get("cgst_amount", 0) or 0) + float(data.get("sgst_amount", 0) or 0) + float(data.get("igst_amount", 0) or 0)
+        if tax_sum > 0:
+            c.drawString(totals_x, y, "Taxes (GST):")
+            c.drawRightString(width - margin - 5, y, f"{tax_sum:.2f}")
+            y -= 13
+
+        grand_total = float(data.get("total_amount") if data.get("total_amount") is not None else (data.get("total") or 0))
+        c.setFillColor(fill_light_green)
+        c.setStrokeColor(accent_green)
+        c.rect(totals_x - 5, y - 18, (width - margin) - (totals_x - 5), 20, fill=1, stroke=1)
+        c.setFillColor(primary_green)
+        c.setFont(self.bold_font, 11)
+        c.drawString(totals_x, y - 13, "TOTAL AMOUNT:")
+        c.drawRightString(width - margin - 5, y - 13, f"{grand_total:.2f}")
+        y -= 28
+
+        # 7. Payment Breakdown
+        if branding.show_payment_details:
+            payments = data.get("payments", [])
+            if payments:
+                c.setFont(self.bold_font, 8.5)
+                c.drawString(margin, y, "Payment:")
+                pay_strs = []
+                for p in payments:
+                    method = str(p.get("method") or p.get("payment_mode") or "Payment").upper()
+                    amt = float(p.get("amount", 0))
+                    ref = f" (Ref: {p['transaction_id']})" if p.get("transaction_id") else ""
+                    pay_strs.append(f"{method}: {amt:.2f}{ref}")
+                c.setFont(self.default_font, 8.5)
+                c.drawString(margin + 55, y, " | ".join(pay_strs))
+                y -= 16
+
+        # 8. Friendly Retail Footer
+        retail_note = branding.footer_text or "Thank you for shopping with us! Please visit again."
+        c.setFont(self._get_font(retail_note, False), 8)
+        c.setFillColor(text_muted)
+        c.drawCentredString(width / 2.0, 32, retail_note)
+
+    def render_report_pdf(
+        self,
+        report_title: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+        kpis: Optional[list[Dict[str, Any]]] = None,
+        headers: Optional[list[str]] = None,
+        rows: Optional[list[list[Any]]] = None,
+        branding: Optional[BrandingContext] = None,
+        notes: Optional[str] = None,
+        **kwargs: Any,
+    ) -> bytes:
+        """
+        Renders a production-grade branded Report PDF using ReportLab Platypus.
+        Includes:
+        - Corporate branded header (logo, business name, address, contact, GSTIN)
+        - Dynamic report title and metadata parameters
+        - KPI cards summary block (if kpis provided)
+        - Professional styled data table with zebra striping and repeated headers
+        - Clean running footer with page numbering
+        """
+        resolved_title = kwargs.get("title", report_title) or report_title or "Report"
+        resolved_kpis = kwargs.get("kpi_summary", kpis) or kpis or []
+        resolved_headers = headers or []
+        resolved_rows = rows or []
+        resolved_metadata = metadata or {}
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=36,
+            rightMargin=36,
+            topMargin=36,
+            bottomMargin=40,
+        )
+
+        styles = getSampleStyleSheet()
+        normal_style = styles["Normal"]
+
+        elements = []
+
+        # 1. Branded Company Header
+        header_text = []
+        biz_name = getattr(branding, "business_name", None) or "Retail Store"
+        header_text.append(f"<font size='14' color='#1F497D'><b>{biz_name}</b></font>")
+
+        sub_details = []
+        addr = getattr(branding, "address", None)
+        if addr:
+            sub_details.append(addr)
+        phone = getattr(branding, "phone", None)
+        if phone:
+            sub_details.append(f"Phone: {phone}")
+        email = getattr(branding, "email", None)
+        if email:
+            sub_details.append(f"Email: {email}")
+        if getattr(branding, "show_gstin", False) and getattr(branding, "gstin", None):
+            sub_details.append(f"GSTIN: {branding.gstin}")
+
+        if sub_details:
+            header_text.append(f"<font size='8' color='#475569'>{' | '.join(sub_details[:3])}</font>")
+
+        logo_url = getattr(branding, "logo_url", None)
+        logo_path = self._validate_logo_path(logo_url)
+        if logo_path:
+            try:
+                from reportlab.platypus import Image as PlatyImage
+                img = ImageReader(logo_path)
+                iw, ih = img.getSize()
+                aspect = iw / float(ih)
+                w = min(80, 40 * aspect)
+                h = w / aspect
+                logo_img = PlatyImage(logo_path, width=w, height=h)
+                header_table = PlatyTable(
+                    [[Paragraph("<br/>".join(header_text), normal_style), logo_img]],
+                    colWidths=[430, 93],
+                )
+                header_table.setStyle(PlatyTableStyle([
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]))
+                elements.append(header_table)
+            except Exception as e:
+                logger.warning(f"Failed to embed logo in report: {e}")
+                elements.append(Paragraph("<br/>".join(header_text), normal_style))
+        else:
+            elements.append(Paragraph("<br/>".join(header_text), normal_style))
+
+        elements.append(Spacer(1, 10))
+
+        # 2. Report Title & Metadata Banner
+        title_p = Paragraph(f"<font size='13' color='#1F497D'><b>{resolved_title.upper()}</b></font>", normal_style)
+        elements.append(title_p)
+        elements.append(Spacer(1, 5))
+
+        if resolved_metadata:
+            meta_items = [f"<b>{k}:</b> {v if v is not None else 'N/A'}" for k, v in resolved_metadata.items()]
+            meta_str = " &nbsp;&nbsp;|&nbsp;&nbsp; ".join(meta_items)
+            meta_p = Paragraph(f"<font size='8' color='#334155'>{meta_str}</font>", normal_style)
+            elements.append(meta_p)
+            elements.append(Spacer(1, 10))
+
+        # 3. KPI Summary Cards (if available)
+        if resolved_kpis:
+            kpi_cells = []
+            for item in resolved_kpis[:4]:
+                lbl = item.get("label") or item.get("metric") or "Metric"
+                val = item.get("value")
+                if isinstance(val, (int, float, Decimal)):
+                    val_str = f"{float(val):,.2f}" if isinstance(val, (float, Decimal)) else f"{val:,}"
+                else:
+                    val_str = str(val if val is not None else "")
+                cell_p = Paragraph(
+                    f"<para align='center'><font size='7.5' color='#64748B'>{lbl.upper()}</font><br/>"
+                    f"<font size='11' color='#1F497D'><b>{val_str}</b></font></para>",
+                    normal_style,
+                )
+                kpi_cells.append(cell_p)
+
+            num_kpis = len(kpi_cells)
+            if num_kpis > 0:
+                col_w = 523.0 / num_kpis
+                kpi_table = PlatyTable([kpi_cells], colWidths=[col_w] * num_kpis)
+                kpi_table.setStyle(PlatyTableStyle([
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F0F4F8")),
+                    ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#CBD5E1")),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ]))
+                elements.append(kpi_table)
+                elements.append(Spacer(1, 12))
+
+        # 4. Report Data Table
+        if resolved_headers and resolved_rows:
+            h_cells = [
+                Paragraph(f"<font size='8.5' color='white'><b>{h}</b></font>", normal_style)
+                for h in resolved_headers
+            ]
+            t_data = [h_cells]
+
+            total_w = 523.0
+            num_cols = len(resolved_headers)
+            base_col_w = total_w / num_cols
+            col_widths = [base_col_w] * num_cols
+
+            for r in resolved_rows:
+                r_cells = []
+                for idx, c in enumerate(r):
+                    val_s = str(c if c is not None else "")
+                    if isinstance(c, (int, float, Decimal)):
+                        if isinstance(c, (float, Decimal)):
+                            formatted_val = f"{float(c):,.2f}"
+                        else:
+                            formatted_val = f"{c:,}"
+                        p_cell = Paragraph(f"<para align='right'><font size='8' color='#1E293B'>{formatted_val}</font></para>", normal_style)
+                    else:
+                        p_cell = Paragraph(f"<font size='8' color='#1E293B'>{val_s}</font>", normal_style)
+                    r_cells.append(p_cell)
+                t_data.append(r_cells)
+
+            report_table = PlatyTable(t_data, colWidths=col_widths, repeatRows=1)
+            report_table.setStyle(PlatyTableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F497D")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
+            ]))
+            elements.append(report_table)
+
+        if notes:
+            elements.append(Spacer(1, 10))
+            elements.append(Paragraph(f"<font size='7.5' color='#64748B'><i>Note: {notes}</i></font>", normal_style))
+
+        def _add_footer(canvas_obj, document):
+            canvas_obj.saveState()
+            canvas_obj.setFont("Helvetica", 7.5)
+            canvas_obj.setFillColor(colors.HexColor("#64748B"))
+            canvas_obj.drawString(36, 20, "Generated by Retail-OS | Confidential")
+            page_str = f"Page {document.page}"
+            canvas_obj.drawRightString(A4[0] - 36, 20, page_str)
+            canvas_obj.restoreState()
+
+        doc.build(elements, onFirstPage=_add_footer, onLaterPages=_add_footer)
+        buffer.seek(0)
+        return buffer.getvalue()
 
     def _draw_footer(self, c: canvas.Canvas, branding: BrandingContext):
         """Draws the footer text at the bottom of the page."""
@@ -401,6 +930,14 @@ class DocumentRenderer:
         if branding.footer_text:
             c.setFont(self._get_font(branding.footer_text, False), 8)
             c.drawCentredString(width / 2.0, 30, branding.footer_text)
+
+    def _draw_document(self, c: canvas.Canvas, data: Dict[str, Any], branding: BrandingContext, title: str, prefix: str):
+        """Backward-compatible helper that delegates to dedicated invoice/bill renderer based on title."""
+        if "BILL" in (title or "").upper():
+            self._draw_bill_receipt(c, data, branding)
+        else:
+            self._draw_tax_invoice(c, data, branding)
+
 
     def _render_credit_note(self, data: Dict[str, Any], branding: BrandingContext) -> bytes:
         """Renders an A4 credit note PDF using ReportLab."""

@@ -538,14 +538,14 @@ class TestBackwardCompatibility:
         resp = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
         assert resp.status_code == 200
 
-    def test_deprecated_refresh_token_still_works(self, unique_slug):
+    def test_deprecated_refresh_token_is_deleted(self, unique_slug):
         email = f"compat3-{unique_slug}@example.com"
         _register(unique_slug, email)
         login = client.post("/api/v1/auth/login", json={"email": email, "password": "TestPass@123!"})
         refresh_token = login.json()["refresh_token"]
 
         resp = client.post("/api/v1/auth/refresh-token", json={"refresh_token": refresh_token})
-        assert resp.status_code == 200
+        assert resp.status_code == 404
 
     def test_logout_still_works(self, unique_slug):
         email = f"compat4-{unique_slug}@example.com"

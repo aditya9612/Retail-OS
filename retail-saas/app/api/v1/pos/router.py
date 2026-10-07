@@ -109,6 +109,30 @@ def get_z_report(
 
 
 @router.get(
+    "/{shift_id}/z-report/pdf",
+)
+def export_z_report_pdf(
+    shift_id: int,
+    user: User = Depends(require_permission("pos:shift_manage")),
+    db: Session = Depends(get_db),
+):
+    """Downloads the Z-Report for a POS shift as a branded PDF document."""
+    return POSShiftService(db).export_z_report_pdf(user, shift_id)
+
+
+@router.get(
+    "/{shift_id}/z-report/excel",
+)
+def export_z_report_excel(
+    shift_id: int,
+    user: User = Depends(require_permission("pos:shift_manage")),
+    db: Session = Depends(get_db),
+):
+    """Downloads the Z-Report for a POS shift as a 2-sheet Excel spreadsheet."""
+    return POSShiftService(db).export_z_report_excel(user, shift_id)
+
+
+@router.get(
     "",
     response_model=List[POSShiftResponse],
 )

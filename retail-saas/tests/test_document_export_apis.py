@@ -323,3 +323,128 @@ def test_tenant_isolation_on_document_pdf_exports(export_test_setup, unique_slug
     po_id = export_test_setup["po_id"]
     res_po = client.get(f"/api/v1/purchase-orders/{po_id}/pdf", headers=headers_b)
     assert res_po.status_code == 404
+
+
+def test_reports_get_export_direct_download(export_test_setup):
+    headers = export_test_setup["headers"]
+
+    # 1. GET PDF direct download
+    res_pdf = client.get(
+        "/api/v1/reports/export?report_type=sales_daily&format=pdf",
+        headers=headers,
+    )
+    assert res_pdf.status_code == 200
+    assert res_pdf.headers["content-type"] == "application/pdf"
+    assert res_pdf.content.startswith(b"%PDF-")
+    assert b"%%EOF" in res_pdf.content
+
+    # 2. GET Excel direct download
+    res_excel = client.get(
+        "/api/v1/reports/export?report_type=sales_daily&format=excel",
+        headers=headers,
+    )
+    assert res_excel.status_code == 200
+    assert res_excel.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert res_excel.content[:4] == b"PK\x03\x04"
+
+    # 3. GET CSV direct download
+    res_csv = client.get(
+        "/api/v1/reports/export?report_type=sales_daily&format=csv",
+        headers=headers,
+    )
+    assert res_csv.status_code == 200
+    assert "text/csv" in res_csv.headers["content-type"]
+
+
+def test_expanded_report_types_export(export_test_setup):
+    headers = export_test_setup["headers"]
+
+    report_types_to_test = [
+        "products_slow_moving",
+        "customers_lifetime_value",
+        "daily_billing",
+        "payment_summary",
+        "gst_sales",
+        "profit_loss",
+        "inventory_stock",
+        "inventory_valuation",
+    ]
+
+    for rtype in report_types_to_test:
+        # Test PDF export
+        res_pdf = client.post(
+            "/api/v1/reports/export",
+            json={"report_type": rtype, "format": "pdf"},
+            headers=headers,
+        )
+        assert res_pdf.status_code == 200, f"PDF failed for {rtype}: {res_pdf.text}"
+        assert res_pdf.headers["content-type"] == "application/pdf"
+        assert res_pdf.content.startswith(b"%PDF-")
+
+        # Test Excel export
+        res_excel = client.post(
+            "/api/v1/reports/export",
+            json={"report_type": rtype, "format": "excel"},
+            headers=headers,
+        )
+        assert res_excel.status_code == 200, f"Excel failed for {rtype}: {res_excel.text}"
+        assert res_excel.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        assert res_excel.content[:4] == b"PK\x03\x04"
+
+
+def test_pos_z_report_pdf_and_excel_exports(export_test_setup):
+    headers = export_test_setup["headers"]
+
+    from app.core.database import SessionLocal
+    from app.models.user import User
+
+    db = SessionLocal()
+    try:
+        user_db = db.query(User).filter(User.email == f"exp-{export_test_setup['slug']}@test.com").first()
+        if user_db:
+            user_db.store_id = export_test_setup["store_id"]
+            db.commit()
+    finally:
+        db.close()
+
+    # Open a POS shift
+    open_resp = client.post(
+        "/api/v1/pos/shifts/open",
+        json={"opening_cash_float": "1000.00", "notes": "Shift 1"},
+        headers=headers,
+    )
+    assert open_resp.status_code in (200, 201), open_resp.text
+    shift_id = open_resp.json()["id"]
+
+    # 1. Export Z-report PDF
+    res_pdf = client.get(
+        f"/api/v1/pos/shifts/{shift_id}/z-report/pdf",
+        headers=headers,
+    )
+    assert res_pdf.status_code == 200, res_pdf.text
+    assert res_pdf.headers["content-type"] == "application/pdf"
+    assert res_pdf.content.startswith(b"%PDF-")
+    assert b"%%EOF" in res_pdf.content
+
+    # 2. Export Z-report Excel
+    res_excel = client.get(
+        f"/api/v1/pos/shifts/{shift_id}/z-report/excel",
+        headers=headers,
+    )
+    assert res_excel.status_code == 200, res_excel.text
+    assert res_excel.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert res_excel.content[:4] == b"PK\x03\x04"
+    wb = openpyxl.load_workbook(io.BytesIO(res_excel.content))
+    assert "Overview" in wb.sheetnames
+
+
+def test_amount_to_indian_words_utility():
+    from app.utils.helpers import amount_to_indian_words
+
+    assert amount_to_indian_words(0) == "Indian Rupees Zero Only"
+    assert amount_to_indian_words(1) == "Indian Rupees One Only"
+    assert amount_to_indian_words(100) == "Indian Rupees One Hundred Only"
+    assert amount_to_indian_words("354.00") == "Indian Rupees Three Hundred Fifty-Four Only"
+    assert amount_to_indian_words(1234.50) == "Indian Rupees One Thousand Two Hundred Thirty-Four and Fifty Paise Only"
+    assert "Lakh" in amount_to_indian_words(100000)
+    assert "Crore" in amount_to_indian_words(10000000)

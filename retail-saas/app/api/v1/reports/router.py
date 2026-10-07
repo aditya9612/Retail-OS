@@ -286,6 +286,36 @@ def export_report(
     return ReportService(db).export_report(user=user, data=data)
 
 
+@router.get("/export")
+def export_report_get(
+    report_type: str = Query(...),
+    format: str = Query(default="csv"),
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    target_date: Optional[date] = None,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    store_id: Optional[int] = None,
+    threshold: Optional[int] = None,
+    limit: Optional[int] = None,
+    user: User = Depends(require_permission("reports:read")),
+    db: Session = Depends(get_db),
+):
+    req = ReportExportRequest(
+        report_type=report_type,
+        format=format,  # type: ignore[arg-type]
+        start_date=start_date,
+        end_date=end_date,
+        target_date=target_date,
+        year=year,
+        month=month,
+        store_id=store_id,
+        threshold=threshold,
+        limit=limit,
+    )
+    return ReportService(db).export_report(user=user, data=req)
+
+
 # ============================================================================
 # LEGACY COMPATIBILITY ROUTES (PRESERVED & DELEGATED)
 # ============================================================================

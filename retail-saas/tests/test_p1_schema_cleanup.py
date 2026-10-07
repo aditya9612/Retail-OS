@@ -188,21 +188,19 @@ def test_wallet_operation_base_optional_remarks():
 
 
 def test_auth_refresh_endpoints_and_deprecation():
-    """Test both refresh and refresh-token endpoints and verify deprecation metadata."""
+    """Verify canonical /auth/refresh exists and deprecated /auth/refresh-token is permanently deleted."""
     # Check OpenAPI route metadata
     routes = {r.path: r for r in auth_router.routes}
     assert "/auth/refresh" in routes
-    assert "/auth/refresh-token" in routes
+    assert "/auth/refresh-token" not in routes
 
     refresh_route = routes["/auth/refresh"]
     assert not getattr(refresh_route, "deprecated", False)
 
-    refresh_token_route = routes["/auth/refresh-token"]
-    assert getattr(refresh_token_route, "deprecated", False) is True
-
-    # Check request behavior on both endpoints (both reject invalid token identically)
+    # Check request behavior on canonical endpoint
     resp1 = client.post("/api/v1/auth/refresh", json={"refresh_token": "invalid_test_token"})
-    resp2 = client.post("/api/v1/auth/refresh-token", json={"refresh_token": "invalid_test_token"})
+    assert resp1.status_code in (400, 401)
 
-    assert resp1.status_code == resp2.status_code
-    assert resp1.json() == resp2.json()
+    # Verify deleted endpoint returns 404
+    resp2 = client.post("/api/v1/auth/refresh-token", json={"refresh_token": "invalid_test_token"})
+    assert resp2.status_code == 404
