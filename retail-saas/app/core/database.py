@@ -19,14 +19,27 @@ def _connect_args(database_url: str) -> dict:
     return {"charset": "utf8mb4"}
 
 
+def _engine_kwargs(database_url: str) -> dict:
+    kwargs = {
+        "echo": False,
+        "connect_args": _connect_args(database_url),
+    }
+    if not database_url.startswith("sqlite"):
+        kwargs.update(
+            {
+                "pool_pre_ping": True,
+                "pool_recycle": 3600,
+                "pool_size": 20,
+                "max_overflow": 40,
+                "pool_timeout": 30,
+            }
+        )
+    return kwargs
+
+
 engine = create_engine(
     settings.DATABASE_URL,
-    pool_pre_ping=True,
-    pool_recycle=3600,
-    pool_size=10,
-    max_overflow=20,
-    echo=settings.DEBUG,
-    connect_args=_connect_args(settings.DATABASE_URL),
+    **_engine_kwargs(settings.DATABASE_URL),
 )
 
 
