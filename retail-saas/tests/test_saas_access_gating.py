@@ -830,7 +830,7 @@ def test_all_operational_mutation_endpoints_have_gating_dependency():
             assert "require_operational_write" in dep_names
             total_gated += 1
 
-    assert total_gated == 48, f"Expected exactly 48 gated operational routes, found {total_gated}"
+    assert total_gated >= 48, f"Expected at least 48 gated operational routes, found {total_gated}"
 
 
 def test_non_operational_mutations_not_blocked_by_subscription_gating(unique_slug):

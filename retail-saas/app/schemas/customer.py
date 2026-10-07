@@ -898,7 +898,7 @@ class WalletOperationBase(BaseModel):
             "Remarks",
             1,
             255,
-            required=False,
+            required=True,
         )
 
 

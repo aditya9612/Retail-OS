@@ -38,6 +38,8 @@ def super_admin_auth(db_session):
     name_suffix = "".join([c for c in uid if c.isalpha()] or ["Alpha"])
     email = f"sa_mgmt_{uid}@example.com"
     password = "SuperPassword@123!"
+    db_session.query(SuperAdmin).delete()
+    db_session.commit()
     data = SuperAdminCreate(
         email=email,
         full_name=f"Super Admin {name_suffix}",

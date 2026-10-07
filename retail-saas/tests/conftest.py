@@ -7,6 +7,7 @@ import pytest
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_retail_saas.db"
 os.environ["SECRET_KEY"] = "test-secret-key-for-pytest-only"
+os.environ["AUTH_FIXED_OTP_ENABLED"] = "false"
 
 from app.core.config import get_settings
 
@@ -67,13 +68,13 @@ def init_test_database():
         session.flush()
 
         for plan in plans:
-            dims = ["stores", "products"] if plan.code == "basic" else ["users", "stores", "products"]
+            dims = ["users", "stores", "products", "monthly_orders"]
             for dim in dims:
                 session.add(
                     SaaSPlanEntitlement(
                         plan_id=plan.id,
                         dimension=dim,
-                        value=0,
+                        value=None,
                         is_unlimited=True,
                     )
                 )

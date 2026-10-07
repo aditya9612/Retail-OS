@@ -1419,7 +1419,7 @@ def test_create_store_owner_success(super_admin_fixture):
         "owner_name": f"Ganesh Patil {uid}",
         "owner_email": f"ganesh_{uid}@example.com",
         "password": "Password@123!",
-        "owner_phone": "9876543210",
+        "owner_phone": f"98{int(uid, 16) % 100000000:08d}",
         "address": "MG Road",
         "city": "Pune",
         "state": "Maharashtra",

@@ -72,8 +72,6 @@ class StoreExpenseService:
             expense,
         )
 
-        print("AMOUNT VALUE:", created_expense.amount)
-        print("AMOUNT TYPE:", type(created_expense.amount))
         return created_expense
 
     @staticmethod

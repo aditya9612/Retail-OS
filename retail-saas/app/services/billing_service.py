@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 
 import boto3
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -38,6 +38,27 @@ class BillingService:
 
     def _next_document_number(self, tenant_id: int, doc_type: str, prefix: str) -> str:
         year = datetime.utcnow().year
+        bind = self.db.get_bind()
+        if bind.dialect.name == "mysql":
+            self.db.execute(
+                text(
+                    "INSERT INTO document_sequences (tenant_id, doc_type, year, last_number, created_at, updated_at) "
+                    "VALUES (:tenant_id, :doc_type, :year, 0, NOW(), NOW()) "
+                    "ON DUPLICATE KEY UPDATE id=id"
+                ),
+                {"tenant_id": tenant_id, "doc_type": doc_type, "year": year},
+            )
+            self.db.flush()
+        else:
+            self.db.execute(
+                text(
+                    "INSERT OR IGNORE INTO document_sequences (tenant_id, doc_type, year, last_number, created_at, updated_at) "
+                    "VALUES (:tenant_id, :doc_type, :year, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {"tenant_id": tenant_id, "doc_type": doc_type, "year": year},
+            )
+            self.db.flush()
+
         row = (
             self.db.query(DocumentSequence)
             .filter(

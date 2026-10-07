@@ -367,14 +367,14 @@ class MultiStoreAnalyticsService:
         store_items: List[StoreProfitComparisonItem] = []
         for s in stores:
             ord_data = order_map.get(s.id)
-            gross_sales = Decimal(str(ord_data[1])) if ord_data else Decimal("0.00")
-            discounts = Decimal(str(ord_data[2])) if ord_data else Decimal("0.00")
-            net_revenue = gross_sales - discounts
-            cogs = cogs_map.get(s.id, Decimal("0.00"))
-            operating_expenses = expense_map.get(s.id, Decimal("0.00"))
-            refund_amount = refund_map.get(s.id, Decimal("0.00"))
-            gross_profit = net_revenue - cogs
-            net_profit = gross_profit - operating_expenses - refund_amount
+            gross_sales = (Decimal(str(ord_data[1])) if ord_data else Decimal("0.00")).quantize(Decimal("0.01"))
+            discounts = (Decimal(str(ord_data[2])) if ord_data else Decimal("0.00")).quantize(Decimal("0.01"))
+            net_revenue = (gross_sales - discounts).quantize(Decimal("0.01"))
+            cogs = cogs_map.get(s.id, Decimal("0.00")).quantize(Decimal("0.01"))
+            operating_expenses = expense_map.get(s.id, Decimal("0.00")).quantize(Decimal("0.01"))
+            refund_amount = refund_map.get(s.id, Decimal("0.00")).quantize(Decimal("0.01"))
+            gross_profit = (net_revenue - cogs).quantize(Decimal("0.01"))
+            net_profit = (gross_profit - operating_expenses - refund_amount).quantize(Decimal("0.01"))
             margin = (
                 round(float((net_profit / net_revenue) * 100), 2)
                 if net_revenue > 0

@@ -10,6 +10,7 @@ from pydantic import (
     StrictInt,
     StrictStr,
     field_validator,
+    model_validator,
 )
 
 
@@ -49,8 +50,8 @@ class SaleItemCreate(BaseModel):
         description="Product ID must be a positive integer",
     )
 
-    quantity: StrictInt = Field(
-        ...,
+    quantity: Optional[StrictInt] = Field(
+        default=None,
         gt=0,
         le=100000,
         description="Quantity must be greater than 0 and at most 100,000",
@@ -62,6 +63,20 @@ class SaleItemCreate(BaseModel):
         le=100000,
         description="Stock quantity must be non-negative and at most 100,000",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def sync_quantity_and_stock(cls, data):
+        if isinstance(data, dict):
+            qty = data.get("quantity")
+            stk = data.get("stock")
+            if qty is None and stk is not None:
+                data["quantity"] = stk
+            elif stk is None and qty is not None:
+                data["stock"] = qty
+            elif qty is None and stk is None:
+                raise ValueError("Either quantity or stock must be provided.")
+        return data
 
     unit_price: Optional[float] = Field(
         default=0.0,
@@ -177,8 +192,8 @@ class SaleCreate(BaseModel):
         description="Store ID must be a positive integer",
     )
 
-    sale_number: StrictStr = Field(
-        ...,
+    sale_number: Optional[StrictStr] = Field(
+        default=None,
         min_length=1,
         max_length=100,
         description="Sale reference number",

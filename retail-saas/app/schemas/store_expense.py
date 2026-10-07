@@ -11,6 +11,7 @@ from pydantic import (
     StrictInt,
     field_validator,
     model_validator,
+    field_serializer,
 )
 
 
@@ -708,6 +709,10 @@ class StoreExpenseResponse(BaseModel):
     expense_date: date
     payment_method: PaymentMethod
     reference_number: Optional[str] = None
+
+    @field_serializer("amount", mode="plain")
+    def serialize_amount(self, v: Decimal) -> str:
+        return f"{Decimal(str(v)):.2f}"
 
     model_config = ConfigDict(from_attributes=True)
 
