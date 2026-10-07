@@ -29,12 +29,17 @@ from app.models.store import Store
 from app.models.coupon import Coupon
 from app.models.order import Order, OrderTracking
 from app.models.order_item import OrderItem
+from app.models.order_item_batch_allocation import OrderItemBatchAllocation
 from app.models.product import Product
+from app.models.product_batch import ProductBatch
+from app.models.product_variant import ProductVariant
 from app.models.delivery import Delivery
 from app.repositories.order_repo import OrderRepository
+from app.repositories.order_item_batch_allocation_repo import OrderItemBatchAllocationRepository
 from app.repositories.customer_repo import get_customers_for_export
 from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate, OrderResponse
 from app.services.inventory_service import InventoryService
+from app.services.batch_allocation_service import BatchAllocationService, InsufficientStockException
 from app.utils.constants import OrderStatus, StockMovementType
 
 from reportlab.lib import colors
@@ -47,6 +52,23 @@ class OrderService:
         self.db = db
         self.repo = OrderRepository(db)
         self.inventory_service = InventoryService(db)
+        self.batch_allocation_service = BatchAllocationService(db)
+        self.batch_allocation_repo = OrderItemBatchAllocationRepository(db)
+
+    def _is_batch_managed(
+        self, product: Product, store_id: int, variant_id: int | None = None
+    ) -> bool:
+        if getattr(product, "track_batch", False):
+            return True
+        query = self.db.query(ProductBatch.id).filter(
+            ProductBatch.tenant_id == product.tenant_id,
+            ProductBatch.store_id == store_id,
+            ProductBatch.product_id == product.id,
+            ProductBatch.is_active.is_(True),
+        )
+        if variant_id is not None:
+            query = query.filter(ProductBatch.variant_id == variant_id)
+        return query.first() is not None
 
     def _generate_order_number(self) -> str:
         return f"ORD-{uuid.uuid4().hex[:8].upper()}"
@@ -263,6 +285,7 @@ class OrderService:
             tax_amount=tax_amount,
             total=total,
             variant=item.variant,
+            variant_id=getattr(item, "variant_id", None),
         )
 
     def _calculate_order_discount(
@@ -392,6 +415,25 @@ class OrderService:
                 raise NotFoundException(
                     f"Product {item_data.product_id} not found"
                 )
+
+            variant_id = getattr(item_data, "variant_id", None)
+            if variant_id is not None:
+                variant = (
+                    self.db.query(ProductVariant)
+                    .filter(
+                        ProductVariant.id == variant_id,
+                        ProductVariant.tenant_id == tenant_id,
+                    )
+                    .first()
+                )
+                if not variant:
+                    raise NotFoundException(
+                        f"ProductVariant {variant_id} not found"
+                    )
+                if variant.product_id != product.id:
+                    raise AppException(
+                        f"ProductVariant {variant_id} does not belong to product {product.id}"
+                    )
 
             order.items.append(
                 self._calculate_item_totals(
@@ -651,48 +693,92 @@ class OrderService:
 
         from app.schemas.inventory import StockOutRequest
 
-        for item in order.items:
+        try:
+            with self.db.begin_nested():
+                for item in order.items:
+                    product = (
+                        self.db.query(Product)
+                        .filter(
+                            Product.id == item.product_id,
+                            Product.tenant_id == tenant_id,
+                        )
+                        .first()
+                    )
+                    if not product:
+                        raise NotFoundException(f"Product {item.product_id} not found")
 
-            self.inventory_service.stock_out(
-                tenant_id,
-                StockOutRequest(
-                    store_id=order.store_id,
-                    product_id=item.product_id,
-                    quantity=item.quantity,
-                ),
-            )
+                    variant_id = getattr(item, "variant_id", None)
 
-        order.status = OrderStatus.CONFIRMED.value
+                    if self._is_batch_managed(product, order.store_id, variant_id=variant_id):
+                        # Batch allocation path:
+                        alloc_result = self.batch_allocation_service.allocate(
+                            tenant_id=tenant_id,
+                            store_id=order.store_id,
+                            product_id=item.product_id,
+                            requested_quantity=Decimal(str(item.quantity)),
+                            variant_id=variant_id,
+                            strategy="AUTO",
+                            reference_id=order.id,
+                            reference_type="ORDER",
+                            notes=f"Order {order.order_number} confirmation",
+                            commit=False,
+                        )
 
-        delivery = Delivery(
-            tenant_id=tenant_id,
-            order_id=order.id,
-            status="pending",
-        )
+                        # Persist OrderItemBatchAllocation rows
+                        for alloc in alloc_result.allocations:
+                            allocation_row = OrderItemBatchAllocation(
+                                order_item_id=item.id,
+                                batch_id=alloc.batch_id,
+                                quantity=alloc.allocated_quantity,
+                                unit_cost=alloc.unit_cost,
+                            )
+                            self.db.add(allocation_row)
+                    else:
+                        # Non-batch product path:
+                        self.inventory_service.stock_out(
+                            tenant_id,
+                            StockOutRequest(
+                                store_id=order.store_id,
+                                product_id=item.product_id,
+                                quantity=item.quantity,
+                            ),
+                            commit=False,
+                        )
 
-        self.db.add(delivery)
+                order.status = OrderStatus.CONFIRMED.value
 
-        tracking = OrderTracking(
-            order_id=order.id,
-            status=OrderStatus.CONFIRMED.value,
-            remarks="Order confirmed",
-        )
+                delivery = Delivery(
+                    tenant_id=tenant_id,
+                    order_id=order.id,
+                    status="pending",
+                )
+                self.db.add(delivery)
 
-        self.db.add(tracking)
+                tracking = OrderTracking(
+                    order_id=order.id,
+                    status=OrderStatus.CONFIRMED.value,
+                    remarks="Order confirmed",
+                )
+                self.db.add(tracking)
 
-        if order.customer_id is not None:
+                if order.customer_id is not None:
+                    customer = self._get_customer(
+                        tenant_id,
+                        order.customer_id,
+                    )
+                    customer.total_spend = int(
+                        (customer.total_spend or 0)
+                        + round(order.total_amount)
+                    )
 
-            customer = self._get_customer(
-                tenant_id,
-                order.customer_id,
-            )
+                self.db.flush()
 
-            customer.total_spend = int(
-                (customer.total_spend or 0)
-                + round(order.total_amount)
-            )
-
-        return self.repo.update(order)
+            self.db.commit()
+            self.db.refresh(order)
+            return order
+        except Exception:
+            self.db.rollback()
+            raise
 
     def cancel_order(
         self,

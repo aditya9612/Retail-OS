@@ -182,7 +182,7 @@ class InventoryService:
 
         return movement
 
-    def stock_out(self, tenant_id: int, data: StockOutRequest) -> StockMovement:
+    def stock_out(self, tenant_id: int, data: StockOutRequest, commit: bool = True) -> StockMovement:
         self._get_product(tenant_id, data.product_id)
         self._get_store(tenant_id, data.store_id)
 
@@ -228,13 +228,17 @@ class InventoryService:
             notes=data.notes,
         )
 
-        try:
+        if commit:
+            try:
+                self.db.add(movement)
+                self.db.commit()
+                self.db.refresh(movement)
+            except Exception:
+                self.db.rollback()
+                raise
+        else:
             self.db.add(movement)
-            self.db.commit()
-            self.db.refresh(movement)
-        except Exception:
-            self.db.rollback()
-            raise
+            self.db.flush()
 
         cache_delete_pattern(f"inventory:{tenant_id}:*")
 

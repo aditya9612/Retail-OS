@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -8,7 +8,9 @@ from app.core.database import Base, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.order import Order
+    from app.models.order_item_batch_allocation import OrderItemBatchAllocation
     from app.models.product import Product
+    from app.models.product_variant import ProductVariant
 
 
 class OrderItem(Base, TimestampMixin):
@@ -17,6 +19,11 @@ class OrderItem(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), nullable=False, index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    variant_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("product_variants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
@@ -29,6 +36,12 @@ class OrderItem(Base, TimestampMixin):
 
     order: Mapped["Order"] = relationship("Order", back_populates="items")
     product: Mapped[Optional["Product"]] = relationship("Product")
+    variant_rel: Mapped[Optional["ProductVariant"]] = relationship("ProductVariant")
+    batch_allocations: Mapped[List["OrderItemBatchAllocation"]] = relationship(
+        "OrderItemBatchAllocation",
+        back_populates="order_item",
+        cascade="all, delete-orphan",
+    )
 
     def __init__(self, **kwargs):
         if "discount" in kwargs and "discount_amount" not in kwargs:

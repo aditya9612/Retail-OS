@@ -48,6 +48,7 @@ class StockMovementType(str, Enum):
     TRANSFER = "transfer"
     ADJUSTMENT = "adjustment"
     RETURN = "return"
+    ALLOCATION = "allocation"
 
 
 class InvoiceStatus(str, Enum):

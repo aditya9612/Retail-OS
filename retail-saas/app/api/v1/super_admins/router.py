@@ -642,39 +642,39 @@ def configure_plan_limits_by_path(
     return SuperAdminService(db).configure_plan_limits(plan_id, data)
 
 
-@router.post(
-    "/saas-plans/{plan_id}/configure-limits",
-    response_model=PlanLimitsConfigureResponse,
-    summary="Configure Plan Limits (Deprecated POST alias)",
-    deprecated=True,
-    description="Deprecated: Use PUT /api/v1/super-admins/saas-plans/{plan_id}/configure-limits instead.",
-)
-def configure_plan_limits_by_path_post_deprecated(
-    plan_id: str,
-    data: PlanLimitsConfigureRequest,
-    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
-    db: Session = Depends(get_db),
-):
-    return SuperAdminService(db).configure_plan_limits(plan_id, data)
+# @router.post(
+#     "/saas-plans/{plan_id}/configure-limits",
+#     response_model=PlanLimitsConfigureResponse,
+#     summary="Configure Plan Limits (Deprecated POST alias)",
+#     deprecated=True,
+#     description="Deprecated: Use PUT /api/v1/super-admins/saas-plans/{plan_id}/configure-limits instead.",
+# )
+# def configure_plan_limits_by_path_post_deprecated(
+#     plan_id: str,
+#     data: PlanLimitsConfigureRequest,
+#     current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+#     db: Session = Depends(get_db),
+# ):
+#     return SuperAdminService(db).configure_plan_limits(plan_id, data)
 
 
-@router.post(
-    "/saas-plans/configure-limits",
-    response_model=PlanLimitsConfigureResponse,
-    summary="Configure All Plan Limits (Deprecated Body alias)",
-    deprecated=True,
-    description="Deprecated: Use PUT /api/v1/super-admins/saas-plans/{plan_id}/configure-limits instead.",
-)
-def configure_plan_limits_by_body(
-    data: PlanLimitsConfigureRequest,
-    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
-    db: Session = Depends(get_db),
-):
-    """
-    Deprecated: select a plan (by plan_id or plan_code in request body) and configure all its limits.
-    Use PUT /api/v1/super-admins/saas-plans/{plan_id}/configure-limits instead.
-    """
-    return SuperAdminService(db).configure_plan_limits(None, data)
+# @router.post(
+#     "/saas-plans/configure-limits",
+#     response_model=PlanLimitsConfigureResponse,
+#     summary="Configure All Plan Limits (Deprecated Body alias)",
+#     deprecated=True,
+#     description="Deprecated: Use PUT /api/v1/super-admins/saas-plans/{plan_id}/configure-limits instead.",
+# )
+# def configure_plan_limits_by_body(
+#     data: PlanLimitsConfigureRequest,
+#     current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+#     db: Session = Depends(get_db),
+# ):
+#     """
+#     Deprecated: select a plan (by plan_id or plan_code in request body) and configure all its limits.
+#     Use PUT /api/v1/super-admins/saas-plans/{plan_id}/configure-limits instead.
+#     """
+#     return SuperAdminService(db).configure_plan_limits(None, data)
 
 
 

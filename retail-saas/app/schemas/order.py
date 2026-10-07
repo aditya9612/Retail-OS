@@ -82,6 +82,12 @@ class OrderItemCreate(BaseModel):
         description="Variant cannot be empty",
     )
 
+    variant_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Optional Product Variant ID",
+    )
+
     @field_validator("unit_price", "discount", mode="before")
     @classmethod
     def validate_decimal_values(cls, v):
@@ -141,6 +147,19 @@ class OrderItemCreate(BaseModel):
         return v
 
 
+class OrderItemBatchAllocationResponse(BaseModel):
+    id: int
+    order_item_id: int
+    batch_id: int
+    quantity: Decimal
+    unit_cost: Decimal
+    created_at: datetime
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
 class OrderItemResponse(BaseModel):
 
     id: int
@@ -160,6 +179,8 @@ class OrderItemResponse(BaseModel):
     igst_amount: Decimal = Decimal("0.00")
     notes: Optional[str] = None
     variant: Optional[str] = None
+    variant_id: Optional[int] = None
+    batch_allocations: Optional[List[OrderItemBatchAllocationResponse]] = None
 
     model_config = {
         "from_attributes": True
