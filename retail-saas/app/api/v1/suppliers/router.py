@@ -1,3 +1,4 @@
+from typing import Union
 from fastapi import APIRouter, Depends, Query, Path, HTTPException
 from sqlalchemy.orm import Session
 
@@ -7,6 +8,7 @@ from app.models.user import User
 
 from app.schemas.supplier import (
     SupplierCreate,
+    SupplierEmptyResponse,
     SupplierResponse,
     SupplierStatsResponse,
     SupplierStatusUpdate,
@@ -41,7 +43,7 @@ def create_supplier(
 
 @router.get(
     "",
-    response_model=list[SupplierResponse],
+    response_model=Union[list[SupplierResponse], SupplierEmptyResponse],
 )
 def list_suppliers(
     user: User = Depends(
@@ -56,7 +58,7 @@ def list_suppliers(
 
 @router.get(
     "/search",
-    response_model=list[SupplierResponse],
+    response_model=Union[list[SupplierResponse], SupplierEmptyResponse],
 )
 def search_suppliers(
     search: str = Query(

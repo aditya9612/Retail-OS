@@ -1,11 +1,16 @@
+from typing import Union
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func
 
 from app.core.exceptions import AppException, NotFoundException
 from app.models.purchase_order import PurchaseOrder
 from app.models.supplier import Supplier
+from app.schemas.purchase_order import PurchaseOrderResponse
 from app.schemas.supplier import (
     SupplierCreate,
+    SupplierEmptyResponse,
+    SupplierPurchaseHistoryResponse,
+    SupplierResponse,
     SupplierUpdate,
 )
 
@@ -25,7 +30,7 @@ class SupplierService:
             tenant_id=tenant_id,
             name=data.name,
             contact_person=data.contact_person,
-            email=str(data.email),
+            email=str(data.email) if data.email else None,
             phone=data.phone,
             address=data.address,
             gstin=data.gstin,
@@ -46,9 +51,9 @@ class SupplierService:
     def list_suppliers(
         self,
         tenant_id: int,
-    ) -> list[Supplier]:
+    ) -> Union[list[SupplierResponse], SupplierEmptyResponse]:
 
-        return (
+        suppliers = (
             self.db.query(Supplier)
             .filter(
                 Supplier.tenant_id == tenant_id
@@ -56,6 +61,15 @@ class SupplierService:
             .order_by(Supplier.created_at.desc())
             .all()
         )
+
+        if not suppliers:
+            return SupplierEmptyResponse(
+                success=True,
+                message="No suppliers found",
+                data=[],
+            )
+
+        return [SupplierResponse.model_validate(s) for s in suppliers]
 
     def get_supplier(
         self,
@@ -144,7 +158,7 @@ class SupplierService:
         self,
         tenant_id: int,
         search: str,
-    ) -> list[Supplier]:
+    ) -> Union[list[SupplierResponse], SupplierEmptyResponse]:
 
         search = search.strip()
 
@@ -164,11 +178,13 @@ class SupplierService:
         )
 
         if not suppliers:
-            raise NotFoundException(
-                "No suppliers found matching the search"
+            return SupplierEmptyResponse(
+                success=True,
+                message="No suppliers found matching the search",
+                data=[],
             )
 
-        return suppliers
+        return [SupplierResponse.model_validate(s) for s in suppliers]
 
     def supplier_stats(
         self,
@@ -211,7 +227,7 @@ class SupplierService:
         self,
         tenant_id: int,
         supplier_id: int,
-    ):
+    ) -> SupplierPurchaseHistoryResponse:
 
         supplier = self.get_supplier(
             tenant_id,
@@ -231,14 +247,19 @@ class SupplierService:
             .all()
         )
 
-        return {
-             "supplier_id": supplier.id,
-             "supplier_name": supplier.name,
-             "total_purchases": len(purchases),
-             "purchase_history": purchases,
-             "message": (
-                 "No purchase history found for this supplier"
-                 if not purchases
-                 else "Purchase history retrieved successfully"
-                ),
-        }
+        serialized_purchases = [
+            PurchaseOrderResponse.model_validate(p)
+            for p in purchases
+        ]
+
+        return SupplierPurchaseHistoryResponse(
+            supplier_id=supplier.id,
+            supplier_name=supplier.name,
+            total_purchases=len(serialized_purchases),
+            purchase_history=serialized_purchases,
+            message=(
+                "No purchase history found for this supplier"
+                if not serialized_purchases
+                else "Purchase history retrieved successfully"
+            ),
+        )
