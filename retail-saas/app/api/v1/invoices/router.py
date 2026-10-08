@@ -151,7 +151,23 @@ def get_invoice(
     )
 
 
-@router.get("/{invoice_id}/pdf")
+@router.get(
+    "/{invoice_id}/pdf",
+    tags=["Invoice Documents", "Bill / Receipt"],
+    summary="Download or Preview Tax Invoice / Bill PDF",
+    description=(
+        "Exports an authoritative, dynamically rendered PDF document for a sales transaction. "
+        "Supports formal B2B/B2C Tax Invoice format (default, Corporate Navy Blue theme) or compact POS Bill / Receipt format "
+        "(Emerald Green theme) via the `document_type` query parameter. Delivery mode can be `download` (attachment) or `preview` (inline). "
+        "Requires 'billing:read' permission."
+    ),
+    responses={
+        200: {
+            "content": {"application/pdf": {}},
+            "description": "Rendered PDF document stream.",
+        }
+    },
+)
 def invoice_pdf(
     invoice_id: int,
     mode: Literal["download", "preview"] = Query(default="download"),

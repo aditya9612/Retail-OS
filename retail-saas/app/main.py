@@ -78,13 +78,225 @@ async def lifespan(app: FastAPI):
     yield
 
 
-from app.core.exceptions import register_exception_handlers
+openapi_tags = [
+    # --- Top: Core Operational Setup & Masters ---
+    {
+        "name": "auth",
+        "description": "Authentication, user login, OTP verification, and JWT session tokens.",
+    },
+    {
+        "name": "Users",
+        "description": "User and employee accounts, credentials, and store assignments.",
+    },
+    {
+        "name": "Roles",
+        "description": "Role-based access control (RBAC) and permissions management.",
+    },
+    {
+        "name": "Stores",
+        "description": "Store outlets, retail branch locations, and store settings.",
+    },
+    {
+        "name": "Store Targets",
+        "description": "Store revenue and sales performance targets.",
+    },
+    {
+        "name": "Store Transfers",
+        "description": "Inter-store inventory transfer and stock allocation requests.",
+    },
+    {
+        "name": "Store Expenses",
+        "description": "Store-level daily operational expense logs and accounting.",
+    },
+    {
+        "name": "products",
+        "description": "Product catalog, SKU definitions, pricing, barcodes, and master records.",
+    },
+    {
+        "name": "product-variants",
+        "description": "Product size, color, and attribute variant matrices.",
+    },
+    {
+        "name": "categories",
+        "description": "Product categorization, hierarchy, and taxonomy.",
+    },
+    {
+        "name": "inventory",
+        "description": "Stock level tracking, adjustments, audits, and warehouse positions.",
+    },
+    {
+        "name": "suppliers",
+        "description": "Supplier directory, vendor contacts, and vendor terms.",
+    },
+    {
+        "name": "warehouses",
+        "description": "Warehouse facilities and physical inventory holding hubs.",
+    },
+    {
+        "name": "grn",
+        "description": "Goods Received Notes (GRN) for inbound supplier shipments.",
+    },
+    # --- Centre: Procurement, Orders, POS, Invoices & Documents ---
+    {
+        "name": "Purchase Orders",
+        "description": "Supplier Purchase Order management, fulfillment tracking, and PO PDF exports.",
+    },
+    {
+        "name": "purchase-order-returns",
+        "description": "Purchase order return to vendor workflows.",
+    },
+    {
+        "name": "delivery",
+        "description": "Delivery tracking, dispatch schedules, and courier management.",
+    },
+    {
+        "name": "Delivery Exports",
+        "description": "Bulk export of delivery shipments, fulfillment logs, and tracking records in CSV or Excel format.",
+    },
+    {
+        "name": "Coupons",
+        "description": "Discount vouchers, promotional codes, and coupon redemption.",
+    },
+    {
+        "name": "orders",
+        "description": "Sales orders, cart checkout, and customer transactions.",
+    },
+    {
+        "name": "Order Returns",
+        "description": "Customer returns, exchange items, and restocking.",
+    },
+    {
+        "name": "billing",
+        "description": "POS billing engine, barcode scanning, and fast cashier checkout.",
+    },
+    {
+        "name": "pos-shifts",
+        "description": "POS cash registers, cashier drawer shifts, opening/closing floats.",
+    },
+    {
+        "name": "POS Z-Reports",
+        "description": "Cash register end-of-shift / end-of-day Z-Report JSON analytics, PDF downloads, and Excel spreadsheets.",
+    },
+    {
+        "name": "invoices",
+        "description": "Tax Invoices, invoice status, and billing history.",
+    },
+    {
+        "name": "Invoice Documents",
+        "description": "Tax Invoice document PDF generation, downloads, and print formatting.",
+    },
+    {
+        "name": "Bill / Receipt",
+        "description": "Compact POS thermal bill and customer payment receipt PDF generation.",
+    },
+    {
+        "name": "gst-rates",
+        "description": "GST tax slab definitions and HSN/SAC rate configurations.",
+    },
+    {
+        "name": "refunds",
+        "description": "Order refunds, returns, and payment reversals.",
+    },
+    {
+        "name": "Credit Notes",
+        "description": "Credit Note management, refund allocations, and Credit Note PDF exports.",
+    },
+    {
+        "name": "payments",
+        "description": "Customer payment processing, split tenders, and payment records.",
+    },
+    {
+        "name": "customers",
+        "description": "Customer directory, loyalty points, customer ledger, and credit limits.",
+    },
+    {
+        "name": "Customer Exports",
+        "description": "Bulk export of customer directory lists in CSV or Excel format.",
+    },
+    {
+        "name": "Document Settings",
+        "description": "Customizable branding, invoice prefix/padding sequence rules, terms, and visual document styling.",
+    },
+    # --- Centre-Lower: Reports & Business Analytics ---
+    {
+        "name": "Report Exports",
+        "description": "Unified on-demand document export engine supporting 22 business reports in CSV, Excel (.xlsx), and PDF formats.",
+    },
+    {
+        "name": "Sales Reports",
+        "description": "Daily, monthly, and yearly sales analytics, turnover trends, and top selling products.",
+    },
+    {
+        "name": "Inventory Reports",
+        "description": "Live stock levels, low-stock reorder alerts, slow-moving items, and inventory valuation.",
+    },
+    {
+        "name": "GST Reports",
+        "description": "Tax compliance, GSTR sales registers, and tax liability breakdowns.",
+    },
+    {
+        "name": "Customer Reports",
+        "description": "Customer activity, retention cohorts, customer lifetime value (CLV), and RFM segmentation.",
+    },
+    {
+        "name": "Payment Reports",
+        "description": "Daily billing register, cashier reconciliation, and payment gateway/method distribution.",
+    },
+    {
+        "name": "Profitability Reports",
+        "description": "Product margin analysis and store-wide Profit & Loss financial statements.",
+    },
+    {
+        "name": "Multi-Store Reports",
+        "description": "Comparative cross-store analytics across revenue, profit, inventory, and customer growth.",
+    },
+    {
+        "name": "Sales",
+        "description": "General sales analytics.",
+    },
+    # --- End: Dashboards, AI, Integrations & Administration ---
+    {
+        "name": "Dashboard",
+        "description": "Executive dashboard KPIs and summary metrics.",
+    },
+    {
+        "name": "analytics",
+        "description": "Advanced analytics and predictive retail business intelligence.",
+    },
+    {
+        "name": "ai",
+        "description": "Retail-OS AI assistant, inventory forecasts, and smart insights.",
+    },
+    {
+        "name": "whatsapp",
+        "description": "WhatsApp messaging notifications, billing receipts, and alerts.",
+    },
+    {
+        "name": "reviews",
+        "description": "Customer product and store feedback reviews.",
+    },
+    {
+        "name": "Super Admins",
+        "description": "Platform-wide super administrator controls.",
+    },
+    {
+        "name": "SaaS Billing",
+        "description": "Tenant SaaS subscription plans, billing cycle, and invoices.",
+    },
+    {
+        "name": "SaaS Usage",
+        "description": "Tenant plan quotas, resource usage limits, and metering.",
+    },
+]
 
 app = FastAPI(
     title=settings.APP_NAME,
     version="1.0.0",
     lifespan=lifespan,
+    openapi_tags=openapi_tags,
 )
+
+from app.core.exceptions import register_exception_handlers
 
 register_exception_handlers(app)
 

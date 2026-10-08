@@ -19,7 +19,7 @@ from app.services.purchase_order_service import PurchaseOrderService
 
 router = APIRouter(
     prefix="/purchase-orders",
-    tags=["purchase-orders"],
+    tags=["Purchase Orders"],
 )
 
 
@@ -65,7 +65,22 @@ def get_purchase_order(
     )
 
 
-@router.get("/{purchase_order_id}/pdf")
+@router.get(
+    "/{purchase_order_id}/pdf",
+    summary="Download or Preview Purchase Order PDF",
+    description=(
+        "Exports a professional vendor Purchase Order PDF document in Purple Indigo theme (#6D28D9). "
+        "Includes buyer delivery information, supplier details, itemized procurement table with SKU, "
+        "quantities, unit costs, total order value in numbers and Indian words, and signature block. "
+        "Requires 'purchase_orders:read' permission."
+    ),
+    responses={
+        200: {
+            "content": {"application/pdf": {}},
+            "description": "Rendered Purchase Order PDF stream.",
+        }
+    },
+)
 def get_purchase_order_pdf(
     purchase_order_id: int,
     mode: Literal["download", "preview"] = Query(default="download"),

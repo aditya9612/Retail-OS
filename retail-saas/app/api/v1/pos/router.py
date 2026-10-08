@@ -94,41 +94,70 @@ def close_shift(
 @router.get(
     "/{shift_id}/z-report",
     response_model=POSZReportResponse,
+    tags=["POS Z-Reports"],
+    summary="Get POS Shift Z-Report Data Summary",
+    description=(
+        "Generates a comprehensive Z-Report financial summary for the specified POS shift. "
+        "Includes opening cash float, cash sales, cash additions, cash drops, cash payouts, refunds, "
+        "expected vs counted closing cash, variance status, transaction counts, and tender breakdown. "
+        "Requires 'pos:shift_manage' permission."
+    ),
 )
 def get_z_report(
     shift_id: int,
     user: User = Depends(require_permission("pos:shift_manage")),
     db: Session = Depends(get_db),
 ):
-    """
-    Generates a comprehensive Z-Report summary for the specified shift.
-    Includes opening float, cash sales, cash drops, cash payouts, expected cash, counted cash,
-    variance status, transaction volume, and breakdown by payment method.
-    """
     return POSShiftService(db).get_z_report(user, shift_id)
 
 
 @router.get(
     "/{shift_id}/z-report/pdf",
+    tags=["POS Z-Reports"],
+    summary="Export POS Shift Z-Report as Branded PDF",
+    description=(
+        "Downloads the official register shift Z-Report as a branded PDF document in Dark Green POS theme (#14532D). "
+        "Features full cash drawer reconciliation, transaction counts, and payment breakdowns. "
+        "Requires 'pos:shift_manage' permission."
+    ),
+    responses={
+        200: {
+            "content": {"application/pdf": {}},
+            "description": "Rendered POS Z-Report PDF stream.",
+        }
+    },
 )
 def export_z_report_pdf(
     shift_id: int,
     user: User = Depends(require_permission("pos:shift_manage")),
     db: Session = Depends(get_db),
 ):
-    """Downloads the Z-Report for a POS shift as a branded PDF document."""
     return POSShiftService(db).export_z_report_pdf(user, shift_id)
 
 
 @router.get(
     "/{shift_id}/z-report/excel",
+    tags=["POS Z-Reports"],
+    summary="Export POS Shift Z-Report as Analytical Excel Workbook",
+    description=(
+        "Downloads the official register shift Z-Report as a structured 2-sheet Excel spreadsheet (.xlsx). "
+        "Sheet 1 contains shift overview and KPI metrics; Sheet 2 contains financial transaction reconciliation with auto-filter and formatting. "
+        "Requires 'pos:shift_manage' permission."
+    ),
+    responses={
+        200: {
+            "content": {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            },
+            "description": "Generated 2-sheet POS Z-Report Excel workbook.",
+        }
+    },
 )
 def export_z_report_excel(
     shift_id: int,
     user: User = Depends(require_permission("pos:shift_manage")),
     db: Session = Depends(get_db),
 ):
-    """Downloads the Z-Report for a POS shift as a 2-sheet Excel spreadsheet."""
     return POSShiftService(db).export_z_report_excel(user, shift_id)
 
 

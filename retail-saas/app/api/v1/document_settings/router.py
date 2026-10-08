@@ -16,7 +16,7 @@ from app.schemas.document_setting import (
 )
 from app.services.document_settings_service import DocumentSettingsService
 
-router = APIRouter(prefix="/document-settings", tags=["document-settings"])
+router = APIRouter(prefix="/document-settings", tags=["Document Settings"])
 
 ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/jpg"}

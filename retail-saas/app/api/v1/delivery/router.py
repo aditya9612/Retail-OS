@@ -120,7 +120,25 @@ def get_delivery_stats(
         )
 
 
-@router.get("/export")
+@router.get(
+    "/export",
+    tags=["Delivery Exports"],
+    summary="Export Deliveries to Excel or CSV",
+    description=(
+        "Exports tenant delivery and shipment dispatch records as an analytical Excel workbook (.xlsx) "
+        "or raw machine-readable CSV. Supports filtering by delivery status ('pending', 'assigned', 'out_for_delivery', 'delivered', 'cancelled'). "
+        "Requires 'orders:read' permission."
+    ),
+    responses={
+        200: {
+            "content": {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {},
+                "text/csv": {},
+            },
+            "description": "Exported Deliveries data stream (Excel or CSV).",
+        }
+    },
+)
 def export_deliveries(
     format: str = Query(..., description="Export format: excel or csv (required)"),
     status: Optional[str] = Query(None, description="Optional status filter"),
