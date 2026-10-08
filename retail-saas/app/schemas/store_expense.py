@@ -11,6 +11,7 @@ from pydantic import (
     StrictInt,
     field_validator,
     model_validator,
+    field_serializer,
 )
 
 
@@ -217,13 +218,6 @@ def validate_description(value: Optional[str]) -> Optional[str]:
 # ============================================================
 
 def validate_expense_date(value) -> date:
-    if isinstance(value, date):
-        if value > date.today():
-            raise ValueError(
-                "Expense date cannot be in the future."
-            )
-        return value
-
     # API input must be a string in YYYY-MM-DD format
     if not isinstance(value, str):
         raise ValueError(
@@ -531,13 +525,11 @@ class StoreExpenseCreate(BaseModel):
         ...,
         description="Payment method used for the expense",
     )
-
     reference_number: Optional[str] = Field(
         default=None,
         max_length=100,
         description="Optional invoice, receipt, or reference number",
     )
-
     @field_validator("store_id", mode="before")
     @classmethod
     def validate_store_id_field(cls, value):
@@ -702,12 +694,16 @@ from pydantic import BaseModel, ConfigDict
 class StoreExpenseResponse(BaseModel):
     id: int
     store_id: int
-    amount: Decimal
+    amount: float
     category: str
     description: Optional[str] = None
     expense_date: date
     payment_method: PaymentMethod
     reference_number: Optional[str] = None
+
+    @field_serializer("amount")
+    def serialize_amount(self, value: float) -> float:
+        return float(value)
 
     model_config = ConfigDict(from_attributes=True)
 

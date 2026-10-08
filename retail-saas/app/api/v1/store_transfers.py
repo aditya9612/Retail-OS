@@ -130,13 +130,16 @@ def get_transfer(
 @router.put(
     "/{transfer_id}/approve",
     response_model=StoreTransferResponse,
+    responses={
+        200: {"description": "Store transfer approved successfully"},
+    },
     dependencies=[Depends(require_operational_write)],
 )
 def approve_transfer(
     transfer_id: int = Path(
         ...,
         gt=0,
-        description="Store transfer ID must be a positive integer greater than 0",
+        description ="Enter the ID of the store transfer you want to approve. " ,
     ),
     data: StoreTransferApprove = Body(...),
     db: Session = Depends(get_db),
