@@ -109,6 +109,7 @@ def test_pan_and_aadhaar_validation():
             "email": f"invalid-pan-{uuid.uuid4().hex[:6]}@example.com",
             "full_name": "Test Pan Validation",
             "password": "Password123!",
+            "phone": "9876543210",
             "role": "staff",
             "pan_number": "INVALIDPAN123",
         },
@@ -124,6 +125,7 @@ def test_pan_and_aadhaar_validation():
             "email": f"invalid-aadhaar-{uuid.uuid4().hex[:6]}@example.com",
             "full_name": "Test Aadhaar Zero",
             "password": "Password123!",
+            "phone": "9876543210",
             "role": "staff",
             "addhar_number": "012345678901",
         },
@@ -139,6 +141,7 @@ def test_pan_and_aadhaar_validation():
             "email": f"invalid-aadhaar-{uuid.uuid4().hex[:6]}@example.com",
             "full_name": "Test Aadhaar Short",
             "password": "Password123!",
+            "phone": "9876543210",
             "role": "staff",
             "addhar_number": "12345",
         },
@@ -154,6 +157,7 @@ def test_pan_and_aadhaar_validation():
             "email": f"invalid-aadhaar-{uuid.uuid4().hex[:6]}@example.com",
             "full_name": "Test Aadhaar Identical",
             "password": "Password123!",
+            "phone": "9876543210",
             "role": "staff",
             "addhar_number": "222222222222",
         },
@@ -161,4 +165,103 @@ def test_pan_and_aadhaar_validation():
     )
     assert invalid_aadhaar_identical.status_code == 422
     assert "identical digits" in invalid_aadhaar_identical.text
+
+
+def test_create_user_missing_phone_returns_422():
+    tenant = create_tenant_and_admin("mphone")
+    headers = tenant["headers"]
+
+    resp = client.post(
+        "/api/v1/users",
+        data={
+            "email": f"no-phone-{uuid.uuid4().hex[:6]}@example.com",
+            "full_name": "No Phone User",
+            "password": "Password123!",
+            "role": "staff",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    assert "phone" in resp.text.lower()
+
+
+def test_create_user_invalid_file_extension():
+    tenant = create_tenant_and_admin("badext")
+    headers = tenant["headers"]
+
+    bad_file = io.BytesIO(b"executable file content")
+    bad_file.name = "malicious.exe"
+
+    resp = client.post(
+        "/api/v1/users",
+        data={
+            "email": f"badfile-{uuid.uuid4().hex[:6]}@example.com",
+            "full_name": "Bad File User",
+            "password": "Password123!",
+            "phone": "9876543210",
+            "role": "cashier",
+        },
+        files={
+            "pancard": ("malicious.exe", bad_file, "application/octet-stream"),
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    assert "Invalid file type" in resp.text
+
+
+def test_create_user_oversized_file():
+    tenant = create_tenant_and_admin("bigfile")
+    headers = tenant["headers"]
+
+    big_content = b"0" * (6 * 1024 * 1024)  # 6 MB
+    big_file = io.BytesIO(big_content)
+
+    resp = client.post(
+        "/api/v1/users",
+        data={
+            "email": f"bigfile-{uuid.uuid4().hex[:6]}@example.com",
+            "full_name": "Big File User",
+            "password": "Password123!",
+            "phone": "9876543210",
+            "role": "cashier",
+        },
+        files={
+            "profile_photo": ("avatar.png", big_file, "image/png"),
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 413
+    assert "exceeds maximum allowed size" in resp.text
+
+
+@pytest.mark.parametrize(
+    "invalid_email,expected_detail",
+    [
+        ("rohanpawar3333@gmail.comm", "gmail.comm"),
+        ("testuser@gmail.con", "gmail.con"),
+        ("testuser@yahoo.comm", "yahoo.comm"),
+        ("employee@customdomain.comm", ".comm"),
+        ("employee@customdomain.coom", ".coom"),
+        ("employee@customdomain.cpm", ".cpm"),
+    ],
+)
+def test_create_user_invalid_email_domain_typo_rejected(invalid_email, expected_detail):
+    tenant = create_tenant_and_admin("bademail")
+    headers = tenant["headers"]
+
+    resp = client.post(
+        "/api/v1/users",
+        data={
+            "email": invalid_email,
+            "full_name": "Test Typo Email User",
+            "password": "Password123!",
+            "phone": "9876543210",
+            "role": "staff",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422, f"Expected 422 for {invalid_email}, got {resp.status_code}: {resp.text}"
+    assert expected_detail in resp.text
+
 

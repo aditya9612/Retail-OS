@@ -2,6 +2,7 @@ import re
 from typing import Optional
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator, EmailStr
+from app.utils.validators import validate_email_address, validate_gstin_number
 
 INDIAN_STATES_AND_UTS = {
     "Andhra Pradesh",
@@ -300,79 +301,15 @@ class StoreCreate(BaseModel):
     @classmethod
     def validate_email(cls, value):
         if value is None:
-         return None
-
-        value = value.strip().lower()
-
-        if not value:
-           raise ValueError("Email is required")
-
-        if len(value) > 254:
-           raise ValueError("Email must not exceed 254 characters")
-
-    # Must contain exactly one @
-        if value.count("@") != 1:
-           raise ValueError("Please enter a valid email address")
-
-        local_part, domain = value.rsplit("@", 1)
-
-    # Local part validation
-        if not local_part:
-            raise ValueError("Email must contain a username before @")
-
-        if len(local_part) > 64:
-            raise ValueError("Email username must not exceed 64 characters")
-
-        if local_part.startswith(".") or local_part.endswith("."):
-            raise ValueError("Email username cannot start or end with a dot")
-
-        if ".." in local_part:
-            raise ValueError("Email username cannot contain consecutive dots")
-
-    # Allowed characters in email username
-        if not re.fullmatch(
-             r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+",
-             local_part
-        ):
-            raise ValueError("Email contains invalid characters")
-
-    # Domain validation
-        if not domain:
-            raise ValueError("Email must contain a valid domain")
-
-        if len(domain) > 253:
-            raise ValueError("Email domain is too long")
-
-        if "." not in domain:
-            raise ValueError("Email domain must contain a valid extension")
-
-        if domain.startswith(".") or domain.endswith("."):
-            raise ValueError("Email domain cannot start or end with a dot")
-
-        if ".." in domain:
-            raise ValueError("Email domain cannot contain consecutive dots")
-
-    # Domain labels must be valid
-        if not re.fullmatch(
-            r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+",
-            domain
-        ):
-            raise ValueError("Email domain contains invalid characters")
-
-        return value
+            return None
+        return validate_email_address(value, field_name="Store email", required=False)
 
     @field_validator("gstin")
     @classmethod
     def validate_gstin(cls, v: Optional[str]) -> Optional[str]:
         if not v or not v.strip():
             return None
-        clean_gst = v.strip().upper()
-        if not re.fullmatch(
-            r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$",
-            clean_gst,
-        ):
-            raise ValueError("Invalid GSTIN format")
-        return clean_gst
+        return validate_gstin_number(v, field_name="GSTIN", required=False)
 
 
 class StoreUpdate(BaseModel):
@@ -575,82 +512,15 @@ class StoreUpdate(BaseModel):
     @classmethod
     def validate_email(cls, value):
         if value is None:
-         return None
-
-        value = value.strip().lower()
-
-        if not value:
-           raise ValueError("Email is required")
-
-        if len(value) > 254:
-           raise ValueError("Email must not exceed 254 characters")
-
-    # Must contain exactly one @
-        if value.count("@") != 1:
-           raise ValueError("Please enter a valid email address")
-
-        local_part, domain = value.rsplit("@", 1)
-
-    # Local part validation
-        if not local_part:
-            raise ValueError("Email must contain a username before @")
-
-        if len(local_part) > 64:
-            raise ValueError("Email username must not exceed 64 characters")
-
-        if local_part.startswith(".") or local_part.endswith("."):
-            raise ValueError("Email username cannot start or end with a dot")
-
-        if ".." in local_part:
-            raise ValueError("Email username cannot contain consecutive dots")
-
-    # Allowed characters in email username
-        if not re.fullmatch(
-             r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+",
-             local_part
-        ):
-            raise ValueError("Email contains invalid characters")
-
-    # Domain validation
-        if not domain:
-            raise ValueError("Email must contain a valid domain")
-
-        if len(domain) > 253:
-            raise ValueError("Email domain is too long")
-
-        if "." not in domain:
-            raise ValueError("Email domain must contain a valid extension")
-
-        if domain.startswith(".") or domain.endswith("."):
-            raise ValueError("Email domain cannot start or end with a dot")
-
-        if ".." in domain:
-            raise ValueError("Email domain cannot contain consecutive dots")
-
-    # Domain labels must be valid
-        if not re.fullmatch(
-            r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+",
-            domain
-        ):
-            raise ValueError("Email domain contains invalid characters")
-
-        return value
+            return None
+        return validate_email_address(value, field_name="Store email", required=False)
 
     @field_validator("gstin")
     @classmethod
     def validate_gstin(cls, v: Optional[str]) -> Optional[str]:
         if not v or not v.strip():
             return None
-
-        clean_gst = v.strip().upper()
-
-        if not re.fullmatch(
-            r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$",
-            clean_gst,
-        ):
-            raise ValueError("Invalid GSTIN format")
-
-        return clean_gst
+        return validate_gstin_number(v, field_name="GSTIN", required=False)
 
 
 

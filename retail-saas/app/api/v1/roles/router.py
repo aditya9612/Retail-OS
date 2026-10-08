@@ -53,7 +53,7 @@ def list_permissions(
     description="Gets detailed information about a specific role, including assigned user count and permissions.",
 )
 def get_role(
-    role_id: Annotated[int, Path(gt=0, description="Role ID must be a positive integer")],
+    role_id: Annotated[int, Path(gt=0, le=999999, description="Role ID must be a positive integer up to 999999")],
     current_user: User = Depends(require_permission("users:read")),
     db: Session = Depends(get_db),
 ):
@@ -90,7 +90,7 @@ def create_role(
     include_in_schema=False,
 )
 def update_role(
-    role_id: Annotated[int, Path(gt=0, description="Role ID must be a positive integer")],
+    role_id: Annotated[int, Path(gt=0, le=999999, description="Role ID must be a positive integer up to 999999")],
     data: RoleUpdate,
     current_user: User = Depends(require_permission("users:write")),
     db: Session = Depends(get_db),
@@ -111,7 +111,7 @@ def update_role(
     description="Store Owner deletes a custom role. System/core roles and roles with active assigned users cannot be deleted.",
 )
 def delete_role(
-    role_id: Annotated[int, Path(gt=0, description="Role ID must be a positive integer")],
+    role_id: Annotated[int, Path(gt=0, le=999999, description="Role ID must be a positive integer up to 999999")],
     current_user: User = Depends(require_permission("users:write")),
     db: Session = Depends(get_db),
 ):

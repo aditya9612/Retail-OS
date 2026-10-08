@@ -1,7 +1,6 @@
-from typing import Optional
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Path, status
+from fastapi import APIRouter, Depends, Path, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -13,12 +12,7 @@ from app.schemas.store import (
     StoreResponse,
     StoreUpdate,
 )
-from app.schemas.user import (
-    UserCreate,
-    UserResponse,
-)
 from app.services.store_service import StoreService
-from app.services.user_service import UserService
 router = APIRouter(
     prefix="/stores",
     tags=["Stores"],
@@ -171,82 +165,3 @@ def delete_store(
     return {
         "message": "Store deleted successfully"
     }
-
-# ============================================================
-# ROLE-BASED STORE USER APIs (PER STORE)
-# ============================================================
-
-@router.get(
-    "/{store_id}/users",
-    response_model=list[UserResponse],
-    summary="List Store Users",
-    description="List all role-based users assigned to a specific store.",
-)
-def list_store_users(
-    store_id: int,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    include_inactive: bool = Query(False),
-    user: User = Depends(
-        require_permission("users:read")
-    ),
-    service: StoreService = Depends(
-        get_store_service
-    ),
-    db: Session = Depends(get_db),
-):
-    # Verify store belongs to caller's tenant
-    service.get_store(user.tenant_id, store_id)
-
-    if user.store_id is not None and user.store_id != store_id:
-        raise ForbiddenException("Access denied to users of this store")
-
-    skip = (page - 1) * page_size
-    return UserService(db).list_users(
-        tenant_id=user.tenant_id,
-        skip=skip,
-        limit=page_size,
-        include_inactive=include_inactive,
-        store_id=store_id,
-    )
-
-
-@router.post(
-    "/{store_id}/users",
-    response_model=UserResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create Store User",
-    description="Store Owner creates a role-based user for a specific store.",
-)
-def create_store_user(
-    store_id: Annotated[
-    int,
-    Path(
-        gt=0,
-        le=999999,
-        description="Store ID must be a positive integer up to 999999",
-        ),
-    ],
-    data: UserCreate,
-    user: User = Depends(
-        require_permission("users:write")
-    ),
-    service: StoreService = Depends(
-        get_store_service
-    ),
-    db: Session = Depends(get_db),
-):
-    # Verify store belongs to caller's tenant
-    service.get_store(user.tenant_id, store_id)
-
-    if user.store_id is not None and user.store_id != store_id:
-        raise ForbiddenException("You can only create users for your assigned store")
-
-    # Force store_id to match the path store_id
-    data.store_id = store_id
-
-    return UserService(db).create_user(
-        tenant_id=user.tenant_id,
-        data=data,
-        current_user_store_id=user.store_id,
-    )

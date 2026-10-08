@@ -83,6 +83,7 @@ def test_remove_user_from_store_flow():
             "full_name": "Test Staff",
             "password": "Password123!",
             "role": "staff",
+            "phone": f"98{abs(hash(user_email)) % 100000000:08d}",
         },
         headers=headers,
     )

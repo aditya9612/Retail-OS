@@ -12,7 +12,7 @@ from pydantic import (
     model_validator,
 )
 
-from app.utils.validators import validate_pan_number, validate_aadhaar_number
+from app.utils.validators import validate_pan_number, validate_aadhaar_number, validate_email_address
 from app.utils.phone import normalize_phone_number
 
 
@@ -96,32 +96,7 @@ class UserBase(BaseModel):
     @field_validator("email")
     @classmethod
     def validate_email(cls, value: EmailStr) -> str:
-        value = str(value).strip().lower()
-
-        if not value:
-            raise ValueError("Email cannot be empty")
-
-        if len(value) > 255:
-            raise ValueError("Email cannot exceed 255 characters")
-
-        local_part, separator, domain = value.rpartition("@")
-
-        if not separator or not local_part or not domain:
-            raise ValueError("Invalid email address")
-
-        if "." not in domain:
-            raise ValueError(
-                "Email domain must contain a valid domain extension"
-            )
-
-        if (
-            domain.startswith(".")
-            or domain.endswith(".")
-            or ".." in domain
-        ):
-            raise ValueError("Invalid email domain")
-
-        return value
+        return validate_email_address(str(value), field_name="Email", required=True)
 
     @field_validator("full_name")
     @classmethod
@@ -163,10 +138,27 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
 
+    phone: str = Field(
+        ...,
+        description="Mandatory 10-digit Indian phone number",
+    )
+
+    role: str = Field(
+        "staff",
+        description="Role name (e.g. staff, manager, cashier, admin, accountant)",
+    )
+
     password: str = Field(
         min_length=8,
         max_length=100,
     )
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def validate_create_phone(cls, value: Any) -> str:
+        if value is None or not str(value).strip():
+            raise ValueError("Phone number is required")
+        return normalize_phone_number(str(value).strip())
 
     @field_validator("password")
     @classmethod

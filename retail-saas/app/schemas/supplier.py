@@ -10,6 +10,7 @@ from pydantic import (
 from typing import Any, Optional
 
 from app.schemas.purchase_order import PurchaseOrderResponse
+from app.utils.validators import validate_email_address, validate_gstin_number
 
 class SupplierBase(BaseModel):
 
@@ -51,6 +52,13 @@ class SupplierBase(BaseModel):
         max_length=15,
         description="GSTIN must be exactly 15 characters"
     )
+
+    @field_validator("email")
+    @classmethod
+    def validate_supplier_email(cls, value: Optional[EmailStr]) -> Optional[str]:
+        if value is None:
+            return None
+        return validate_email_address(str(value), field_name="Supplier email", required=False)
 
     @field_validator("name", "contact_person", "address")
     @classmethod
@@ -120,28 +128,10 @@ class SupplierBase(BaseModel):
 
     @field_validator("gstin")
     @classmethod
-    def validate_gstin(cls, value: str) -> str:
-
-        value = value.strip().upper()
-
-        if len(value) != 15:
-            raise ValueError(
-                "GSTIN must be exactly 15 characters"
-            )
-
-        if not (
-            value[:2].isdigit()
-            and value[2:7].isalpha()
-            and value[7:11].isdigit()
-            and value[11].isalpha()
-            and value[12] == "Z"
-            and value[13:15].isalnum()
-        ):
-            raise ValueError(
-                "Invalid Indian GSTIN format"
-            )
-
-        return value
+    def validate_gstin(cls, value: Optional[str]) -> Optional[str]:
+        if not value or not str(value).strip():
+            return None
+        return validate_gstin_number(value, field_name="GSTIN", required=False)
 
 
 class SupplierCreate(SupplierBase):
@@ -177,6 +167,13 @@ class SupplierUpdate(BaseModel):
         min_length=15,
         max_length=15
     )
+
+    @field_validator("email")
+    @classmethod
+    def validate_update_supplier_email(cls, value: Optional[EmailStr]) -> Optional[str]:
+        if value is None:
+            return None
+        return validate_email_address(str(value), field_name="Supplier email", required=False)
 
     @field_validator("name", "contact_person", "address")
     @classmethod
@@ -262,30 +259,9 @@ class SupplierUpdate(BaseModel):
         cls,
         value: Optional[str]
     ) -> Optional[str]:
-
-        if value is None:
-            return value
-
-        value = value.strip().upper()
-
-        if len(value) != 15:
-            raise ValueError(
-                "GSTIN must be exactly 15 characters"
-            )
-
-        if not (
-            value[:2].isdigit()
-            and value[2:7].isalpha()
-            and value[7:11].isdigit()
-            and value[11].isalpha()
-            and value[12] == "Z"
-            and value[13:15].isalnum()
-        ):
-            raise ValueError(
-                "Invalid Indian GSTIN format"
-            )
-
-        return value
+        if not value or not str(value).strip():
+            return None
+        return validate_gstin_number(value, field_name="GSTIN", required=False)
 
 
 class SupplierResponse(BaseModel):

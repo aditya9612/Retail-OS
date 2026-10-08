@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 import re
 
 from app.utils.phone import normalize_phone_number
+from app.utils.validators import validate_email_address
 
 EMAIL_PATTERN = re.compile(
     r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$"
@@ -11,12 +12,7 @@ EMAIL_PATTERN = re.compile(
 
 
 def normalize_email(value: str) -> str:
-    value = value.strip()
-    if not value:
-        raise ValueError("Email address is required")
-    if not EMAIL_PATTERN.fullmatch(value):
-        raise ValueError("Invalid email address")
-    return value
+    return validate_email_address(value, field_name="Email address", required=True)
 
 
 def validate_password_value(value: str) -> str:

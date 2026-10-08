@@ -300,6 +300,62 @@ from app.core.exceptions import register_exception_handlers
 
 register_exception_handlers(app)
 
+from fastapi.openapi.utils import get_openapi
+
+
+def custom_openapi():
+    if not app.openapi_schema:
+        openapi_schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            openapi_version=app.openapi_version,
+            description=app.description,
+            routes=app.routes,
+            tags=app.openapi_tags,
+            servers=app.servers,
+            terms_of_service=app.terms_of_service,
+            contact=app.contact,
+            license_info=app.license_info,
+        )
+        app.openapi_schema = openapi_schema
+
+    try:
+        from app.core.database import SessionLocal
+        from app.models.role import Role
+        with SessionLocal() as db_session:
+            db_roles = [
+                r[0] for r in (
+                    db_session.query(Role.name)
+                    .distinct()
+                    .all()
+                )
+                if r[0] and r[0].strip().lower() != "superadmin"
+            ]
+            standard_order = ["admin", "manager", "cashier", "staff", "accountant"]
+            sorted_roles = [role for role in standard_order if role in db_roles]
+            for r in db_roles:
+                if r not in sorted_roles:
+                    sorted_roles.append(r)
+            if not sorted_roles:
+                sorted_roles = standard_order
+    except Exception:
+        sorted_roles = ["admin", "manager", "cashier", "staff", "accountant"]
+
+    schemas = app.openapi_schema.get("components", {}).get("schemas", {})
+    body_schema = schemas.get("Body_create_user_api_v1_users_post")
+    if body_schema and "properties" in body_schema and "role" in body_schema["properties"]:
+        body_schema["properties"]["role"]["enum"] = sorted_roles
+        body_schema["properties"]["role"]["description"] = (
+            f"Role name saved in database ({', '.join(sorted_roles)})"
+        )
+        if "staff" in sorted_roles:
+            body_schema["properties"]["role"]["default"] = "staff"
+
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
+
 
 import json
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -345,16 +401,18 @@ class UserJsonToFormMiddleware:
                     data = {}
 
                 # Map legacy role_id to role name if role string was omitted
-                if data.get("role_id") and not data.get("role"):
-                    try:
-                        from app.core.database import SessionLocal
-                        from app.models.role import Role
-                        with SessionLocal() as db_session:
-                            r = db_session.query(Role).filter(Role.id == data["role_id"]).first()
-                            if r:
-                                data["role"] = r.name
-                    except Exception:
-                        pass
+                if "role_id" in data:
+                    if not data.get("role"):
+                        try:
+                            from app.core.database import SessionLocal
+                            from app.models.role import Role
+                            with SessionLocal() as db_session:
+                                r = db_session.query(Role).filter(Role.id == data["role_id"]).first()
+                                if r:
+                                    data["role"] = r.name
+                        except Exception:
+                            pass
+                    data.pop("role_id", None)
 
                 boundary = "----RetailOSFormBoundaryXyZ12345"
                 body_parts = []

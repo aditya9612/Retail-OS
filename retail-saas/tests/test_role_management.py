@@ -145,10 +145,14 @@ def test_role_management_full_flow(unique_slug):
         db.close()
 
     # 11. Create MULTIPLE users under this SINGLE custom role across different stores!
-    # User 1: assigned to Store 1
+    # Also verify that removed /api/v1/stores/{store_id}/users endpoint returns 404
+    assert client.get(f"/api/v1/stores/{store1_id}/users", headers=owner_headers).status_code == 404
+    assert client.post(f"/api/v1/stores/{store1_id}/users", headers=owner_headers, json={}).status_code == 404
+
+    # User 1: assigned to Store 1 via POST /api/v1/users
     user1_email = f"supervisor1-{unique_slug}@retailstore.com"
     user1_res = client.post(
-        f"/api/v1/stores/{store1_id}/users",
+        "/api/v1/users",
         headers=owner_headers,
         json={
             "email": user1_email,
@@ -156,6 +160,7 @@ def test_role_management_full_flow(unique_slug):
             "password": "Password@123!",
             "role": "inventory_supervisor",
             "phone": "9812345671",
+            "store_id": store1_id,
         },
     )
     assert user1_res.status_code == 201
@@ -163,10 +168,10 @@ def test_role_management_full_flow(unique_slug):
     assert user1_data["role_id"] == custom_role_id
     assert user1_data["store_id"] == store1_id
 
-    # User 2: assigned to Store 2
+    # User 2: assigned to Store 2 via POST /api/v1/users
     user2_email = f"supervisor2-{unique_slug}@retailstore.com"
     user2_res = client.post(
-        f"/api/v1/stores/{store2_id}/users",
+        "/api/v1/users",
         headers=owner_headers,
         json={
             "email": user2_email,
@@ -174,6 +179,7 @@ def test_role_management_full_flow(unique_slug):
             "password": "Password@123!",
             "role_id": custom_role_id,
             "phone": "9812345672",
+            "store_id": store2_id,
         },
     )
     assert user2_res.status_code == 201
@@ -351,6 +357,7 @@ def test_create_user_phone_validation_error(unique_slug):
     finally:
         db.close()
 
+    # 2. Test POST /api/v1/users with empty phone string "" -> returns 422 (phone is required)
     res_empty_phone = client.post(
         "/api/v1/users",
         headers=owner_headers,
@@ -362,7 +369,7 @@ def test_create_user_phone_validation_error(unique_slug):
             "phone": "",
         },
     )
-    assert res_empty_phone.status_code == 201
+    assert res_empty_phone.status_code == 422
 
     # 3. Test POST /api/v1/users with valid phone -> succeeds
     valid_phone = f"96{abs(hash(unique_slug + 'valid')) % 100000000:08d}"

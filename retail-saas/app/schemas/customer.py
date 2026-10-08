@@ -13,6 +13,7 @@ from pydantic import (
     model_validator,
 )
 from app.schemas.order import OrderResponse
+from app.utils.validators import validate_email_address, validate_gstin_number
 
 
 class CustomerExportStatus(str, Enum):
@@ -243,6 +244,13 @@ class CustomerBase(BaseModel):
         "inactive"
     ] = "new"
 
+    @field_validator("email")
+    @classmethod
+    def validate_customer_email(cls, v: Optional[EmailStr]) -> Optional[str]:
+        if v is None:
+            return None
+        return validate_email_address(str(v), field_name="Customer email", required=False)
+
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, v: str) -> str:
@@ -275,28 +283,9 @@ class CustomerBase(BaseModel):
         cls,
         v: Optional[str]
     ) -> Optional[str]:
-
         if v is None:
             return None
-
-        v = v.strip().upper()
-
-        if not v:
-            raise ValueError(
-                "GSTIN cannot be empty or whitespace"
-            )
-
-        pattern = (
-            r"^[0-9]{2}[A-Z]{5}[0-9]{4}"
-            r"[A-Z][1-9A-Z]Z[0-9A-Z]$"
-        )
-
-        if not re.fullmatch(pattern, v):
-            raise ValueError(
-                "Invalid GSTIN format"
-            )
-
-        return v
+        return validate_gstin_number(v, field_name="GSTIN", required=False)
 
 
 class CustomerCreate(CustomerBase):
@@ -577,7 +566,7 @@ class CustomerUpdate(BaseModel):
                 f"Email cannot be placeholder '{v}'"
             )
 
-        return v
+        return validate_email_address(v, field_name="Customer email", required=True)
 
     @field_validator("gstin", mode="before")
     @classmethod
@@ -613,28 +602,9 @@ class CustomerUpdate(BaseModel):
         cls,
         v: Optional[str]
     ) -> Optional[str]:
-
         if v is None:
             return None
-
-        v = v.strip().upper()
-
-        if not v:
-            raise ValueError(
-                "GSTIN cannot be empty or whitespace"
-            )
-
-        pattern = (
-            r"^[0-9]{2}[A-Z]{5}[0-9]{4}"
-            r"[A-Z][1-9A-Z]Z[0-9A-Z]$"
-        )
-
-        if not re.fullmatch(pattern, v):
-            raise ValueError(
-                "Invalid GSTIN format"
-            )
-
-        return v
+        return validate_gstin_number(v, field_name="GSTIN", required=False)
 
 
 class CustomerResponse(CustomerBase):
