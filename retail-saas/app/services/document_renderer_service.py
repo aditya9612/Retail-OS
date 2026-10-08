@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 import qrcode
+import html
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -16,6 +17,7 @@ from reportlab.platypus import (
     SimpleDocTemplate,
     Paragraph,
     Spacer,
+    HRFlowable,
     Table as PlatyTable,
     TableStyle as PlatyTableStyle,
 )
@@ -27,6 +29,13 @@ from app.services.export_theme import THEMES, get_theme_for_report
 from app.utils.helpers import amount_to_indian_words
 
 logger = logging.getLogger(__name__)
+
+
+def _xml_escape(text: Any) -> str:
+    """Escapes XML/HTML special characters for safe ReportLab Platypus Paragraph formatting."""
+    if text is None:
+        return ""
+    return html.escape(str(text), quote=False)
 
 
 def format_document_number(raw_number: Any, prefix: Optional[str] = None, doc_type: str = "invoice") -> str:
@@ -781,64 +790,86 @@ class DocumentRenderer:
         # 1. Branded Company Header
         header_text = []
         biz_name = getattr(branding, "business_name", None) or "Retail Store"
-        header_text.append(f"<font size='14' color='{theme.primary_hex}'><b>{biz_name}</b></font>")
+        header_text.append(f"<font size='13' color='{theme.primary_hex}'><b>{_xml_escape(biz_name)}</b></font>")
 
-        sub_details = []
         addr = getattr(branding, "address", None)
         if addr:
-            sub_details.append(addr)
+            header_text.append(f"<font size='8' color='#475569'>{_xml_escape(addr)}</font>")
+
+        contact_parts = []
         phone = getattr(branding, "phone", None)
         if phone:
-            sub_details.append(f"Phone: {phone}")
+            contact_parts.append(f"Phone: {_xml_escape(phone)}")
         email = getattr(branding, "email", None)
         if email:
-            sub_details.append(f"Email: {email}")
-        if getattr(branding, "show_gstin", False) and getattr(branding, "gstin", None):
-            sub_details.append(f"GSTIN: {branding.gstin}")
+            contact_parts.append(f"Email: {_xml_escape(email)}")
+        website = getattr(branding, "website", None)
+        if website:
+            contact_parts.append(f"Web: {_xml_escape(website)}")
+        if contact_parts:
+            header_text.append(f"<font size='8' color='#475569'>{' &nbsp;|&nbsp; '.join(contact_parts)}</font>")
 
-        if sub_details:
-            header_text.append(f"<font size='8' color='#475569'>{' | '.join(sub_details[:3])}</font>")
+        gstin = getattr(branding, "gstin", None)
+        show_gstin = getattr(branding, "show_gstin", True)
+        if show_gstin and gstin:
+            header_text.append(f"<font size='8' color='#475569'><b>GSTIN:</b> {_xml_escape(gstin)}</font>")
+
+        company_p = Paragraph("<br/>".join(header_text), normal_style)
 
         logo_url = getattr(branding, "logo_url", None)
         logo_path = self._validate_logo_path(logo_url)
+        logo_img = None
         if logo_path:
             try:
                 from reportlab.platypus import Image as PlatyImage
                 img = ImageReader(logo_path)
                 iw, ih = img.getSize()
                 aspect = iw / float(ih)
-                w = min(80, 40 * aspect)
-                h = w / aspect
+                max_w = 75.0
+                max_h = 45.0
+                if aspect >= 1:
+                    w = min(max_w, max_h * aspect)
+                    h = w / aspect
+                else:
+                    h = min(max_h, max_w / aspect)
+                    w = h * aspect
                 logo_img = PlatyImage(logo_path, width=w, height=h)
-                header_table = PlatyTable(
-                    [[Paragraph("<br/>".join(header_text), normal_style), logo_img]],
-                    colWidths=[430, 93],
-                )
-                header_table.setStyle(PlatyTableStyle([
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("ALIGN", (1, 0), (1, 0), "RIGHT"),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ]))
-                elements.append(header_table)
             except Exception as e:
                 logger.warning(f"Failed to embed logo in report: {e}")
-                elements.append(Paragraph("<br/>".join(header_text), normal_style))
-        else:
-            elements.append(Paragraph("<br/>".join(header_text), normal_style))
+                logo_img = None
 
-        elements.append(Spacer(1, 10))
+        if logo_img:
+            header_table = PlatyTable(
+                [[logo_img, company_p]],
+                colWidths=[80, 443],
+            )
+            header_table.setStyle(PlatyTableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ALIGN", (0, 0), (0, 0), "LEFT"),
+                ("ALIGN", (1, 0), (1, 0), "LEFT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]))
+            elements.append(header_table)
+        else:
+            elements.append(company_p)
+
+        elements.append(Spacer(1, 4))
+        elements.append(HRFlowable(width="100%", thickness=1, color=theme.primary_color, spaceBefore=2, spaceAfter=8))
 
         # 2. Report Title & Metadata Banner
-        title_p = Paragraph(f"<font size='13' color='{theme.primary_hex}'><b>{resolved_title.upper()}</b></font>", normal_style)
+        title_p = Paragraph(f"<font size='12' color='{theme.primary_hex}'><b>{_xml_escape(resolved_title.upper())}</b></font>", normal_style)
         elements.append(title_p)
-        elements.append(Spacer(1, 5))
+        elements.append(Spacer(1, 4))
 
         if resolved_metadata:
-            meta_items = [f"<b>{k}:</b> {v if v is not None else 'N/A'}" for k, v in resolved_metadata.items()]
+            meta_items = [f"<b>{_xml_escape(k)}:</b> {_xml_escape(v) if v is not None else 'N/A'}" for k, v in resolved_metadata.items()]
             meta_str = " &nbsp;&nbsp;|&nbsp;&nbsp; ".join(meta_items)
             meta_p = Paragraph(f"<font size='8' color='#334155'>{meta_str}</font>", normal_style)
             elements.append(meta_p)
-            elements.append(Spacer(1, 10))
+            elements.append(Spacer(1, 8))
 
         # 3. KPI Summary Cards (if available)
         if resolved_kpis:
@@ -921,11 +952,19 @@ class DocumentRenderer:
             canvas_obj.setFont("Helvetica", 7.5)
             canvas_obj.setFillColor(colors.HexColor("#64748B"))
             canvas_obj.drawString(36, 20, "Generated by Retail-OS | Confidential")
+            footer_text = getattr(branding, "footer_text", None)
+            if footer_text:
+                canvas_obj.drawCentredString(A4[0] / 2.0, 20, str(footer_text)[:60])
             page_str = f"Page {document.page}"
             canvas_obj.drawRightString(A4[0] - 36, 20, page_str)
             canvas_obj.restoreState()
 
-        doc.build(elements, onFirstPage=_add_footer, onLaterPages=_add_footer)
+        class UncompressedCanvas(canvas.Canvas):
+            def __init__(self, *args, **kwargs):
+                kwargs["pageCompression"] = 0
+                super().__init__(*args, **kwargs)
+
+        doc.build(elements, canvasmaker=UncompressedCanvas, onFirstPage=_add_footer, onLaterPages=_add_footer)
         buffer.seek(0)
         return buffer.getvalue()
 

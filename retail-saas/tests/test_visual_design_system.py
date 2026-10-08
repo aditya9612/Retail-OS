@@ -209,6 +209,14 @@ def test_report_pdf_themes_rendering(branding):
         parsed = parse_pdf_structure(pdf_bytes)
         assert parsed["page_count"] >= 1
         assert len(pdf_bytes) > 2000
+        # Assert full dynamic branding rendered
+        assert "Nexus Retail Hub" in parsed["text"]
+        assert "Sector 18, Vashi" in parsed["text"]
+        assert "+91 9820011223" in parsed["text"]
+        assert "contact@nexusretail.com" in parsed["text"]
+        assert "https://nexusretail.com" in parsed["text"]
+        assert "27ABCDE1234F1Z5" in parsed["text"]
+        assert "Thank you for your business" in parsed["text"]
 
 
 def test_report_excel_dynamic_theme_styling(branding):
@@ -260,3 +268,101 @@ def test_report_excel_dynamic_theme_styling(branding):
         header_fill_color = str(header_cell.fill.start_color.rgb)
         assert header_fill_color.endswith(expected_hex)
 
+
+def test_report_pdf_with_logo_and_graceful_fallbacks(branding):
+    """Verify report PDF embeds logo when valid and falls back safely on corrupt/traversal paths."""
+    from PIL import Image
+    from pathlib import Path
+
+    uploads_dir = Path("uploads")
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    valid_logo_path = uploads_dir / "temp_valid_logo.png"
+
+    try:
+        # Create a valid test image
+        img = Image.new("RGB", (120, 60), color=(15, 118, 110))
+        img.save(valid_logo_path)
+
+        renderer = DocumentRenderer()
+
+        # 1. Valid logo embedded
+        branding_with_logo = branding.model_copy(update={"logo_url": "/uploads/temp_valid_logo.png"})
+        pdf_bytes = renderer.render_report_pdf(
+            report_title="Daily Sales Report",
+            branding=branding_with_logo,
+            report_type="sales_daily",
+        )
+        parsed = parse_pdf_structure(pdf_bytes)
+        assert parsed["page_count"] == 1
+        assert "Nexus Retail Hub" in parsed["text"]
+
+        # 2. Corrupt logo fallback (test_logo.png is 67 bytes corrupt)
+        branding_corrupt = branding.model_copy(update={"logo_url": "/uploads/test_logo.png"})
+        pdf_corrupt = renderer.render_report_pdf(
+            report_title="Daily Sales Report",
+            branding=branding_corrupt,
+            report_type="sales_daily",
+        )
+        parsed_corrupt = parse_pdf_structure(pdf_corrupt)
+        assert parsed_corrupt["page_count"] == 1
+        assert "Nexus Retail Hub" in parsed_corrupt["text"]
+
+        # 3. Path traversal rejected gracefully
+        branding_traversal = branding.model_copy(update={"logo_url": "../../etc/shadow.png"})
+        pdf_traversal = renderer.render_report_pdf(
+            report_title="Daily Sales Report",
+            branding=branding_traversal,
+            report_type="sales_daily",
+        )
+        parsed_traversal = parse_pdf_structure(pdf_traversal)
+        assert parsed_traversal["page_count"] == 1
+        assert "Nexus Retail Hub" in parsed_traversal["text"]
+
+    finally:
+        if valid_logo_path.exists():
+            valid_logo_path.unlink()
+
+
+def test_report_pdf_minimal_branding_no_breakage():
+    """Verify report PDF renders properly with minimal branding and missing optional fields."""
+    minimal_branding = BrandingContext(
+        business_name="Minimal Outlet",
+        address="",
+        phone="",
+        email="",
+        website="",
+        gstin="",
+        footer_text="",
+        show_gstin=False,
+    )
+    renderer = DocumentRenderer()
+    pdf_bytes = renderer.render_report_pdf(
+        report_title="Stock Summary Report",
+        branding=minimal_branding,
+        report_type="inventory_stock",
+    )
+    parsed = parse_pdf_structure(pdf_bytes)
+    assert parsed["page_count"] == 1
+    assert "Minimal Outlet" in parsed["text"]
+
+
+def test_report_pdf_xml_character_escaping():
+    """Verify special XML characters (&, <, >) in business details do not crash report generation."""
+    special_branding = BrandingContext(
+        business_name="Marks & Spencer <Retail> & Co.",
+        address="Bldg #4 & #5 <Phase 2>, West Sector",
+        phone="+91 9000000000",
+        email="info&support@marks-spencer.co.in",
+        website="https://m&s.co.in?ref=pos<app>",
+        gstin="27AABCM1234F1Z1",
+        footer_text="Confidential & Proprietary <Notice>",
+    )
+    renderer = DocumentRenderer()
+    pdf_bytes = renderer.render_report_pdf(
+        report_title="Profit & Loss Statement",
+        branding=special_branding,
+        report_type="profit_loss",
+    )
+    parsed = parse_pdf_structure(pdf_bytes)
+    assert parsed["page_count"] == 1
+    assert "Marks & Spencer" in parsed["text"]

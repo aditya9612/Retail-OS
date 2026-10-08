@@ -1271,12 +1271,21 @@ class ReportService:
 
         branding = None
         try:
+            tenant_id, resolved_store_id = self._resolve_tenant_and_store(user, data.store_id)
             branding = DocumentSettingsService(self.db).resolve_branding(
-                tenant_id=user.tenant_id,
-                store_id=data.store_id,
+                tenant_id=tenant_id,
+                store_id=resolved_store_id,
             )
+        except HTTPException:
+            raise
         except Exception:
-            branding = None
+            try:
+                branding = DocumentSettingsService(self.db).resolve_branding(
+                    tenant_id=getattr(user, "tenant_id", None) or 1,
+                    store_id=data.store_id,
+                )
+            except Exception:
+                branding = None
 
         headers: List[str] = []
         rows: List[List[Any]] = []
