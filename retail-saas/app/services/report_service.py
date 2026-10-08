@@ -1756,6 +1756,7 @@ class ReportService:
                 metadata=metadata,
                 kpis=kpis,
                 branding=branding,
+                report_type=rtype,
             )
 
         # -------------------------------------------------------------
@@ -1770,6 +1771,7 @@ class ReportService:
                 headers=headers,
                 rows=rows,
                 branding=branding,
+                report_type=rtype,
             )
             return StreamingResponse(
                 io.BytesIO(pdf_bytes),

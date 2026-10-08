@@ -8,6 +8,8 @@ from fastapi.responses import StreamingResponse
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from app.services.export_theme import get_theme_for_report
+
 
 class ExcelExportService:
     """
@@ -55,6 +57,7 @@ class ExcelExportService:
         enable_zebra: bool = True,
         min_col_width: int = 12,
         max_col_width: int = 50,
+        report_type: str | None = None,
     ) -> openpyxl.Workbook:
         """
         Creates and styles an openpyxl Workbook with the given headers and data rows.
@@ -63,6 +66,12 @@ class ExcelExportService:
         ws = wb.active
         # Excel sheet titles cannot exceed 31 chars
         ws.title = (sheet_title or "Export")[:31].replace(":", "").replace("/", "_").replace("\\", "_")
+
+        theme = get_theme_for_report(report_type or sheet_title)
+        header_fill = (
+            PatternFill(start_color=theme.excel_header_hex, end_color=theme.excel_header_hex, fill_type="solid")
+            if theme else self.header_fill
+        )
 
         # Freeze the top header row so it stays visible during scrolling
         ws.freeze_panes = "A2"
@@ -74,7 +83,7 @@ class ExcelExportService:
         for col_idx in range(1, len(headers) + 1):
             cell = ws.cell(row=1, column=col_idx)
             cell.font = self.header_font
-            cell.fill = self.header_fill
+            cell.fill = header_fill
             cell.alignment = self.header_alignment
             cell.border = self.cell_border
 
@@ -139,6 +148,7 @@ class ExcelExportService:
         headers: list[str],
         rows: list[list[Any]],
         enable_zebra: bool = True,
+        report_type: str | None = None,
     ) -> io.BytesIO:
         """Generates an in-memory BytesIO stream containing the complete .xlsx file."""
         wb = self.create_workbook(
@@ -146,6 +156,7 @@ class ExcelExportService:
             headers=headers,
             rows=rows,
             enable_zebra=enable_zebra,
+            report_type=report_type,
         )
         stream = io.BytesIO()
         wb.save(stream)
@@ -158,9 +169,10 @@ class ExcelExportService:
         headers: list[str],
         rows: list[list[Any]],
         enable_zebra: bool = True,
+        report_type: str | None = None,
     ) -> bytes:
         """Generates raw .xlsx bytes."""
-        stream = self.export_to_stream(sheet_title, headers, rows, enable_zebra)
+        stream = self.export_to_stream(sheet_title, headers, rows, enable_zebra, report_type=report_type)
         return stream.getvalue()
 
     def create_streaming_response(
@@ -170,10 +182,11 @@ class ExcelExportService:
         rows: list[list[Any]],
         filename: str,
         enable_zebra: bool = True,
+        report_type: str | None = None,
     ) -> StreamingResponse:
         """Creates a FastAPI StreamingResponse with proper Excel MIME type and Content-Disposition."""
         clean_name = filename if filename.endswith(".xlsx") else f"{filename}.xlsx"
-        stream = self.export_to_stream(sheet_title, headers, rows, enable_zebra)
+        stream = self.export_to_stream(sheet_title, headers, rows, enable_zebra, report_type=report_type)
         return StreamingResponse(
             stream,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -189,6 +202,7 @@ class ExcelExportService:
         kpis: list[dict[str, Any]] | None = None,
         branding: Any = None,
         enable_zebra: bool = True,
+        report_type: str | None = None,
     ) -> openpyxl.Workbook:
         """
         Creates a professional 2-sheet corporate Excel workbook:
@@ -197,13 +211,21 @@ class ExcelExportService:
         """
         wb = openpyxl.Workbook()
 
+        theme = get_theme_for_report(report_type or sheet_title)
+        header_hex = theme.excel_header_hex
+        theme_header_fill = PatternFill(
+            start_color=header_hex,
+            end_color=header_hex,
+            fill_type="solid",
+        )
+
         # ----------------------------------------------------
         # SHEET 1: OVERVIEW / SUMMARY
         # ----------------------------------------------------
         ws_summary = wb.active
         ws_summary.title = "Overview"
 
-        title_font = Font(name="Calibri", size=15, bold=True, color=self.HEADER_FILL_COLOR)
+        title_font = Font(name="Calibri", size=15, bold=True, color=header_hex)
         subtitle_font = Font(name="Calibri", size=11, bold=True, color="374151")
         section_font = Font(name="Calibri", size=11, bold=True, color=self.HEADER_FONT_COLOR)
         key_font = Font(name="Calibri", size=10, bold=True, color="1F2937")
@@ -226,9 +248,9 @@ class ExcelExportService:
         # Metadata Section
         if metadata:
             ws_summary.cell(row=current_row, column=1, value="REPORT PARAMETERS").font = section_font
-            ws_summary.cell(row=current_row, column=1).fill = self.header_fill
+            ws_summary.cell(row=current_row, column=1).fill = theme_header_fill
             ws_summary.cell(row=current_row, column=2, value="DETAILS").font = section_font
-            ws_summary.cell(row=current_row, column=2).fill = self.header_fill
+            ws_summary.cell(row=current_row, column=2).fill = theme_header_fill
             ws_summary.row_dimensions[current_row].height = 22
             current_row += 1
 
@@ -246,9 +268,9 @@ class ExcelExportService:
         # KPI Section
         if kpis:
             ws_summary.cell(row=current_row, column=1, value="KEY METRICS (KPIs)").font = section_font
-            ws_summary.cell(row=current_row, column=1).fill = self.header_fill
+            ws_summary.cell(row=current_row, column=1).fill = theme_header_fill
             ws_summary.cell(row=current_row, column=2, value="VALUE").font = section_font
-            ws_summary.cell(row=current_row, column=2).fill = self.header_fill
+            ws_summary.cell(row=current_row, column=2).fill = theme_header_fill
             ws_summary.row_dimensions[current_row].height = 22
             current_row += 1
 
@@ -290,7 +312,7 @@ class ExcelExportService:
         for col_idx in range(1, len(headers) + 1):
             cell = ws_data.cell(row=1, column=col_idx)
             cell.font = self.header_font
-            cell.fill = self.header_fill
+            cell.fill = theme_header_fill
             cell.alignment = self.header_alignment
             cell.border = self.cell_border
 
@@ -344,6 +366,7 @@ class ExcelExportService:
         kpis: list[dict[str, Any]] | None = None,
         branding: Any = None,
         enable_zebra: bool = True,
+        report_type: str | None = None,
     ) -> StreamingResponse:
         """Generates a professional 2-sheet report workbook and returns a StreamingResponse."""
         clean_name = filename if filename.endswith(".xlsx") else f"{filename}.xlsx"
@@ -355,6 +378,7 @@ class ExcelExportService:
             kpis=kpis,
             branding=branding,
             enable_zebra=enable_zebra,
+            report_type=report_type,
         )
         stream = io.BytesIO()
         wb.save(stream)

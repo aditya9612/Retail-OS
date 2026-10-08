@@ -422,6 +422,7 @@ class POSShiftService:
             headers=headers,
             rows=rows,
             branding=branding,
+            report_type="pos_z_report",
         )
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
@@ -485,5 +486,6 @@ class POSShiftService:
             metadata=metadata,
             kpis=kpis,
             branding=branding,
+            report_type="pos_z_report",
         )
 
