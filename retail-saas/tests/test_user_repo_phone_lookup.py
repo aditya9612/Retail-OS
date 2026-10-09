@@ -47,6 +47,10 @@ def _unique():
     return uuid.uuid4().hex[:8]
 
 
+def _unique_phone():
+    return f"9{uuid.uuid4().int % 1000000000:09d}"
+
+
 def _create_tenant(db, domain: str) -> Tenant:
     tenant = Tenant(
         name=f"Test Tenant {domain}",
@@ -102,7 +106,7 @@ class TestActiveUserFound:
     def test_returns_user_for_existing_active_phone(self, db, repo):
         """Active user with matching phone is returned."""
         tenant = _create_tenant(db, f"t-{_unique()}")
-        phone = "9876543210"
+        phone = _unique_phone()
         user = _create_user(db, tenant, phone)
 
         result = repo.get_active_user_by_phone(phone)
@@ -115,9 +119,10 @@ class TestActiveUserFound:
     def test_returned_user_has_role_loaded(self, db, repo):
         """Eager-loaded role relationship is accessible without extra query."""
         tenant = _create_tenant(db, f"t-{_unique()}")
-        user = _create_user(db, tenant, "9123456789")
+        phone = _unique_phone()
+        user = _create_user(db, tenant, phone)
 
-        result = repo.get_active_user_by_phone("9123456789")
+        result = repo.get_active_user_by_phone(phone)
 
         assert result is not None
         assert result.role is not None
@@ -228,21 +233,23 @@ class TestCanonicalPhone:
     def test_lookup_uses_canonical_form(self, db, repo):
         """Stored canonical phone matches lookup with the same canonical value."""
         tenant = _create_tenant(db, f"t-{_unique()}")
-        raw_phone = "+91 98765-43210"
+        phone_core = f"{uuid.uuid4().int % 1000000000:09d}"
+        raw_phone = f"+91 9{phone_core[:4]}-{phone_core[4:]}"
         canonical = normalize_phone_number(raw_phone)
         _create_user(db, tenant, canonical)
 
         result = repo.get_active_user_by_phone(canonical)
 
         assert result is not None
-        assert result.phone == "9876543210"
+        assert result.phone == canonical
 
     def test_non_canonical_form_does_not_match(self, db, repo):
         """If the DB stores canonical '9876543210', looking up '+919876543210' should NOT match."""
         tenant = _create_tenant(db, f"t-{_unique()}")
-        _create_user(db, tenant, "9876543210")
+        phone = _unique_phone()
+        _create_user(db, tenant, phone)
 
         # Intentionally pass un-normalized form — repo expects canonical
-        result = repo.get_active_user_by_phone("+919876543210")
+        result = repo.get_active_user_by_phone(f"+91{phone}")
 
         assert result is None

@@ -284,13 +284,18 @@ class TestSuperAdminCompleteFlow:
         # 6a. Create Store Manager for Branch 1 (Kothrud)
         mgr_email = f"mgr_kothrud_{uid_1}@storecorp.com"
         mgr_password = "MgrPassword@123!"
+        # Verify removed store users endpoints return 404
+        assert client.get(f"/api/v1/stores/{store_branch1_id}/users", headers=owner1_headers).status_code == 404
+        assert client.post(f"/api/v1/stores/{store_branch1_id}/users", headers=owner1_headers, json={}).status_code == 404
+
         create_mgr_res = client.post(
-            f"/api/v1/stores/{store_branch1_id}/users",
+            "/api/v1/users",
             json={
                 "email": mgr_email,
                 "full_name": f"Kothrud Manager {name_suffix1}",
                 "password": mgr_password,
                 "role_id": manager_role_id,
+                "store_id": store_branch1_id,
                 "phone": "9811122233",
             },
             headers=owner1_headers,
@@ -322,12 +327,13 @@ class TestSuperAdminCompleteFlow:
         # 6c. Create Staff for Branch 2 (Viman Nagar)
         staff_viman_email = f"staff_viman_{uid_1}@storecorp.com"
         create_viman_staff_res = client.post(
-            f"/api/v1/stores/{store_branch2_id}/users",
+            "/api/v1/users",
             json={
                 "email": staff_viman_email,
                 "full_name": f"Viman Staff {name_suffix1}",
                 "password": staff_password,
                 "role_id": staff_role_id,
+                "store_id": store_branch2_id,
                 "phone": "9811122235",
             },
             headers=owner1_headers,
@@ -336,7 +342,7 @@ class TestSuperAdminCompleteFlow:
         assert create_viman_staff_res.json()["store_id"] == store_branch2_id
 
         # List users specifically for Branch 1
-        branch1_users_res = client.get(f"/api/v1/stores/{store_branch1_id}/users", headers=owner1_headers)
+        branch1_users_res = client.get(f"/api/v1/users?store_id={store_branch1_id}", headers=owner1_headers)
         assert branch1_users_res.status_code == 200
         b1_users = branch1_users_res.json()
         b1_emails = {u["email"] for u in b1_users}
@@ -381,5 +387,5 @@ class TestSuperAdminCompleteFlow:
         assert mgr_del_store.status_code in (403, 401)
 
         # 7e. Store Manager CANNOT access users of Branch 2
-        mgr_cross_users = client.get(f"/api/v1/stores/{store_branch2_id}/users", headers=mgr_headers)
+        mgr_cross_users = client.get(f"/api/v1/users?store_id={store_branch2_id}", headers=mgr_headers)
         assert mgr_cross_users.status_code == 403

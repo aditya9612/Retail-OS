@@ -13,6 +13,8 @@ from pydantic import (
 )
 from app.schemas.saas_invoice import SaaSInvoiceResponse
 from app.schemas.saas_upi import UPITransactionResponse
+from app.utils.validators import validate_email_address, validate_single_pincode
+from app.utils.phone import normalize_phone_number
 
 
 
@@ -37,14 +39,7 @@ class SuperAdminCreate(BaseModel):
     @field_validator("email")
     @classmethod
     def validate_email(cls, value: EmailStr) -> str:
-        value = str(value).strip()
-
-        if not value:
-            raise ValueError(
-                "Email cannot be empty"
-            )
-
-        return value
+        return validate_email_address(str(value), field_name="Super admin email", required=True)
 
     @field_validator("full_name")
     @classmethod
@@ -142,14 +137,7 @@ class SuperAdminLogin(BaseModel):
     @field_validator("email")
     @classmethod
     def validate_email(cls, value: EmailStr) -> str:
-        value = str(value).strip()
-
-        if not value:
-            raise ValueError(
-                "Email cannot be empty"
-            )
-
-        return value
+        return validate_email_address(str(value), field_name="Super admin email", required=True)
 
 
 class SuperAdminUpdate(BaseModel):
@@ -169,15 +157,7 @@ class SuperAdminUpdate(BaseModel):
     ) -> str | None:
         if value is None:
             return None
-
-        value = str(value).strip()
-
-        if not value:
-            raise ValueError(
-                "Email cannot be empty"
-            )
-
-        return value
+        return validate_email_address(str(value), field_name="Super admin email", required=False)
 
     @field_validator("full_name")
     @classmethod
@@ -699,15 +679,24 @@ class SuperAdminStoreOwnerCreate(BaseModel):
                 data["domain"] = data["slug"]
         return data
 
+    @field_validator("owner_email")
+    @classmethod
+    def validate_owner_email(cls, value: EmailStr) -> str:
+        return validate_email_address(str(value), field_name="Owner email", required=True)
+
     @field_validator("owner_phone")
     @classmethod
     def validate_owner_phone(cls, value: str | None) -> str | None:
-        if value is None:
+        if value is None or not str(value).strip():
             return None
-        value = value.strip()
-        if not value:
+        return normalize_phone_number(str(value).strip())
+
+    @field_validator("pincode")
+    @classmethod
+    def validate_owner_pincode(cls, value: str | None) -> str | None:
+        if value is None or not str(value).strip():
             return None
-        return value
+        return validate_single_pincode(value)
 
 
 class SuperAdminStoreOwnerUpdate(BaseModel):
@@ -736,3 +725,17 @@ class SuperAdminStoreOwnerUpdate(BaseModel):
             if not data.get("owner_phone") and data.get("phone"):
                 data["owner_phone"] = data["phone"]
         return data
+
+    @field_validator("owner_phone")
+    @classmethod
+    def validate_owner_phone(cls, value: str | None) -> str | None:
+        if value is None or not str(value).strip():
+            return None
+        return normalize_phone_number(str(value).strip())
+
+    @field_validator("pincode")
+    @classmethod
+    def validate_owner_pincode(cls, value: str | None) -> str | None:
+        if value is None or not str(value).strip():
+            return None
+        return validate_single_pincode(value)

@@ -9,7 +9,7 @@ from app.models.user import User
 from app.schemas.billing import CreditNoteCreate, CreditNoteResponse
 from app.services.billing_service import BillingService
 
-router = APIRouter(prefix="/credit-notes", tags=["credit-notes"])
+router = APIRouter(prefix="/credit-notes", tags=["Credit Notes"])
 
 
 @router.post("", response_model=CreditNoteResponse, status_code=201)
@@ -51,7 +51,22 @@ def get_credit_note(
     )
 
 
-@router.get("/{credit_note_id}/pdf")
+@router.get(
+    "/{credit_note_id}/pdf",
+    summary="Download or Preview Credit Note PDF",
+    description=(
+        "Exports a branded GST Credit Note PDF document in Coral Red theme (#DC2626). "
+        "Includes original invoice reference, customer details, itemized tax adjustments, "
+        "grand total credited amount in numbers and Indian words, and signature block. "
+        "Requires 'billing:read' permission."
+    ),
+    responses={
+        200: {
+            "content": {"application/pdf": {}},
+            "description": "Rendered Credit Note PDF stream.",
+        }
+    },
+)
 def credit_note_pdf(
     credit_note_id: int,
     mode: Literal["download", "preview"] = Query(default="download"),

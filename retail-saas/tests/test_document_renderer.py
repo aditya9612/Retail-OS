@@ -318,3 +318,52 @@ def test_tenant_and_store_isolation_integration(db_session=None):
         brand_fallback = service.resolve_branding(t_a.id, s_a.id)
         pdf_fallback = renderer.render("invoice", {"invoice_number": "4"}, brand_fallback)
         assert b"Alpha Brand Name" in pdf_fallback
+
+
+def test_report_pdf_tenant_isolation_and_store_override(db_session=None):
+    """Verify report PDF respects tenant isolation and store-level branding overrides."""
+    from app.core.database import SessionLocal
+
+    with SessionLocal() as db:
+        t_a = db.query(Tenant).filter(Tenant.domain == "unit-iso-a.test").first()
+        if not t_a:
+            t_a = Tenant(name="Alpha Entity", domain="unit-iso-a.test", plan="pro")
+            db.add(t_a)
+            db.commit()
+            db.refresh(t_a)
+
+        t_b = db.query(Tenant).filter(Tenant.domain == "unit-iso-b.test").first()
+        if not t_b:
+            t_b = Tenant(name="Beta Entity", domain="unit-iso-b.test", plan="pro")
+            db.add(t_b)
+            db.commit()
+            db.refresh(t_b)
+
+        s_a = db.query(Store).filter(Store.tenant_id == t_a.id, Store.name == "Store A1").first()
+        if not s_a:
+            s_a = Store(tenant_id=t_a.id, name="Store A1", code="SA1")
+            db.add(s_a)
+            db.commit()
+            db.refresh(s_a)
+
+        service = DocumentSettingsService(db)
+        renderer = DocumentRenderer()
+
+        # 1. Tenant-level branding (All Stores report)
+        service.create_or_update_setting(t_a.id, DocumentSettingCreate(business_name="Alpha HQ Tenant"))
+        brand_all_stores = service.resolve_branding(t_a.id, None)
+        pdf_all_stores = renderer.render_report_pdf("Consolidated Sales Report", branding=brand_all_stores)
+        assert b"Alpha HQ Tenant" in pdf_all_stores
+
+        # 2. Store-specific override
+        service.create_or_update_setting(t_a.id, DocumentSettingUpdate(business_name="Store A1 Outlet"), store_id=s_a.id)
+        brand_single_store = service.resolve_branding(t_a.id, s_a.id)
+        pdf_single_store = renderer.render_report_pdf("Store A1 Daily Sales", branding=brand_single_store)
+        assert b"Store A1 Outlet" in pdf_single_store
+        assert b"Alpha HQ Tenant" not in pdf_single_store
+
+        # 3. All stores still retains tenant-level branding, not store A1 override
+        brand_all_stores_again = service.resolve_branding(t_a.id, None)
+        pdf_all_stores_again = renderer.render_report_pdf("Consolidated Sales Report", branding=brand_all_stores_again)
+        assert b"Alpha HQ Tenant" in pdf_all_stores_again
+        assert b"Store A1 Outlet" not in pdf_all_stores_again

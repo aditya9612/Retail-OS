@@ -299,7 +299,7 @@ def test_role_escalation_security_enforcement(unique_slug):
     # 4. Create Staff in Store 1
     target_staff_email = f"target_staff_{suffix}@testmart.com"
     r_target = client.post(
-        f"/api/v1/stores/{store1_id}/users",
+        "/api/v1/users",
         headers=owner_headers,
         json={
             "email": target_staff_email,
@@ -307,6 +307,7 @@ def test_role_escalation_security_enforcement(unique_slug):
             "password": "Password@123!",
             "role": "staff",
             "phone": _gen_phone(),
+            "store_id": store1_id,
         },
     )
     assert r_target.status_code == 201
@@ -411,23 +412,23 @@ def test_cross_tenant_and_store_isolation_negatives(unique_slug):
 
     # Users
     u_a1 = client.post(
-        f"/api/v1/stores/{store_a1_id}/users",
+        "/api/v1/users",
         headers=headers_a,
-        json={"email": f"u_a1_{suffix_a}@mart.com", "full_name": "User Alpha", "password": "Password@123!", "role": "staff", "phone": _gen_phone()},
+        json={"email": f"u_a1_{suffix_a}@mart.com", "full_name": "User Alpha", "password": "Password@123!", "role": "staff", "phone": _gen_phone(), "store_id": store_a1_id},
     ).json()
     user_a1_id = u_a1["id"]
 
     u_a2 = client.post(
-        f"/api/v1/stores/{store_a2_id}/users",
+        "/api/v1/users",
         headers=headers_a,
-        json={"email": f"u_a2_{suffix_a}@mart.com", "full_name": "User Beta", "password": "Password@123!", "role": "staff", "phone": _gen_phone()},
+        json={"email": f"u_a2_{suffix_a}@mart.com", "full_name": "User Beta", "password": "Password@123!", "role": "staff", "phone": _gen_phone(), "store_id": store_a2_id},
     ).json()
     user_a2_id = u_a2["id"]
 
     u_b = client.post(
-        f"/api/v1/stores/{store_b_id}/users",
+        "/api/v1/users",
         headers=headers_b,
-        json={"email": f"u_b_{suffix_b}@mart.com", "full_name": "User Gamma", "password": "Password@123!", "role": "staff", "phone": _gen_phone()},
+        json={"email": f"u_b_{suffix_b}@mart.com", "full_name": "User Gamma", "password": "Password@123!", "role": "staff", "phone": _gen_phone(), "store_id": store_b_id},
     ).json()
     user_b_id = u_b["id"]
 
@@ -475,8 +476,11 @@ def test_cross_tenant_and_store_isolation_negatives(unique_slug):
     # Store 1 Manager CANNOT delete Store 2 user -> MUST be 403
     assert client.delete(f"/api/v1/users/{user_a2_id}", headers=mgr_headers).status_code == 403
 
-    # Store 1 Manager CANNOT list Store 2 users via /stores/{store_id}/users -> MUST be 403
-    assert client.get(f"/api/v1/stores/{store_a2_id}/users", headers=mgr_headers).status_code == 403
+    # Store 1 Manager CANNOT list Store 2 users via /users?store_id={store_id} -> MUST be 403
+    assert client.get(f"/api/v1/users?store_id={store_a2_id}", headers=mgr_headers).status_code == 403
+
+    # Removed /stores/{store_id}/users endpoint MUST return 404
+    assert client.get(f"/api/v1/stores/{store_a2_id}/users", headers=mgr_headers).status_code == 404
 
     # Store 1 Manager CANNOT assign users to stores -> MUST be 403
     assert client.post(f"/api/v1/users/{user_a1_id}/assign-store", headers=mgr_headers, json={"store_id": store_a1_id}).status_code == 403

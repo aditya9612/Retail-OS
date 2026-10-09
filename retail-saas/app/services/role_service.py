@@ -66,14 +66,14 @@ class RoleService:
             raise ConflictException("Tenant ID is required")
 
         clean_name = data.name.strip().lower()
-        if clean_name in {"superadmin"}:
+        if clean_name in {"superadmin", "owner", "admin"}:
             raise ConflictException(f"Cannot create reserved system role '{clean_name}'")
 
         existing = self.repo.get_by_name(name=clean_name, tenant_id=tenant_id)
         if existing:
             raise ConflictException(f"Role '{clean_name}' already exists in your organization")
 
-        clean_perms = list(dict.fromkeys([p.strip() for p in data.permissions if p and p.strip()]))
+        clean_perms = data.permissions or []
 
         role = Role(
             tenant_id=tenant_id,
@@ -115,6 +115,9 @@ class RoleService:
                 if new_name != role.name:
                     raise ConflictException("Default administrator role names cannot be renamed")
 
+            if new_name in {"superadmin", "owner", "admin"}:
+                raise ConflictException(f"Cannot rename role to reserved system role '{new_name}'")
+
             if new_name != role.name:
                 existing = self.repo.get_by_name(name=new_name, tenant_id=tenant_id)
                 if existing and existing.id != role.id:
@@ -122,8 +125,7 @@ class RoleService:
                 role.name = new_name
 
         if data.permissions is not None:
-            clean_perms = list(dict.fromkeys([p.strip() for p in data.permissions if p and p.strip()]))
-            role.permissions = clean_perms
+            role.permissions = data.permissions
 
         role = self.repo.update(role)
         self.db.commit()

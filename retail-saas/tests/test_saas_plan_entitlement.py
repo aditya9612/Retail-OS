@@ -23,8 +23,16 @@ def db_session():
 
 class TestSaaSPlanEntitlementModel:
     def test_create_saas_plan_entitlement(self, db_session):
-        plan = db_session.query(SaaSPlan).filter_by(code="basic").first()
-        assert plan is not None
+        plan = SaaSPlan(
+            name=f"Ent Test Plan {uuid.uuid4().hex[:6]}",
+            code=f"ent_plan_{uuid.uuid4().hex[:6]}",
+            price=Decimal("100.00"),
+            currency="INR",
+            billing_interval="monthly",
+            is_active=True,
+        )
+        db_session.add(plan)
+        db_session.flush()
 
         entitlement = SaaSPlanEntitlement(
             plan_id=plan.id,
@@ -39,12 +47,20 @@ class TestSaaSPlanEntitlementModel:
         assert entitlement.dimension == "users"
         assert entitlement.value == 5
         assert entitlement.is_unlimited is False
-        assert entitlement.plan.code == "basic"
+        assert entitlement.plan.id == plan.id
         assert entitlement in plan.entitlements
 
     def test_saas_plan_entitlement_unlimited(self, db_session):
-        plan = db_session.query(SaaSPlan).filter_by(code="pro").first()
-        assert plan is not None
+        plan = SaaSPlan(
+            name=f"Ent Unlimited Plan {uuid.uuid4().hex[:6]}",
+            code=f"ent_unlim_{uuid.uuid4().hex[:6]}",
+            price=Decimal("100.00"),
+            currency="INR",
+            billing_interval="monthly",
+            is_active=True,
+        )
+        db_session.add(plan)
+        db_session.flush()
 
         entitlement = SaaSPlanEntitlement(
             plan_id=plan.id,

@@ -285,6 +285,9 @@ class TestPINResetAPI:
 
     def test_pin_reset_full_flow(self, client, db, monkeypatch):
         """D, E, F. PIN reset request -> verify -> reset cycle via endpoints."""
+        from app.core.config import get_settings
+        monkeypatch.setenv("AUTH_FIXED_OTP_ENABLED", "false")
+        get_settings.cache_clear()
         monkeypatch.setattr("app.services.auth_service.secrets.randbelow", lambda _: 654321)
         tenant = _create_tenant(db, f"t-{_unique()}")
         phone = _unique_phone()

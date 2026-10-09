@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import distinct, func
+from sqlalchemy import distinct, func, text
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppException, NotFoundException
@@ -30,6 +30,27 @@ class InventoryService:
     def _generate_movement_reference(self, tenant_id: int, prefix: str) -> tuple[int, str]:
         year = datetime.utcnow().year
         doc_type = f"stock_{prefix.lower()}"
+        bind = self.db.get_bind()
+        if bind.dialect.name == "mysql":
+            self.db.execute(
+                text(
+                    "INSERT INTO document_sequences (tenant_id, doc_type, year, last_number, created_at, updated_at) "
+                    "VALUES (:tenant_id, :doc_type, :year, 0, NOW(), NOW()) "
+                    "ON DUPLICATE KEY UPDATE id=id"
+                ),
+                {"tenant_id": tenant_id, "doc_type": doc_type, "year": year},
+            )
+            self.db.flush()
+        else:
+            self.db.execute(
+                text(
+                    "INSERT OR IGNORE INTO document_sequences (tenant_id, doc_type, year, last_number, created_at, updated_at) "
+                    "VALUES (:tenant_id, :doc_type, :year, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {"tenant_id": tenant_id, "doc_type": doc_type, "year": year},
+            )
+            self.db.flush()
+
         row = (
             self.db.query(DocumentSequence)
             .filter(

@@ -499,12 +499,17 @@ class ProductService:
                 "Product not found"
             )
 
+        # Quota check only when toggling inactive -> active
         if not product.is_active:
-            raise ConflictException(
-                "Inactive product cannot be toggled. Activate it using product update."
+            entitlement_svc = SaaSEntitlementService(self.db)
+            entitlement_svc.require_limit(
+                tenant_id=tenant_id,
+                dimension=EntitlementDimension.PRODUCTS,
+                requested_amount=1,
+                lock_tenant=True,
             )
 
-        product.is_active = False
+        product.is_active = not product.is_active
 
         return self.repo.update(product)
 

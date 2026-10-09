@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
@@ -258,20 +259,57 @@ class ProfitLossResponse(BaseModel):
 # EXPORT REQUEST
 # ============================================================================
 
+class ReportType(str, Enum):
+    SALES_DAILY = "sales_daily"
+    SALES_MONTHLY = "sales_monthly"
+    SALES_YEARLY = "sales_yearly"
+    GST_SALES = "gst_sales"
+    GST_SUMMARY = "gst_summary"
+    INVENTORY_STOCK = "inventory_stock"
+    INVENTORY_LOW = "inventory_low"
+    INVENTORY_VALUATION = "inventory_valuation"
+    PRODUCTS_TOP_SELLING = "products_top_selling"
+    PRODUCTS_SLOW_MOVING = "products_slow_moving"
+    PRODUCTS_PROFITABILITY = "products_profitability"
+    PROFIT_LOSS = "profit_loss"
+    CUSTOMERS_OVERVIEW = "customers_overview"
+    CUSTOMERS_RETENTION = "customers_retention"
+    CUSTOMERS_LIFETIME_VALUE = "customers_lifetime_value"
+    CUSTOMERS_SEGMENTS = "customers_segments"
+    DAILY_BILLING = "daily_billing"
+    DAILY_BILLING_CLOSURE = "daily_billing_closure"
+    PAYMENT_SUMMARY = "payment_summary"
+    MULTI_STORE_REVENUE = "multi_store_revenue"
+    MULTI_STORE_PROFIT = "multi_store_profit"
+    MULTI_STORE_INVENTORY = "multi_store_inventory"
+    MULTI_STORE_CUSTOMER = "multi_store_customer"
+
+
+class ExportFormat(str, Enum):
+    CSV = "csv"
+    EXCEL = "excel"
+    PDF = "pdf"
+
+
 class ReportExportRequest(BaseModel):
-    report_type: str = Field(
+    report_type: ReportType = Field(
         ...,
-        description="Type of report: 'sales_daily', 'sales_monthly', 'sales_yearly', "
-                    "'gst_sales', 'gst_summary', 'inventory_stock', 'inventory_low', "
-                    "'inventory_valuation', 'products_top_selling', 'products_profitability', "
-                    "'profit_loss', 'customers_overview', 'customers_retention', 'customers_segments'"
+        description="Supported report type identifier: 'sales_daily', 'sales_monthly', 'sales_yearly', "
+                    "'gst_sales', 'gst_summary', 'inventory_stock', 'inventory_low', 'inventory_valuation', "
+                    "'products_top_selling', 'products_slow_moving', 'products_profitability', 'profit_loss', "
+                    "'customers_overview', 'customers_retention', 'customers_lifetime_value', 'customers_segments', "
+                    "'daily_billing', 'payment_summary', 'multi_store_revenue', 'multi_store_profit', "
+                    "'multi_store_inventory', 'multi_store_customer'."
     )
-    format: Literal["csv", "excel", "pdf"] = "csv"
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    target_date: Optional[date] = None
-    year: Optional[int] = None
-    month: Optional[int] = None
-    store_id: Optional[int] = None
-    threshold: Optional[int] = None
-    limit: Optional[int] = None
+    format: ExportFormat = Field(
+        default=ExportFormat.CSV,
+        description="Target export file format ('csv', 'excel', 'pdf'). Default: 'csv'."
+    )
+    start_date: Optional[date] = Field(None, description="Start date for date-range reports (YYYY-MM-DD).")
+    end_date: Optional[date] = Field(None, description="End date for date-range reports (YYYY-MM-DD).")
+    target_date: Optional[date] = Field(None, description="Target date for daily reports (YYYY-MM-DD).")
+    year: Optional[int] = Field(None, ge=2000, le=2100, description="Calendar year for monthly or yearly reports.")
+    month: Optional[int] = Field(None, ge=1, le=12, description="Month number (1-12) for monthly reports.")
+    store_id: Optional[int] = Field(None, gt=0, description="Optional store filter ID.")
+    threshold: Optional[int] = Field(None, ge=0, description="Stock threshold for slow-moving products.")
+    limit: Optional[int] = Field(None, gt=0, le=500, description="Maximum number of items/ranking rows to return.")

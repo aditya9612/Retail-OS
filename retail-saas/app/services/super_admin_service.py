@@ -1405,9 +1405,9 @@ class SuperAdminService:
         Configure all limits (users, stores, products, monthly_orders, etc.)
         for a plan in a single API call (bulk create/update).
         """
-        target = plan_identifier if plan_identifier is not None else (data.plan_id or data.plan_code)
+        target = plan_identifier
         if target is None:
-            raise AppException("plan_id or plan_code must be provided")
+            raise AppException("plan_id must be provided in URL path")
 
         plan = None
         if isinstance(target, int) or (isinstance(target, str) and target.isdigit()):
@@ -1440,10 +1440,6 @@ class SuperAdminService:
         process_dim("stores", data.stores, data.is_stores_unlimited)
         process_dim("products", data.products, data.is_products_unlimited)
         process_dim("monthly_orders", data.monthly_orders, data.is_monthly_orders_unlimited)
-
-        if data.items:
-            for item in data.items:
-                dim_map[item.dimension] = (None if item.is_unlimited else item.value, item.is_unlimited)
 
         if not dim_map:
             raise AppException("No limits or dimensions were specified to configure")

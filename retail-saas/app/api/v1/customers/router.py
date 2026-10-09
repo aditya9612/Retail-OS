@@ -370,7 +370,26 @@ def get_notes_by_customer_id(
     )
 
 
-@router.get("/export-directory")
+@router.get(
+    "/export-directory",
+    tags=["Customer Exports"],
+    summary="Export Complete Customer Directory",
+    description=(
+        "Exports the tenant customer directory filtered by status ('all', 'active', 'inactive') "
+        "as either an analytical Excel workbook (.xlsx) or a branded PDF document (.pdf). "
+        "Features customer contact details, loyalty points, and account status. "
+        "Requires 'customers:read' permission."
+    ),
+    responses={
+        200: {
+            "content": {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {},
+                "application/pdf": {},
+            },
+            "description": "Exported Customer Directory file stream (Excel or PDF).",
+        }
+    },
+)
 def export_directory(
     status: CustomerExportStatus = Query(
         ...,

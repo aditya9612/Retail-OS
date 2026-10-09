@@ -57,13 +57,13 @@ def create_transfer(
     response_model=List[StoreTransferResponse],
 )
 def list_transfers(
-    source_store_id: int = Query(
-        ...,
+    source_store_id: Optional[int] = Query(
+        None,
         gt=0,
         description="Filter transfers by source store ID (must be > 0)",
     ),
-    destination_store_id: int = Query(
-        ...,
+    destination_store_id: Optional[int] = Query(
+        None,
         gt=0,
         description="Filter transfers by destination store ID (must be > 0)",
     ),
@@ -130,23 +130,27 @@ def get_transfer(
 @router.put(
     "/{transfer_id}/approve",
     response_model=StoreTransferResponse,
+    responses={
+        200: {"description": "Store transfer approved successfully"},
+    },
     dependencies=[Depends(require_operational_write)],
 )
 def approve_transfer(
     transfer_id: int = Path(
         ...,
         gt=0,
-        description="Store transfer ID must be a positive integer greater than 0",
+        description ="Enter the ID of the store transfer you want to approve. " ,
     ),
-    data: StoreTransferApprove = Body(...),
+    data: Optional[StoreTransferApprove] = Body(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     try:
+        approved_by = data.approved_by if data else current_user.id
         return StoreTransferService.approve_transfer(
             db=db,
             transfer_id=transfer_id,
-            approved_by=data.approved_by,
+            approved_by=approved_by,
             tenant_id=current_user.tenant_id,
         )
     except ValueError as e:

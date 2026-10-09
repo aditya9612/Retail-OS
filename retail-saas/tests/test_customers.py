@@ -201,16 +201,18 @@ def test_create_customer_address_validation(tenant_a):
         "birthday": "1990-01-01",
     }
 
-    # Missing address rejected
+    # Missing address accepted (optional per P1 schema)
     resp = client.post("/api/v1/customers", json=base_payload, headers=headers)
-    assert resp.status_code == 422
+    assert resp.status_code == 201
+    assert resp.json()["address"] is None
 
-    # Null address rejected
-    resp = client.post("/api/v1/customers", json={**base_payload, "address": None}, headers=headers)
-    assert resp.status_code == 422
+    # Null address accepted (optional per P1 schema)
+    resp = client.post("/api/v1/customers", json={**base_payload, "phone": random_phone(), "address": None}, headers=headers)
+    assert resp.status_code == 201
+    assert resp.json()["address"] is None
 
     # Empty address string rejected
-    resp = client.post("/api/v1/customers", json={**base_payload, "address": ""}, headers=headers)
+    resp = client.post("/api/v1/customers", json={**base_payload, "phone": random_phone(), "address": ""}, headers=headers)
     assert resp.status_code == 422
 
     # Whitespace only address rejected
@@ -220,7 +222,7 @@ def test_create_customer_address_validation(tenant_a):
     # Valid normal address
     resp = client.post(
         "/api/v1/customers",
-        json={**base_payload, "address": "Flat 402, Sunshine Heights, Pune - 411001"},
+        json={**base_payload, "phone": random_phone(), "address": "Flat 402, Sunshine Heights, Pune - 411001"},
         headers=headers,
     )
     assert resp.status_code == 201
@@ -583,7 +585,7 @@ def test_wallet_credit_and_debit_response_and_validation(tenant_a, tenant_b):
     }
     assert client.post("/api/v1/customers/wallet/credit", json=null_ref, headers=headers_a).status_code == 422
 
-    # Remarks: missing, null, empty, whitespace rejected
+    # Remarks: empty, whitespace rejected; omitted, null accepted (optional per P1 schema)
     ref_new = str(random.randint(10000000, 99999999))
     assert client.post(
         "/api/v1/customers/wallet/credit",
@@ -593,21 +595,21 @@ def test_wallet_credit_and_debit_response_and_validation(tenant_a, tenant_b):
 
     assert client.post(
         "/api/v1/customers/wallet/credit",
-        json={"customer_id": cust["id"], "amount": "100.00", "reference_no": ref_new, "remarks": "   "},
+        json={"customer_id": cust["id"], "amount": "100.00", "reference_no": f"REF{random.randint(10000, 99999)}", "remarks": "   "},
         headers=headers_a,
     ).status_code == 422
 
     assert client.post(
         "/api/v1/customers/wallet/credit",
-        json={"customer_id": cust["id"], "amount": "100.00", "reference_no": ref_new, "remarks": None},
+        json={"customer_id": cust["id"], "amount": "100.00", "reference_no": f"REF{random.randint(10000, 99999)}", "remarks": None},
         headers=headers_a,
-    ).status_code == 422
+    ).status_code == 200
 
     assert client.post(
         "/api/v1/customers/wallet/credit",
-        json={"customer_id": cust["id"], "amount": "100.00", "reference_no": ref_new},
+        json={"customer_id": cust["id"], "amount": "100.00", "reference_no": f"REF{random.randint(10000, 99999)}"},
         headers=headers_a,
-    ).status_code == 422
+    ).status_code == 200
 
     # Insufficient debit
     over_debit = {
@@ -1227,8 +1229,8 @@ def test_wallet_remarks_and_reference_validation(tenant_a):
         )
         assert res.status_code == 200, f"Failed to accept valid reference_no: {ref_unique}"
 
-    # Reject invalid remarks (numeric-only, symbol-only, placeholder "string", empty, whitespace, null)
-    for bad_remark in ["12345678", "@@@@@", "-------", "!@#$%", "string", "", "   ", None]:
+    # Reject invalid remarks (numeric-only, symbol-only, placeholder "string", empty, whitespace)
+    for bad_remark in ["12345678", "@@@@@", "-------", "!@#$%", "string", "", "   "]:
         ref_temp = str(random.randint(10000000, 99999999))
         res = client.post(
             "/api/v1/customers/wallet/credit",
@@ -1236,6 +1238,14 @@ def test_wallet_remarks_and_reference_validation(tenant_a):
             headers=headers,
         )
         assert res.status_code == 422, f"Failed to reject bad remarks: {bad_remark}"
+
+    # Remarks is optional per P1 schema: None is accepted
+    res_none = client.post(
+        "/api/v1/customers/wallet/credit",
+        json={"customer_id": cust["id"], "amount": "100.00", "reference_no": str(random.randint(10000000, 99999999)), "remarks": None},
+        headers=headers,
+    )
+    assert res_none.status_code == 200
 
     # In debit: invalid remarks must fail with 422 BEFORE balance check (even if balance is 0)
     res_debit_bad_remark = client.post(

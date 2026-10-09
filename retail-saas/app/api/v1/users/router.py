@@ -24,7 +24,7 @@ from app.schemas.user import (
     UsersByStoreResponse,
 )
 from app.services.user_service import UserService
-from app.utils.validators import validate_pan_number, validate_aadhaar_number
+from app.utils.validators import validate_pan_number, validate_aadhaar_number, validate_email_address
 
 
 router = APIRouter(
@@ -33,7 +33,12 @@ router = APIRouter(
 )
 
 
-async def _save_user_file(file: Optional[UploadFile], prefix: str) -> Optional[str]:
+async def _save_user_file(
+    file: Optional[UploadFile],
+    prefix: str,
+    max_size: int = 5 * 1024 * 1024,
+    allowed_exts: Optional[set[str]] = None,
+) -> Optional[str]:
     if not file:
         return None
     content = await file.read()
@@ -45,6 +50,13 @@ async def _save_user_file(file: Optional[UploadFile], prefix: str) -> Optional[s
         text_val = content.decode("utf-8", errors="ignore").strip()
         return text_val if text_val else None
 
+    if len(content) > max_size:
+        max_mb = max_size // (1024 * 1024)
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"{prefix.replace('_', ' ').title()} file exceeds maximum allowed size of {max_mb}MB",
+        )
+
     ext = Path(filename).suffix.lower()
     if not ext:
         content_type = getattr(file, "content_type", "")
@@ -54,8 +66,16 @@ async def _save_user_file(file: Optional[UploadFile], prefix: str) -> Optional[s
             ext = ".png"
         elif "jpeg" in content_type or "jpg" in content_type:
             ext = ".jpg"
+        elif "webp" in content_type:
+            ext = ".webp"
         else:
             ext = ".bin"
+
+    if allowed_exts and ext not in allowed_exts:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Invalid file type '{ext}' for {prefix.replace('_', ' ')}. Allowed: {', '.join(sorted(allowed_exts))}",
+        )
 
     unique_filename = f"{prefix}_{uuid.uuid4().hex[:12]}{ext}"
     user_upload_dir = Path("uploads") / "users"
@@ -71,24 +91,28 @@ async def _save_user_file(file: Optional[UploadFile], prefix: str) -> Optional[s
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create User",
-    description="Create a new user with role and KYC/profile details (pan_number, addhar_number, pancard, addhar card, profile photo) using multipart/form-data.",
+    description="Create a new user with role, mandatory phone number, and KYC/profile details (pan_number, addhar_number, pancard, addhar card, profile photo) using multipart/form-data.",
 )
 async def create_user(
     email: EmailStr = Form(..., description="Valid email address is required"),
     full_name: str = Form(..., min_length=2, max_length=100, description="Full name of the user"),
     password: str = Form(..., min_length=8, max_length=100, description="Password (min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char)"),
-    role: str = Form("staff", description="Role name (e.g. staff, manager, cashier, admin)"),
-    role_id: Optional[int] = Form(None, description="Role ID from GET /api/v1/roles"),
+    phone: str = Form(..., description="Mandatory 10-digit Indian phone number"),
+    role: str = Form("staff", description="Role name (e.g. staff, manager, cashier, admin, accountant)"),
     store_id: Optional[int] = Form(None, description="Store ID to assign the user to"),
-    phone: Optional[str] = Form(None, description="Optional 10-digit phone number"),
     pan_number: Optional[str] = Form(None, description="PAN card number (e.g. ABCDE1234F)"),
     addhar_number: Optional[str] = Form(None, description="Aadhaar card 12-digit number (e.g. 987654321012)"),
-    pancard: Optional[UploadFile] = File(None, description="PAN card document or image file"),
-    addhar_card: Optional[UploadFile] = File(None, description="Aadhaar card document or image file"),
-    profile_photo: Optional[UploadFile] = File(None, description="Profile photo image file"),
+    pancard: Optional[UploadFile] = File(None, description="PAN card document or image file (PDF/JPG/PNG, max 5MB)"),
+    addhar_card: Optional[UploadFile] = File(None, description="Aadhaar card document or image file (PDF/JPG/PNG, max 5MB)"),
+    profile_photo: Optional[UploadFile] = File(None, description="Profile photo image file (JPG/PNG/WEBP, max 2MB)"),
     current_user: User = Depends(require_permission("users:write")),
     db: Session = Depends(get_db),
 ):
+    try:
+        validated_email = validate_email_address(str(email), field_name="Email", required=True)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     try:
         validated_pan = validate_pan_number(pan_number)
     except ValueError as e:
@@ -99,19 +123,25 @@ async def create_user(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    pancard_path = await _save_user_file(pancard, "pancard")
-    addhar_card_path = await _save_user_file(addhar_card, "addhar_card")
-    profile_photo_path = await _save_user_file(profile_photo, "profile_photo")
+    pancard_path = await _save_user_file(
+        pancard, "pancard", max_size=5 * 1024 * 1024, allowed_exts={".pdf", ".jpg", ".jpeg", ".png"}
+    )
+    addhar_card_path = await _save_user_file(
+        addhar_card, "addhar_card", max_size=5 * 1024 * 1024, allowed_exts={".pdf", ".jpg", ".jpeg", ".png"}
+    )
+    profile_photo_path = await _save_user_file(
+        profile_photo, "profile_photo", max_size=2 * 1024 * 1024, allowed_exts={".jpg", ".jpeg", ".png", ".webp"}
+    )
 
     effective_store_id = current_user.store_id if current_user.store_id is not None else store_id
 
     try:
         user_data = UserCreate(
-            email=email,
+            email=validated_email,
             full_name=full_name,
             password=password,
             role=role,
-            role_id=role_id,
+            role_id=None,
             phone=phone,
             pan_number=validated_pan,
             addhar_number=validated_aadhaar,

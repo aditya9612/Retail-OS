@@ -45,7 +45,7 @@ def create_store_expense(
     response_model=list[StoreExpenseResponse],
 )
 def get_store_expenses(
-    store_id: int | None = Query(default=None, gt=0),
+    store_id: int = Query(..., gt=0),
     user: User = Depends(
         require_permission("store_expenses:read")
     ),
@@ -111,6 +111,9 @@ def update_store_expense(
 @router.delete(
     "/{expense_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        204: {"description": "Expense deleted successfully"}
+    },
 )
 def delete_store_expense(
     expense_id: int,

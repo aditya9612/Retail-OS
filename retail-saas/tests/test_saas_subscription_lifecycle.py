@@ -106,6 +106,7 @@ def test_registration_creates_subscription_and_syncs_projection(db_session: Sess
     uid = uuid.uuid4().hex[:8]
     email = f"owner-{uid}@lifecyclecorp.com"
     domain = f"corp-{uid}"
+    phone = f"98{int(uid, 16) % 100000000:08d}"
 
     reg_payload = {
         "tenant_name": f"Lifecycle Corp {uid}",
@@ -113,7 +114,7 @@ def test_registration_creates_subscription_and_syncs_projection(db_session: Sess
         "email": email,
         "admin_name": "Lifecycle Owner",
         "password": "Password123!",
-        "phone": "9876543210",
+        "phone": phone,
     }
 
     resp = client.post("/api/v1/auth/register", json=reg_payload)
@@ -553,6 +554,7 @@ def test_registration_transaction_atomicity(db_session: Session):
     uid = uuid.uuid4().hex[:8]
     domain = f"atomic-{uid}"
     email = f"owner-{uid}@atomiccorp.com"
+    phone = f"98{int(uid, 16) % 100000000:08d}"
 
     reg_payload = {
         "tenant_name": f"Atomic Corp {uid}",
@@ -560,7 +562,7 @@ def test_registration_transaction_atomicity(db_session: Session):
         "email": email,
         "admin_name": "Atomic Owner",
         "password": "Password123!",
-        "phone": "9876543210",
+        "phone": phone,
         "plan_code": code,  # Inactive!
     }
 
@@ -1015,7 +1017,7 @@ def _make_test_super_admin(db: Session) -> tuple[SuperAdmin, dict]:
         email=f"sa_{uid}@example.com",
         full_name=f"SA {uid}",
         hashed_password="hashed_dummy_password",
-        phone="9876543210",
+        phone=f"98{int(uid, 16) % 100000000:08d}",
         is_active=True,
     )
     db.add(sa)

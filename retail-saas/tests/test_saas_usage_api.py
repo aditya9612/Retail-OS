@@ -221,8 +221,20 @@ class TestSaaSUsageApi:
         tenant = db.query(Tenant).filter(Tenant.id == t["tenant_id"]).first()
         sub = db.query(SaaSSubscription).filter(SaaSSubscription.id == tenant.current_subscription_id).first()
 
-        # Delete all entitlements for this plan
-        db.query(SaaSPlanEntitlement).filter(SaaSPlanEntitlement.plan_id == sub.plan_id).delete()
+        # Create isolated plan with no entitlements so shared baseline plans are not deleted
+        uid = uuid.uuid4().hex[:6]
+        noent_plan = SaaSPlan(
+            name=f"NoEnt Plan {uid}",
+            code=f"noent_{uid}",
+            price=Decimal("100.00"),
+            currency="INR",
+            billing_interval="monthly",
+            trial_days=0,
+            is_active=True,
+        )
+        db.add(noent_plan)
+        db.commit()
+        sub.plan_id = noent_plan.id
         db.commit()
 
         r = client.get("/api/v1/saas/usage", headers=t["headers"])
@@ -235,12 +247,28 @@ class TestSaaSUsageApi:
         tenant = db.query(Tenant).filter(Tenant.id == t["tenant_id"]).first()
         sub = db.query(SaaSSubscription).filter(SaaSSubscription.id == tenant.current_subscription_id).first()
 
-        seed_plan_entitlements(db, sub.plan_id)
-        # Corrupt one entitlement: is_unlimited=False with value=None
+        # Create isolated plan so shared baseline plans are not corrupted
+        uid = uuid.uuid4().hex[:6]
+        inval_plan = SaaSPlan(
+            name=f"Inval Plan {uid}",
+            code=f"inval_{uid}",
+            price=Decimal("100.00"),
+            currency="INR",
+            billing_interval="monthly",
+            trial_days=0,
+            is_active=True,
+        )
+        db.add(inval_plan)
+        db.commit()
+        sub.plan_id = inval_plan.id
+        db.commit()
+
+        seed_plan_entitlements(db, inval_plan.id)
+        # Corrupt one entitlement on this isolated plan: is_unlimited=False with value=None
         ent = (
             db.query(SaaSPlanEntitlement)
             .filter(
-                SaaSPlanEntitlement.plan_id == sub.plan_id,
+                SaaSPlanEntitlement.plan_id == inval_plan.id,
                 SaaSPlanEntitlement.dimension == EntitlementDimension.USERS,
             )
             .first()

@@ -1266,14 +1266,44 @@ class ReportService:
         rtype = data.report_type
         fmt = data.format.lower()
 
-        # Gather table data (headers, rows, title) based on report type
+        from app.services.document_settings_service import DocumentSettingsService
+        from app.services.document_renderer_service import DocumentRenderer
+
+        branding = None
+        try:
+            tenant_id, resolved_store_id = self._resolve_tenant_and_store(user, data.store_id)
+            branding = DocumentSettingsService(self.db).resolve_branding(
+                tenant_id=tenant_id,
+                store_id=resolved_store_id,
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            try:
+                branding = DocumentSettingsService(self.db).resolve_branding(
+                    tenant_id=getattr(user, "tenant_id", None) or 1,
+                    store_id=data.store_id,
+                )
+            except Exception:
+                branding = None
+
         headers: List[str] = []
         rows: List[List[Any]] = []
+        metadata: Dict[str, Any] = {}
+        kpis: List[Dict[str, Any]] = []
         title = rtype.replace("_", " ").title()
 
         if rtype == "sales_daily":
-            tdate = data.target_date or date.today()
+            tdate = data.target_date or (data.start_date or date.today())
             res = self.daily_sales(user, target_date=tdate, store_id=data.store_id)
+            title = "Daily Sales Report"
+            metadata = {"Date": str(res["date"]), "Store ID": str(data.store_id or "All Stores")}
+            kpis = [
+                {"label": "Order Count", "value": res["order_count"]},
+                {"label": "Gross Sales", "value": res["gross_sales"]},
+                {"label": "Net Sales", "value": res["net_sales"]},
+                {"label": "AOV", "value": res["average_order_value"]},
+            ]
             headers = ["Metric", "Value"]
             rows = [
                 ["Date", res["date"]],
@@ -1291,6 +1321,14 @@ class ReportService:
             year = data.year or date.today().year
             month = data.month or date.today().month
             res = self.monthly_sales(user, year=year, month=month, store_id=data.store_id)
+            title = f"Monthly Sales Report ({res['year']}-{res['month']:02d})"
+            metadata = {"Year": res["year"], "Month": res["month"], "Store ID": str(data.store_id or "All Stores")}
+            kpis = [
+                {"label": "Order Count", "value": res["order_count"]},
+                {"label": "Gross Sales", "value": res["gross_sales"]},
+                {"label": "Net Sales", "value": res["net_sales"]},
+                {"label": "Growth Rate", "value": f"{res['growth_rate_pct']}%" if res["growth_rate_pct"] is not None else "N/A"},
+            ]
             headers = ["Metric", "Value"]
             rows = [
                 ["Year", res["year"]],
@@ -1308,6 +1346,13 @@ class ReportService:
         elif rtype == "sales_yearly":
             year = data.year or date.today().year
             res = self.yearly_sales(user, year=year, store_id=data.store_id)
+            title = f"Yearly Sales Report ({res['year']})"
+            metadata = {"Year": res["year"], "Store ID": str(data.store_id or "All Stores")}
+            kpis = [
+                {"label": "Total Orders", "value": res["total_orders"]},
+                {"label": "Gross Sales", "value": res["total_gross_sales"]},
+                {"label": "Net Sales", "value": res["total_net_sales"]},
+            ]
             headers = ["Month", "Orders", "Gross Sales", "Total Sales", "Net Sales"]
             for m in res["monthly_breakdown"]:
                 rows.append([
@@ -1322,6 +1367,14 @@ class ReportService:
             sdate = data.start_date or date.today().replace(day=1)
             edate = data.end_date or date.today()
             res = self.gst_sales(user, start_date=sdate, end_date=edate, store_id=data.store_id)
+            title = "GST Sales Report"
+            metadata = {"Period": f"{res['start_date']} to {res['end_date']}", "Store ID": str(data.store_id or "All Stores")}
+            kpis = [
+                {"label": "Invoice Count", "value": res["invoice_count"]},
+                {"label": "Taxable Amount", "value": res["taxable_amount"]},
+                {"label": "Total Tax", "value": res["total_tax"]},
+                {"label": "Total Amount", "value": res["total_amount"]},
+            ]
             headers = ["Metric", "Value"]
             rows = [
                 ["Period", f"{res['start_date']} to {res['end_date']}"],
@@ -1338,6 +1391,14 @@ class ReportService:
             sdate = data.start_date or date.today().replace(day=1)
             edate = data.end_date or date.today()
             res = self.gst_summary(user, start_date=sdate, end_date=edate, store_id=data.store_id)
+            title = "GST Summary Report"
+            metadata = {"Period": f"{res['start_date']} to {res['end_date']}", "Store ID": str(data.store_id or "All Stores")}
+            kpis = [
+                {"label": "Invoice Count", "value": res["invoice_count"]},
+                {"label": "Output Tax", "value": res["total_output_tax"]},
+                {"label": "Input Tax Credit", "value": res["input_tax_credit"]},
+                {"label": "Net Tax Liability", "value": res["net_tax_liability"]},
+            ]
             headers = ["Metric", "Value"]
             rows = [
                 ["Period", f"{res['start_date']} to {res['end_date']}"],
@@ -1352,6 +1413,9 @@ class ReportService:
 
         elif rtype == "inventory_stock":
             res = self.current_stock(user, store_id=data.store_id)
+            title = "Current Stock Inventory Report"
+            metadata = {"Store ID": str(data.store_id or "All Stores")}
+            kpis = [{"label": "Total Items", "value": len(res.get("items", []))}]
             headers = ["Product", "SKU", "Store ID", "Quantity", "Min Stock", "Status"]
             for it in res["items"]:
                 rows.append([
@@ -1365,6 +1429,9 @@ class ReportService:
 
         elif rtype == "inventory_low":
             res = self.low_stock(user, store_id=data.store_id)
+            title = "Low Stock Alert Report"
+            metadata = {"Store ID": str(data.store_id or "All Stores")}
+            kpis = [{"label": "Deficit Items", "value": len(res.get("items", []))}]
             headers = ["Product", "SKU", "Store ID", "Quantity", "Min Stock", "Deficit"]
             for it in res["items"]:
                 rows.append([
@@ -1378,6 +1445,14 @@ class ReportService:
 
         elif rtype == "inventory_valuation":
             res = self.inventory_valuation(user, store_id=data.store_id)
+            title = "Inventory Valuation Report"
+            metadata = {"Store ID": str(data.store_id or "All Stores")}
+            kpis = [
+                {"label": "Total Products", "value": res["total_products"]},
+                {"label": "Total Units", "value": res["total_units"]},
+                {"label": "Cost Valuation", "value": res["cost_valuation"]},
+                {"label": "Retail Valuation", "value": res["retail_valuation"]},
+            ]
             headers = ["Metric", "Value"]
             rows = [
                 ["Total Products", res["total_products"]],
@@ -1394,6 +1469,33 @@ class ReportService:
                 limit=data.limit or 10,
                 store_id=data.store_id,
             )
+            title = "Top Selling Products Report"
+            metadata = {"Limit": data.limit or 10, "Store ID": str(data.store_id or "All Stores")}
+            kpis = [{"label": "Products Listed", "value": len(res.get("products", []))}]
+            headers = ["Product", "SKU", "Qty Sold", "Revenue", "Orders"]
+            for p in res["products"]:
+                rows.append([
+                    p["product_name"],
+                    p["sku"],
+                    p["quantity_sold"],
+                    str(p["revenue"]),
+                    p["orders_count"],
+                ])
+
+        elif rtype == "products_slow_moving":
+            res = self.slow_moving_products(
+                user,
+                threshold=data.threshold if data.threshold is not None else 5,
+                start_date=data.start_date,
+                end_date=data.end_date,
+                store_id=data.store_id,
+            )
+            title = "Slow Moving Products Report"
+            metadata = {"Threshold": res["threshold"], "Store ID": str(data.store_id or "All Stores")}
+            kpis = [
+                {"label": "Threshold", "value": res["threshold"]},
+                {"label": "Slow Products", "value": len(res.get("products", []))},
+            ]
             headers = ["Product", "SKU", "Qty Sold", "Revenue", "Orders"]
             for p in res["products"]:
                 rows.append([
@@ -1411,6 +1513,13 @@ class ReportService:
                 end_date=data.end_date,
                 store_id=data.store_id,
             )
+            title = "Product Profitability Report"
+            metadata = {"Store ID": str(data.store_id or "All Stores")}
+            kpis = [
+                {"label": "Total Revenue", "value": res["total_revenue"]},
+                {"label": "Estimated Cost", "value": res["total_estimated_cost"]},
+                {"label": "Estimated Profit", "value": res["total_estimated_profit"]},
+            ]
             headers = ["Product", "SKU", "Qty Sold", "Revenue", "Cost", "Profit", "Margin %"]
             for p in res["products"]:
                 rows.append([
@@ -1427,6 +1536,13 @@ class ReportService:
             sdate = data.start_date or date.today().replace(day=1)
             edate = data.end_date or date.today()
             res = self.profit_loss(user, start_date=sdate, end_date=edate, store_id=data.store_id)
+            title = "Profit and Loss Statement"
+            metadata = {"Period": f"{res['start_date']} to {res['end_date']}", "Store ID": str(data.store_id or "All Stores")}
+            kpis = [
+                {"label": "Gross Sales", "value": res["gross_sales"]},
+                {"label": "Gross Profit", "value": res["gross_profit"]},
+                {"label": "Net Profit", "value": res["net_profit"]},
+            ]
             headers = ["Financial Component", "Amount"]
             rows = [
                 ["Gross Sales", str(res["gross_sales"])],
@@ -1443,6 +1559,13 @@ class ReportService:
 
         elif rtype == "customers_overview":
             res = self.customers_overview(user)
+            title = "Customer Overview Report"
+            metadata = {"Generated": date.today().isoformat()}
+            kpis = [
+                {"label": "Total Customers", "value": res["total_customers"]},
+                {"label": "Active Customers", "value": res["active_customers"]},
+                {"label": "Total Spend", "value": res["total_spend_all_customers"]},
+            ]
             headers = ["Metric", "Value"]
             rows = [
                 ["Total Customers", res["total_customers"]],
@@ -1454,6 +1577,14 @@ class ReportService:
 
         elif rtype == "customers_retention":
             res = self.customers_retention(user)
+            title = "Customer Retention Report"
+            metadata = {"Generated": date.today().isoformat()}
+            kpis = [
+                {"label": "Total Customers", "value": res["total_customers"]},
+                {"label": "Active Customers", "value": res["active_customers"]},
+                {"label": "Repeat Customers", "value": res["repeat_customers"]},
+                {"label": "Retention Rate", "value": f"{res['retention_rate']}%"},
+            ]
             headers = ["Metric", "Value"]
             rows = [
                 ["Total Customers", res["total_customers"]],
@@ -1463,11 +1594,140 @@ class ReportService:
                 ["Retention Rate", f"{res['retention_rate']}%"],
             ]
 
+        elif rtype == "customers_lifetime_value":
+            res = self.customers_lifetime_value(user, limit=data.limit or 20)
+            title = "Customer Lifetime Value Report"
+            metadata = {"Average LTV": str(res.get("average_lifetime_value", 0))}
+            kpis = [
+                {"label": "Average LTV", "value": res.get("average_lifetime_value", 0)},
+                {"label": "Top Customers", "value": len(res.get("top_customers", []))},
+            ]
+            headers = ["Customer ID", "Name", "Phone", "Email", "Total Spend", "Orders Count"]
+            for c in res.get("top_customers", []):
+                rows.append([
+                    c["customer_id"],
+                    c["name"],
+                    c.get("phone") or "",
+                    c.get("email") or "",
+                    str(c["total_spend"]),
+                    c["orders_count"],
+                ])
+
         elif rtype == "customers_segments":
             res = self.customers_segments(user)
+            title = "Customer Segments Report"
+            metadata = {"Total Categorized": res["total_categorized"]}
+            kpis = [{"label": "Total Categorized", "value": res["total_categorized"]}]
             headers = ["Segment", "Count"]
             for seg, cnt in res["segment_counts"].items():
                 rows.append([seg, cnt])
+
+        elif rtype in ("daily_billing", "daily_billing_closure"):
+            tdate = data.target_date or (data.start_date or date.today())
+            res = self.daily_billing_closure(user.tenant_id, tdate)
+            title = f"Daily Billing Closure ({res['date']})"
+            metadata = {"Date": res["date"]}
+            kpis = [
+                {"label": "Invoices", "value": res["invoice_count"]},
+                {"label": "Total Sales", "value": res["total_sales"]},
+                {"label": "Net Collection", "value": res["net_collection"]},
+            ]
+            headers = ["Metric", "Value"]
+            rows = [
+                ["Date", res["date"]],
+                ["Invoice Count", res["invoice_count"]],
+                ["Total Sales", str(res["total_sales"])],
+                ["Cash Sales", str(res["cash_sales"])],
+                ["Card Sales", str(res["card_sales"])],
+                ["UPI Sales", str(res["upi_sales"])],
+                ["Wallet Sales", str(res["wallet_sales"])],
+                ["Discount Amount", str(res["discount_amount"])],
+                ["Refund Amount", str(res["refund_amount"])],
+                ["Net Collection", str(res["net_collection"])],
+            ]
+
+        elif rtype == "payment_summary":
+            sdate = data.start_date or date.today().replace(day=1)
+            edate = data.end_date or date.today()
+            res = self.payment_summary(user.tenant_id, sdate, edate)
+            title = "Payment Summary Report"
+            metadata = {"Period": f"{res['start_date']} to {res['end_date']}"}
+            kpis = [
+                {"label": "Grand Total", "value": res["grand_total"]},
+                {"label": "Payment Methods", "value": len(res["payment_breakdown"])},
+            ]
+            headers = ["Payment Method", "Transactions", "Total Amount"]
+            for method, vals in res["payment_breakdown"].items():
+                rows.append([method, str(vals["transaction_count"]), str(vals["total_amount"])])
+
+        elif rtype == "multi_store_revenue":
+            from app.services.multi_store_analytics_service import MultiStoreAnalyticsService
+            store_ids_list = [data.store_id] if data.store_id else None
+            ms_res = MultiStoreAnalyticsService(self.db).revenue_comparison(
+                user=user, start_date=data.start_date, end_date=data.end_date, store_ids=store_ids_list
+            )
+            title = "Multi-Store Revenue Comparison"
+            metadata = {"Period": f"{ms_res.start_date} to {ms_res.end_date}"}
+            kpis = [
+                {"label": "Stores", "value": ms_res.store_count},
+                {"label": "Total Orders", "value": ms_res.total_tenant_orders},
+                {"label": "Total Net Sales", "value": ms_res.total_tenant_net_sales},
+            ]
+            headers = ["Store ID", "Store Name", "Orders", "Gross Sales", "Net Sales", "AOV"]
+            for s in ms_res.stores:
+                rows.append([s.store_id, s.store_name, s.order_count, str(s.gross_sales), str(s.net_sales), str(s.average_order_value)])
+
+        elif rtype == "multi_store_profit":
+            from app.services.multi_store_analytics_service import MultiStoreAnalyticsService
+            store_ids_list = [data.store_id] if data.store_id else None
+            ms_res = MultiStoreAnalyticsService(self.db).profit_comparison(
+                user=user, start_date=data.start_date, end_date=data.end_date, store_ids=store_ids_list
+            )
+            title = "Multi-Store Profit Comparison"
+            metadata = {"Period": f"{ms_res.start_date} to {ms_res.end_date}"}
+            kpis = [
+                {"label": "Stores", "value": ms_res.store_count},
+                {"label": "Tenant Revenue", "value": ms_res.total_tenant_revenue},
+                {"label": "Tenant Net Profit", "value": ms_res.total_tenant_net_profit},
+            ]
+            headers = ["Store ID", "Store Name", "Revenue", "COGS", "Gross Profit", "Expenses", "Net Profit", "Margin %"]
+            for s in ms_res.stores:
+                rows.append([s.store_id, s.store_name, str(s.revenue), str(s.cogs), str(s.gross_profit), str(s.operating_expenses), str(s.net_profit), f"{s.profit_margin_pct}%" if s.profit_margin_pct is not None else "N/A"])
+
+        elif rtype == "multi_store_inventory":
+            from app.services.multi_store_analytics_service import MultiStoreAnalyticsService
+            store_ids_list = [data.store_id] if data.store_id else None
+            ms_res = MultiStoreAnalyticsService(self.db).inventory_comparison(
+                user=user, store_ids=store_ids_list
+            )
+            title = "Multi-Store Inventory Comparison"
+            metadata = {"Stores Analyzed": ms_res.store_count}
+            kpis = [
+                {"label": "Stores", "value": ms_res.store_count},
+                {"label": "Stock Units", "value": ms_res.total_tenant_stock_units},
+                {"label": "Cost Valuation", "value": ms_res.total_tenant_cost_valuation},
+                {"label": "Retail Valuation", "value": ms_res.total_tenant_retail_valuation},
+            ]
+            headers = ["Store ID", "Store Name", "Stock Units", "Cost Valuation", "Retail Valuation", "Low Stock SKUs"]
+            for s in ms_res.stores:
+                rows.append([s.store_id, s.store_name, s.total_stock_units, str(s.total_cost_valuation), str(s.total_retail_valuation), s.low_stock_sku_count])
+
+        elif rtype == "multi_store_customer":
+            from app.services.multi_store_analytics_service import MultiStoreAnalyticsService
+            store_ids_list = [data.store_id] if data.store_id else None
+            ms_res = MultiStoreAnalyticsService(self.db).customer_comparison(
+                user=user, start_date=data.start_date, end_date=data.end_date, store_ids=store_ids_list
+            )
+            title = "Multi-Store Customer Comparison"
+            metadata = {"Period": f"{ms_res.start_date} to {ms_res.end_date}"}
+            kpis = [
+                {"label": "Stores", "value": ms_res.store_count},
+                {"label": "Unique Customers", "value": ms_res.total_tenant_unique_customers},
+                {"label": "Total Sales", "value": ms_res.total_tenant_sales},
+            ]
+            headers = ["Store ID", "Store Name", "Customers", "Repeat Customers", "Repeat Rate %", "Total Sales", "Sales/Customer"]
+            for s in ms_res.stores:
+                rows.append([s.store_id, s.store_name, s.total_unique_customers, s.repeat_customers, f"{s.repeat_customer_rate_pct}%", str(s.total_sales), str(s.sales_per_customer)])
 
         else:
             raise HTTPException(
@@ -1494,46 +1754,36 @@ class ReportService:
             )
 
         # -------------------------------------------------------------
-        # EXCEL FORMAT
+        # EXCEL FORMAT (Professional 2-Sheet Workbook)
         # -------------------------------------------------------------
         elif fmt == "excel":
-            return ExcelExportService().create_streaming_response(
+            return ExcelExportService().create_report_streaming_response(
                 sheet_title=title,
                 headers=headers,
                 rows=rows,
                 filename=filename,
+                metadata=metadata,
+                kpis=kpis,
+                branding=branding,
+                report_type=rtype,
             )
 
         # -------------------------------------------------------------
-        # PDF FORMAT
+        # PDF FORMAT (Professional DocumentRenderer ReportLab Platypus)
         # -------------------------------------------------------------
         elif fmt == "pdf":
-            out_stream = io.BytesIO()
-            doc = SimpleDocTemplate(out_stream, pagesize=letter)
-            styles = getSampleStyleSheet()
-            elements = []
-
-            elements.append(Paragraph(f"<b>{title}</b>", styles["Title"]))
-            elements.append(Spacer(1, 12))
-
-            table_data = [headers] + [[str(c) for c in r] for r in rows]
-            t = Table(table_data)
-            t.setStyle(
-                TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F497D")),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
-                    ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#F2F2F2")),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ])
+            from app.services.document_renderer_service import DocumentRenderer
+            pdf_bytes = DocumentRenderer().render_report_pdf(
+                title=title,
+                metadata=metadata,
+                kpi_summary=kpis,
+                headers=headers,
+                rows=rows,
+                branding=branding,
+                report_type=rtype,
             )
-            elements.append(t)
-            doc.build(elements)
-            out_stream.seek(0)
             return StreamingResponse(
-                out_stream,
+                io.BytesIO(pdf_bytes),
                 media_type="application/pdf",
                 headers={"Content-Disposition": f"attachment; filename={filename}.pdf"},
             )

@@ -104,9 +104,6 @@ class LimitItemDetail(BaseModel):
 
 
 class PlanLimitsConfigureRequest(BaseModel):
-    plan_id: Optional[int] = Field(None, description="Optional plan ID (can also be passed in URL path)")
-    plan_code: Optional[str] = Field(None, description="Optional plan code (e.g. 'basic', 'pro', 'enterprise')")
-
     # Direct dimension values (None means unlimited when is_*_unlimited is True, or if null sent for unlimited)
     users: Optional[int] = Field(None, ge=0, description="Users limit (number or null for unlimited)")
     is_users_unlimited: Optional[bool] = Field(None, description="Set True for unlimited users")
@@ -119,8 +116,6 @@ class PlanLimitsConfigureRequest(BaseModel):
 
     monthly_orders: Optional[int] = Field(None, ge=0, description="Monthly orders limit (number or null for unlimited)")
     is_monthly_orders_unlimited: Optional[bool] = Field(None, description="Set True for unlimited monthly orders")
-
-    items: Optional[list[SaaSPlanEntitlementCreate]] = Field(None, description="Optional list of custom dimensions")
 
 
 class PlanLimitsConfigureResponse(BaseModel):

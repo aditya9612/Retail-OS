@@ -18,7 +18,7 @@ from app.services.multi_store_analytics_service import MultiStoreAnalyticsServic
 
 router = APIRouter(
     prefix="/multi-store",
-    tags=["multi-store"],
+    tags=["Multi-Store Reports"],
 )
 
 
@@ -40,7 +40,12 @@ def require_multi_store_read_permission(
     raise ForbiddenException("Missing permission: reports:read or stores:read")
 
 
-@router.get("/revenue-comparison", response_model=StoreRevenueComparisonResponse)
+@router.get(
+    "/revenue-comparison",
+    response_model=StoreRevenueComparisonResponse,
+    summary="Multi-Store Revenue Comparison",
+    description="Cross-store comparative revenue analytics, total sales, average order value, and order count across stores.",
+)
 def get_revenue_comparison(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
@@ -56,7 +61,12 @@ def get_revenue_comparison(
     )
 
 
-@router.get("/profit-comparison", response_model=StoreProfitComparisonResponse)
+@router.get(
+    "/profit-comparison",
+    response_model=StoreProfitComparisonResponse,
+    summary="Multi-Store Profit Comparison",
+    description="Cross-store profitability comparison analyzing total revenue, cost of goods, gross profit, and profit margins.",
+)
 def get_profit_comparison(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
@@ -72,7 +82,12 @@ def get_profit_comparison(
     )
 
 
-@router.get("/inventory-comparison", response_model=StoreInventoryComparisonResponse)
+@router.get(
+    "/inventory-comparison",
+    response_model=StoreInventoryComparisonResponse,
+    summary="Multi-Store Inventory Comparison",
+    description="Cross-store inventory analytics comparing total stock units, inventory valuation, and out-of-stock items across stores.",
+)
 def get_inventory_comparison(
     store_ids: Optional[List[int]] = Query(default=None),
     user: User = Depends(require_multi_store_read_permission),
@@ -84,7 +99,12 @@ def get_inventory_comparison(
     )
 
 
-@router.get("/customer-comparison", response_model=StoreCustomerComparisonResponse)
+@router.get(
+    "/customer-comparison",
+    response_model=StoreCustomerComparisonResponse,
+    summary="Multi-Store Customer Comparison",
+    description="Cross-store customer metrics comparing unique customers, new customer acquisitions, repeat rates, and revenue per customer.",
+)
 def get_customer_comparison(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,

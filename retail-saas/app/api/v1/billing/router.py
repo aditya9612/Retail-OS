@@ -447,6 +447,7 @@ def cancel_held_cart(
 @router.post(
     "/tender-change/calculate",
     response_model=TenderChangeResponse,
+    dependencies=[Depends(require_operational_write)],
 )
 def calculate_tender_change(
     payload: TenderChangeRequest,

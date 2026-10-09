@@ -277,3 +277,85 @@ def aggregate_taxes(
         "igst_amount": igst_amount,
         "grand_total": grand_total,
     }
+
+
+def amount_to_indian_words(amount: Decimal | float | int | str) -> str:
+    """
+    Converts a numeric amount into words formatted in Indian currency standard.
+    Examples:
+        354.00 -> 'Indian Rupees Three Hundred Fifty-Four Only'
+        12500.50 -> 'Indian Rupees Twelve Thousand Five Hundred and Fifty Paise Only'
+    """
+    try:
+        amt = Decimal(str(amount)).quantize(Decimal("0.01"))
+    except Exception:
+        return ""
+
+    if amt == Decimal("0.00"):
+        return "Indian Rupees Zero Only"
+
+    is_negative = amt < Decimal("0.00")
+    amt = abs(amt)
+
+    rupees = int(amt)
+    paise = int(round((amt - Decimal(rupees)) * 100))
+
+    ones = [
+        "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+        "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen",
+        "Seventeen", "Eighteen", "Nineteen",
+    ]
+    tens = [
+        "", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety",
+    ]
+
+    def num_to_words_below_1000(n: int) -> str:
+        parts = []
+        if n >= 100:
+            parts.append(f"{ones[n // 100]} Hundred")
+            n %= 100
+        if n >= 20:
+            t = tens[n // 10]
+            rem = ones[n % 10]
+            parts.append(f"{t}-{rem}" if rem else t)
+        elif n > 0:
+            parts.append(ones[n])
+        return " ".join(parts)
+
+    def convert_rupees(n: int) -> str:
+        if n == 0:
+            return ""
+        parts = []
+        crores = n // 10000000
+        if crores:
+            parts.append(f"{convert_rupees(crores)} Crore")
+            n %= 10000000
+        lakhs = n // 100000
+        if lakhs:
+            parts.append(f"{num_to_words_below_1000(lakhs)} Lakh")
+            n %= 100000
+        thousands = n // 1000
+        if thousands:
+            parts.append(f"{num_to_words_below_1000(thousands)} Thousand")
+            n %= 1000
+        if n > 0:
+            parts.append(num_to_words_below_1000(n))
+        return " ".join(parts)
+
+    result_parts = []
+    if is_negative:
+        result_parts.append("Minus")
+
+    rupee_words = convert_rupees(rupees)
+    if rupee_words:
+        result_parts.append(f"Indian Rupees {rupee_words}")
+
+    if paise > 0:
+        paise_words = num_to_words_below_1000(paise)
+        if rupee_words:
+            result_parts.append(f"and {paise_words} Paise")
+        else:
+            result_parts.append(f"{paise_words} Paise")
+
+    result_parts.append("Only")
+    return " ".join(result_parts)

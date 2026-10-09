@@ -21,6 +21,7 @@ def clear_redis(fake_redis):
     fake_redis._store.clear()
     yield
     fake_redis._store.clear()
+    get_settings.cache_clear()
 
 def _reset_settings_cache():
     # lru_cache reset for get_settings

@@ -32,6 +32,9 @@ def super_admin_auth():
     password = "SuperPassword@123!"
     session = SessionLocal()
     try:
+        from app.models.super_admin import SuperAdmin
+        session.query(SuperAdmin).delete()
+        session.commit()
         sa_data = SuperAdminCreate(
             email=email,
             full_name=f"Super Admin {name_suffix}",

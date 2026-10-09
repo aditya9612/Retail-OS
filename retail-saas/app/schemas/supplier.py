@@ -1,5 +1,5 @@
-import re
 from datetime import datetime
+import re
 from typing import Any, Optional, Union
 
 from pydantic import (
@@ -11,6 +11,7 @@ from pydantic import (
 )
 
 from app.schemas.purchase_order import PurchaseOrderResponse
+from app.utils.validators import validate_email_address, validate_gstin_number
 
 GSTIN_REGEX = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$")
 
@@ -115,12 +116,12 @@ def validate_address_value(value: Optional[str]) -> Optional[str]:
 
 def validate_email_value(value: Optional[Any]) -> Optional[Any]:
     if value is None:
-        raise ValueError("Email cannot be null")
+        return None
     val_str = str(value).strip().lower()
     if not val_str:
-        raise ValueError("Email cannot be empty or whitespace")
+        raise ValueError("Supplier email cannot be empty or whitespace")
     if val_str in DISALLOWED_PLACEHOLDERS:
-        raise ValueError("Email cannot be a placeholder")
+        raise ValueError("Supplier email cannot be placeholder")
     if "@" not in val_str:
         raise ValueError("Invalid email format")
     local_part, domain_part = val_str.rsplit("@", 1)
@@ -136,12 +137,13 @@ def validate_email_value(value: Optional[Any]) -> Optional[Any]:
         raise ValueError(f"Disallowed email domain: {domain_part}")
     if local_part in DISALLOWED_PLACEHOLDERS:
         raise ValueError("Email username cannot be a placeholder")
+    validate_email_address(str(value), field_name="Supplier email", required=True)
     return value
 
 
 def validate_phone_value(value: Optional[str]) -> Optional[str]:
     if value is None:
-        raise ValueError("Phone number cannot be null")
+        return None
     if not isinstance(value, str):
         raise ValueError("Phone number must be a string")
     trimmed = value.strip()
@@ -178,7 +180,7 @@ def validate_phone_value(value: Optional[str]) -> Optional[str]:
 
 def validate_gstin_value(value: Optional[str]) -> Optional[str]:
     if value is None:
-        raise ValueError("GSTIN cannot be null")
+        return None
     if not isinstance(value, str):
         raise ValueError("Invalid Indian GSTIN format")
     trimmed = value.strip()
@@ -186,6 +188,8 @@ def validate_gstin_value(value: Optional[str]) -> Optional[str]:
         raise ValueError("GSTIN cannot be empty or whitespace")
     if len(trimmed) != 15:
         raise ValueError("GSTIN must be exactly 15 characters")
+    if trimmed != trimmed.upper():
+        raise ValueError("Invalid Indian GSTIN format")
     if trimmed.lower() in DISALLOWED_PLACEHOLDERS:
         raise ValueError("Invalid Indian GSTIN format")
 
@@ -195,6 +199,8 @@ def validate_gstin_value(value: Optional[str]) -> Optional[str]:
     state_code = int(trimmed[:2])
     if state_code < 1 or (state_code > 38 and state_code not in (97, 99)):
         raise ValueError("Invalid Indian GSTIN state code")
+
+    validate_gstin_number(trimmed, field_name="GSTIN", required=True)
 
     return trimmed
 
@@ -257,7 +263,7 @@ class SupplierBase(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def validate_email(cls, value: Optional[EmailStr]) -> Optional[EmailStr]:
+    def validate_supplier_email(cls, value: Optional[EmailStr]) -> Optional[str]:
         return validate_email_value(value)
 
     @field_validator("phone")
@@ -322,7 +328,7 @@ class SupplierUpdate(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def validate_update_email(cls, value: Optional[EmailStr]) -> Optional[EmailStr]:
+    def validate_update_supplier_email(cls, value: Optional[EmailStr]) -> Optional[str]:
         return validate_email_value(value)
 
     @field_validator("phone")
@@ -409,4 +415,4 @@ class SupplierPurchaseHistoryResponse(BaseModel):
 
     model_config = {
         "from_attributes": True
-    }
+    }
