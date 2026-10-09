@@ -1,10 +1,15 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from app.models.invoice import Invoice
+    from app.models.order import Order
 
 
 class Payment(Base, TimestampMixin):
@@ -96,6 +101,10 @@ class Payment(Base, TimestampMixin):
 
     order: Mapped["Order"] = relationship(
         "Order",
+        back_populates="payments",
+    )
+    invoice: Mapped[Optional["Invoice"]] = relationship(
+        "Invoice",
         back_populates="payments",
     )
 

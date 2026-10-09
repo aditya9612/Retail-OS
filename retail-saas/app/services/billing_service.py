@@ -7,7 +7,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.exceptions import AppException, NotFoundException
+from app.core.exceptions import AppException, ForbiddenException, NotFoundException
 from app.models.credit_note import CreditNote
 from app.models.customer import Customer
 from app.models.document_sequence import DocumentSequence
@@ -89,13 +89,32 @@ class BillingService:
                 if self.db.query(CreditNote).filter(CreditNote.credit_note_no == num).first():
                     continue
             elif doc_type == "invoice":
-                if self.db.query(Invoice).filter(Invoice.invoice_number == num).first():
+                if (
+                    self.db.query(Invoice)
+                    .filter(
+                        Invoice.tenant_id == tenant_id,
+                        Invoice.invoice_number == num,
+                    )
+                    .first()
+                ):
                     continue
             self.db.flush()
             return num
 
-    def _generate_invoice_number(self, tenant_id: int) -> str:
-        return self._next_document_number(tenant_id, "invoice", "INV")
+    def _generate_invoice_number(self, tenant_id: int, store_id: Optional[int] = None) -> str:
+        prefix = "INV"
+        try:
+            from app.services.document_settings_service import DocumentSettingsService
+            branding = DocumentSettingsService(self.db).resolve_branding(
+                tenant_id=tenant_id, store_id=store_id
+            )
+            if branding and getattr(branding, "invoice_prefix", None):
+                cand = str(branding.invoice_prefix).strip()
+                if cand:
+                    prefix = cand
+        except Exception:
+            prefix = "INV"
+        return self._next_document_number(tenant_id, "invoice", prefix)
 
     def _generate_credit_note_number(self, tenant_id: int) -> str:
         return self._next_document_number(tenant_id, "credit_note", "CN")
@@ -203,7 +222,11 @@ class BillingService:
             )
 
     def create_invoice(
-        self, tenant_id: int, order_id: int, same_state: bool = True
+        self,
+        tenant_id: int,
+        order_id: int,
+        same_state: bool = True,
+        commit: bool = True,
     ) -> Invoice:
         order = (
             self.db.query(Order)
@@ -234,14 +257,17 @@ class BillingService:
         if existing:
             return existing
 
+        from decimal import ROUND_HALF_UP
+
         if same_state:
-            half = (order.tax_amount / Decimal("2")).quantize(
-                Decimal("0.01")
+            cgst_half = (order.tax_amount / Decimal("2")).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
             )
+            sgst_half = order.tax_amount - cgst_half
 
             gst = {
-                "cgst_amount": half,
-                "sgst_amount": half,
+                "cgst_amount": cgst_half,
+                "sgst_amount": sgst_half,
                 "igst_amount": Decimal("0.00"),
             }
         else:
@@ -251,11 +277,18 @@ class BillingService:
                 "igst_amount": order.tax_amount,
             }
 
+        initial_status = InvoiceStatus.ISSUED.value
+        if getattr(order, "payment_status", None) == "paid":
+            initial_status = "paid"
+
+        invoice_number = self._generate_invoice_number(tenant_id, store_id=order.store_id)
+
         invoice = Invoice(
             tenant_id=tenant_id,
+            store_id=order.store_id,
             order_id=order.id,
-            invoice_number=self._generate_invoice_number(tenant_id),
-            status=InvoiceStatus.ISSUED.value,
+            invoice_number=invoice_number,
+            status=initial_status,
             subtotal=order.subtotal,
             discount_amount=order.discount_amount,
             total_amount=order.total_amount,
@@ -270,8 +303,11 @@ class BillingService:
         )
 
         self.db.add(invoice)
-        self.db.commit()
-        self.db.refresh(invoice)
+        if commit:
+            self.db.commit()
+            self.db.refresh(invoice)
+        else:
+            self.db.flush()
 
         return invoice
 
@@ -280,7 +316,31 @@ class BillingService:
         tenant_id: int,
         user_id: int,
         data: InvoiceCreate,
+        user: Optional[User] = None,
     ) -> Invoice:
+        if user is None:
+            user = (
+                self.db.query(User)
+                .filter(User.id == user_id, User.tenant_id == tenant_id)
+                .first()
+            )
+
+        if user and user.store_id is not None and data.store_id != user.store_id:
+            raise ForbiddenException("Access denied: cannot create invoice for another store")
+
+        if user and user.store_id is None:
+            store = (
+                self.db.query(Store)
+                .filter(
+                    Store.id == data.store_id,
+                    Store.tenant_id == tenant_id,
+                    Store.is_active.is_(True),
+                )
+                .first()
+            )
+            if not store:
+                raise NotFoundException(f"Store {data.store_id} not found")
+
         order_svc = OrderService(self.db)
 
         if data.items:
@@ -309,18 +369,16 @@ class BillingService:
                     )
                 )
 
-            order = order_svc.create_order(
-                tenant_id,
-                user_id,
-                OrderCreate(
-                    store_id=data.store_id,
-                    customer_id=data.customer_id,
-                    order_type="pos",
-                    discount_amount=Decimal("0.00"),
-                    coupon_code=None,
-                    items=items,
-                ),
+            order_create_payload = OrderCreate(
+                store_id=data.store_id,
+                customer_id=data.customer_id,
+                order_type="pos",
+                discount_amount=Decimal("0.00"),
+                coupon_code=None,
+                same_state=data.same_state,
+                items=items,
             )
+            is_cart_checkout = False
         else:
             cart_svc = CartService(self.db)
             cart = cart_svc.get_cart(tenant_id, user_id)
@@ -341,98 +399,127 @@ class BillingService:
                 for item in cart["items"]
             ]
 
+            order_create_payload = OrderCreate(
+                store_id=data.store_id,
+                customer_id=data.customer_id or cart.get("customer_id"),
+                order_type="pos",
+                discount_amount=Decimal(cart.get("discount_amount", "0")),
+                coupon_code=cart.get("coupon_code"),
+                same_state=data.same_state,
+                items=items,
+            )
+            is_cart_checkout = True
+
+        try:
+            # Step 1: Create draft order with commit=False (calculates line taxes & totals)
             order = order_svc.create_order(
                 tenant_id,
                 user_id,
-                OrderCreate(
-                    store_id=data.store_id,
-                    customer_id=data.customer_id or cart.get("customer_id"),
-                    order_type="pos",
-                    discount_amount=Decimal(
-                        cart.get("discount_amount", "0")
-                    ),
-                    coupon_code=cart.get("coupon_code"),
-                    items=items,
-                ),
+                order_create_payload,
+                commit=False,
             )
 
-        order = order_svc.confirm_order(
-            tenant_id,
-            order.id,
-        )
-
-        if data.payments:
-            total_paid = sum(
-                (p.amount for p in data.payments),
-                Decimal("0"),
-            )
-
-            if total_paid != order.total_amount:
-                raise AppException(
-                    f"Payment total ({total_paid}) must match order total ({order.total_amount})"
+            # Step 2: Validate payment tender BEFORE irreversible inventory mutations!
+            payment_records: list[Payment] = []
+            if data.payments:
+                total_paid = sum(
+                    (p.amount for p in data.payments),
+                    Decimal("0"),
                 )
 
-            for payment in data.payments:
-                amount_tendered = payment.amount_tendered
-                change_due = payment.change_due
-                if payment.payment_mode.lower() == "cash" and amount_tendered is not None:
-                    if amount_tendered < payment.amount:
-                        raise AppException(
-                            f"Cash tendered ({amount_tendered}) cannot be less than payable amount ({payment.amount})"
-                        )
-                    computed_change = (amount_tendered - payment.amount).quantize(Decimal("0.01"))
-                    if change_due is not None and change_due != computed_change:
-                        raise AppException(
-                            f"Provided change_due ({change_due}) does not match calculated change ({computed_change})"
-                        )
-                    change_due = computed_change
-
-                self.db.add(
-                    Payment(
-                        tenant_id=tenant_id,
-                        order_id=order.id,
-                        payment_method=payment.payment_mode,
-                        amount=payment.amount,
-                        amount_tendered=amount_tendered,
-                        change_due=change_due,
-                        transaction_id=payment.transaction_reference,
-                        status=PaymentStatus.COMPLETED.value,
+                if total_paid != order.total_amount:
+                    raise AppException(
+                        f"Payment total ({total_paid}) must match order total ({order.total_amount})"
                     )
-                )
 
-            self.db.flush()
+                for payment in data.payments:
+                    amount_tendered = payment.amount_tendered
+                    change_due = payment.change_due
+                    if payment.payment_mode.lower() == "cash" and amount_tendered is not None:
+                        if amount_tendered < payment.amount:
+                            raise AppException(
+                                f"Cash tendered ({amount_tendered}) cannot be less than payable amount ({payment.amount})"
+                            )
+                        computed_change = (amount_tendered - payment.amount).quantize(Decimal("0.01"))
+                        if change_due is not None and change_due != computed_change:
+                            raise AppException(
+                                f"Provided change_due ({change_due}) does not match calculated change ({computed_change})"
+                            )
+                        change_due = computed_change
 
-        invoice = self.create_invoice(
-            tenant_id,
-            order.id,
-            data.same_state,
-        )
+                    payment_records.append(
+                        Payment(
+                            tenant_id=tenant_id,
+                            order_id=order.id,
+                            customer_id=order.customer_id,
+                            payment_method=payment.payment_mode,
+                            amount=payment.amount,
+                            amount_tendered=amount_tendered,
+                            change_due=change_due,
+                            transaction_id=payment.transaction_reference,
+                            status=PaymentStatus.COMPLETED.value,
+                            paid_at=datetime.utcnow(),
+                        )
+                    )
 
-        AuditService(self.db).log(
-            tenant_id,
-            user_id,
-            "invoice_created",
-            "invoice",
-            invoice.id,
-            {
-                "invoice_number": invoice.invoice_number,
-                "order_id": order.id,
-                "total_amount": str(invoice.total_amount),
-            },
-        )
+            # Step 3: Confirm order (allocates batches & deducts inventory) with commit=False
+            order = order_svc.confirm_order(
+                tenant_id,
+                order.id,
+                commit=False,
+            )
 
-        if not data.items:
-            CartService(self.db).clear_cart(
+            # Step 4: Create invoice with commit=False
+            invoice = self.create_invoice(
+                tenant_id,
+                order.id,
+                data.same_state,
+                commit=False,
+            )
+
+            # Step 5: Update invoice status and link payments to invoice
+            if data.payments:
+                invoice.status = "paid"
+                for p_rec in payment_records:
+                    p_rec.invoice_id = invoice.id
+                    self.db.add(p_rec)
+                self.db.flush()
+
+            # Step 6: Audit log
+            AuditService(self.db).log(
                 tenant_id,
                 user_id,
+                "invoice_created",
+                "invoice",
+                invoice.id,
+                {
+                    "invoice_number": invoice.invoice_number,
+                    "order_id": order.id,
+                    "total_amount": str(invoice.total_amount),
+                },
             )
 
-        return invoice
+            # Step 7: Clear cart if cart checkout
+            if is_cart_checkout:
+                CartService(self.db).clear_cart(
+                    tenant_id,
+                    user_id,
+                )
+
+            # Step 8: Single, atomic commit of all changes
+            self.db.commit()
+            self.db.refresh(invoice)
+            return invoice
+
+        except Exception:
+            self.db.rollback()
+            raise
 
     def get_invoice(
         self,
         tenant_id: int,
         invoice_id: int,
+        user: Optional[User] = None,
     ) -> Invoice:
         invoice = (
             self.db.query(Invoice)
@@ -446,6 +533,10 @@ class BillingService:
         if not invoice:
             raise NotFoundException("Invoice not found")
 
+        if user is not None and user.store_id is not None:
+            if invoice.store_id is None or invoice.store_id != user.store_id:
+                raise ForbiddenException("Access denied: invoice belongs to another store")
+
         return invoice
 
     def search_invoices(
@@ -458,10 +549,30 @@ class BillingService:
         payment_status: str | None = None,
         date_from=None,
         date_to=None,
+        store_id: int | None = None,
+        user: Optional[User] = None,
     ) -> list[Invoice]:
         query = self.db.query(Invoice).filter(
             Invoice.tenant_id == tenant_id
         )
+
+        effective_store_id = store_id
+        if user is not None and user.store_id is not None:
+            if store_id is not None and store_id != user.store_id:
+                raise ForbiddenException("Access denied: store staff cannot query other stores' invoices")
+            effective_store_id = user.store_id
+        elif user is not None and user.store_id is None and store_id is not None:
+            store = (
+                self.db.query(Store)
+                .filter(Store.id == store_id, Store.tenant_id == tenant_id)
+                .first()
+            )
+            if not store:
+                raise NotFoundException(f"Store {store_id} not found")
+            effective_store_id = store_id
+
+        if effective_store_id is not None:
+            query = query.filter(Invoice.store_id == effective_store_id)
 
         if invoice_number:
             query = query.filter(
@@ -546,15 +657,18 @@ class BillingService:
         self,
         tenant_id: int,
         invoice_id: int,
+        user: Optional[User] = None,
     ) -> dict:
         invoice = self.get_invoice(
             tenant_id,
             invoice_id,
+            user=user,
         )
 
         thermal = self.get_thermal_payload(
             tenant_id,
             invoice_id,
+            user=user,
         )
 
         return {
@@ -567,10 +681,12 @@ class BillingService:
         tenant_id: int,
         invoice_id: int,
         printer_type: str = "generic",
+        user: Optional[User] = None,
     ) -> dict:
         invoice = self.get_invoice(
             tenant_id,
             invoice_id,
+            user=user,
         )
 
         order = (
@@ -678,10 +794,12 @@ class BillingService:
         tenant_id: int,
         invoice_id: int,
         document_type: str = "invoice",
+        user: Optional[User] = None,
     ) -> bytes:
         invoice = self.get_invoice(
             tenant_id,
             invoice_id,
+            user=user,
         )
 
         order = (
@@ -790,6 +908,7 @@ class BillingService:
         self,
         tenant_id: int,
         credit_note_id: int,
+        user: Optional[User] = None,
     ) -> bytes:
         from app.models.credit_note import CreditNote
         from app.services.document_settings_service import DocumentSettingsService
@@ -803,11 +922,7 @@ class BillingService:
         if not credit_note:
             raise NotFoundException("Credit note not found")
 
-        invoice = (
-            self.db.query(Invoice)
-            .filter(Invoice.id == credit_note.invoice_id, Invoice.tenant_id == tenant_id)
-            .first()
-        )
+        invoice = self.get_invoice(tenant_id, credit_note.invoice_id, user=user)
         order = (
             self.db.query(Order).filter(Order.id == invoice.order_id).first()
             if invoice
@@ -892,10 +1007,12 @@ class BillingService:
         product_id: int,
         return_quantity: Decimal,
         reason: str | None = None,
+        user: Optional[User] = None,
     ) -> dict:
         invoice = self.get_invoice(
             tenant_id,
             invoice_id,
+            user=user,
         )
 
         order = (
@@ -974,10 +1091,12 @@ class BillingService:
         refund_amount: Decimal,
         refund_method: str,
         reason: str | None,
+        user: Optional[User] = None,
     ) -> Refund:
         invoice = self.get_invoice(
             tenant_id,
             invoice_id,
+            user=user,
         )
 
         if refund_amount <= 0:
@@ -1033,6 +1152,7 @@ class BillingService:
         tenant_id: int,
         refund_id: int,
         approved_by_user_id: int,
+        user: Optional[User] = None,
     ) -> Refund:
         refund = (
             self.db.query(Refund)
@@ -1059,6 +1179,7 @@ class BillingService:
         invoice = self.get_invoice(
             tenant_id,
             refund.invoice_id,
+            user=user,
         )
 
         AuditService(self.db).log(
@@ -1114,6 +1235,7 @@ class BillingService:
         self,
         tenant_id: int,
         refund_id: int,
+        user: Optional[User] = None,
     ) -> Refund:
         refund = (
             self.db.query(Refund)
@@ -1126,6 +1248,9 @@ class BillingService:
 
         if not refund:
             raise NotFoundException("Refund not found")
+
+        if user is not None:
+            self.get_invoice(tenant_id, refund.invoice_id, user=user)
 
         if refund.status != RefundStatus.PENDING.value:
             raise AppException(
@@ -1146,6 +1271,7 @@ class BillingService:
         refund_amount: Decimal,
         reason: str | None,
         approved_by_user_id: int,
+        user: Optional[User] = None,
     ) -> CreditNote:
         refund = self.create_refund(
             tenant_id,
@@ -1153,12 +1279,14 @@ class BillingService:
             refund_amount,
             "cash",
             reason,
+            user=user,
         )
 
         self.approve_refund(
             tenant_id,
             refund.id,
             approved_by_user_id,
+            user=user,
         )
 
         credit_note = (
@@ -1181,6 +1309,7 @@ class BillingService:
         self,
         tenant_id: int,
         refund_id: int,
+        user: Optional[User] = None,
     ) -> Refund:
         refund = (
             self.db.query(Refund)
@@ -1194,35 +1323,31 @@ class BillingService:
         if not refund:
             raise NotFoundException("Refund not found")
 
+        if user is not None:
+            self.get_invoice(tenant_id, refund.invoice_id, user=user)
+
         return refund
 
     def list_refunds(
         self,
         tenant_id: int,
         invoice_id: int | None = None,
+        user: Optional[User] = None,
     ) -> list[Refund]:
         query = self.db.query(Refund).filter(
             Refund.tenant_id == tenant_id
         )
 
         if invoice_id is not None:
-            invoice = (
-                self.db.query(Invoice)
-                .filter(
-                    Invoice.id == invoice_id,
-                    Invoice.tenant_id == tenant_id,
-                )
-                .first()
-            )
-
-            if not invoice:
-                raise NotFoundException(
-                    "Invoice not found"
-                )
-
+            self.get_invoice(tenant_id, invoice_id, user=user)
             query = query.filter(
                 Refund.invoice_id == invoice_id
             )
+        elif user is not None and user.store_id is not None:
+            query = query.join(
+                Invoice,
+                Refund.invoice_id == Invoice.id,
+            ).filter(Invoice.store_id == user.store_id)
 
         return (
             query.order_by(
@@ -1235,29 +1360,22 @@ class BillingService:
         self,
         tenant_id: int,
         invoice_id: int | None = None,
+        user: Optional[User] = None,
     ) -> list[CreditNote]:
         query = self.db.query(CreditNote).filter(
             CreditNote.tenant_id == tenant_id
         )
 
         if invoice_id is not None:
-            invoice = (
-                self.db.query(Invoice)
-                .filter(
-                    Invoice.id == invoice_id,
-                    Invoice.tenant_id == tenant_id,
-                )
-                .first()
-            )
-
-            if not invoice:
-                raise NotFoundException(
-                    "Invoice not found"
-                )
-
+            self.get_invoice(tenant_id, invoice_id, user=user)
             query = query.filter(
                 CreditNote.invoice_id == invoice_id
             )
+        elif user is not None and user.store_id is not None:
+            query = query.join(
+                Invoice,
+                CreditNote.invoice_id == Invoice.id,
+            ).filter(Invoice.store_id == user.store_id)
 
         return (
             query.order_by(
@@ -1270,6 +1388,7 @@ class BillingService:
         self,
         tenant_id: int,
         credit_note_id: int,
+        user: Optional[User] = None,
     ) -> CreditNote:
         credit_note = (
             self.db.query(CreditNote)
@@ -1284,5 +1403,8 @@ class BillingService:
             raise NotFoundException(
                 "Credit note not found"
             )
+
+        if user is not None:
+            self.get_invoice(tenant_id, credit_note.invoice_id, user=user)
 
         return credit_note

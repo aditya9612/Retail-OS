@@ -7,7 +7,9 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.exceptions import ForbiddenException, NotFoundException
 from app.core.security import require_permission
+from app.models.store import Store
 from app.models.user import User
 from app.schemas.billing import InvoiceCreate, InvoiceReprintRequest
 from app.schemas.order import InvoiceResponse
@@ -24,10 +26,27 @@ def create_invoice(
     user: User = Depends(require_permission("billing:write")),
     db: Session = Depends(get_db),
 ):
+    if user.store_id is not None and payload.store_id != user.store_id:
+        raise ForbiddenException("Access denied: cannot create invoice for another store")
+
+    if user.store_id is None:
+        store = (
+            db.query(Store)
+            .filter(
+                Store.id == payload.store_id,
+                Store.tenant_id == user.tenant_id,
+                Store.is_active.is_(True),
+            )
+            .first()
+        )
+        if not store:
+            raise NotFoundException(f"Store {payload.store_id} not found")
+
     return BillingService(db).create_invoice_from_cart(
         user.tenant_id,
         user.id,
         payload,
+        user=user,
     )
 
 
@@ -60,6 +79,7 @@ def search_invoices(
     ] = Query(default=None),
     date_from: Optional[datetime] = Query(default=None),
     date_to: Optional[datetime] = Query(default=None),
+    store_id: Optional[int] = Query(default=None),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
@@ -120,12 +140,30 @@ def search_invoices(
             payment_status,
             date_from,
             date_to,
+            store_id,
         ]
     ):
         raise HTTPException(
             status_code=422,
             detail="At least one search parameter is required",
         )
+
+    effective_store_id = store_id
+    if user.store_id is not None:
+        if store_id is not None and store_id != user.store_id:
+            raise ForbiddenException("Access denied: store staff cannot query other stores' invoices")
+        effective_store_id = user.store_id
+    elif store_id is not None:
+        store = (
+            db.query(Store)
+            .filter(
+                Store.id == store_id,
+                Store.tenant_id == user.tenant_id,
+            )
+            .first()
+        )
+        if not store:
+            raise NotFoundException(f"Store {store_id} not found")
 
     return BillingService(db).search_invoices(
         user.tenant_id,
@@ -136,6 +174,8 @@ def search_invoices(
         payment_status,
         date_from,
         date_to,
+        effective_store_id,
+        user=user,
     )
 
 
@@ -148,6 +188,7 @@ def get_invoice(
     return BillingService(db).get_invoice(
         user.tenant_id,
         invoice_id,
+        user=user,
     )
 
 
@@ -178,12 +219,14 @@ def invoice_pdf(
     invoice = BillingService(db).get_invoice(
         user.tenant_id,
         invoice_id,
+        user=user,
     )
 
     pdf_bytes = BillingService(db).generate_pdf(
         user.tenant_id,
         invoice_id,
         document_type=document_type,
+        user=user,
     )
 
     disposition = "inline" if mode == "preview" else "attachment"
@@ -209,12 +252,14 @@ def reprint_invoice(
     result = BillingService(db).reprint_invoice(
         user.tenant_id,
         invoice_id,
+        user=user,
     )
 
     thermal = BillingService(db).get_thermal_payload(
         user.tenant_id,
         invoice_id,
         printer_type,
+        user=user,
     )
 
     return {
@@ -232,6 +277,7 @@ def generate_invoice_async(
     BillingService(db).get_invoice(
         user.tenant_id,
         invoice_id,
+        user=user,
     )
 
     try:

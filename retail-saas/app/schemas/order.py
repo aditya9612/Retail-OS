@@ -239,6 +239,11 @@ class OrderCreate(BaseModel):
         max_length=1000,
     )
 
+    same_state: bool = Field(
+        default=True,
+        description="True for intra-state (CGST+SGST), False for inter-state (IGST)",
+    )
+
     items: List[OrderItemCreate] = Field(
         ...,
         min_length=1,
@@ -560,6 +565,7 @@ class InvoiceResponse(BaseModel):
 
     id: int
     tenant_id: int
+    store_id: Optional[int] = None
     order_id: int
     invoice_number: str
     status: str
