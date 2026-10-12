@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.exceptions import AppException, ForbiddenException, NotFoundException
+from app.core.security import is_tenant_wide_authorized
 from app.models.credit_note import CreditNote
 from app.models.customer import Customer
 from app.models.document_sequence import DocumentSequence
@@ -325,10 +326,15 @@ class BillingService:
                 .first()
             )
 
-        if user and user.store_id is not None and data.store_id != user.store_id:
+        if not user:
+            raise ForbiddenException("Access denied: user context required")
+
+        if user.store_id is not None and data.store_id != user.store_id:
             raise ForbiddenException("Access denied: cannot create invoice for another store")
 
-        if user and user.store_id is None:
+        if user.store_id is None:
+            if not is_tenant_wide_authorized(user, self.db):
+                raise ForbiddenException("Access denied: user has no assigned store")
             store = (
                 self.db.query(Store)
                 .filter(
@@ -520,6 +526,7 @@ class BillingService:
         tenant_id: int,
         invoice_id: int,
         user: Optional[User] = None,
+        system_context: bool = False,
     ) -> Invoice:
         invoice = (
             self.db.query(Invoice)
@@ -533,9 +540,15 @@ class BillingService:
         if not invoice:
             raise NotFoundException("Invoice not found")
 
-        if user is not None and user.store_id is not None:
-            if invoice.store_id is None or invoice.store_id != user.store_id:
-                raise ForbiddenException("Access denied: invoice belongs to another store")
+        if not system_context:
+            if user is None:
+                raise ForbiddenException("Access denied: user context required")
+
+            if user.store_id is not None:
+                if invoice.store_id is None or invoice.store_id != user.store_id:
+                    raise ForbiddenException("Access denied: invoice belongs to another store")
+            elif not is_tenant_wide_authorized(user, self.db):
+                raise ForbiddenException("Access denied: user has no assigned store")
 
         return invoice
 
@@ -551,25 +564,32 @@ class BillingService:
         date_to=None,
         store_id: int | None = None,
         user: Optional[User] = None,
+        system_context: bool = False,
     ) -> list[Invoice]:
         query = self.db.query(Invoice).filter(
             Invoice.tenant_id == tenant_id
         )
 
         effective_store_id = store_id
-        if user is not None and user.store_id is not None:
-            if store_id is not None and store_id != user.store_id:
-                raise ForbiddenException("Access denied: store staff cannot query other stores' invoices")
-            effective_store_id = user.store_id
-        elif user is not None and user.store_id is None and store_id is not None:
-            store = (
-                self.db.query(Store)
-                .filter(Store.id == store_id, Store.tenant_id == tenant_id)
-                .first()
-            )
-            if not store:
-                raise NotFoundException(f"Store {store_id} not found")
-            effective_store_id = store_id
+        if not system_context:
+            if user is None:
+                raise ForbiddenException("Access denied: user context required")
+
+            if user.store_id is not None:
+                if store_id is not None and store_id != user.store_id:
+                    raise ForbiddenException("Access denied: store staff cannot query other stores' invoices")
+                effective_store_id = user.store_id
+            elif not is_tenant_wide_authorized(user, self.db):
+                raise ForbiddenException("Access denied: user has no assigned store")
+            elif store_id is not None:
+                store = (
+                    self.db.query(Store)
+                    .filter(Store.id == store_id, Store.tenant_id == tenant_id)
+                    .first()
+                )
+                if not store:
+                    raise NotFoundException(f"Store {store_id} not found")
+                effective_store_id = store_id
 
         if effective_store_id is not None:
             query = query.filter(Invoice.store_id == effective_store_id)
@@ -658,17 +678,20 @@ class BillingService:
         tenant_id: int,
         invoice_id: int,
         user: Optional[User] = None,
+        system_context: bool = False,
     ) -> dict:
         invoice = self.get_invoice(
             tenant_id,
             invoice_id,
             user=user,
+            system_context=system_context,
         )
 
         thermal = self.get_thermal_payload(
             tenant_id,
             invoice_id,
             user=user,
+            system_context=system_context,
         )
 
         return {
@@ -682,11 +705,13 @@ class BillingService:
         invoice_id: int,
         printer_type: str = "generic",
         user: Optional[User] = None,
+        system_context: bool = False,
     ) -> dict:
         invoice = self.get_invoice(
             tenant_id,
             invoice_id,
             user=user,
+            system_context=system_context,
         )
 
         order = (
@@ -795,11 +820,13 @@ class BillingService:
         invoice_id: int,
         document_type: str = "invoice",
         user: Optional[User] = None,
+        system_context: bool = False,
     ) -> bytes:
         invoice = self.get_invoice(
             tenant_id,
             invoice_id,
             user=user,
+            system_context=system_context,
         )
 
         order = (
@@ -1249,8 +1276,7 @@ class BillingService:
         if not refund:
             raise NotFoundException("Refund not found")
 
-        if user is not None:
-            self.get_invoice(tenant_id, refund.invoice_id, user=user)
+        self.get_invoice(tenant_id, refund.invoice_id, user=user)
 
         if refund.status != RefundStatus.PENDING.value:
             raise AppException(
@@ -1323,8 +1349,7 @@ class BillingService:
         if not refund:
             raise NotFoundException("Refund not found")
 
-        if user is not None:
-            self.get_invoice(tenant_id, refund.invoice_id, user=user)
+        self.get_invoice(tenant_id, refund.invoice_id, user=user)
 
         return refund
 
@@ -1333,21 +1358,27 @@ class BillingService:
         tenant_id: int,
         invoice_id: int | None = None,
         user: Optional[User] = None,
+        system_context: bool = False,
     ) -> list[Refund]:
         query = self.db.query(Refund).filter(
             Refund.tenant_id == tenant_id
         )
 
         if invoice_id is not None:
-            self.get_invoice(tenant_id, invoice_id, user=user)
+            self.get_invoice(tenant_id, invoice_id, user=user, system_context=system_context)
             query = query.filter(
                 Refund.invoice_id == invoice_id
             )
-        elif user is not None and user.store_id is not None:
-            query = query.join(
-                Invoice,
-                Refund.invoice_id == Invoice.id,
-            ).filter(Invoice.store_id == user.store_id)
+        elif not system_context:
+            if user is None:
+                raise ForbiddenException("Access denied: user context required")
+            if user.store_id is not None:
+                query = query.join(
+                    Invoice,
+                    Refund.invoice_id == Invoice.id,
+                ).filter(Invoice.store_id == user.store_id)
+            elif not is_tenant_wide_authorized(user, self.db):
+                raise ForbiddenException("Access denied: user has no assigned store")
 
         return (
             query.order_by(
@@ -1361,21 +1392,27 @@ class BillingService:
         tenant_id: int,
         invoice_id: int | None = None,
         user: Optional[User] = None,
+        system_context: bool = False,
     ) -> list[CreditNote]:
         query = self.db.query(CreditNote).filter(
             CreditNote.tenant_id == tenant_id
         )
 
         if invoice_id is not None:
-            self.get_invoice(tenant_id, invoice_id, user=user)
+            self.get_invoice(tenant_id, invoice_id, user=user, system_context=system_context)
             query = query.filter(
                 CreditNote.invoice_id == invoice_id
             )
-        elif user is not None and user.store_id is not None:
-            query = query.join(
-                Invoice,
-                CreditNote.invoice_id == Invoice.id,
-            ).filter(Invoice.store_id == user.store_id)
+        elif not system_context:
+            if user is None:
+                raise ForbiddenException("Access denied: user context required")
+            if user.store_id is not None:
+                query = query.join(
+                    Invoice,
+                    CreditNote.invoice_id == Invoice.id,
+                ).filter(Invoice.store_id == user.store_id)
+            elif not is_tenant_wide_authorized(user, self.db):
+                raise ForbiddenException("Access denied: user has no assigned store")
 
         return (
             query.order_by(
@@ -1389,6 +1426,7 @@ class BillingService:
         tenant_id: int,
         credit_note_id: int,
         user: Optional[User] = None,
+        system_context: bool = False,
     ) -> CreditNote:
         credit_note = (
             self.db.query(CreditNote)
@@ -1404,7 +1442,6 @@ class BillingService:
                 "Credit note not found"
             )
 
-        if user is not None:
-            self.get_invoice(tenant_id, credit_note.invoice_id, user=user)
+        self.get_invoice(tenant_id, credit_note.invoice_id, user=user, system_context=system_context)
 
         return credit_note

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.exceptions import ForbiddenException, NotFoundException
-from app.core.security import require_permission
+from app.core.security import is_tenant_wide_authorized, require_permission
 from app.models.store import Store
 from app.models.user import User
 from app.schemas.billing import InvoiceCreate, InvoiceReprintRequest
@@ -30,6 +30,8 @@ def create_invoice(
         raise ForbiddenException("Access denied: cannot create invoice for another store")
 
     if user.store_id is None:
+        if not is_tenant_wide_authorized(user, db):
+            raise ForbiddenException("Access denied: user has no assigned store")
         store = (
             db.query(Store)
             .filter(

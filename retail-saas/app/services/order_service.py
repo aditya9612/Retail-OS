@@ -15,6 +15,7 @@ from app.core.exceptions import (
     NotFoundException,
     ConflictException,
 )
+from app.core.security import is_tenant_wide_authorized
 from app.models.customer import (
     Customer,
     CustomerFeedback,
@@ -381,8 +382,14 @@ class OrderService:
             )
             .first()
         )
-        if user and user.store_id is not None and data.store_id != user.store_id:
+        if not user:
+            raise ForbiddenException("Access denied: user context required")
+
+        if user.store_id is not None and data.store_id != user.store_id:
             raise ForbiddenException("Access denied: cannot create order for another store")
+
+        if user.store_id is None and not is_tenant_wide_authorized(user, self.db):
+            raise ForbiddenException("Access denied: user has no assigned store")
 
         self._get_store(
             tenant_id,
