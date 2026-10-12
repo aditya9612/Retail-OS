@@ -899,7 +899,8 @@ class OrderService:
                 OrderTracking.order_id == order.id
             )
             .order_by(
-                OrderTracking.updated_at.desc()
+                OrderTracking.created_at.desc(),
+                OrderTracking.id.desc(),
             )
             .all()
         )
