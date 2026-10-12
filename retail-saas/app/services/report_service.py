@@ -431,6 +431,8 @@ class ReportService:
             "gross_sales": total_year_gross,
             "total_sales": total_year_sales,
             "net_sales": total_year_net,
+            "total_gross_sales": total_year_gross,
+            "total_net_sales": total_year_net,
             "monthly_breakdown": monthly_breakdown,
             "store_id": resolved_store_id,
         }
@@ -1349,9 +1351,10 @@ class ReportService:
             title = f"Yearly Sales Report ({res['year']})"
             metadata = {"Year": res["year"], "Store ID": str(data.store_id or "All Stores")}
             kpis = [
-                {"label": "Total Orders", "value": res["total_orders"]},
-                {"label": "Gross Sales", "value": res["total_gross_sales"]},
-                {"label": "Net Sales", "value": res["total_net_sales"]},
+                {"label": "Total Orders", "value": res.get("total_orders", 0)},
+                {"label": "Gross Sales", "value": res.get("gross_sales", res.get("total_gross_sales", Decimal("0.00")))},
+                {"label": "Total Sales", "value": res.get("total_sales", Decimal("0.00"))},
+                {"label": "Net Sales", "value": res.get("net_sales", res.get("total_net_sales", Decimal("0.00")))},
             ]
             headers = ["Month", "Orders", "Gross Sales", "Total Sales", "Net Sales"]
             for m in res["monthly_breakdown"]:

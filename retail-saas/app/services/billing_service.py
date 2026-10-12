@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+import threading
 from typing import Any, Dict, List, Optional
 
 import boto3
@@ -15,8 +16,12 @@ from app.models.document_sequence import DocumentSequence
 from app.models.invoice import Invoice
 from app.models.invoice_item import InvoiceItem
 from app.models.order import Order
+from app.models.order_item import OrderItem
 from app.models.payment import Payment
 from app.models.product import Product
+from app.models.invoice_item_return import InvoiceItemReturn
+from app.models.inventory import StockMovement
+from app.models.order_item_batch_allocation import OrderItemBatchAllocation
 from app.models.refund import Refund
 from app.models.store import Store
 from app.models.tenant import Tenant
@@ -24,15 +29,19 @@ from app.models.user import User
 from app.schemas.billing import InvoiceCreate
 from app.schemas.order import OrderCreate, OrderItemCreate
 from app.services.audit_service import AuditService
+from app.services.batch_allocation_service import BatchAllocationService
 from app.services.cart_service import CartService
 from app.services.inventory_service import InventoryService
 from app.services.order_service import OrderService
-from app.utils.constants import InvoiceStatus, OrderStatus, PaymentStatus, RefundStatus
+from app.utils.constants import InvoiceStatus, OrderStatus, PaymentStatus, RefundStatus, StockMovementType
 from app.utils.gst_engine import calculate_line_tax, resolve_gst_rate
 from app.utils.pdf_generator import generate_invoice_pdf
 from app.utils.thermal_printer import generate_thermal_payload
 
 settings = get_settings()
+
+_refund_mutex = threading.Lock()
+_return_mutex = threading.Lock()
 
 
 class BillingService:
@@ -1035,81 +1044,269 @@ class BillingService:
         return_quantity: Decimal,
         reason: str | None = None,
         user: Optional[User] = None,
+        condition: str = "sellable",
+        idempotency_key: str | None = None,
+        issue_credit_note: bool = False,
+        refund_method: str = "cash",
     ) -> dict:
-        invoice = self.get_invoice(
+        self.get_invoice(
             tenant_id,
             invoice_id,
             user=user,
         )
 
-        order = (
-            self.db.query(Order)
-            .filter(Order.id == invoice.order_id)
-            .first()
-        )
+        if not isinstance(return_quantity, Decimal):
+            return_quantity = Decimal(str(return_quantity))
 
-        if not order:
-            raise NotFoundException("Order not found")
+        if return_quantity <= Decimal("0"):
+            raise AppException("Return quantity must be greater than zero")
 
-        invoice_item = next(
-            (
-                i
-                for i in invoice.items
-                if i.product_id == product_id
-            ),
-            None,
-        )
+        cond = condition.strip().lower() if condition else "sellable"
+        if cond not in ("sellable", "damaged", "expired"):
+            cond = "sellable"
 
-        if not invoice_item:
-            raise NotFoundException(
-                "Product not found on invoice"
+        if idempotency_key:
+            existing_return = (
+                self.db.query(InvoiceItemReturn)
+                .filter(
+                    InvoiceItemReturn.tenant_id == tenant_id,
+                    InvoiceItemReturn.idempotency_key == idempotency_key,
+                )
+                .first()
             )
+            if existing_return:
+                if (
+                    existing_return.invoice_id != invoice_id
+                    or existing_return.product_id != product_id
+                    or existing_return.quantity != return_quantity
+                    or existing_return.condition != cond
+                ):
+                    raise AppException("Idempotency key collision: request payload does not match existing return")
 
-        if return_quantity > invoice_item.quantity:
-            raise AppException(
-                "Return quantity exceeds invoiced quantity"
+                inv_item = (
+                    self.db.query(InvoiceItem)
+                    .filter(InvoiceItem.id == existing_return.invoice_item_id)
+                    .first()
+                )
+                cn = (
+                    self.db.query(CreditNote)
+                    .filter(CreditNote.id == existing_return.credit_note_id)
+                    .first()
+                    if existing_return.credit_note_id
+                    else None
+                )
+                return {
+                    "return_id": existing_return.id,
+                    "invoice_id": existing_return.invoice_id,
+                    "product_id": existing_return.product_id,
+                    "return_quantity": existing_return.quantity,
+                    "condition": existing_return.condition,
+                    "returned_quantity_total": inv_item.returned_quantity if inv_item else existing_return.quantity,
+                    "remaining_returnable_quantity": (inv_item.quantity - inv_item.returned_quantity) if inv_item else Decimal("0"),
+                    "reason": existing_return.reason,
+                    "status": "return_processed",
+                    "credit_note_id": cn.id if cn else None,
+                    "credit_note_no": cn.credit_note_no if cn else None,
+                    "refund_id": existing_return.refund_id,
+                }
+
+        _return_mutex.acquire()
+        try:
+            invoice = (
+                self.db.query(Invoice)
+                .filter(
+                    Invoice.id == invoice_id,
+                    Invoice.tenant_id == tenant_id,
+                )
+                .with_for_update()
+                .first()
             )
+            if not invoice:
+                raise NotFoundException("Invoice not found")
 
-        from app.schemas.inventory import StockInRequest
+            invoice_item = (
+                self.db.query(InvoiceItem)
+                .filter(
+                    InvoiceItem.invoice_id == invoice.id,
+                    InvoiceItem.product_id == product_id,
+                )
+                .with_for_update()
+                .first()
+            )
+            if not invoice_item:
+                raise NotFoundException("Product not found on invoice")
 
-        InventoryService(self.db).stock_in(
-            tenant_id,
-            StockInRequest(
-                store_id=order.store_id,
+            current_returned = getattr(invoice_item, "returned_quantity", None) or Decimal("0.00")
+            remaining_returnable = invoice_item.quantity - current_returned
+
+            if return_quantity > remaining_returnable:
+                raise AppException(
+                    f"Return quantity ({return_quantity}) exceeds remaining returnable quantity ({remaining_returnable})"
+                )
+
+            order = (
+                self.db.query(Order)
+                .filter(Order.id == invoice.order_id)
+                .with_for_update()
+                .first()
+            )
+            order_item = None
+            if order:
+                order_item = (
+                    self.db.query(OrderItem)
+                    .filter(
+                        OrderItem.order_id == order.id,
+                        OrderItem.product_id == product_id,
+                    )
+                    .with_for_update()
+                    .first()
+                )
+
+            store_id = invoice.store_id or (order.store_id if order else None)
+            if not store_id:
+                raise AppException("Invoice has no associated store")
+
+            cond = condition.strip().lower() if condition else "sellable"
+            if cond not in ("sellable", "damaged", "expired"):
+                cond = "sellable"
+
+            invoice_item.returned_quantity = current_returned + return_quantity
+
+            from app.schemas.inventory import StockInRequest
+
+            batch_allocations = []
+            if order_item:
+                batch_allocations = (
+                    self.db.query(OrderItemBatchAllocation)
+                    .filter(OrderItemBatchAllocation.order_item_id == order_item.id)
+                    .all()
+                )
+
+            restored_batches = []
+            if batch_allocations:
+                restored_batches = BatchAllocationService(self.db, user=user).restore_batch_allocation(
+                    tenant_id=tenant_id,
+                    store_id=store_id,
+                    order_item_id=order_item.id,
+                    quantity_to_restore=return_quantity,
+                    condition=cond,
+                    reference_id=invoice.id,
+                    reference_type="INVOICE_RETURN",
+                    notes=reason or f"Return for invoice {invoice.invoice_number}",
+                    commit=False,
+                )
+            else:
+                product = self.db.query(Product).filter(Product.id == product_id).first()
+                is_batch_tracked = product and getattr(product, "track_batch", False)
+
+                if cond == "sellable":
+                    InventoryService(self.db).stock_in(
+                        tenant_id,
+                        StockInRequest(
+                            store_id=store_id,
+                            product_id=product_id,
+                            quantity=return_quantity,
+                            notes=reason or f"Return for invoice {invoice.invoice_number}" + (" (historical unbatched)" if is_batch_tracked else ""),
+                        ),
+                        commit=False,
+                        movement_type=StockMovementType.RETURN.value,
+                        reference_id=invoice.id,
+                        reference_type="INVOICE_RETURN",
+                    )
+                else:
+                    inv = InventoryService(self.db)._get_or_create_inventory(tenant_id, store_id, product_id)
+                    movement = StockMovement(
+                        tenant_id=tenant_id,
+                        store_id=store_id,
+                        product_id=product_id,
+                        movement_type=StockMovementType.ADJUSTMENT.value,
+                        quantity=Decimal("0.0000"),
+                        previous_stock=inv.quantity,
+                        new_stock=inv.quantity,
+                        reference_id=invoice.id,
+                        reference_type="RETURN_DAMAGED",
+                        notes=reason or f"Return of {cond} goods for invoice {invoice.invoice_number} - zero saleable stock added",
+                        created_by=getattr(user, "id", None) if user else None,
+                    )
+                    self.db.add(movement)
+
+            item_ratio = return_quantity / invoice_item.quantity if invoice_item.quantity > Decimal("0") else Decimal("0")
+            line_unit_price = invoice_item.unit_price
+            line_tax = (invoice_item.gst_amount * item_ratio).quantize(Decimal("0.01"))
+            line_total = (invoice_item.total_amount * item_ratio).quantize(Decimal("0.01"))
+
+            canonical_return = InvoiceItemReturn(
+                tenant_id=tenant_id,
+                store_id=store_id,
+                invoice_id=invoice.id,
+                invoice_item_id=invoice_item.id,
+                order_item_id=order_item.id if order_item else None,
                 product_id=product_id,
-                quantity=int(return_quantity),
-                notes=(
-                    reason
-                    or f"Return for invoice "
-                    f"{invoice.invoice_number}"
-                ),
-            ),
-        )
+                batch_id=int(restored_batches[0]["batch_id"]) if restored_batches else None,
+                quantity=return_quantity,
+                unit_price=line_unit_price,
+                tax_amount=line_tax,
+                total_amount=line_total,
+                condition=cond,
+                reason=reason,
+                idempotency_key=idempotency_key,
+                user_id=getattr(user, "id", None) if user else None,
+            )
+            self.db.add(canonical_return)
+            self.db.flush()
 
-        order_item = next(
-            (
-                i
-                for i in order.items
-                if i.product_id == product_id
-            ),
-            None,
-        )
+            total_invoiced = sum((i.quantity for i in invoice.items), Decimal("0"))
+            total_returned = sum(((getattr(i, "returned_quantity", None) or Decimal("0")) for i in invoice.items), Decimal("0"))
+            if total_returned >= total_invoiced:
+                invoice.status = "refunded"
+                if order:
+                    order.status = OrderStatus.RETURNED.value
 
-        if (
-            order_item
-            and return_quantity >= order_item.quantity
-        ):
-            order.status = OrderStatus.RETURNED.value
+            created_credit_note = None
+            created_refund = None
+            if issue_credit_note:
+                created_refund = self.create_refund(
+                    tenant_id=tenant_id,
+                    invoice_id=invoice.id,
+                    refund_amount=line_total,
+                    refund_method=refund_method or "cash",
+                    reason=reason or f"Return for item {product_id}",
+                    user=user,
+                    commit=False,
+                )
+                created_credit_note = self._approve_refund_internal(
+                    tenant_id=tenant_id,
+                    refund=created_refund,
+                    approved_by_user_id=getattr(user, "id", 1) if user else 1,
+                    user=user,
+                    return_id=canonical_return.id,
+                    commit=False,
+                )
+                canonical_return.refund_id = created_refund.id
+                canonical_return.credit_note_id = created_credit_note.id
 
-        self.db.commit()
+            self.db.commit()
 
-        return {
-            "invoice_id": invoice_id,
-            "product_id": product_id,
-            "return_quantity": return_quantity,
-            "reason": reason,
-            "status": "return_processed",
-        }
+            return {
+                "return_id": canonical_return.id,
+                "invoice_id": invoice_id,
+                "product_id": product_id,
+                "return_quantity": return_quantity,
+                "condition": cond,
+                "returned_quantity_total": invoice_item.returned_quantity,
+                "remaining_returnable_quantity": invoice_item.quantity - invoice_item.returned_quantity,
+                "reason": reason,
+                "status": "return_processed",
+                "restored_batches": restored_batches,
+                "credit_note_id": created_credit_note.id if created_credit_note else None,
+                "credit_note_no": created_credit_note.credit_note_no if created_credit_note else None,
+                "refund_id": created_refund.id if created_refund else None,
+            }
+        except Exception:
+            self.db.rollback()
+            raise
+        finally:
+            _return_mutex.release()
 
     def create_refund(
         self,
@@ -1119,60 +1316,120 @@ class BillingService:
         refund_method: str,
         reason: str | None,
         user: Optional[User] = None,
+        idempotency_key: Optional[str] = None,
+        commit: bool = True,
     ) -> Refund:
-        invoice = self.get_invoice(
+        self.get_invoice(
             tenant_id,
             invoice_id,
             user=user,
         )
+
+        if not isinstance(refund_amount, Decimal):
+            refund_amount = Decimal(str(refund_amount))
 
         if refund_amount <= 0:
             raise AppException(
                 "Refund amount must be greater than zero"
             )
 
-        existing_refunds = (
-            self.db.query(
-                func.coalesce(
-                    func.sum(Refund.refund_amount),
-                    0,
+        if idempotency_key:
+            existing_idemp = (
+                self.db.query(Refund)
+                .filter(
+                    Refund.tenant_id == tenant_id,
+                    Refund.refund_reference == idempotency_key,
                 )
+                .first()
             )
-            .filter(
-                Refund.invoice_id == invoice_id,
-                Refund.status.in_(
-                    [
-                        RefundStatus.PENDING.value,
-                        RefundStatus.APPROVED.value,
-                    ]
-                ),
+            if existing_idemp:
+                if (
+                    existing_idemp.invoice_id != invoice_id
+                    or existing_idemp.refund_amount != refund_amount
+                    or existing_idemp.refund_method != refund_method
+                ):
+                    raise AppException("Idempotency key collision: refund request payload does not match existing refund")
+                return existing_idemp
+
+        _refund_mutex.acquire()
+        try:
+            invoice = (
+                self.db.query(Invoice)
+                .filter(
+                    Invoice.id == invoice_id,
+                    Invoice.tenant_id == tenant_id,
+                )
+                .with_for_update()
+                .first()
             )
-            .scalar()
-        )
+            if not invoice:
+                raise NotFoundException("Invoice not found")
 
-        if (
-            Decimal(str(existing_refunds))
-            + refund_amount
-            > invoice.total_amount
-        ):
-            raise AppException(
-                "Cumulative refund amount cannot exceed invoice total"
+            completed_payments = (
+                self.db.query(func.coalesce(func.sum(Payment.amount), 0))
+                .filter(
+                    Payment.invoice_id == invoice_id,
+                    Payment.status == PaymentStatus.COMPLETED.value,
+                )
+                .scalar()
+            )
+            paid_amount = Decimal(str(completed_payments))
+            eligible_paid_amount = (
+                invoice.total_amount
+                if (paid_amount <= Decimal("0") and invoice.status == "paid")
+                else (min(paid_amount, invoice.total_amount) if paid_amount > Decimal("0") else invoice.total_amount)
             )
 
-        refund = Refund(
-            tenant_id=tenant_id,
-            invoice_id=invoice_id,
-            refund_amount=refund_amount,
-            refund_method=refund_method,
-            status=RefundStatus.PENDING.value,
-            reason=reason,
-        )
+            existing_refunds = (
+                self.db.query(
+                    func.coalesce(
+                        func.sum(Refund.refund_amount),
+                        0,
+                    )
+                )
+                .filter(
+                    Refund.invoice_id == invoice_id,
+                    Refund.status.in_(
+                        [
+                            RefundStatus.PENDING.value,
+                            RefundStatus.APPROVED.value,
+                        ]
+                    ),
+                )
+                .with_for_update()
+                .scalar()
+            )
+            total_active = Decimal(str(existing_refunds))
 
-        self.db.add(refund)
-        self.db.commit()
-        self.db.refresh(refund)
+            if total_active + refund_amount > eligible_paid_amount:
+                raise AppException(
+                    f"Cumulative refund amount ({total_active + refund_amount}) cannot exceed eligible paid amount ({eligible_paid_amount})"
+                )
 
-        return refund
+            refund = Refund(
+                tenant_id=tenant_id,
+                invoice_id=invoice_id,
+                refund_amount=refund_amount,
+                refund_method=refund_method,
+                status=RefundStatus.PENDING.value,
+                reason=reason,
+                refund_reference=idempotency_key,
+            )
+
+            self.db.add(refund)
+            if commit:
+                self.db.commit()
+                self.db.refresh(refund)
+            else:
+                self.db.flush()
+
+            return refund
+        except Exception:
+            if commit:
+                self.db.rollback()
+            raise
+        finally:
+            _refund_mutex.release()
 
     def approve_refund(
         self,
@@ -1187,27 +1444,70 @@ class BillingService:
                 Refund.id == refund_id,
                 Refund.tenant_id == tenant_id,
             )
+            .with_for_update()
             .first()
         )
 
         if not refund:
             raise NotFoundException("Refund not found")
 
+        self._approve_refund_internal(
+            tenant_id=tenant_id,
+            refund=refund,
+            approved_by_user_id=approved_by_user_id,
+            user=user,
+            commit=True,
+        )
+        self.db.refresh(refund)
+        return refund
+
+    def _approve_refund_internal(
+        self,
+        tenant_id: int,
+        refund: Refund,
+        approved_by_user_id: int,
+        user: Optional[User] = None,
+        return_id: Optional[int] = None,
+        commit: bool = True,
+    ) -> CreditNote:
         if refund.status != RefundStatus.PENDING.value:
             raise AppException(
                 "Only pending refunds can be approved"
             )
 
-        refund.status = RefundStatus.APPROVED.value
-        refund.approved_by = approved_by_user_id
+        invoice = (
+            self.db.query(Invoice)
+            .filter(
+                Invoice.id == refund.invoice_id,
+                Invoice.tenant_id == tenant_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if not invoice:
+            raise NotFoundException("Invoice not found")
 
-        self.db.flush()
-
-        invoice = self.get_invoice(
+        self.get_invoice(
             tenant_id,
             refund.invoice_id,
             user=user,
         )
+
+        prior_approved = (
+            self.db.query(func.coalesce(func.sum(Refund.refund_amount), 0))
+            .filter(
+                Refund.invoice_id == refund.invoice_id,
+                Refund.id != refund.id,
+                Refund.status == RefundStatus.APPROVED.value,
+            )
+            .scalar()
+        )
+        if Decimal(str(prior_approved)) + refund.refund_amount > invoice.total_amount:
+            raise AppException("Approved refund exceeds invoice total")
+
+        refund.status = RefundStatus.APPROVED.value
+        refund.approved_by = approved_by_user_id
+        self.db.flush()
 
         AuditService(self.db).log(
             tenant_id,
@@ -1222,6 +1522,7 @@ class BillingService:
                 ),
                 "refund_method": refund.refund_method,
             },
+            commit=commit,
         )
 
         gst = self._credit_note_gst_breakdown(
@@ -1240,23 +1541,29 @@ class BillingService:
             cgst_amount=gst["cgst_amount"],
             sgst_amount=gst["sgst_amount"],
             igst_amount=gst["igst_amount"],
+            return_id=return_id,
         )
 
         self.db.add(credit_note)
 
-        order = (
-            self.db.query(Order)
-            .filter(Order.id == invoice.order_id)
-            .first()
-        )
+        total_approved = Decimal(str(prior_approved)) + refund.refund_amount
+        if total_approved >= invoice.total_amount:
+            invoice.status = "refunded"
+            order = (
+                self.db.query(Order)
+                .filter(Order.id == invoice.order_id)
+                .with_for_update()
+                .first()
+            )
+            if order:
+                order.status = OrderStatus.REFUNDED.value
 
-        if order:
-            order.status = OrderStatus.REFUNDED.value
+        if commit:
+            self.db.commit()
+        else:
+            self.db.flush()
 
-        self.db.commit()
-        self.db.refresh(refund)
-
-        return refund
+        return credit_note
 
     def reject_refund(
         self,

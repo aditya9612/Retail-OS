@@ -24,6 +24,7 @@ class OrderItemBatchAllocation(Base):
     )
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    returned_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("0.0000"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )

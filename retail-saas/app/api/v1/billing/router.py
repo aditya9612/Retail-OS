@@ -371,6 +371,10 @@ def process_item_return(
         payload.return_quantity,
         payload.reason,
         user=user,
+        condition=payload.condition,
+        idempotency_key=payload.idempotency_key,
+        issue_credit_note=payload.issue_credit_note,
+        refund_method=payload.refund_method,
     )
 
 

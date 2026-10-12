@@ -163,6 +163,10 @@ class ReturnItemRequest(BaseModel):
         description="Return quantity must be greater than 0",
     )
     reason: Optional[str] = Field(default=None, min_length=3, max_length=500)
+    condition: str = Field(default="sellable", description="Item condition: sellable, damaged, expired")
+    idempotency_key: Optional[str] = Field(default=None, max_length=100, description="Optional idempotency key")
+    issue_credit_note: bool = Field(default=False, description="Whether to atomically issue credit note")
+    refund_method: str = Field(default="cash", description="Refund method if issuing credit note")
 
 
 class ThermalPrintResponse(BaseModel):

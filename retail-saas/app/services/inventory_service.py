@@ -128,7 +128,15 @@ class InventoryService:
 
         return inventory
 
-    def stock_in(self, tenant_id: int, data: StockInRequest) -> StockMovement:
+    def stock_in(
+        self,
+        tenant_id: int,
+        data: StockInRequest,
+        commit: bool = True,
+        movement_type: Optional[str] = None,
+        reference_id: Optional[int] = None,
+        reference_type: Optional[str] = None,
+    ) -> StockMovement:
         self._get_product(tenant_id, data.product_id)
         self._get_store(tenant_id, data.store_id)
 
@@ -170,13 +178,17 @@ class InventoryService:
         if data.expiry_date:
             inventory.expiry_date = data.expiry_date
 
-        ref_id, ref_str = self._generate_movement_reference(tenant_id, "IN")
+        if reference_id is not None or reference_type is not None:
+            ref_id = reference_id
+            ref_str = reference_type
+        else:
+            ref_id, ref_str = self._generate_movement_reference(tenant_id, "IN")
 
         movement = StockMovement(
             tenant_id=tenant_id,
             store_id=data.store_id,
             product_id=data.product_id,
-            movement_type=StockMovementType.STOCK_IN.value,
+            movement_type=movement_type or StockMovementType.STOCK_IN.value,
             quantity=data.quantity,
             previous_stock=previous_stock,
             new_stock=new_stock,
@@ -187,13 +199,17 @@ class InventoryService:
             notes=data.notes,
         )
 
-        try:
+        if commit:
+            try:
+                self.db.add(movement)
+                self.db.commit()
+                self.db.refresh(movement)
+            except Exception:
+                self.db.rollback()
+                raise
+        else:
             self.db.add(movement)
-            self.db.commit()
-            self.db.refresh(movement)
-        except Exception:
-            self.db.rollback()
-            raise
+            self.db.flush()
 
         movement.batch_number = data.batch_number
         movement.expiry_date = data.expiry_date
