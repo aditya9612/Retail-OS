@@ -99,7 +99,10 @@ class OrderTracking(Base):
     def __init__(self, **kwargs):
         if "remarks" in kwargs and "notes" not in kwargs:
             kwargs["notes"] = kwargs.pop("remarks")
-        kwargs.pop("updated_at", None)
+        if "updated_at" in kwargs and "created_at" not in kwargs:
+            kwargs["created_at"] = kwargs.pop("updated_at")
+        else:
+            kwargs.pop("updated_at", None)
         super().__init__(**kwargs)
 
     @property
@@ -109,3 +112,11 @@ class OrderTracking(Base):
     @remarks.setter
     def remarks(self, val: Optional[str]) -> None:
         self.notes = val
+
+    @property
+    def updated_at(self) -> datetime:
+        return self.created_at
+
+    @updated_at.setter
+    def updated_at(self, val: datetime) -> None:
+        self.created_at = val
