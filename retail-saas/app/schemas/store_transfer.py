@@ -374,7 +374,7 @@ class StoreTransferApprove(BaseModel):
     approved_by: StrictInt = Field(
         ...,
         ge=1,
-        description="ID of the user/staff member approving the store transfer. Enter an existing User/Staff ID. Example: 5.",
+        description="Enter the User ID of the person approving this store transfer. Example: 5.",
         json_schema_extra={"example": 5},
     )
 
