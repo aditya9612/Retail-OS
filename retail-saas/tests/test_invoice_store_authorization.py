@@ -9,6 +9,9 @@ from app.models.invoice import Invoice
 from app.models.order import Order
 from app.models.inventory import Inventory
 from app.core.database import SessionLocal
+from app.core.exceptions import ForbiddenException
+from app.services.billing_service import BillingService
+from app.tasks.invoice_tasks import generate_invoice_pdf_task
 
 client = TestClient(app)
 
@@ -217,6 +220,28 @@ def store_security_fixture(unique_slug):
     assert b_login.status_code == 200
     tenant_b_headers = {"Authorization": f"Bearer {b_login.json()['access_token']}"}
 
+    # 8. Create Unassigned Cashier (store_id=None, role=cashier)
+    u_email = f"unassigned_{suffix}@secstore.com"
+    u_pass = "UnassignedPass@123!"
+    u_res = client.post(
+        "/api/v1/users",
+        headers=owner_headers,
+        data={
+            "email": u_email,
+            "full_name": "Unassigned Cashier",
+            "password": u_pass,
+            "role": "cashier",
+            "phone": _gen_phone(),
+        },
+    )
+    assert u_res.status_code == 201, u_res.text
+    u_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": u_email, "password": u_pass},
+    )
+    assert u_login.status_code == 200
+    unassigned_headers = {"Authorization": f"Bearer {u_login.json()['access_token']}"}
+
     return {
         "tenant_a_id": tenant_a_id,
         "owner_headers": owner_headers,
@@ -226,6 +251,7 @@ def store_security_fixture(unique_slug):
         "product2_id": product2_id,
         "cashier1_headers": cashier1_headers,
         "cashier2_headers": cashier2_headers,
+        "unassigned_headers": unassigned_headers,
         "invoice1_id": invoice1_id,
         "invoice1_number": invoice1_number,
         "invoice2_id": invoice2_id,
@@ -522,3 +548,162 @@ def test_unauthorized_cross_store_list_credit_notes_forbidden(store_security_fix
     assert res.status_code == 403
 
 
+def test_unassigned_cashier_cannot_create_invoice_forbidden(store_security_fixture):
+    """Unassigned cashier (store_id=None, non-admin) cannot create invoice for any store (403 Forbidden)."""
+    ctx = store_security_fixture
+    res = client.post(
+        "/api/v1/invoices",
+        headers=ctx["unassigned_headers"],
+        json={
+            "store_id": ctx["store1_id"],
+            "items": [{"product_id": ctx["product1_id"], "quantity": 1}],
+            "payments": [{"payment_mode": "cash", "amount": "118.00"}],
+        },
+    )
+    assert res.status_code == 403
+    assert "no assigned store" in str(res.json()).lower()
+
+
+def test_unassigned_cashier_cannot_access_invoice_detail_forbidden(store_security_fixture):
+    """Unassigned cashier (store_id=None, non-admin) cannot access invoice detail for any store (403 Forbidden)."""
+    ctx = store_security_fixture
+    res = client.get(
+        f"/api/v1/invoices/{ctx['invoice1_id']}",
+        headers=ctx["unassigned_headers"],
+    )
+    assert res.status_code == 403
+    assert "no assigned store" in str(res.json()).lower()
+
+
+def test_unassigned_cashier_cannot_search_invoices_forbidden(store_security_fixture):
+    """Unassigned cashier (store_id=None, non-admin) cannot search invoices across tenant (403 Forbidden)."""
+    ctx = store_security_fixture
+    res = client.get(
+        "/api/v1/invoices?payment_status=completed",
+        headers=ctx["unassigned_headers"],
+    )
+    assert res.status_code == 403
+    assert "no assigned store" in str(res.json()).lower()
+
+
+def test_unassigned_cashier_cannot_add_to_cart_forbidden(store_security_fixture):
+    """Unassigned cashier (store_id=None, non-admin) cannot add items to cart for any store (403 Forbidden)."""
+    ctx = store_security_fixture
+    res = client.post(
+        "/api/v1/billing/cart/add-item",
+        headers=ctx["unassigned_headers"],
+        params={"store_id": ctx["store1_id"]},
+        json={"product_id": ctx["product1_id"], "quantity": 1},
+    )
+    assert res.status_code == 403
+    assert "no assigned store" in str(res.json()).lower()
+
+
+def test_unassigned_cashier_cannot_create_direct_order_forbidden(store_security_fixture):
+    """Unassigned cashier (store_id=None, non-admin) cannot create orders directly (403 Forbidden)."""
+    ctx = store_security_fixture
+    res = client.post(
+        "/api/v1/orders",
+        headers=ctx["unassigned_headers"],
+        json={
+            "store_id": ctx["store1_id"],
+            "order_type": "pos",
+            "items": [{"product_id": ctx["product1_id"], "quantity": 1}],
+        },
+    )
+    assert res.status_code == 403
+    assert "no assigned store" in str(res.json()).lower()
+
+
+def test_cross_store_direct_order_creation_forbidden(store_security_fixture):
+    """Cashier 1 assigned to Store 1 attempting direct order creation for Store 2 is rejected (403 Forbidden)."""
+    ctx = store_security_fixture
+    res = client.post(
+        "/api/v1/orders",
+        headers=ctx["cashier1_headers"],
+        json={
+            "store_id": ctx["store2_id"],
+            "order_type": "pos",
+            "items": [{"product_id": ctx["product2_id"], "quantity": 1}],
+        },
+    )
+    assert res.status_code == 403
+    assert "another store" in str(res.json()).lower()
+
+
+def test_service_call_without_user_context_fails_closed(store_security_fixture):
+    """Direct BillingService calls without user context fail closed with ForbiddenException."""
+    ctx = store_security_fixture
+    db = SessionLocal()
+    try:
+        service = BillingService(db)
+        with pytest.raises(ForbiddenException) as exc_info:
+            service.get_invoice(ctx["tenant_a_id"], ctx["invoice1_id"], user=None, system_context=False)
+        assert "user context required" in str(exc_info.value).lower()
+
+        with pytest.raises(ForbiddenException) as exc_info2:
+            service.search_invoices(ctx["tenant_a_id"], user=None, system_context=False)
+        assert "user context required" in str(exc_info2.value).lower()
+    finally:
+        db.close()
+
+
+def test_cross_store_refund_approval_and_rejection_forbidden(store_security_fixture):
+    """Cashier 1 attempting to approve or reject a refund on Store 2's invoice is rejected (403 Forbidden)."""
+    ctx = store_security_fixture
+    refund_res = client.post(
+        "/api/v1/refunds",
+        headers=ctx["owner_headers"],
+        json={
+            "invoice_id": ctx["invoice2_id"],
+            "refund_amount": "50.00",
+            "refund_method": "cash",
+            "reason": "Test Refund",
+        },
+    )
+    assert refund_res.status_code == 201, refund_res.text
+    refund_id = refund_res.json()["id"]
+
+    appr_res = client.post(
+        f"/api/v1/refunds/{refund_id}/approve",
+        headers=ctx["cashier1_headers"],
+    )
+    assert appr_res.status_code == 403
+
+    rej_res = client.post(
+        f"/api/v1/refunds/{refund_id}/reject",
+        headers=ctx["cashier1_headers"],
+    )
+    assert rej_res.status_code == 403
+
+
+def test_cross_store_credit_note_pdf_download_forbidden(store_security_fixture):
+    """Cashier 1 attempting to download credit note PDF for Store 2 is rejected (403 Forbidden)."""
+    ctx = store_security_fixture
+    cn_res = client.post(
+        "/api/v1/credit-notes",
+        headers=ctx["owner_headers"],
+        json={
+            "invoice_id": ctx["invoice2_id"],
+            "refund_amount": "40.00",
+            "reason": "Return item",
+        },
+    )
+    assert cn_res.status_code == 201, cn_res.text
+    cn_id = cn_res.json()["id"]
+
+    pdf_res = client.get(
+        f"/api/v1/credit-notes/{cn_id}/pdf",
+        headers=ctx["cashier1_headers"],
+    )
+    assert pdf_res.status_code == 403
+    assert b"%PDF" not in pdf_res.content
+
+
+def test_celery_task_background_generation_with_system_context(store_security_fixture):
+    """Celery background worker executes with trusted system_context and generates invoice PDF."""
+    ctx = store_security_fixture
+    result = generate_invoice_pdf_task(ctx["tenant_a_id"], ctx["invoice1_id"])
+    assert result["status"] == "success"
+    assert result["invoice_id"] == ctx["invoice1_id"]
+    assert result["size"] > 0

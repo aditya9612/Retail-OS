@@ -15,6 +15,7 @@ class AuditService:
         resource: str,
         resource_id: int | None = None,
         details: dict | None = None,
+        commit: bool = True,
     ) -> AuditLog:
         entry = AuditLog(
             tenant_id=tenant_id,
@@ -25,6 +26,9 @@ class AuditService:
             details=details,
         )
         self.db.add(entry)
-        self.db.commit()
-        self.db.refresh(entry)
+        if commit:
+            self.db.commit()
+            self.db.refresh(entry)
+        else:
+            self.db.flush()
         return entry

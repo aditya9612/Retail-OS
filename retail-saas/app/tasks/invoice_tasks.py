@@ -18,6 +18,7 @@ def generate_invoice_pdf_task(self, tenant_id: int, invoice_id: int) -> dict:
         pdf_bytes = service.generate_pdf(
             tenant_id,
             invoice_id,
+            system_context=True,
         )
 
         return {

@@ -431,6 +431,8 @@ class ReportService:
             "gross_sales": total_year_gross,
             "total_sales": total_year_sales,
             "net_sales": total_year_net,
+            "total_gross_sales": total_year_gross,
+            "total_net_sales": total_year_net,
             "monthly_breakdown": monthly_breakdown,
             "store_id": resolved_store_id,
         }
@@ -680,36 +682,123 @@ class ReportService:
         user_or_tenant: Union[User, int],
         store_id: Optional[int] = None,
     ) -> dict:
+        from app.models.category import Category
         tenant_id, resolved_store_id = self._resolve_tenant_and_store(
             user_or_tenant, store_id
         )
-        q = (
+
+        items_query = (
             self.db.query(
-                func.count(distinct(Product.id)),
-                func.coalesce(func.sum(Inventory.quantity), 0),
-                func.coalesce(func.sum(Inventory.quantity * Product.cost_price), Decimal("0.00")),
-                func.coalesce(func.sum(Inventory.quantity * Product.selling_price), Decimal("0.00")),
+                Product.id,
+                Product.name,
+                Product.sku,
+                Product.hsn_code,
+                Category.name.label("category_name"),
+                Inventory.quantity,
+                Inventory.min_stock_level,
+                Product.cost_price,
+                Product.selling_price,
             )
-            .join(Product, Inventory.product_id == Product.id)
+            .join(Inventory, Product.id == Inventory.product_id)
+            .outerjoin(Category, Product.category_id == Category.id)
             .filter(
                 Inventory.tenant_id == tenant_id,
                 Product.is_active == True,
             )
         )
         if resolved_store_id is not None:
-            q = q.filter(Inventory.store_id == resolved_store_id)
+            items_query = items_query.filter(Inventory.store_id == resolved_store_id)
 
-        res = q.first()
-        total_products = int(res[0] or 0)
-        total_units = int(res[1] or 0)
-        cost_valuation = Decimal(str(res[2] or "0.00"))
-        retail_valuation = Decimal(str(res[3] or "0.00"))
+        rows = items_query.all()
+
+        total_units = 0
+        cost_valuation = Decimal("0.00")
+        retail_valuation = Decimal("0.00")
+        seen_products = set()
+
+        category_data: Dict[str, Dict[str, Any]] = {}
+        items_list: List[Dict[str, Any]] = []
+        low_stock_list: List[Dict[str, Any]] = []
+
+        for r in rows:
+            p_id = r[0]
+            p_name = r[1]
+            p_sku = r[2]
+            p_hsn = r[3] or ""
+            cat_name = r[4] or "Grocery"
+            qty = int(r[5] or 0)
+            min_stock = int(r[6] or 0)
+            c_price = Decimal(str(r[7] or "0.00"))
+            s_price = Decimal(str(r[8] or "0.00"))
+
+            seen_products.add(p_id)
+            total_units += qty
+            item_cost_val = qty * c_price
+            item_retail_val = qty * s_price
+            cost_valuation += item_cost_val
+            retail_valuation += item_retail_val
+
+            items_list.append({
+                "product_id": p_id,
+                "product_name": p_name,
+                "sku": p_sku,
+                "hsn_sac": p_hsn or "1234",
+                "category": cat_name,
+                "stock_qty": qty,
+                "cost_price": c_price,
+                "retail_price": s_price,
+                "total_cost_value": item_cost_val,
+                "total_retail_value": item_retail_val,
+            })
+
+            # Category aggregation
+            if cat_name not in category_data:
+                category_data[cat_name] = {
+                    "category": cat_name,
+                    "products_set": set(),
+                    "units": 0,
+                    "cost_value": Decimal("0.00"),
+                    "retail_value": Decimal("0.00"),
+                }
+            category_data[cat_name]["products_set"].add(p_id)
+            category_data[cat_name]["units"] += qty
+            category_data[cat_name]["cost_value"] += item_cost_val
+            category_data[cat_name]["retail_value"] += item_retail_val
+
+            if qty <= min_stock:
+                low_stock_list.append({
+                    "product_name": p_name,
+                    "sku": p_sku,
+                    "category": cat_name,
+                    "current_stock": qty,
+                    "minimum_stock": min_stock,
+                    "status": "Critical" if qty == 0 else "Low Stock",
+                })
+
+        category_summary = []
+        for cat_name, c_info in category_data.items():
+            c_ret_val = c_info["retail_value"]
+            share_pct = round(float(c_ret_val / retail_valuation * 100), 2) if retail_valuation > Decimal("0.00") else 0.0
+            category_summary.append({
+                "category": cat_name,
+                "products_count": len(c_info["products_set"]),
+                "units": c_info["units"],
+                "cost_value": c_info["cost_value"],
+                "retail_value": c_ret_val,
+                "share_pct": share_pct,
+            })
+        category_summary.sort(key=lambda x: x["retail_value"], reverse=True)
+        items_list.sort(key=lambda x: x["total_retail_value"], reverse=True)
 
         return {
-            "total_products": total_products,
+            "total_products": len(seen_products),
             "total_units": total_units,
             "cost_valuation": cost_valuation,
             "retail_valuation": retail_valuation,
+            "items": items_list,
+            "category_summary": category_summary,
+            "top_products": items_list[:15],
+            "low_stock_items": low_stock_list,
             "store_id": resolved_store_id,
             "data_limitation_note": "Valuation reflects current product cost_price; historical cost fluctuations are not tracked.",
         }
@@ -1349,9 +1438,10 @@ class ReportService:
             title = f"Yearly Sales Report ({res['year']})"
             metadata = {"Year": res["year"], "Store ID": str(data.store_id or "All Stores")}
             kpis = [
-                {"label": "Total Orders", "value": res["total_orders"]},
-                {"label": "Gross Sales", "value": res["total_gross_sales"]},
-                {"label": "Net Sales", "value": res["total_net_sales"]},
+                {"label": "Total Orders", "value": res.get("total_orders", 0)},
+                {"label": "Gross Sales", "value": res.get("gross_sales", res.get("total_gross_sales", Decimal("0.00")))},
+                {"label": "Total Sales", "value": res.get("total_sales", Decimal("0.00"))},
+                {"label": "Net Sales", "value": res.get("net_sales", res.get("total_net_sales", Decimal("0.00")))},
             ]
             headers = ["Month", "Orders", "Gross Sales", "Total Sales", "Net Sales"]
             for m in res["monthly_breakdown"]:
@@ -1453,13 +1543,28 @@ class ReportService:
                 {"label": "Cost Valuation", "value": res["cost_valuation"]},
                 {"label": "Retail Valuation", "value": res["retail_valuation"]},
             ]
-            headers = ["Metric", "Value"]
-            rows = [
-                ["Total Products", res["total_products"]],
-                ["Total Units", res["total_units"]],
-                ["Cost Valuation", str(res["cost_valuation"])],
-                ["Retail Valuation", str(res["retail_valuation"])],
-            ]
+            if res.get("items"):
+                headers = ["Product", "SKU", "HSN/SAC", "Category", "Stock Qty", "Cost Price", "Retail Price", "Total Cost Value", "Total Retail Value"]
+                for it in res["items"]:
+                    rows.append([
+                        it["product_name"],
+                        it["sku"],
+                        it.get("hsn_sac", "-"),
+                        it["category"],
+                        it["stock_qty"],
+                        str(it["cost_price"]),
+                        str(it["retail_price"]),
+                        str(it["total_cost_value"]),
+                        str(it["total_retail_value"]),
+                    ])
+            else:
+                headers = ["Metric", "Value"]
+                rows = [
+                    ["Total Products", res["total_products"]],
+                    ["Total Units", res["total_units"]],
+                    ["Cost Valuation", str(res["cost_valuation"])],
+                    ["Retail Valuation", str(res["retail_valuation"])],
+                ]
 
         elif rtype == "products_top_selling":
             res = self.top_selling_products(
@@ -1666,6 +1771,7 @@ class ReportService:
             ms_res = MultiStoreAnalyticsService(self.db).revenue_comparison(
                 user=user, start_date=data.start_date, end_date=data.end_date, store_ids=store_ids_list
             )
+            res = ms_res
             title = "Multi-Store Revenue Comparison"
             metadata = {"Period": f"{ms_res.start_date} to {ms_res.end_date}"}
             kpis = [
@@ -1683,16 +1789,27 @@ class ReportService:
             ms_res = MultiStoreAnalyticsService(self.db).profit_comparison(
                 user=user, start_date=data.start_date, end_date=data.end_date, store_ids=store_ids_list
             )
+            res = ms_res
             title = "Multi-Store Profit Comparison"
             metadata = {"Period": f"{ms_res.start_date} to {ms_res.end_date}"}
             kpis = [
                 {"label": "Stores", "value": ms_res.store_count},
-                {"label": "Tenant Revenue", "value": ms_res.total_tenant_revenue},
+                {"label": "Tenant Net Revenue", "value": ms_res.total_tenant_net_revenue},
+                {"label": "Tenant Gross Profit", "value": ms_res.total_tenant_gross_profit},
                 {"label": "Tenant Net Profit", "value": ms_res.total_tenant_net_profit},
             ]
-            headers = ["Store ID", "Store Name", "Revenue", "COGS", "Gross Profit", "Expenses", "Net Profit", "Margin %"]
+            headers = ["Store ID", "Store Name", "Net Revenue", "COGS", "Gross Profit", "Expenses", "Net Profit", "Margin %"]
             for s in ms_res.stores:
-                rows.append([s.store_id, s.store_name, str(s.revenue), str(s.cogs), str(s.gross_profit), str(s.operating_expenses), str(s.net_profit), f"{s.profit_margin_pct}%" if s.profit_margin_pct is not None else "N/A"])
+                rows.append([
+                    s.store_id,
+                    s.store_name,
+                    str(s.net_revenue),
+                    str(s.cogs),
+                    str(s.gross_profit),
+                    str(s.operating_expenses),
+                    str(s.net_profit),
+                    f"{s.net_profit_margin_pct}%" if s.net_profit_margin_pct is not None else "N/A",
+                ])
 
         elif rtype == "multi_store_inventory":
             from app.services.multi_store_analytics_service import MultiStoreAnalyticsService
@@ -1700,17 +1817,27 @@ class ReportService:
             ms_res = MultiStoreAnalyticsService(self.db).inventory_comparison(
                 user=user, store_ids=store_ids_list
             )
+            res = ms_res
             title = "Multi-Store Inventory Comparison"
-            metadata = {"Stores Analyzed": ms_res.store_count}
+            metadata = {"As of Date": str(ms_res.as_of_date), "Stores Analyzed": ms_res.store_count}
             kpis = [
                 {"label": "Stores", "value": ms_res.store_count},
-                {"label": "Stock Units", "value": ms_res.total_tenant_stock_units},
+                {"label": "Total Units", "value": ms_res.total_tenant_units},
                 {"label": "Cost Valuation", "value": ms_res.total_tenant_cost_valuation},
                 {"label": "Retail Valuation", "value": ms_res.total_tenant_retail_valuation},
             ]
-            headers = ["Store ID", "Store Name", "Stock Units", "Cost Valuation", "Retail Valuation", "Low Stock SKUs"]
+            headers = ["Store ID", "Store Name", "Total Products", "Total Units", "Cost Valuation", "Retail Valuation", "Low Stock SKUs", "Out of Stock"]
             for s in ms_res.stores:
-                rows.append([s.store_id, s.store_name, s.total_stock_units, str(s.total_cost_valuation), str(s.total_retail_valuation), s.low_stock_sku_count])
+                rows.append([
+                    s.store_id,
+                    s.store_name,
+                    s.total_products,
+                    s.total_units,
+                    str(s.cost_valuation),
+                    str(s.retail_valuation),
+                    s.low_stock_count,
+                    s.out_of_stock_count,
+                ])
 
         elif rtype == "multi_store_customer":
             from app.services.multi_store_analytics_service import MultiStoreAnalyticsService
@@ -1718,16 +1845,27 @@ class ReportService:
             ms_res = MultiStoreAnalyticsService(self.db).customer_comparison(
                 user=user, start_date=data.start_date, end_date=data.end_date, store_ids=store_ids_list
             )
+            res = ms_res
             title = "Multi-Store Customer Comparison"
             metadata = {"Period": f"{ms_res.start_date} to {ms_res.end_date}"}
             kpis = [
                 {"label": "Stores", "value": ms_res.store_count},
                 {"label": "Unique Customers", "value": ms_res.total_tenant_unique_customers},
-                {"label": "Total Sales", "value": ms_res.total_tenant_sales},
+                {"label": "Total Orders", "value": ms_res.total_tenant_orders},
+                {"label": "Total Spend", "value": ms_res.total_tenant_spend},
             ]
-            headers = ["Store ID", "Store Name", "Customers", "Repeat Customers", "Repeat Rate %", "Total Sales", "Sales/Customer"]
+            headers = ["Store ID", "Store Name", "Unique Customers", "Guest Orders", "Total Orders", "Total Spend", "Avg Bill Size", "Order Share %"]
             for s in ms_res.stores:
-                rows.append([s.store_id, s.store_name, s.total_unique_customers, s.repeat_customers, f"{s.repeat_customer_rate_pct}%", str(s.total_sales), str(s.sales_per_customer)])
+                rows.append([
+                    s.store_id,
+                    s.store_name,
+                    s.unique_customers,
+                    s.guest_orders,
+                    s.total_orders,
+                    str(s.total_spend),
+                    str(s.average_bill_size),
+                    f"{s.share_of_total_orders_pct}%",
+                ])
 
         else:
             raise HTTPException(
@@ -1736,6 +1874,20 @@ class ReportService:
             )
 
         filename = f"{rtype}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        # -------------------------------------------------------------
+        # REFERENCE-MATCHED PRESENTATION MODEL
+        # -------------------------------------------------------------
+        from app.services.report_design_builder import ReportDesignBuilder
+        presentation = ReportDesignBuilder(self.db).build_presentation(
+            rtype=rtype,
+            data=data,
+            res=res,
+            user=user,
+            branding=branding,
+            raw_headers=headers,
+            raw_rows=rows,
+        )
 
         # -------------------------------------------------------------
         # CSV FORMAT
@@ -1754,7 +1906,7 @@ class ReportService:
             )
 
         # -------------------------------------------------------------
-        # EXCEL FORMAT (Professional 2-Sheet Workbook)
+        # EXCEL FORMAT (Professional Reference-Matched Multi-Sheet Workbook)
         # -------------------------------------------------------------
         elif fmt == "excel":
             return ExcelExportService().create_report_streaming_response(
@@ -1766,10 +1918,11 @@ class ReportService:
                 kpis=kpis,
                 branding=branding,
                 report_type=rtype,
+                presentation=presentation,
             )
 
         # -------------------------------------------------------------
-        # PDF FORMAT (Professional DocumentRenderer ReportLab Platypus)
+        # PDF FORMAT (Professional Reference-Matched DocumentRenderer Platypus)
         # -------------------------------------------------------------
         elif fmt == "pdf":
             from app.services.document_renderer_service import DocumentRenderer
@@ -1781,6 +1934,7 @@ class ReportService:
                 rows=rows,
                 branding=branding,
                 report_type=rtype,
+                presentation=presentation,
             )
             return StreamingResponse(
                 io.BytesIO(pdf_bytes),

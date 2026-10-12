@@ -416,3 +416,199 @@ class BatchAllocationService:
             raise AppException(f"Database error during allocation: {str(e)}") from e
         except Exception as e:
             raise AppException(f"Unexpected error during allocation: {str(e)}") from e
+
+    def restore_batch_allocation(
+        self,
+        *,
+        tenant_id: int,
+        store_id: int,
+        order_item_id: int,
+        quantity_to_restore: Decimal,
+        condition: str = "sellable",
+        reference_id: Optional[int] = None,
+        reference_type: Optional[str] = "RETURN",
+        notes: Optional[str] = None,
+        commit: bool = False,
+    ) -> List[dict]:
+        """
+        Atomically restores eligible returned quantity back to original batch allocations.
+        Ensures:
+        - ProductBatch.quantity is NEVER altered.
+        - ProductBatch.remaining_quantity <= ProductBatch.quantity.
+        - OrderItemBatchAllocation.returned_quantity <= OrderItemBatchAllocation.quantity.
+        - Damaged or expired goods NEVER increment saleable inventory or batch remaining_quantity.
+        - Aggregate Inventory quantity is incremented consistently for saleable returns.
+        - Consistent row locking with with_for_update().
+        """
+        self._validate_tenant(tenant_id)
+        if not isinstance(quantity_to_restore, Decimal):
+            quantity_to_restore = Decimal(str(quantity_to_restore))
+        if quantity_to_restore <= Decimal("0"):
+            raise AppException("Quantity to restore must be greater than zero")
+
+        from app.models.order_item_batch_allocation import OrderItemBatchAllocation
+
+        # 1. Row-lock all batch allocation records for this order item in consistent ID order
+        stmt = (
+            select(OrderItemBatchAllocation)
+            .where(OrderItemBatchAllocation.order_item_id == order_item_id)
+            .order_by(OrderItemBatchAllocation.id.asc())
+            .with_for_update()
+        )
+        allocations = self.db.execute(stmt).scalars().all()
+
+        if not allocations:
+            return []
+
+        # Check total remaining returnable quantity across allocations
+        total_alloc_qty = sum((a.quantity for a in allocations), Decimal("0"))
+        total_already_returned = sum(
+            (getattr(a, "returned_quantity", None) or Decimal("0") for a in allocations),
+            Decimal("0"),
+        )
+        total_returnable = total_alloc_qty - total_already_returned
+
+        if quantity_to_restore > total_returnable:
+            raise AppException(
+                f"Requested return quantity ({quantity_to_restore}) exceeds remaining allocated batch quantity ({total_returnable})"
+            )
+
+        restored_records: List[dict] = []
+        remaining_needed = quantity_to_restore
+        is_sellable = condition.lower() == "sellable"
+        today = date.today()
+
+        total_avail_on_allocs = sum(
+            (alloc.quantity - (getattr(alloc, "returned_quantity", None) or Decimal("0")) for alloc in allocations),
+            Decimal("0"),
+        )
+        if quantity_to_restore > total_avail_on_allocs:
+            raise AppException(
+                f"Requested return quantity ({quantity_to_restore}) exceeds available unreturned batch allocations ({total_avail_on_allocs})"
+            )
+
+        # Reverse allocations in reverse order (LIFO reversal of FIFO allocations)
+        allocations_to_process = sorted(allocations, key=lambda a: a.id, reverse=True)
+
+        for alloc in allocations_to_process:
+            if remaining_needed <= Decimal("0"):
+                break
+
+            current_returned = getattr(alloc, "returned_quantity", None) or Decimal("0")
+            avail_on_alloc = alloc.quantity - current_returned
+            if avail_on_alloc <= Decimal("0"):
+                continue
+
+            to_restore = min(avail_on_alloc, remaining_needed)
+
+            # Row-lock the ProductBatch
+            batch = self.db.execute(
+                select(ProductBatch)
+                .where(ProductBatch.id == alloc.batch_id)
+                .with_for_update()
+            ).scalar_one_or_none()
+
+            if not batch:
+                raise NotFoundException(f"Product batch {alloc.batch_id} not found")
+
+            # Update allocation returned_quantity
+            alloc.returned_quantity = current_returned + to_restore
+
+            # Determine whether batch is physically sellable
+            is_expired = batch.expiry_date and batch.expiry_date < today
+            can_restock_to_saleable = is_sellable and not is_expired
+
+            if can_restock_to_saleable:
+                # Invariant: remaining_quantity + to_restore <= quantity (reject instead of silent capping)
+                if batch.remaining_quantity + to_restore > batch.quantity:
+                    raise AppException(
+                        f"Batch restoration exceeds lot capacity for batch {batch.batch_number}: "
+                        f"current remaining {batch.remaining_quantity} + to_restore {to_restore} > lot capacity {batch.quantity}"
+                    )
+                prev_rem = batch.remaining_quantity
+                batch.remaining_quantity = batch.remaining_quantity + to_restore
+                new_rem = batch.remaining_quantity
+
+                # Sync inventory batch mirror
+                self._sync_inventory_batch_mirror(
+                    tenant_id=tenant_id,
+                    store_id=store_id,
+                    product_id=batch.product_id,
+                    batch=batch,
+                    for_update=True,
+                )
+
+                # Update aggregate Inventory row for product & store
+                agg_inv = self.db.execute(
+                    select(Inventory)
+                    .where(
+                        Inventory.tenant_id == tenant_id,
+                        Inventory.store_id == store_id,
+                        Inventory.product_id == batch.product_id,
+                        Inventory.batch_id.is_(None),
+                    )
+                    .with_for_update()
+                ).scalar_one_or_none()
+
+                if agg_inv:
+                    agg_inv.quantity += to_restore
+
+                # Record StockMovement as RETURN
+                movement = StockMovement(
+                    tenant_id=tenant_id,
+                    store_id=store_id,
+                    product_id=batch.product_id,
+                    batch_id=batch.id,
+                    movement_type=StockMovementType.RETURN.value,
+                    quantity=to_restore,
+                    previous_stock=prev_rem,
+                    new_stock=new_rem,
+                    reference_id=reference_id,
+                    reference_type=reference_type or "RETURN",
+                    notes=notes or f"Restocked batch {batch.batch_number} from return",
+                    created_by=getattr(self.user, "id", None) if self.user else None,
+                )
+                self.db.add(movement)
+            else:
+                # Damaged or Expired: do NOT increment batch remaining_quantity or saleable stock
+                note_text = notes or f"Return of {to_restore} {condition} goods for batch {batch.batch_number} - zero saleable stock added"
+                if condition.lower() not in note_text.lower():
+                    note_text = f"{note_text} [{condition}: {to_restore} units write-off] - zero saleable stock added"
+                movement = StockMovement(
+                    tenant_id=tenant_id,
+                    store_id=store_id,
+                    product_id=batch.product_id,
+                    batch_id=batch.id,
+                    movement_type=StockMovementType.ADJUSTMENT.value,
+                    quantity=Decimal("0.0000"),
+                    previous_stock=batch.remaining_quantity,
+                    new_stock=batch.remaining_quantity,
+                    reference_id=reference_id,
+                    reference_type=reference_type or "RETURN_DAMAGED",
+                    notes=note_text,
+                    created_by=getattr(self.user, "id", None) if self.user else None,
+                )
+                self.db.add(movement)
+
+            remaining_needed -= to_restore
+            restored_records.append(
+                {
+                    "batch_id": batch.id,
+                    "batch_number": batch.batch_number,
+                    "restored_quantity": str(to_restore),
+                    "is_restocked_saleable": can_restock_to_saleable,
+                    "condition": condition,
+                    "remaining_quantity_after": str(batch.remaining_quantity),
+                }
+            )
+
+        if remaining_needed > Decimal("0"):
+            raise AppException(
+                f"Unable to restore full return quantity from available batch allocations (unallocated remainder: {remaining_needed})"
+            )
+
+        self.db.flush()
+        if commit:
+            self.db.commit()
+
+        return restored_records
