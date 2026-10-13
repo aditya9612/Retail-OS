@@ -265,6 +265,64 @@ class SuperAdminChangePassword(BaseModel):
         return value
 
 
+class SuperAdminProfileUpdate(BaseModel):
+    full_name: Optional[str] = Field(None, min_length=2, max_length=255, description="Full name of Super Admin")
+    phone: Optional[str] = Field(None, description="10-digit Indian phone number (e.g. 9876543210)")
+    email: Optional[EmailStr] = Field(None, description="Email address")
+    password: Optional[str] = Field(None, min_length=8, max_length=128, description="New password (min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char)")
+    current_password: Optional[str] = Field(None, min_length=8, max_length=128, description="Current password (required if updating password)")
+    pin: Optional[str] = Field(None, min_length=4, max_length=6, description="4 or 6 digit security PIN")
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v.strip():
+            clean = v.strip().replace(" ", "").replace("-", "")
+            if clean.startswith("+91"):
+                clean = clean[3:]
+            if not re.fullmatch(r"[6-9]\d{9}", clean):
+                raise ValueError("Phone must be a valid 10-digit Indian mobile number")
+            return clean
+        return v
+
+    @field_validator("pin")
+    @classmethod
+    def validate_pin(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v.strip():
+            clean = v.strip()
+            if not clean.isdigit() or len(clean) not in {4, 6}:
+                raise ValueError("PIN must be exactly 4 or 6 numeric digits")
+            return clean
+        return v
+
+
+class SuperAdminPINLogin(BaseModel):
+    identifier: str = Field(..., description="Super Admin email or registered phone number")
+    pin: str = Field(..., min_length=4, max_length=6, description="4 or 6 digit security PIN")
+
+
+class SuperAdminOTPSend(BaseModel):
+    identifier: str = Field(..., description="Super Admin email or registered phone number")
+
+
+class SuperAdminOTPVerify(BaseModel):
+    identifier: str = Field(..., description="Super Admin email or registered phone number")
+    otp: str = Field(..., min_length=4, max_length=6, description="OTP code received on email or phone")
+
+
+class SuperAdminPINSetup(BaseModel):
+    pin: str = Field(..., min_length=4, max_length=6, description="4 or 6 digit security PIN")
+    current_password: Optional[str] = Field(None, min_length=8, max_length=128, description="Current password for verification")
+
+    @field_validator("pin")
+    @classmethod
+    def validate_pin(cls, v: str) -> str:
+        clean = v.strip()
+        if not clean.isdigit() or len(clean) not in {4, 6}:
+            raise ValueError("PIN must be exactly 4 or 6 numeric digits")
+        return clean
+
+
 class SuperAdminResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True
@@ -273,10 +331,33 @@ class SuperAdminResponse(BaseModel):
     id: int
     email: EmailStr
     full_name: str
-    phone: str | None
+    phone: str | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class SuperAdminProfileResponse(SuperAdminResponse):
+    has_pin: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def check_has_pin(cls, data: Any) -> Any:
+        if hasattr(data, "pin_hash"):
+            return {
+                "id": data.id,
+                "email": data.email,
+                "full_name": data.full_name,
+                "phone": data.phone,
+                "is_active": data.is_active,
+                "has_pin": bool(data.pin_hash),
+                "created_at": data.created_at,
+                "updated_at": data.updated_at,
+            }
+        elif isinstance(data, dict):
+            if "has_pin" not in data and "pin_hash" in data:
+                data["has_pin"] = bool(data["pin_hash"])
+        return data
 
 
 class SuperAdminListResponse(BaseModel):

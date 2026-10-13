@@ -22,6 +22,12 @@ from app.schemas.super_admin import (
     SuperAdminInvoiceListResponse,
     SuperAdminListResponse,
     SuperAdminLogin,
+    SuperAdminOTPSend,
+    SuperAdminOTPVerify,
+    SuperAdminPINLogin,
+    SuperAdminPINSetup,
+    SuperAdminProfileResponse,
+    SuperAdminProfileUpdate,
     SuperAdminRefreshToken,
     SuperAdminResponse,
     SuperAdminStatusUpdate,
@@ -147,10 +153,67 @@ def refresh_super_admin_token(
     }
 
 
+@router.post(
+    "/login/pin",
+    response_model=SuperAdminTokenResponse,
+    summary="Super Admin PIN Login",
+    description="Quick login using registered email or phone with 4-6 digit security PIN.",
+)
+def super_admin_login_with_pin(
+    data: SuperAdminPINLogin,
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).login_with_pin(data)
+
+
+@router.post(
+    "/otp/send",
+    summary="Send Login OTP",
+    description="Generate and send a 6-digit OTP to Super Admin registered email or phone.",
+)
+def super_admin_send_otp(
+    data: SuperAdminOTPSend,
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).send_otp(data)
+
+
+@router.post(
+    "/otp/verify",
+    response_model=SuperAdminTokenResponse,
+    summary="Verify OTP & Login",
+    description="Verify the 6-digit OTP and receive JWT access & refresh tokens.",
+)
+def super_admin_verify_otp(
+    data: SuperAdminOTPVerify,
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).verify_otp_and_login(data)
+
+
+@router.post(
+    "/pin/setup",
+    summary="Setup / Change Security PIN",
+    description="Setup or update a 4 or 6 digit security PIN for Super Admin account.",
+)
+def super_admin_setup_pin(
+    data: SuperAdminPINSetup,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).setup_pin(current_super_admin.id, data)
+
+
+@router.get(
+    "/profile",
+    response_model=SuperAdminProfileResponse,
+    summary="Get Current Super Admin Profile",
+)
 @router.get(
     "/me",
     response_model=SuperAdminResponse,
-    summary="Get Current Super Admin",
+    summary="Get Current Super Admin Profile (Alias)",
+    include_in_schema=False,
 )
 def get_current_super_admin_profile(
     current_super_admin: SuperAdmin = Depends(
@@ -161,21 +224,28 @@ def get_current_super_admin_profile(
 
 
 @router.patch(
+    "/profile",
+    response_model=SuperAdminProfileResponse,
+    summary="Unified Super Admin Profile Update",
+    description="Single consolidated API to update all Super Admin profile information: full_name, phone, email, password, and security PIN.",
+)
+@router.patch(
     "/me",
     response_model=SuperAdminResponse,
-    summary="Update Current Super Admin Profile",
+    summary="Update Current Super Admin Profile (Alias)",
+    include_in_schema=False,
 )
 def update_current_super_admin_profile(
-    data: SuperAdminUpdate,
+    data: SuperAdminProfileUpdate,
     current_super_admin: SuperAdmin = Depends(
         get_current_super_admin
     ),
     db: Session = Depends(get_db),
 ):
     """
-    Updates the logged-in Super Admin's own profile information (full_name, phone, email).
+    Consolidated single API: updates Super Admin full_name, phone, email, password, and security PIN in one place.
     """
-    return SuperAdminService(db).update_super_admin(
+    return SuperAdminService(db).update_profile(
         current_super_admin.id,
         data,
     )
@@ -827,6 +897,7 @@ def get_invoice(
     "",
     response_model=SuperAdminListResponse,
     summary="List Super Admins",
+    include_in_schema=False,
 )
 def list_super_admins(
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
@@ -850,6 +921,7 @@ def list_super_admins(
     "/{super_admin_id}",
     response_model=SuperAdminResponse,
     summary="Get Super Admin",
+    include_in_schema=False,
 )
 def get_super_admin(
     super_admin_id: int,
@@ -867,6 +939,7 @@ def get_super_admin(
     "/{super_admin_id}",
     response_model=SuperAdminResponse,
     summary="Update Super Admin",
+    include_in_schema=False,
 )
 def update_super_admin(
     super_admin_id: int,
@@ -886,6 +959,7 @@ def update_super_admin(
     "/{super_admin_id}/status",
     response_model=SuperAdminResponse,
     summary="Activate or Deactivate Super Admin",
+    include_in_schema=False,
 )
 def update_super_admin_status(
     super_admin_id: int,
@@ -912,6 +986,7 @@ def update_super_admin_status(
 @router.post(
     "/change-password",
     summary="Change Super Admin Password",
+    include_in_schema=False,
 )
 def change_password(
     data: SuperAdminChangePassword,
