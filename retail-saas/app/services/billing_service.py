@@ -112,22 +112,16 @@ class BillingService:
             return num
 
     def _generate_invoice_number(self, tenant_id: int, store_id: Optional[int] = None) -> str:
-        prefix = "INV"
-        try:
-            from app.services.document_settings_service import DocumentSettingsService
-            branding = DocumentSettingsService(self.db).resolve_branding(
-                tenant_id=tenant_id, store_id=store_id
-            )
-            if branding and getattr(branding, "invoice_prefix", None):
-                cand = str(branding.invoice_prefix).strip()
-                if cand:
-                    prefix = cand
-        except Exception:
-            prefix = "INV"
-        return self._next_document_number(tenant_id, "invoice", prefix)
+        from app.services.document_number_service import DocumentNumberService
+        return DocumentNumberService(self.db).generate_invoice_number(
+            tenant_id=tenant_id, store_id=store_id
+        )
 
-    def _generate_credit_note_number(self, tenant_id: int) -> str:
-        return self._next_document_number(tenant_id, "credit_note", "CN")
+    def _generate_credit_note_number(self, tenant_id: int, store_id: Optional[int] = None) -> str:
+        from app.services.document_number_service import DocumentNumberService
+        return DocumentNumberService(self.db).generate_credit_note_number(
+            tenant_id=tenant_id, store_id=store_id
+        )
 
     def _credit_note_gst_breakdown(
         self, invoice: Invoice, refund_amount: Decimal
@@ -1533,7 +1527,7 @@ class BillingService:
         credit_note = CreditNote(
             tenant_id=tenant_id,
             credit_note_no=self._generate_credit_note_number(
-                tenant_id
+                tenant_id, store_id=invoice.store_id
             ),
             invoice_id=refund.invoice_id,
             refund_id=refund.id,

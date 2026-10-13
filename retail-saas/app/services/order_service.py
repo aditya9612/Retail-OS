@@ -1,4 +1,5 @@
 import uuid
+from typing import Optional
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
@@ -73,7 +74,20 @@ class OrderService:
             query = query.filter(ProductBatch.variant_id == variant_id)
         return query.first() is not None
 
-    def _generate_order_number(self) -> str:
+    def _generate_order_number(
+        self,
+        tenant_id: Optional[int] = None,
+        store_id: Optional[int] = None,
+        pos_id: Optional[int] = None,
+    ) -> str:
+        if tenant_id:
+            try:
+                from app.services.document_number_service import DocumentNumberService
+                return DocumentNumberService(self.db).generate_order_number(
+                    tenant_id=tenant_id, store_id=store_id, pos_id=pos_id
+                )
+            except Exception:
+                pass
         return f"ORD-{uuid.uuid4().hex[:8].upper()}"
 
     def _get_store(
@@ -407,7 +421,9 @@ class OrderService:
             store_id=data.store_id,
             customer_id=data.customer_id,
             user_id=user_id,
-            order_number=self._generate_order_number(),
+            order_number=self._generate_order_number(
+                tenant_id=tenant_id, store_id=data.store_id
+            ),
             order_type=data.order_type,
             status=OrderStatus.DRAFT.value,
             coupon_code=data.coupon_code,

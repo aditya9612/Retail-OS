@@ -14,6 +14,6 @@ class DocumentSequence(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
-    doc_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    doc_type: Mapped[str] = mapped_column(String(64), nullable=False)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     last_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

@@ -16,6 +16,7 @@ from app.models.supplier import Supplier
 from app.repositories.purchase_order_repo import (
     PurchaseOrderRepository,
 )
+from app.services.document_number_service import DocumentNumberService
 
 from app.schemas.purchase_order import (
     PurchaseOrderCreate,
@@ -69,7 +70,9 @@ class PurchaseOrderService:
             supplier_id=data.supplier_id,
             store_id=data.store_id,
             invoice_number=invoice_val,
-            order_number=f"PO-{uuid.uuid4().hex[:8].upper()}",
+            order_number=DocumentNumberService(self.db).generate_purchase_order_number(
+                tenant_id=tenant_id, store_id=data.store_id
+            ),
             status="draft",
             notes=data.notes or data.remarks,
             expected_delivery_date=data.expected_delivery_date,
