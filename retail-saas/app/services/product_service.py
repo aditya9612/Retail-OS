@@ -14,7 +14,7 @@ from app.schemas.product import (
     ProductUpdate,
 )
 from app.services.saas_entitlement_service import SaaSEntitlementService
-from app.utils.barcode_generator import generate_barcode_image
+from app.utils.barcode_generator import generate_barcode_image, generate_ean13_barcode
 
 
 class ProductService:
@@ -29,6 +29,13 @@ class ProductService:
     ) -> Product:
         sku = data.sku.strip().upper()
         barcode = data.barcode.strip() if data.barcode else None
+
+        if not barcode:
+            for _ in range(10):
+                candidate = generate_ean13_barcode(tenant_id)
+                if not self.repo.is_barcode_taken(candidate, tenant_id):
+                    barcode = candidate
+                    break
 
         if not sku:
             raise ConflictException(
@@ -126,26 +133,10 @@ class ProductService:
         product_data["sku"] = sku
         product_data["barcode"] = barcode
 
-        batch_num = product_data.pop(
-            "batch_number",
-            None,
-        )
-
-        exp_date = product_data.pop(
-            "expiry_date",
-            None,
-        )
-
         product = Product(
             tenant_id=tenant_id,
             **product_data,
         )
-
-        if batch_num is not None:
-            product.batch_number = batch_num
-
-        if exp_date is not None:
-            product.expiry_date = exp_date
 
         product = self.repo.create(product)
 
@@ -639,3 +630,55 @@ class ProductService:
             store_id,
             days,
         )
+
+    def generate_barcode_for_product(
+        self,
+        tenant_id: int,
+        product_id: int,
+    ) -> Product:
+        product = self.get_product(
+            tenant_id,
+            product_id,
+        )
+
+        for _ in range(10):
+            candidate = generate_ean13_barcode(tenant_id)
+            if not self.repo.is_barcode_taken(candidate, tenant_id):
+                product.barcode = candidate
+                self.db.commit()
+                self.db.refresh(product)
+                return product
+
+        raise ConflictException("Failed to generate a unique barcode. Please try again.")
+
+    def generate_missing_barcodes(
+        self,
+        tenant_id: int,
+    ) -> dict:
+        products_without_barcode = (
+            self.db.query(Product)
+            .filter(
+                Product.tenant_id == tenant_id,
+                (Product.barcode.is_(None) | (Product.barcode == "")),
+            )
+            .all()
+        )
+
+        updated_count = 0
+        for p in products_without_barcode:
+            for _ in range(10):
+                candidate = generate_ean13_barcode(tenant_id)
+                if not self.repo.is_barcode_taken(candidate, tenant_id):
+                    p.barcode = candidate
+                    updated_count += 1
+                    break
+
+        if updated_count > 0:
+            self.db.commit()
+
+        return {
+            "success": True,
+            "total_checked": len(products_without_barcode),
+            "updated_count": updated_count,
+            "message": f"Successfully generated barcodes for {updated_count} products",
+        }

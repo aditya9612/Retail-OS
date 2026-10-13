@@ -11,7 +11,20 @@ from app.schemas.role import (
     RoleUpdate,
 )
 
-PROTECTED_CORE_ROLES = {"superadmin", "admin", "owner", "manager", "staff"}
+PROTECTED_CORE_ROLES = {
+    "superadmin",
+    "admin",
+    "owner",
+    "manager",
+    "cashier",
+    "inventory_manager",
+    "warehouse_staff",
+    "purchase_manager",
+    "sales_executive",
+    "crm_support",
+    "staff",
+    "accountant",
+}
 
 
 class RoleService:

@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import (
     BaseModel,
@@ -618,7 +618,7 @@ class ProductBase(BaseModel):
         },
     )
 
-    variants: Optional[Dict[str, Any]] = None
+    variants: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None
 
     track_batch: bool = False
 
@@ -980,7 +980,7 @@ class ProductUpdate(BaseModel):
         },
     )
 
-    variants: Optional[Dict[str, Any]] = None
+    variants: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None
 
     track_batch: Optional[bool] = None
 
@@ -1247,30 +1247,17 @@ class ProductUpdate(BaseModel):
                 "SKU and Barcode cannot have the same value"
             )
 
-        if self.track_batch is True:
-            if (
-                not self.batch_number
-                or not str(self.batch_number).strip()
-            ):
-                raise ValueError(
-                    "batch_number is required when track_batch is true"
-                )
-
+        if self.batch_number is not None:
             batch_value = str(
                 self.batch_number
             ).strip()
 
-            if batch_value.lower() in PLACEHOLDER_VALUES:
+            if not batch_value or batch_value.lower() in PLACEHOLDER_VALUES:
                 raise ValueError(
                     f"Batch number cannot be placeholder '{batch_value}'"
                 )
 
-        if self.track_expiry is True:
-            if self.expiry_date is None:
-                raise ValueError(
-                    "expiry_date is required when track_expiry is true"
-                )
-
+        if self.expiry_date is not None:
             if self.expiry_date < date.today():
                 raise ValueError(
                     "expiry_date cannot be in the past"
@@ -1297,7 +1284,7 @@ class ProductResponse(BaseModel):
     stock_status: str = "in_stock"
     unit: str = "pcs"
     price: Decimal
-    variants: Optional[Dict[str, Any]] = None
+    variants: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None
     track_batch: bool = False
     track_expiry: bool = False
     batch_number: Optional[str] = None

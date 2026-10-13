@@ -81,6 +81,17 @@ class UserService:
                 )
                 .first()
             )
+            if not role:
+                from app.utils.constants import DEFAULT_ROLE_PERMISSIONS
+                if role_str in DEFAULT_ROLE_PERMISSIONS:
+                    role = Role(
+                        tenant_id=tenant_id,
+                        name=role_str,
+                        permissions=DEFAULT_ROLE_PERMISSIONS[role_str],
+                        is_system=False,
+                    )
+                    self.db.add(role)
+                    self.db.flush()
 
         if not role:
             raise NotFoundException(

@@ -25,6 +25,7 @@ from app.schemas.user import (
 )
 from app.services.user_service import UserService
 from app.utils.validators import validate_pan_number, validate_aadhaar_number, validate_email_address
+from app.utils.constants import RoleEnum, OFFICIAL_ROLES
 
 
 router = APIRouter(
@@ -98,7 +99,7 @@ async def create_user(
     full_name: str = Form(..., min_length=2, max_length=100, description="Full name of the user"),
     password: str = Form(..., min_length=8, max_length=100, description="Password (min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char)"),
     phone: str = Form(..., description="Mandatory 10-digit Indian phone number"),
-    role: str = Form("staff", description="Role name (e.g. staff, manager, cashier, admin, accountant)"),
+    role: str = Form("cashier", description=f"Role name ({', '.join(OFFICIAL_ROLES)})"),
     store_id: Optional[int] = Form(None, description="Store ID to assign the user to"),
     pan_number: Optional[str] = Form(None, description="PAN card number (e.g. ABCDE1234F)"),
     addhar_number: Optional[str] = Form(None, description="Aadhaar card 12-digit number (e.g. 987654321012)"),
@@ -108,6 +109,14 @@ async def create_user(
     current_user: User = Depends(require_permission("users:write")),
     db: Session = Depends(get_db),
 ):
+    clean_role = role.strip().lower()
+    allowed_roles = {r.value for r in RoleEnum}
+    if clean_role not in allowed_roles and clean_role not in {"staff", "accountant"}:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid role '{role}'. Allowed roles: {', '.join(OFFICIAL_ROLES)}",
+        )
+
     try:
         validated_email = validate_email_address(str(email), field_name="Email", required=True)
     except ValueError as e:

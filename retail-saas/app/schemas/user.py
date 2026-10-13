@@ -14,6 +14,7 @@ from pydantic import (
 
 from app.utils.validators import validate_pan_number, validate_aadhaar_number, validate_email_address
 from app.utils.phone import normalize_phone_number
+from app.utils.constants import RoleEnum, OFFICIAL_ROLES
 
 
 PHONE_PATTERN = re.compile(r"^(?:\+91)?[6-9]\d{9}$")
@@ -54,7 +55,7 @@ class UserBase(BaseModel):
 
     role: Optional[str] = Field(
         default=None,
-        description="Role name (e.g. manager, staff, admin, owner). Automatically mapped to role_id.",
+        description=f"Role name ({', '.join(OFFICIAL_ROLES)}). Automatically mapped to role_id.",
     )
 
     pancard: Optional[str] = Field(
@@ -199,10 +200,23 @@ class UserCreate(UserBase):
 
         return value
 
+    @field_validator("role")
+    @classmethod
+    def validate_role_enum(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v.strip():
+            clean_role = v.strip().lower()
+            allowed = {r.value for r in RoleEnum} | {"staff", "accountant"}
+            if clean_role not in allowed:
+                raise ValueError(
+                    f"Invalid role '{v}'. Allowed roles: {', '.join(OFFICIAL_ROLES)}"
+                )
+            return clean_role
+        return v
+
     @model_validator(mode="after")
     def validate_role_specified(self):
         if not self.role_id and not (self.role and self.role.strip()):
-            raise ValueError("Either 'role' (e.g. 'manager', 'staff') or 'role_id' must be provided")
+            raise ValueError(f"Either 'role' ({', '.join(OFFICIAL_ROLES)}) or 'role_id' must be provided")
         return self
 
 

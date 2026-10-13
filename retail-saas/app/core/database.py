@@ -288,6 +288,11 @@ def ensure_schema_compatibility() -> None:
                 ("min_stock_alert", "INT NOT NULL DEFAULT 5"),
                 ("stock_status", "VARCHAR(20) NOT NULL DEFAULT 'in_stock'"),
                 ("unit", "VARCHAR(20) NOT NULL DEFAULT 'pcs'"),
+                ("mrp", "NUMERIC(12,2) NOT NULL DEFAULT 0.00"),
+                ("track_batch", "TINYINT(1) NOT NULL DEFAULT 0"),
+                ("track_expiry", "TINYINT(1) NOT NULL DEFAULT 0"),
+                ("batch_number", "VARCHAR(100) NULL"),
+                ("expiry_date", "DATE NULL"),
             ]
             for col_name, col_def in prod_additions:
                 if col_name not in prod_cols:
@@ -382,6 +387,44 @@ def ensure_schema_compatibility() -> None:
 
 
 
+def ensure_standard_roles(db=None) -> None:
+    """Ensure all official roles exist for all active tenants with their default permissions."""
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+
+    try:
+        from app.models.tenant import Tenant
+        from app.models.role import Role
+        from app.utils.constants import RoleEnum, DEFAULT_ROLE_PERMISSIONS
+
+        tenants = db.query(Tenant).filter(Tenant.is_active == True).all()  # noqa: E712
+        for tenant in tenants:
+            existing_roles = {
+                r.name.lower() for r in db.query(Role.name).filter(Role.tenant_id == tenant.id).all() if r.name
+            }
+            for role_enum in RoleEnum:
+                role_name = role_enum.value
+                if role_name not in existing_roles:
+                    perms = DEFAULT_ROLE_PERMISSIONS.get(role_name, [])
+                    new_role = Role(
+                        tenant_id=tenant.id,
+                        name=role_name,
+                        permissions=perms,
+                        is_system=False,
+                    )
+                    db.add(new_role)
+                    existing_roles.add(role_name)
+        db.commit()
+    except Exception as exc:
+        logger.warning("ensure_standard_roles encountered an exception: %s", exc)
+        db.rollback()
+    finally:
+        if close_db:
+            db.close()
+
+
 def init_db() -> None:
 
     import app.models  # noqa: F401
@@ -389,4 +432,5 @@ def init_db() -> None:
     if not settings.DATABASE_URL.startswith("sqlite"):
         ensure_database_exists()
         ensure_schema_compatibility()
+        ensure_standard_roles()
 

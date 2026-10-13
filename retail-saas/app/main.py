@@ -319,37 +319,17 @@ def custom_openapi():
         )
         app.openapi_schema = openapi_schema
 
-    try:
-        from app.core.database import SessionLocal
-        from app.models.role import Role
-        with SessionLocal() as db_session:
-            db_roles = [
-                r[0] for r in (
-                    db_session.query(Role.name)
-                    .distinct()
-                    .all()
-                )
-                if r[0] and r[0].strip().lower() != "superadmin"
-            ]
-            standard_order = ["admin", "manager", "cashier", "staff", "accountant"]
-            sorted_roles = [role for role in standard_order if role in db_roles]
-            for r in db_roles:
-                if r not in sorted_roles:
-                    sorted_roles.append(r)
-            if not sorted_roles:
-                sorted_roles = standard_order
-    except Exception:
-        sorted_roles = ["admin", "manager", "cashier", "staff", "accountant"]
+    from app.utils.constants import RoleEnum
+    allowed_roles = [r.value for r in RoleEnum]
 
     schemas = app.openapi_schema.get("components", {}).get("schemas", {})
     body_schema = schemas.get("Body_create_user_api_v1_users_post")
     if body_schema and "properties" in body_schema and "role" in body_schema["properties"]:
-        body_schema["properties"]["role"]["enum"] = sorted_roles
+        body_schema["properties"]["role"]["enum"] = allowed_roles
         body_schema["properties"]["role"]["description"] = (
-            f"Role name saved in database ({', '.join(sorted_roles)})"
+            f"Select user role: {', '.join(allowed_roles)}"
         )
-        if "staff" in sorted_roles:
-            body_schema["properties"]["role"]["default"] = "staff"
+        body_schema["properties"]["role"]["default"] = "cashier"
 
     return app.openapi_schema
 

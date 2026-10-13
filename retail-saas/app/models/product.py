@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from typing import Any, TYPE_CHECKING, Optional
 
@@ -5,7 +6,7 @@ if TYPE_CHECKING:
     from app.models.product_variant import ProductVariant
 
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import JSON, Boolean, Date, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -60,11 +61,6 @@ class Product(Base, TimestampMixin):
         String(20)
     )
 
-    gst_rate: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2),
-        default=Decimal("18.00")
-    )
-
     selling_price: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
         nullable=False
@@ -100,6 +96,34 @@ class Product(Base, TimestampMixin):
         nullable=False
     )
 
+    mrp: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+
+    track_batch: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    track_expiry: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    batch_number: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    expiry_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
@@ -111,16 +135,18 @@ class Product(Base, TimestampMixin):
         return self.selling_price
 
     @price.setter
-    def price(self, val: Decimal) -> None:
-        self.selling_price = val
+    def price(self, val: Decimal | None) -> None:
+        if val is not None:
+            self.selling_price = val
 
     @property
     def gst_rate(self) -> Decimal:
         return self.tax_rate
 
     @gst_rate.setter
-    def gst_rate(self, val: Decimal) -> None:
-        self.tax_rate = val
+    def gst_rate(self, val: Decimal | None) -> None:
+        if val is not None:
+            self.tax_rate = val
 
     @property
     def variants(self) -> Any:
@@ -149,22 +175,6 @@ class Product(Base, TimestampMixin):
         self._variants = val
 
     @property
-    def track_batch(self) -> bool:
-        return getattr(self, "_track_batch", False)
-
-    @track_batch.setter
-    def track_batch(self, val: bool) -> None:
-        self._track_batch = bool(val)
-
-    @property
-    def track_expiry(self) -> bool:
-        return getattr(self, "_track_expiry", False)
-
-    @track_expiry.setter
-    def track_expiry(self, val: bool) -> None:
-        self._track_expiry = bool(val)
-
-    @property
     def image_url(self) -> str | None:
         if self.images:
             return self.images[0].image_url
@@ -173,37 +183,6 @@ class Product(Base, TimestampMixin):
     @image_url.setter
     def image_url(self, val: str | None) -> None:
         self._image_url = val
-
-    @property
-    def price(self) -> Decimal:
-        return getattr(self, "selling_price", Decimal("0.00"))
-
-    @price.setter
-    def price(self, val: Decimal) -> None:
-        self.selling_price = val
-
-    @property
-    def mrp(self) -> Decimal:
-        return getattr(self, "_mrp", Decimal("0.00"))
-
-    @mrp.setter
-    def mrp(self, val: Any) -> None:
-        self._mrp = Decimal(str(val)) if val is not None else Decimal("0.00")
-    @property
-    def batch_number(self) -> str | None:
-        return getattr(self, "_batch_number", None)
-
-    @batch_number.setter
-    def batch_number(self, val: str | None) -> None:
-        self._batch_number = val
-
-    @property
-    def expiry_date(self) -> Any:
-        return getattr(self, "_expiry_date", None)
-
-    @expiry_date.setter
-    def expiry_date(self, val: Any) -> None:
-        self._expiry_date = val
 
     category: Mapped["Category | None"] = relationship(
         "Category",
