@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import require_operational_write, require_permission
+from app.core.exceptions import ForbiddenException
+from app.core.security import is_tenant_wide_authorized, require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.order import OrderCreate, OrderResponse, OrderUpdate, OrderTrackingResponse, OrderStatusUpdateRequest
 from app.services.order_service import OrderService
@@ -27,6 +28,10 @@ def create_order(
     user: User = Depends(require_permission("orders:write")),
     db: Session = Depends(get_db),
 ):
+    if user.store_id is not None and data.store_id != user.store_id:
+        raise ForbiddenException("Access denied: cannot create order for another store")
+    if user.store_id is None and not is_tenant_wide_authorized(user, db):
+        raise ForbiddenException("Access denied: user has no assigned store")
     return OrderService(db).create_order(user.tenant_id, user.id, data)
 
 

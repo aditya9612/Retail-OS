@@ -457,3 +457,33 @@ def require_operational_write(
 
     SaaSSubscriptionAccessService(db).require_operational_write_access(user)
     return user
+
+
+def is_tenant_wide_authorized(user: Optional[User], db: Optional[Session] = None) -> bool:
+    """
+    Returns True only if the user has verified tenant-wide administrative authority.
+    A user with store_id is None alone is NOT proof of tenant-wide privilege.
+    They must hold an administrative role ('owner', 'admin', 'superadmin') or explicit '*' wildcard permission.
+    """
+    if not user:
+        return False
+    role = getattr(user, "role", None)
+    if not role and db is not None and getattr(user, "role_id", None):
+        from app.models.role import Role
+        role = db.query(Role).filter(Role.id == user.role_id).first()
+    if not role and getattr(user, "_sa_instance_state", None):
+        try:
+            sess = user._sa_instance_state.session
+            if sess and getattr(user, "role_id", None):
+                from app.models.role import Role
+                role = sess.query(Role).filter(Role.id == user.role_id).first()
+        except Exception:
+            pass
+    if role:
+        role_name = getattr(role, "name", "")
+        if role_name and str(role_name).lower() in ("owner", "admin", "superadmin"):
+            return True
+        permissions = getattr(role, "permissions", None) or []
+        if "*" in permissions:
+            return True
+    return False

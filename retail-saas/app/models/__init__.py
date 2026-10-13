@@ -9,6 +9,7 @@ from app.models.inventory import Inventory, StockMovement
 from app.models.supplier import Supplier
 from app.models.invoice import Invoice
 from app.models.invoice_item import InvoiceItem
+from app.models.invoice_item_return import InvoiceItemReturn
 from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.order_return import OrderReturn
@@ -69,6 +70,7 @@ __all__ = [
     "Supplier",
     "Invoice",
     "InvoiceItem",
+    "InvoiceItemReturn",
     "Order",
     "OrderItem",
     "OrderReturn",

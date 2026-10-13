@@ -1,6 +1,7 @@
 from decimal import Decimal
+from typing import Optional
 
-from sqlalchemy import ForeignKey, Numeric, String
+from sqlalchemy import BigInteger, ForeignKey, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -18,6 +19,7 @@ class CreditNote(Base, TimestampMixin):
     cgst_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
     sgst_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
     igst_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    return_id: Mapped[Optional[int]] = mapped_column(ForeignKey("invoice_item_returns.id", ondelete="SET NULL", use_alter=True), nullable=True)
 
     invoice: Mapped["Invoice"] = relationship("Invoice", back_populates="credit_notes")
     refund: Mapped["Refund"] = relationship("Refund", back_populates="credit_note")

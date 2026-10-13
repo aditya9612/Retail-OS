@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.exceptions import AppException, ForbiddenException, NotFoundException
-from app.core.security import require_operational_write, require_permission
+from app.core.security import is_tenant_wide_authorized, require_operational_write, require_permission
 from app.models.product import Product
 from app.models.store import Store
 from app.models.user import User
@@ -220,6 +220,8 @@ def cart_add_item(
         raise ForbiddenException("Access denied: cannot add cart items for another store")
 
     if user.store_id is None:
+        if not is_tenant_wide_authorized(user, db):
+            raise ForbiddenException("Access denied: user has no assigned store")
         store = (
             db.query(Store)
             .filter(
@@ -369,6 +371,10 @@ def process_item_return(
         payload.return_quantity,
         payload.reason,
         user=user,
+        condition=payload.condition,
+        idempotency_key=payload.idempotency_key,
+        issue_credit_note=payload.issue_credit_note,
+        refund_method=payload.refund_method,
     )
 
 

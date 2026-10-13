@@ -224,3 +224,48 @@ def test_delete_logo(doc_settings_setup):
     assert del_again.status_code == 404
 
 
+def test_upload_logo_with_landline_or_existing_branding_phone(doc_settings_setup):
+    headers = doc_settings_setup["headers"]
+
+    # 1. Update branding with Indian landline phone (+91 20 1234 5678)
+    res_update = client.put(
+        "/api/v1/document-settings",
+        json={
+            "business_name": "SmartMart Fresh Grocery",
+            "phone": "+91 20 1234 5678",
+        },
+        headers=headers,
+    )
+    assert res_update.status_code == 200
+    assert res_update.json()["phone"] == "+912012345678"
+
+    # 2. Upload logo when store branding has landline phone
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00"
+        b"\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    upload_res = client.post(
+        "/api/v1/document-settings/logo",
+        files={"file": ("SmartMart Fresh Grocery Logo-1.png", png_bytes, "image/png")},
+        headers=headers,
+    )
+    assert upload_res.status_code == 200
+    data = upload_res.json()
+    assert data["message"] == "Logo uploaded successfully"
+    assert data["setting"]["logo_path"] is not None
+
+
+def test_update_document_setting_invalid_store_id_returns_clean_404(doc_settings_setup):
+    headers = doc_settings_setup["headers"]
+    res = client.put(
+        "/api/v1/document-settings?store_id=99999",
+        json={"business_name": "Ghost Store"},
+        headers=headers,
+    )
+    assert res.status_code == 404
+    data = res.json()
+    assert data["success"] is False
+    assert "Store with ID 99999 not found for this tenant" in data["message"]
+
+

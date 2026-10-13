@@ -368,6 +368,10 @@ def test_expanded_report_types_export(export_test_setup):
         "profit_loss",
         "inventory_stock",
         "inventory_valuation",
+        "multi_store_revenue",
+        "multi_store_profit",
+        "multi_store_inventory",
+        "multi_store_customer",
     ]
 
     for rtype in report_types_to_test:
@@ -390,6 +394,15 @@ def test_expanded_report_types_export(export_test_setup):
         assert res_excel.status_code == 200, f"Excel failed for {rtype}: {res_excel.text}"
         assert res_excel.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         assert res_excel.content[:4] == b"PK\x03\x04"
+
+        # Test GET PDF direct download
+        res_get = client.get(
+            f"/api/v1/reports/export?report_type={rtype}&format=pdf",
+            headers=headers,
+        )
+        assert res_get.status_code == 200, f"GET PDF failed for {rtype}: {res_get.text}"
+        assert res_get.headers["content-type"] == "application/pdf"
+        assert res_get.content.startswith(b"%PDF-")
 
 
 def test_pos_z_report_pdf_and_excel_exports(export_test_setup):

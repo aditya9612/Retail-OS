@@ -298,8 +298,8 @@ class ReportExportRequest(BaseModel):
                     "'gst_sales', 'gst_summary', 'inventory_stock', 'inventory_low', 'inventory_valuation', "
                     "'products_top_selling', 'products_slow_moving', 'products_profitability', 'profit_loss', "
                     "'customers_overview', 'customers_retention', 'customers_lifetime_value', 'customers_segments', "
-                    "'daily_billing', 'payment_summary', 'multi_store_revenue', 'multi_store_profit', "
-                    "'multi_store_inventory', 'multi_store_customer'."
+                    "'daily_billing', 'daily_billing_closure', 'payment_summary', 'multi_store_revenue', "
+                    "'multi_store_profit', 'multi_store_inventory', 'multi_store_customer'."
     )
     format: ExportFormat = Field(
         default=ExportFormat.CSV,
