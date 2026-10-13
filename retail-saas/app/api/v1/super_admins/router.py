@@ -193,13 +193,15 @@ def super_admin_verify_otp(
 
 @router.post(
     "/pin/setup",
+    response_model=SuperAdminProfileResponse,
     summary="Setup / Change Security PIN",
-    description="Set or change a 4 or 6 digit security PIN using email/mobile with password/OTP, or with logged-in Bearer token.",
+    description="Set or change a 4 or 6 digit security PIN using email or mobile number.",
 )
 @router.post(
     "/pin/reset",
+    response_model=SuperAdminProfileResponse,
     summary="Reset Security PIN",
-    description="Reset a forgotten 4 or 6 digit security PIN using email/mobile with OTP or password.",
+    description="Reset a 4 or 6 digit security PIN using email or mobile number.",
 )
 def super_admin_setup_pin(
     data: SuperAdminPINSetup,

@@ -127,17 +127,24 @@ class SuperAdminCreate(BaseModel):
 
 
 class SuperAdminLogin(BaseModel):
-    email: EmailStr
+    identifier: str = Field(
+        ...,
+        description="Super Admin registered email or mobile number",
+    )
     password: str = Field(
         ...,
         min_length=8,
         max_length=128,
     )
 
-    @field_validator("email")
+    @model_validator(mode="before")
     @classmethod
-    def validate_email(cls, value: EmailStr) -> str:
-        return validate_email_address(str(value), field_name="Super admin email", required=True)
+    def resolve_identifier(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            ident = data.get("identifier") or data.get("email")
+            if ident:
+                data["identifier"] = str(ident).strip()
+        return data
 
 
 class SuperAdminUpdate(BaseModel):
@@ -270,7 +277,6 @@ class SuperAdminProfileUpdate(BaseModel):
     phone: Optional[str] = Field(None, description="10-digit Indian phone number (e.g. 9876543210)")
     email: Optional[EmailStr] = Field(None, description="Email address")
     password: Optional[str] = Field(None, min_length=8, max_length=128, description="New password (min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char)")
-    current_password: Optional[str] = Field(None, min_length=8, max_length=128, description="Current password (required if updating password)")
     pin: Optional[str] = Field(None, min_length=4, max_length=6, description="4 or 6 digit security PIN")
 
     @field_validator("phone")
@@ -313,29 +319,13 @@ class SuperAdminOTPVerify(BaseModel):
 class SuperAdminPINSetup(BaseModel):
     identifier: Optional[str] = Field(
         None,
-        description="Super Admin registered email or 10-digit mobile number",
-        examples=["superadmin@retailos.com", "9899887766"],
+        description="Super Admin registered email or phone number",
     )
     pin: str = Field(
         ...,
         min_length=4,
         max_length=6,
         description="4 or 6 digit security PIN",
-        examples=["1234"],
-    )
-    current_password: Optional[str] = Field(
-        None,
-        min_length=8,
-        max_length=128,
-        description="Current password for verification (required if not using OTP or Bearer token)",
-        examples=["Password@123"],
-    )
-    otp: Optional[str] = Field(
-        None,
-        min_length=4,
-        max_length=6,
-        description="6-digit OTP received on email/mobile (used to set or reset PIN)",
-        examples=["123456"],
     )
 
     @field_validator("pin")
