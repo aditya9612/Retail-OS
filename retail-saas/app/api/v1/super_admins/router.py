@@ -194,14 +194,34 @@ def super_admin_verify_otp(
 @router.post(
     "/pin/setup",
     summary="Setup / Change Security PIN",
-    description="Setup or update a 4 or 6 digit security PIN for Super Admin account.",
+    description="Set or change a 4 or 6 digit security PIN using email/mobile with password/OTP, or with logged-in Bearer token.",
+)
+@router.post(
+    "/pin/reset",
+    summary="Reset Security PIN",
+    description="Reset a forgotten 4 or 6 digit security PIN using email/mobile with OTP or password.",
 )
 def super_admin_setup_pin(
     data: SuperAdminPINSetup,
-    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(
+        super_admin_security_scheme
+    ),
     db: Session = Depends(get_db),
 ):
-    return SuperAdminService(db).setup_pin(current_super_admin.id, data)
+    current_super_admin = None
+    if credentials and credentials.credentials:
+        try:
+            current_super_admin = get_current_super_admin(
+                credentials=credentials, db=db
+            )
+        except Exception:
+            current_super_admin = None
+
+    return SuperAdminService(db).setup_pin(
+        super_admin_id=current_super_admin.id if current_super_admin else None,
+        data=data,
+        current_super_admin=current_super_admin,
+    )
 
 
 @router.get(
