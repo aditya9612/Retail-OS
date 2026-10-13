@@ -618,7 +618,7 @@ class ProductBase(BaseModel):
         },
     )
 
-    variants: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None
+    variants: Optional[Any] = None
 
     track_batch: bool = False
 
@@ -980,7 +980,7 @@ class ProductUpdate(BaseModel):
         },
     )
 
-    variants: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None
+    variants: Optional[Any] = None
 
     track_batch: Optional[bool] = None
 
@@ -1284,7 +1284,7 @@ class ProductResponse(BaseModel):
     stock_status: str = "in_stock"
     unit: str = "pcs"
     price: Decimal
-    variants: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None
+    variants: Optional[Any] = None
     track_batch: bool = False
     track_expiry: bool = False
     batch_number: Optional[str] = None
