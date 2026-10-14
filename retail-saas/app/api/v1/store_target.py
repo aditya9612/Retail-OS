@@ -12,8 +12,6 @@ from app.schemas.store_target import (
     StoreTargetUpdate,
 )
 from app.services.store_target_service import StoreTargetService
-
-
 router = APIRouter(
     prefix="/store-targets",
     tags=["Store Targets"],

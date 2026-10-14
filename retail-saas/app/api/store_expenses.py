@@ -58,30 +58,31 @@ def get_store_expenses(
     )
 
 
+
 @router.get(
-    "/{expense_id}",
-    response_model=StoreExpenseResponse,
+    "",
+    response_model=list[StoreExpenseResponse],
 )
-def get_store_expense(
-    expense_id: int,
+def get_store_expenses(
+    store_id: int = Query(..., gt=0),
     user: User = Depends(
         require_permission("store_expenses:read")
     ),
     db: Session = Depends(get_db),
 ):
-    if expense_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Expense ID must be greater than 0",
-        )
-
-    return StoreExpenseService.get_expense(
+    expenses = StoreExpenseService.get_expenses(
         db=db,
-        expense_id=expense_id,
         tenant_id=user.tenant_id,
+        store_id=store_id,
     )
 
+    if not expenses:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Data Not Found",
+        )
 
+    return expenses
 @router.put(
     "/{expense_id}",
     response_model=StoreExpenseResponse,
