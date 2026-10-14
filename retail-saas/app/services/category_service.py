@@ -28,6 +28,10 @@ class CategoryService:
             if not parent:
                 raise NotFoundException("Parent category not found")
 
+        # Check duplicate category name within the same tenant
+        if self.repository.get_by_name(tenant_id=tenant_id, name=data.name):
+            raise ConflictException(f"Category with name '{data.name.strip()}' already exists")
+
         try:
             return self.repository.create(
                 tenant_id=tenant_id,
@@ -140,6 +144,11 @@ class CategoryService:
                     tenant_id=tenant_id,
                     category_id=curr.parent_id,
                 )
+
+        if data.name is not None:
+            existing = self.repository.get_by_name(tenant_id=tenant_id, name=data.name)
+            if existing and existing.id != category_id:
+                raise ConflictException(f"Category with name '{data.name.strip()}' already exists")
 
         try:
             return self.repository.update(

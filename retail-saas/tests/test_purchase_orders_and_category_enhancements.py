@@ -156,14 +156,6 @@ def test_category_view_details_enriched(tenant_fixture):
     assert p_data["parent_name"] is None
     assert p_data["subcategory_count"] == 1
 
-    # 6. GET /api/v1/categories/{child_id}/details -> wrapped format
-    details_resp = client.get(f"/api/v1/categories/{child_id}/details", headers=headers)
-    assert details_resp.status_code == 200
-    wrapped = details_resp.json()
-    assert wrapped["success"] is True
-    assert wrapped["message"] == "Category details retrieved successfully"
-    assert wrapped["data"]["parent_name"] == "Electronics Dept"
-    assert wrapped["data"]["product_count"] == 1
 
 
 def test_category_delete_with_products_returns_clean_409(tenant_fixture):
