@@ -1468,6 +1468,65 @@ def test_create_store_owner_legacy_payload_on_tenants_endpoint(super_admin_fixtu
     assert data["owner"]["email"] == payload["email"]
 
 
+def test_create_tenant_with_business_name_and_distinct_store_name(super_admin_fixture):
+    """Verify Super Admin can create a Tenant with business_name (Company) and store_name (First Outlet)."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": super_admin_fixture["password"],
+        },
+    )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    uid = uuid.uuid4().hex[:6]
+    payload = {
+        "business_name": f"Adani Retail Enterprise {uid}",
+        "store_name": f"Adani Hypermarket Pune {uid}",
+        "owner_name": f"Gautam Adani {uid}",
+        "owner_email": f"adani_{uid}@example.com",
+        "password": "Password@123!",
+        "owner_phone": f"97{int(uid, 16) % 100000000:08d}",
+        "address": "Phoenix Mall, Viman Nagar",
+        "city": "Pune",
+        "state": "Maharashtra",
+        "pincode": "411014",
+    }
+
+    r = client.post("/api/v1/super-admins/tenants", json=payload, headers=headers)
+    assert r.status_code == 201
+    data = r.json()
+
+    # Tenant entity should be the Business / Company
+    assert data["business_name"] == payload["business_name"]
+    assert data["name"] == payload["business_name"]
+    assert data["email"] == payload["owner_email"]
+    assert data["phone"] is not None
+
+    # Initial outlet / branch should be the Store
+    assert data["total_stores"] == 1
+    assert data["stores"][0]["name"] == payload["store_name"]
+    assert data["stores"][0]["is_main"] is True
+    assert data["stores"][0]["city"] == "Pune"
+
+    # Owner details
+    assert data["owner"]["email"] == payload["owner_email"]
+    assert data["owner"]["full_name"] == payload["owner_name"]
+
+    # Verify update on both business_name and store_name
+    tenant_id = data["id"]
+    update_payload = {
+        "business_name": f"Adani Group Global {uid}",
+        "store_name": f"Adani Flagship Store {uid}",
+    }
+    r_up = client.patch(f"/api/v1/super-admins/tenants/{tenant_id}", json=update_payload, headers=headers)
+    assert r_up.status_code == 200
+    up_data = r_up.json()
+    assert up_data["business_name"] == update_payload["business_name"]
+    assert up_data["name"] == update_payload["business_name"]
+    assert up_data["stores"][0]["name"] == update_payload["store_name"]
+
+
 def test_create_store_owner_duplicate_email(super_admin_fixture):
     """Verify 409 Conflict when attempting to create a Store Owner with an existing email."""
     login_r = client.post(
@@ -1720,3 +1779,204 @@ def test_super_admin_dashboard_extended_metrics(super_admin_fixture):
     assert "pending_upi_transactions" in data
     assert "verified_upi_transactions" in data
     assert "rejected_upi_transactions" in data
+
+
+def test_super_admin_otp_send_and_verify(super_admin_fixture):
+    """Verify POST /otp/send returns structured JSON response with message and expires_in."""
+    r_send = client.post(
+        "/api/v1/super-admins/otp/send",
+        json={"identifier": super_admin_fixture["email"]},
+    )
+    assert r_send.status_code == 200
+    send_data = r_send.json()
+    assert "message" in send_data
+    assert "expires_in" in send_data
+    assert send_data["expires_in"] == 300
+
+    # Verify OTP login
+    r_verify = client.post(
+        "/api/v1/super-admins/otp/verify",
+        json={"identifier": super_admin_fixture["email"], "otp": "123456"},
+    )
+    assert r_verify.status_code == 200
+    verify_data = r_verify.json()
+    assert "access_token" in verify_data
+    assert "refresh_token" in verify_data
+
+
+def test_super_admin_pin_setup_response(super_admin_fixture):
+    """Verify POST /pin/setup returns clean structured confirmation with has_pin=True."""
+    r = client.post(
+        "/api/v1/super-admins/pin/setup",
+        json={"identifier": super_admin_fixture["email"], "pin": "9876"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["has_pin"] is True
+    assert data["success"] is True
+    assert "configured successfully" in data["message"]
+
+
+def test_super_admin_tenant_impersonation(super_admin_fixture, tenant_fixture):
+    """Verify Super Admin can impersonate a Tenant and receives a scoped access token."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": super_admin_fixture["password"],
+        },
+    )
+    if login_r.status_code != 200:
+        login_r = client.post(
+            "/api/v1/super-admins/login",
+            json={
+                "email": super_admin_fixture["email"],
+                "password": "NewSecurePass123!",
+            },
+        )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    tenant_id = tenant_fixture["tenant_id"]
+    r = client.post(f"/api/v1/super-admins/tenants/{tenant_id}/impersonate", headers=headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert "access_token" in data
+    assert data["tenant_id"] == tenant_id
+    assert "impersonated_by_super_admin_id" in data
+    assert "impersonated_email" in data
+
+
+def test_super_admin_audit_logs(super_admin_fixture):
+    """Verify Super Admin can list and filter platform audit logs."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": super_admin_fixture["password"],
+        },
+    )
+    if login_r.status_code != 200:
+        login_r = client.post(
+            "/api/v1/super-admins/login",
+            json={
+                "email": super_admin_fixture["email"],
+                "password": "NewSecurePass123!",
+            },
+        )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    r = client.get("/api/v1/super-admins/audit-logs", headers=headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert "items" in data
+    assert "total" in data
+    assert isinstance(data["items"], list)
+
+
+def test_super_admin_subscription_overrides(super_admin_fixture, tenant_fixture):
+    """Verify Super Admin can manually extend trial and override plan directly."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": super_admin_fixture["password"],
+        },
+    )
+    if login_r.status_code != 200:
+        login_r = client.post(
+            "/api/v1/super-admins/login",
+            json={
+                "email": super_admin_fixture["email"],
+                "password": "NewSecurePass123!",
+            },
+        )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    tenant_id = tenant_fixture["tenant_id"]
+
+    # 1. Extend trial
+    r_trial = client.post(
+        f"/api/v1/super-admins/tenants/{tenant_id}/subscription/extend-trial",
+        json={"extension_days": 10, "reason": "Customer evaluation request"},
+        headers=headers,
+    )
+    assert r_trial.status_code == 200
+    trial_data = r_trial.json()
+    assert trial_data["subscription"]["status"] == "trialing"
+
+    # 2. Override plan
+    r_plan = client.post(
+        f"/api/v1/super-admins/tenants/{tenant_id}/subscription/override-plan",
+        json={"plan_code": "basic", "billing_reason": "offline_payment", "duration_months": 2},
+        headers=headers,
+    )
+    assert r_plan.status_code == 200
+    plan_data = r_plan.json()
+    assert plan_data["subscription"]["status"] == "active"
+
+
+def test_super_admin_system_health(super_admin_fixture):
+    """Verify GET /system-health returns operational status of database and redis."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": super_admin_fixture["password"],
+        },
+    )
+    if login_r.status_code != 200:
+        login_r = client.post(
+            "/api/v1/super-admins/login",
+            json={
+                "email": super_admin_fixture["email"],
+                "password": "NewSecurePass123!",
+            },
+        )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    r = client.get("/api/v1/super-admins/system-health", headers=headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] in ("healthy", "degraded")
+    assert "database" in data
+    assert "redis" in data
+    assert data["database"]["status"] == "healthy"
+
+
+def test_super_admin_broadcast_announcements(super_admin_fixture):
+    """Verify Super Admin can publish, fetch, and delete broadcast announcements."""
+    login_r = client.post(
+        "/api/v1/super-admins/login",
+        json={
+            "email": super_admin_fixture["email"],
+            "password": super_admin_fixture["password"],
+        },
+    )
+    if login_r.status_code != 200:
+        login_r = client.post(
+            "/api/v1/super-admins/login",
+            json={
+                "email": super_admin_fixture["email"],
+                "password": "NewSecurePass123!",
+            },
+        )
+    headers = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
+
+    # 1. Post announcement
+    post_payload = {
+        "title": "Scheduled Maintenance",
+        "message": "Platform maintenance tonight from 1 AM to 2 AM.",
+        "level": "warning",
+    }
+    r_post = client.post("/api/v1/super-admins/broadcast-announcement", json=post_payload, headers=headers)
+    assert r_post.status_code == 200
+    assert r_post.json()["title"] == post_payload["title"]
+
+    # 2. Get announcement
+    r_get = client.get("/api/v1/super-admins/broadcast-announcement")
+    assert r_get.status_code == 200
+    assert r_get.json()["title"] == post_payload["title"]
+
+    # 3. Delete announcement
+    r_del = client.delete("/api/v1/super-admins/broadcast-announcement", headers=headers)
+    assert r_del.status_code == 200

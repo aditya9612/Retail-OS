@@ -15,17 +15,25 @@ from app.core.security import (
 )
 from app.models.super_admin import SuperAdmin
 from app.schemas.super_admin import (
+    BroadcastAnnouncementRequest,
+    BroadcastAnnouncementResponse,
+    SuperAdminAuditLogItem,
+    SuperAdminAuditLogListResponse,
     SuperAdminChangePassword,
     SuperAdminCreate,
     SuperAdminDashboardResponse,
+    SuperAdminExtendTrialRequest,
     SuperAdminInvoiceDetailResponse,
     SuperAdminInvoiceListResponse,
     SuperAdminListResponse,
     SuperAdminLogin,
     SuperAdminOTPSend,
+    SuperAdminOTPSendResponse,
     SuperAdminOTPVerify,
+    SuperAdminOverridePlanRequest,
     SuperAdminPINLogin,
     SuperAdminPINSetup,
+    SuperAdminPINSetupResponse,
     SuperAdminProfileResponse,
     SuperAdminProfileUpdate,
     SuperAdminRefreshToken,
@@ -44,6 +52,8 @@ from app.schemas.super_admin import (
     SuperAdminTenantUserResponse,
     SuperAdminTokenResponse,
     SuperAdminUpdate,
+    SystemHealthResponse,
+    TenantImpersonationResponse,
     TenantStatusUpdate,
 )
 from app.schemas.saas_plan import (
@@ -168,6 +178,7 @@ def super_admin_login_with_pin(
 
 @router.post(
     "/otp/send",
+    response_model=SuperAdminOTPSendResponse,
     summary="Send Login OTP",
     description="Generate and send a 6-digit OTP to Super Admin registered email or phone.",
 )
@@ -193,13 +204,13 @@ def super_admin_verify_otp(
 
 @router.post(
     "/pin/setup",
-    response_model=SuperAdminProfileResponse,
+    response_model=SuperAdminPINSetupResponse,
     summary="Setup / Change Security PIN",
     description="Set or change a 4 or 6 digit security PIN using email or mobile number.",
 )
 @router.post(
     "/pin/reset",
-    response_model=SuperAdminProfileResponse,
+    response_model=SuperAdminPINSetupResponse,
     summary="Reset Security PIN",
     description="Reset a 4 or 6 digit security PIN using email or mobile number.",
 )
@@ -542,6 +553,67 @@ def get_tenant_subscription(
     Super Admin authorization required.
     """
     return SuperAdminService(db).get_tenant_subscription(tenant_id)
+
+
+@router.post(
+    "/tenants/{tenant_id}/impersonate",
+    response_model=TenantImpersonationResponse,
+    summary="Impersonate Tenant / Store Owner (Support Mode)",
+    description="Generates a scoped JWT access token for the tenant's primary admin, allowing Super Admin support staff to diagnose issues directly without knowing the owner's password.",
+)
+@router.post(
+    "/store-owners/{tenant_id}/impersonate",
+    response_model=TenantImpersonationResponse,
+    summary="Impersonate Store Owner (Alias)",
+    include_in_schema=False,
+)
+def impersonate_tenant(
+    tenant_id: int,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).impersonate_tenant(
+        tenant_id=tenant_id,
+        current_super_admin=current_super_admin,
+    )
+
+
+@router.post(
+    "/tenants/{tenant_id}/subscription/extend-trial",
+    response_model=SuperAdminTenantSubscriptionDetailResponse,
+    summary="Extend Tenant SaaS Trial",
+    description="Manually extends the trial period of a Tenant by a given number of days.",
+)
+def extend_tenant_trial(
+    tenant_id: int,
+    data: SuperAdminExtendTrialRequest,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).extend_trial(
+        tenant_id=tenant_id,
+        data=data,
+        current_super_admin=current_super_admin,
+    )
+
+
+@router.post(
+    "/tenants/{tenant_id}/subscription/override-plan",
+    response_model=SuperAdminTenantSubscriptionDetailResponse,
+    summary="Directly Override / Activate SaaS Plan",
+    description="Directly activates or changes a Tenant's SaaS subscription (e.g. for offline payments, enterprise deals) and records a paid invoice.",
+)
+def override_tenant_plan(
+    tenant_id: int,
+    data: SuperAdminOverridePlanRequest,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).override_plan(
+        tenant_id=tenant_id,
+        data=data,
+        current_super_admin=current_super_admin,
+    )
 
 
 # =========================
@@ -913,6 +985,90 @@ def get_invoice(
     Super Admin authorization required.
     """
     return SuperAdminService(db).get_invoice(invoice_id)
+
+
+# ==========================================
+# ENTERPRISE PLATFORM OPERATIONS: AUDIT, HEALTH, BROADCAST
+# ==========================================
+
+@router.get(
+    "/audit-logs",
+    response_model=SuperAdminAuditLogListResponse,
+    summary="List Platform Audit Logs (Super Admin)",
+    description="Query platform-wide activity and security audit logs, filterable by tenant, action, entity type, and search keyword.",
+)
+def list_audit_logs(
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page (1-100)"),
+    action: Optional[str] = Query(None, description="Filter by action name (e.g. TENANT_IMPERSONATED, UPI_VERIFIED)"),
+    tenant_id: Optional[int] = Query(None, description="Filter by tenant ID"),
+    entity_type: Optional[str] = Query(None, description="Filter by entity type (e.g. tenant, saas_subscription, invoice)"),
+    search: Optional[str] = Query(None, description="Search term for action, entity_type, or entity_id"),
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).list_audit_logs(
+        page=page,
+        page_size=page_size,
+        action=action,
+        tenant_id=tenant_id,
+        entity_type=entity_type,
+        search=search,
+    )
+
+
+@router.get(
+    "/system-health",
+    response_model=SystemHealthResponse,
+    summary="Platform Infrastructure & System Health",
+    description="Real-time operational health check for database and Redis cache with response latencies.",
+)
+def get_system_health(
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).get_system_health()
+
+
+@router.post(
+    "/broadcast-announcement",
+    response_model=BroadcastAnnouncementResponse,
+    summary="Publish System Broadcast Announcement",
+    description="Publishes a maintenance window or critical alert banner to all active POS terminals.",
+)
+def set_broadcast_announcement(
+    data: BroadcastAnnouncementRequest,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).set_broadcast_announcement(
+        data=data,
+        current_super_admin=current_super_admin,
+    )
+
+
+@router.get(
+    "/broadcast-announcement",
+    response_model=BroadcastAnnouncementResponse,
+    summary="Get Active Broadcast Announcement",
+    description="Retrieves the current active broadcast announcement banner.",
+)
+def get_broadcast_announcement(
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).get_broadcast_announcement()
+
+
+@router.delete(
+    "/broadcast-announcement",
+    summary="Clear Broadcast Announcement",
+    description="Clears the current active broadcast announcement banner.",
+)
+def delete_broadcast_announcement(
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).delete_broadcast_announcement()
 
 
 @router.get(

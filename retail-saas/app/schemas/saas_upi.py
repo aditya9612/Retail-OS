@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class UPICheckoutPreviewResponse(BaseModel):
     invoice_id: int
     invoice_number: str
-    amount: Decimal
+    amount: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("999.00")])
     currency: str
     due_date: datetime
     subscription_id: int
@@ -20,7 +20,7 @@ class UPICheckoutPreviewResponse(BaseModel):
 
 class UPIInitiateResponse(BaseModel):
     reference: str
-    amount: Decimal
+    amount: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("999.00")])
     currency: str
     upi_vpa: str
     upi_payload: str
@@ -35,7 +35,7 @@ class UPIQRCodeResponse(BaseModel):
     reference: str
     upi_payload: str
     qr_image_base64: str
-    amount: Decimal
+    amount: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("999.00")])
     currency: str
     upi_vpa: str
 
@@ -51,7 +51,7 @@ class UPITransactionResponse(BaseModel):
     id: int
     reference: str
     status: str
-    amount: Decimal
+    amount: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("999.00")])
     currency: str
     upi_id: str
     payer_vpa: Optional[str] = None
@@ -72,7 +72,7 @@ class UPIAdminTransactionResponse(BaseModel):
     id: int
     reference: str
     status: str
-    amount: Decimal
+    amount: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("999.00")])
     currency: str
     upi_id: str
     payer_vpa: Optional[str] = None

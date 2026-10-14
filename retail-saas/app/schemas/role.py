@@ -167,10 +167,28 @@ class RoleCreate(BaseModel):
         min_length=2,
         max_length=50,
         description="Role name (e.g., accountant, cashier, inventory_manager)",
+        examples=["inventory_supervisor"],
+    )
+    description: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        description="Optional human-readable description of this role",
+        examples=["Oversees store inventory counts, stock adjustments, and product transfers"],
     )
     permissions: list[str] = Field(
         default_factory=list,
         description="List of permission strings assigned to this role (e.g., ['products:read', 'inventory:read'])",
+        examples=[["products:read", "inventory:read", "inventory:write"]],
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "inventory_supervisor",
+                "description": "Oversees store inventory counts, stock adjustments, and product transfers",
+                "permissions": ["products:read", "inventory:read", "inventory:write"],
+            }
+        }
     )
 
     @field_validator("name")
@@ -190,10 +208,28 @@ class RoleUpdate(BaseModel):
         min_length=2,
         max_length=50,
         description="New role name (e.g., store_supervisor, assistant_manager)",
+        examples=["senior_supervisor"],
+    )
+    description: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        description="Updated role description",
+        examples=["Updated responsibilities for store inventory management"],
     )
     permissions: Optional[list[str]] = Field(
         default=None,
         description="Updated list of permission strings (must be valid system permissions)",
+        examples=[["products:read", "inventory:read", "inventory:write", "batches:read"]],
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "senior_supervisor",
+                "description": "Updated responsibilities for store inventory management",
+                "permissions": ["products:read", "inventory:read", "inventory:write", "batches:read"],
+            }
+        }
     )
 
     @field_validator("name")
@@ -212,17 +248,97 @@ class RoleUpdate(BaseModel):
 
 
 class RoleDetailResponse(BaseModel):
-    id: int
-    tenant_id: Optional[int] = None
-    name: str
-    is_system: bool = False
-    permissions: list[str] = Field(default_factory=list)
-    user_count: int = 0
-    created_at: Optional[datetime] = None
+    id: int = Field(..., description="Role ID", examples=[1])
+    tenant_id: Optional[int] = Field(None, description="Tenant ID", examples=[1])
+    name: str = Field(..., description="Role name", examples=["cashier"])
+    description: Optional[str] = Field(None, description="Role description", examples=["Handles POS checkout and customer billing"])
+    is_system: bool = Field(False, description="Whether this is a core system role", examples=[True])
+    permissions: list[str] = Field(default_factory=list, description="Assigned permissions", examples=[["products:read", "billing:write"]])
+    user_count: int = Field(0, description="Number of active users assigned to this role", examples=[3])
+    created_at: Optional[datetime] = Field(None, description="Role creation date")
 
     model_config = ConfigDict(
         from_attributes=True,
     )
+
+
+class RoleDeleteResponse(BaseModel):
+    message: str = Field(..., description="Success message", examples=["Role 'inventory_supervisor' deleted successfully"])
+    deleted_role_id: int = Field(..., description="ID of deleted role", examples=[5])
+
+
+class RoleUserItem(BaseModel):
+    id: int = Field(..., description="User ID", examples=[10])
+    full_name: str = Field(..., description="Full Name", examples=["Rohan Deshmukh"])
+    email: str = Field(..., description="Email Address", examples=["rohan@retailstore.com"])
+    phone: Optional[str] = Field(None, description="Phone Number", examples=["9876543210"])
+    store_id: Optional[int] = Field(None, description="Assigned Store ID", examples=[1])
+    store_name: Optional[str] = Field(None, description="Assigned Store Name", examples=["Downtown Branch"])
+    is_active: bool = Field(True, description="Account active status", examples=[True])
+    created_at: Optional[datetime] = Field(None, description="User creation date")
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class RoleUsersResponse(BaseModel):
+    role_id: int = Field(..., description="Role ID", examples=[3])
+    role_name: str = Field(..., description="Role Name", examples=["cashier"])
+    total_users: int = Field(..., description="Total users assigned to this role", examples=[5])
+    page: int = Field(1, description="Current page", examples=[1])
+    page_size: int = Field(20, description="Items per page", examples=[20])
+    users: list[RoleUserItem] = Field(default_factory=list)
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class RoleReassignUsersRequest(BaseModel):
+    target_role_id: int = Field(
+        ...,
+        gt=0,
+        description="Role ID to which all active users will be moved",
+        examples=[2],
+    )
+
+
+class RoleReassignUsersResponse(BaseModel):
+    message: str = Field(..., description="Status message", examples=["Successfully reassigned 3 user(s) to role 'staff'"])
+    source_role_id: int = Field(..., description="Source Role ID", examples=[5])
+    source_role_name: str = Field(..., description="Source Role Name", examples=["temp_cashier"])
+    target_role_id: int = Field(..., description="Target Role ID", examples=[2])
+    target_role_name: str = Field(..., description="Target Role Name", examples=["staff"])
+    reassigned_count: int = Field(..., description="Number of users reassigned", examples=[3])
+
+
+class RoleMatrixColumn(BaseModel):
+    id: int = Field(..., description="Role ID", examples=[1])
+    name: str = Field(..., description="Role name", examples=["cashier"])
+    is_system: bool = Field(False, description="Whether this is a core system role", examples=[False])
+
+
+class PermissionMatrixRow(BaseModel):
+    code: str = Field(..., description="Permission code", examples=["billing:read"])
+    label: str = Field(..., description="Human-readable label", examples=["View Bills"])
+    description: str = Field(..., description="Permission description", examples=["View bills and billing history"])
+    role_access: dict[str, bool] = Field(
+        default_factory=dict,
+        description="Map of role name to boolean indicating if the role has access",
+        examples=[{"owner": True, "cashier": True, "staff": False}],
+    )
+
+
+class ModuleMatrixGroup(BaseModel):
+    module: str = Field(..., description="Module identifier", examples=["billing"])
+    label: str = Field(..., description="Module display name", examples=["Billing & Invoicing"])
+    permissions: list[PermissionMatrixRow] = Field(default_factory=list)
+
+
+class RoleMatrixResponse(BaseModel):
+    roles: list[RoleMatrixColumn] = Field(default_factory=list)
+    modules: list[ModuleMatrixGroup] = Field(default_factory=list)
 
 
 class PermissionItem(BaseModel):

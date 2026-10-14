@@ -134,15 +134,47 @@ class RefreshRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    access_token: str = Field(..., description="JWT access token", examples=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."])
+    refresh_token: str = Field(..., description="JWT refresh token", examples=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."])
+    token_type: str = Field("bearer", description="Authorization scheme", examples=["bearer"])
+
+
+class AuthMessageResponse(BaseModel):
+    """Generic status response for authentication operations."""
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    success: bool = Field(default=True, description="Whether the operation succeeded", examples=[True])
+    message: str = Field(..., description="Status message", examples=["Operation completed successfully."])
+
+
+class OTPRequestResponse(BaseModel):
+    """Response schema when requesting an OTP."""
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    success: bool = Field(default=True, description="Whether the request was processed", examples=[True])
+    message: str = Field(..., description="Status message", examples=["If the account exists, an OTP has been sent."])
+    expires_in: int = Field(default=300, description="OTP validity lifetime in seconds", examples=[300])
+
+
+class OTPVerifyResponse(BaseModel):
+    """Response schema when verifying an OTP."""
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    success: bool = Field(default=True, description="Whether OTP verification succeeded", examples=[True])
+    message: str = Field(..., description="Status message", examples=["OTP verified successfully."])
+    reset_token: str = Field(..., description="Single-use reset authorization token", examples=["vN8pZk2xL9mQ4w_SampleToken123"])
+    expires_in: int = Field(default=600, description="Token validity lifetime in seconds", examples=[600])
+
+
+PINResetVerifyResponse = OTPVerifyResponse
 
 
 class ForgotPasswordRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    email: str
+    email: str = Field(..., description="Registered account email", examples=["owner@example.com"])
 
     @field_validator("email")
     @classmethod
@@ -153,8 +185,8 @@ class ForgotPasswordRequest(BaseModel):
 class VerifyOTPRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    email: str
-    otp: str = Field(min_length=6, max_length=6)
+    email: str = Field(..., description="Registered account email", examples=["owner@example.com"])
+    otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code", examples=["123456"])
 
     @field_validator("email")
     @classmethod
@@ -172,8 +204,8 @@ class VerifyOTPRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    token: str
-    new_password: str
+    token: str = Field(..., description="Password reset authorization token", examples=["reset_token_xyz123"])
+    new_password: str = Field(..., description="New account password (min 6 chars)", examples=["NewSecurePass@123"])
 
     @field_validator("token")
     @classmethod
@@ -192,9 +224,9 @@ class ResetPasswordRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    old_password: str
-    new_password: str
-    confirm_password: str
+    old_password: str = Field(..., description="Current account password", examples=["CurrentPass@123"])
+    new_password: str = Field(..., description="New account password", examples=["NewSecurePass@123"])
+    confirm_password: str = Field(..., description="Confirm new account password", examples=["NewSecurePass@123"])
 
     @field_validator("old_password")
     @classmethod
@@ -221,7 +253,7 @@ class MobileOTPRequestSchema(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
+    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
 
     @field_validator("phone")
     @classmethod
@@ -237,8 +269,8 @@ class MobileOTPVerifySchema(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
-    otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code")
+    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
+    otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code", examples=["123456"])
 
     @field_validator("phone")
     @classmethod
@@ -261,8 +293,8 @@ class MobilePINLoginRequest(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
-    pin: str = Field(..., min_length=4, max_length=4, description="4-digit security PIN")
+    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
+    pin: str = Field(..., min_length=4, max_length=4, description="4-digit security PIN", examples=["1234"])
 
     @field_validator("phone")
     @classmethod
@@ -289,7 +321,7 @@ class PINSetupRequest(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    pin: str = Field(..., min_length=4, max_length=4, description="4-digit security PIN")
+    pin: str = Field(..., min_length=4, max_length=4, description="4-digit security PIN", examples=["1234"])
 
     @field_validator("pin")
     @classmethod
@@ -305,8 +337,8 @@ class PINChangeRequest(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    current_pin: str = Field(..., min_length=4, max_length=4, description="Current 4-digit security PIN")
-    new_pin: str = Field(..., min_length=4, max_length=4, description="New 4-digit security PIN")
+    current_pin: str = Field(..., min_length=4, max_length=4, description="Current 4-digit security PIN", examples=["1234"])
+    new_pin: str = Field(..., min_length=4, max_length=4, description="New 4-digit security PIN", examples=["5678"])
 
     @field_validator("current_pin")
     @classmethod
@@ -330,7 +362,7 @@ class PINResetRequestSchema(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
+    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
 
     @field_validator("phone")
     @classmethod
@@ -346,8 +378,8 @@ class PINResetVerifySchema(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)")
-    otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code")
+    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
+    otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code", examples=["123456"])
 
     @field_validator("phone")
     @classmethod
@@ -370,8 +402,8 @@ class ResetPINRequest(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    token: str = Field(..., min_length=1, description="Reset authorization token")
-    new_pin: str = Field(..., min_length=4, max_length=4, description="New 4-digit security PIN")
+    token: str = Field(..., min_length=1, description="Reset authorization token", examples=["reset_token_xyz123"])
+    new_pin: str = Field(..., min_length=4, max_length=4, description="New 4-digit security PIN", examples=["5678"])
 
     @field_validator("token")
     @classmethod

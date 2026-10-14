@@ -11,9 +11,9 @@ class SaaSInvoiceResponse(BaseModel):
     subscription_id: int
     invoice_number: str
     billing_reason: str
-    subtotal: Decimal
-    tax_amount: Decimal
-    total_amount: Decimal
+    subtotal: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("999.00")])
+    tax_amount: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("179.82")])
+    total_amount: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("1178.82")])
     currency: str
     status: str
     due_date: datetime

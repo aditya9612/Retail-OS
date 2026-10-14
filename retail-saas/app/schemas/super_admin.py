@@ -311,6 +311,12 @@ class SuperAdminOTPSend(BaseModel):
     identifier: str = Field(..., description="Super Admin email or registered phone number")
 
 
+class SuperAdminOTPSendResponse(BaseModel):
+    message: str = Field(..., description="Status confirmation message")
+    expires_in: int = Field(default=300, description="OTP validity in seconds")
+    dev_otp: Optional[str] = Field(None, description="OTP for development/testing environment")
+
+
 class SuperAdminOTPVerify(BaseModel):
     identifier: str = Field(..., description="Super Admin email or registered phone number")
     otp: str = Field(..., min_length=4, max_length=6, description="OTP code received on email or phone")
@@ -352,7 +358,7 @@ class SuperAdminResponse(BaseModel):
 
 
 class SuperAdminProfileResponse(SuperAdminResponse):
-    has_pin: bool = False
+    has_pin: bool = Field(default=True, examples=[True], description="Whether a security PIN is set")
 
     @model_validator(mode="before")
     @classmethod
@@ -374,6 +380,11 @@ class SuperAdminProfileResponse(SuperAdminResponse):
         return data
 
 
+class SuperAdminPINSetupResponse(SuperAdminProfileResponse):
+    success: bool = Field(default=True, description="Indicates if the PIN operation succeeded")
+    message: str = Field(default="Security PIN configured successfully", description="Status message")
+
+
 class SuperAdminListResponse(BaseModel):
     items: list[SuperAdminResponse]
     page: int
@@ -391,6 +402,7 @@ class SuperAdminTokenResponse(BaseModel):
 class SuperAdminTenantResponse(BaseModel):
     id: int
     name: str
+    business_name: Optional[str] = None
     slug: str
     email: str | None = None
     phone: str | None = None
@@ -404,6 +416,19 @@ class SuperAdminTenantResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_business_name(cls, data: Any) -> Any:
+        if hasattr(data, "name"):
+            if not getattr(data, "business_name", None):
+                setattr(data, "business_name", data.name)
+        elif isinstance(data, dict):
+            if "business_name" not in data and "name" in data:
+                data["business_name"] = data["name"]
+            elif "name" not in data and "business_name" in data:
+                data["name"] = data["business_name"]
+        return data
 
 
 class SuperAdminTenantListResponse(BaseModel):
@@ -555,6 +580,7 @@ class SuperAdminDashboardResponse(BaseModel):
     )
     total_saas_revenue: Decimal = Field(
         default=Decimal("0.00"),
+        examples=[Decimal("24999.00")],
         description="Cumulative paid SaaS invoice revenue (SUM of total_amount where status = 'paid')",
     )
 
@@ -567,7 +593,7 @@ class SuperAdminPlanSummary(BaseModel):
     id: int
     code: str
     name: str
-    price: Decimal
+    price: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("999.00")])
     currency: str
     billing_interval: str
 
@@ -583,7 +609,7 @@ class SuperAdminSubscriptionListItem(BaseModel):
     current_plan: Optional[SuperAdminPlanSummary] = None
     pending_plan: Optional[SuperAdminPlanSummary] = None
     scheduled_plan: Optional[SuperAdminPlanSummary] = None
-    unit_price: Decimal
+    unit_price: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("999.00")])
     currency: str
     billing_interval: str
     start_date: datetime
@@ -698,13 +724,19 @@ class SuperAdminInvoiceDetailResponse(BaseModel):
 
 class SuperAdminStoreOwnerCreate(BaseModel):
     """
-    Schema for Super Admin creating a new Store Owner (Tenant).
+    Schema for Super Admin creating a new Business / Store Owner (Tenant) and initial branch.
     """
-    store_name: str = Field(
+    business_name: str = Field(
         ...,
         min_length=2,
         max_length=255,
-        description="Name of the retail business / main store",
+        description="Name of the retail business / company / brand (Tenant entity)",
+    )
+    store_name: Optional[str] = Field(
+        default=None,
+        min_length=2,
+        max_length=255,
+        description="Name of the initial branch / outlet (defaults to main store if omitted)",
     )
     owner_name: str = Field(
         ...,
@@ -728,7 +760,7 @@ class SuperAdminStoreOwnerCreate(BaseModel):
     )
     domain: Optional[str] = Field(
         default=None,
-        description="Unique subdomain/slug for the store (auto-generated if omitted)",
+        description="Unique business subdomain/slug (auto-generated from business_name if omitted)",
     )
     plan_code: Optional[str] = Field(
         default="basic",
@@ -761,7 +793,13 @@ class SuperAdminStoreOwnerCreate(BaseModel):
     @classmethod
     def populate_aliases(cls, data: Any) -> Any:
         if isinstance(data, dict):
-            # Map legacy aliases if modern fields are absent
+            # Resolve business_name from aliases if modern business_name is absent
+            if not data.get("business_name"):
+                data["business_name"] = (
+                    data.get("company_name")
+                    or data.get("tenant_name")
+                    or data.get("store_name")
+                )
             if not data.get("store_name") and data.get("tenant_name"):
                 data["store_name"] = data["tenant_name"]
             if not data.get("owner_name") and data.get("admin_name"):
@@ -798,7 +836,8 @@ class SuperAdminStoreOwnerUpdate(BaseModel):
     """
     Schema for Super Admin updating Store Owner (Tenant) information.
     """
-    store_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
+    business_name: Optional[str] = Field(default=None, min_length=2, max_length=255, description="Business / Company name")
+    store_name: Optional[str] = Field(default=None, min_length=2, max_length=255, description="Main store name")
     owner_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
     owner_phone: Optional[str] = None
     address: Optional[str] = None
@@ -813,6 +852,12 @@ class SuperAdminStoreOwnerUpdate(BaseModel):
     @classmethod
     def populate_aliases(cls, data: Any) -> Any:
         if isinstance(data, dict):
+            if not data.get("business_name"):
+                data["business_name"] = (
+                    data.get("company_name")
+                    or data.get("tenant_name")
+                    or data.get("store_name")
+                )
             if not data.get("store_name") and data.get("tenant_name"):
                 data["store_name"] = data["tenant_name"]
             if not data.get("owner_name") and data.get("admin_name"):
@@ -834,3 +879,86 @@ class SuperAdminStoreOwnerUpdate(BaseModel):
         if value is None or not str(value).strip():
             return None
         return validate_single_pincode(value)
+
+
+# ==========================================
+# ENTERPRISE EXTENSIONS: IMPERSONATION, AUDIT, HEALTH, OVERRIDE, BROADCAST
+# ==========================================
+
+class TenantImpersonationResponse(BaseModel):
+    access_token: str = Field(..., description="Scoped JWT access token for tenant admin access")
+    token_type: str = Field(default="bearer", description="Token type")
+    expires_in: int = Field(default=3600, description="Token expiration window in seconds")
+    tenant_id: int = Field(..., description="Target tenant ID")
+    tenant_name: str = Field(..., description="Target tenant / company name")
+    impersonated_user_id: int = Field(..., description="Target tenant user ID")
+    impersonated_email: str = Field(..., description="Target tenant admin email")
+    impersonated_by_super_admin_id: int = Field(..., description="Super Admin ID who initiated impersonation")
+
+
+class SuperAdminAuditLogItem(BaseModel):
+    id: int
+    tenant_id: Optional[int] = None
+    user_id: Optional[int] = None
+    action: str
+    entity_type: str
+    entity_id: Optional[str] = None
+    old_values: Optional[dict] = None
+    new_values: Optional[dict] = None
+    ip_address: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SuperAdminAuditLogListResponse(BaseModel):
+    items: list[SuperAdminAuditLogItem]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+class SuperAdminExtendTrialRequest(BaseModel):
+    extension_days: int = Field(default=14, ge=1, le=365, description="Number of additional trial days to grant")
+    reason: Optional[str] = Field(None, max_length=255, description="Reason for trial extension")
+
+
+class SuperAdminOverridePlanRequest(BaseModel):
+    plan_code: str = Field(..., min_length=1, max_length=50, description="Target SaaS plan code (e.g. pro, enterprise)")
+    billing_reason: str = Field(default="offline_payment", description="Billing reason (offline_payment, promotional, enterprise_deal)")
+    duration_months: int = Field(default=1, ge=1, le=36, description="Duration in months")
+    notes: Optional[str] = Field(None, max_length=500, description="Internal notes / payment reference")
+
+
+class SystemHealthComponent(BaseModel):
+    status: str = Field(default="healthy", description="Status of the component (healthy, degraded, down)")
+    latency_ms: Optional[float] = Field(None, description="Response latency in milliseconds")
+    message: Optional[str] = Field(None, description="Diagnostic message")
+
+
+class SystemHealthResponse(BaseModel):
+    status: str = Field(default="healthy", description="Overall platform status")
+    timestamp: datetime = Field(..., description="Timestamp of health check")
+    environment: str = Field(default="production", description="Environment identifier")
+    version: str = Field(default="1.0.0", description="Application version")
+    database: SystemHealthComponent
+    redis: SystemHealthComponent
+
+
+class BroadcastAnnouncementRequest(BaseModel):
+    title: str = Field(..., min_length=2, max_length=150, description="Announcement title / banner headline")
+    message: str = Field(..., min_length=2, max_length=1000, description="Announcement body message")
+    level: str = Field(default="info", description="Severity level: info, warning, critical")
+    is_active: bool = Field(default=True, description="Whether the banner is actively broadcasted")
+    expires_at: Optional[datetime] = Field(None, description="Optional automatic expiration timestamp")
+
+
+class BroadcastAnnouncementResponse(BaseModel):
+    title: str
+    message: str
+    level: str
+    is_active: bool
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+    created_by_super_admin_id: Optional[int] = None
