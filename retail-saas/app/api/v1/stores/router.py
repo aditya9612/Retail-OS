@@ -23,8 +23,6 @@ router = APIRouter(
     prefix="/stores",
     tags=["Stores"],
 )
-
-
 def get_store_service(
     db: Session = Depends(get_db),
 ):

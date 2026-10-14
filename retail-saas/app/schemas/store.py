@@ -1,8 +1,8 @@
+from pydantic import validate_call_decorator
 import re
 from typing import Optional
-
+from email_validator import validate_email as validate_email_address, EmailNotValidError
 from pydantic import BaseModel, Field, ConfigDict, field_validator, EmailStr
-
 INDIAN_STATES_AND_UTS = {
     "Andhra Pradesh",
     "Arunachal Pradesh",
@@ -154,12 +154,11 @@ class StoreCreate(BaseModel):
             )
 
         return value
-
     @field_validator("address")
     @classmethod
     def validate_address(cls, value):
         if value is None:
-         return None
+            return None
 
         value = value.strip()
 
@@ -176,19 +175,20 @@ class StoreCreate(BaseModel):
         if not re.search(r"[A-Za-z]", value):
             raise ValueError("Address must contain at least one letter")
 
-        # Reject an address containing only special characters/numbers
+        # Reject addresses without any letters or numbers
         if not re.search(r"[A-Za-z0-9]", value):
             raise ValueError("Invalid address")
 
         # Allow normal address characters
-        if not re.fullmatch(
-            r"[A-Za-z0-9\s,./#&'()\-]+",
-            value
-        ):
+        if not re.fullmatch(r"[A-Za-z0-9\s,./#&'()\-]+", value):
             raise ValueError("Address contains invalid characters")
 
+        # Require at least one number
+        if not any(char.isdigit() for char in value):
+            raise ValueError(
+                "Address must include a building number or other location number"
+            )
         return value
-
     @field_validator("city")
     @classmethod
     def validate_city(cls, value):
@@ -196,19 +196,15 @@ class StoreCreate(BaseModel):
             return None
 
         value = value.strip()
-        if value.lower() in {
-          "string",
-          "test",
-          "city",
-          "example",
-          "null",
-          "none",
-          "n/a",
-          "na",
-            }:
-          raise ValueError("Please enter a valid city name")
+
         if not value:
             raise ValueError("City is required")
+
+        if value.casefold() in {
+            "string", "test", "city", "example", "null",
+            "none", "n/a", "na",
+        }:
+            raise ValueError("Please enter a valid city name")
 
         if len(value) < 2:
             raise ValueError("City must contain at least 2 characters")
@@ -221,14 +217,22 @@ class StoreCreate(BaseModel):
 
         if not re.fullmatch(r"[A-Za-z]+(?:[ .'-][A-Za-z]+)*", value):
             raise ValueError(
-            "City must contain only letters, spaces, hyphens and apostrophes"
+                "City must contain only letters, spaces, hyphens and apostrophes"
         )
 
-        if value.lower() in NON_CITY_LOCATION_NAMES:
+        if value.casefold() in {
+            name.casefold() for name in NON_CITY_LOCATION_NAMES
+        }:
             raise ValueError("Please enter a valid city name")
 
-        return value
+        if value.casefold() in {
+            state.casefold() for state in INDIAN_STATES_AND_UTS
+        }:
+            raise ValueError(
+                "City cannot be a state or union territory name"
+            )
 
+        return value
     @field_validator("state")
     @classmethod
     def validate_state(cls, value):
@@ -295,72 +299,40 @@ class StoreCreate(BaseModel):
             raise ValueError("Please enter a valid phone number")
 
         return clean_phone
-
     @field_validator("email")
     @classmethod
     def validate_email(cls, value):
         if value is None:
-         return None
+            return None
 
         value = value.strip().lower()
 
         if not value:
-           raise ValueError("Email is required")
+            raise ValueError("Email is required")
 
         if len(value) > 254:
-           raise ValueError("Email must not exceed 254 characters")
+            raise ValueError("Email must not exceed 254 characters")
 
-    # Must contain exactly one @
-        if value.count("@") != 1:
-           raise ValueError("Please enter a valid email address")
+        try:
+            validated = validate_email_address(
+                value,
+                check_deliverability=False,
+                allow_display_name=False,
+            )
+        except EmailNotValidError as exc:
+            raise ValueError("Please enter a valid email address") from exc
 
-        local_part, domain = value.rsplit("@", 1)
-
-    # Local part validation
-        if not local_part:
-            raise ValueError("Email must contain a username before @")
+        local_part = validated.local_part
 
         if len(local_part) > 64:
             raise ValueError("Email username must not exceed 64 characters")
 
-        if local_part.startswith(".") or local_part.endswith("."):
-            raise ValueError("Email username cannot start or end with a dot")
+        if local_part.startswith("-") or local_part.endswith("-"):
+            raise ValueError(
+                "Email username cannot start or end with a hyphen"
+        )
 
-        if ".." in local_part:
-            raise ValueError("Email username cannot contain consecutive dots")
-
-    # Allowed characters in email username
-        if not re.fullmatch(
-             r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+",
-             local_part
-        ):
-            raise ValueError("Email contains invalid characters")
-
-    # Domain validation
-        if not domain:
-            raise ValueError("Email must contain a valid domain")
-
-        if len(domain) > 253:
-            raise ValueError("Email domain is too long")
-
-        if "." not in domain:
-            raise ValueError("Email domain must contain a valid extension")
-
-        if domain.startswith(".") or domain.endswith("."):
-            raise ValueError("Email domain cannot start or end with a dot")
-
-        if ".." in domain:
-            raise ValueError("Email domain cannot contain consecutive dots")
-
-    # Domain labels must be valid
-        if not re.fullmatch(
-            r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+",
-            domain
-        ):
-            raise ValueError("Email domain contains invalid characters")
-
-        return value
-
+        return validated.normalized.lower()
     @field_validator("gstin")
     @classmethod
     def validate_gstin(cls, v: Optional[str]) -> Optional[str]:
@@ -575,67 +547,35 @@ class StoreUpdate(BaseModel):
     @classmethod
     def validate_email(cls, value):
         if value is None:
-         return None
-
+            return None
         value = value.strip().lower()
 
         if not value:
-           raise ValueError("Email is required")
+            raise ValueError("Email is required")
 
         if len(value) > 254:
-           raise ValueError("Email must not exceed 254 characters")
+            raise ValueError("Email must not exceed 254 characters")
 
-    # Must contain exactly one @
-        if value.count("@") != 1:
-           raise ValueError("Please enter a valid email address")
+        try:
+            validated = validate_email_address(
+                value,
+                check_deliverability=False,
+                allow_display_name=False,
+            )
+        except EmailNotValidError as exc:
+            raise ValueError("Please enter a valid email address") from exc
 
-        local_part, domain = value.rsplit("@", 1)
-
-    # Local part validation
-        if not local_part:
-            raise ValueError("Email must contain a username before @")
+        local_part = validated.local_part
 
         if len(local_part) > 64:
             raise ValueError("Email username must not exceed 64 characters")
 
-        if local_part.startswith(".") or local_part.endswith("."):
-            raise ValueError("Email username cannot start or end with a dot")
+        if local_part.startswith("-") or local_part.endswith("-"):
+            raise ValueError(
+                "Email username cannot start or end with a hyphen"
+            )
 
-        if ".." in local_part:
-            raise ValueError("Email username cannot contain consecutive dots")
-
-    # Allowed characters in email username
-        if not re.fullmatch(
-             r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+",
-             local_part
-        ):
-            raise ValueError("Email contains invalid characters")
-
-    # Domain validation
-        if not domain:
-            raise ValueError("Email must contain a valid domain")
-
-        if len(domain) > 253:
-            raise ValueError("Email domain is too long")
-
-        if "." not in domain:
-            raise ValueError("Email domain must contain a valid extension")
-
-        if domain.startswith(".") or domain.endswith("."):
-            raise ValueError("Email domain cannot start or end with a dot")
-
-        if ".." in domain:
-            raise ValueError("Email domain cannot contain consecutive dots")
-
-    # Domain labels must be valid
-        if not re.fullmatch(
-            r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+",
-            domain
-        ):
-            raise ValueError("Email domain contains invalid characters")
-
-        return value
-
+        return validated.normalized.lower()
     @field_validator("gstin")
     @classmethod
     def validate_gstin(cls, v: Optional[str]) -> Optional[str]:
