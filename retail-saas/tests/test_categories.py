@@ -136,6 +136,23 @@ def test_create_category_valid_names(tenant_fixture):
         assert data["tenant_id"] == tenant_fixture["tenant_id"]
 
 
+def test_create_category_no_extra_fields(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    resp = client.post(
+        "/api/v1/categories",
+        json={"name": "Stationery Supplies", "description": "Office and desk items"},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["name"] == "Stationery Supplies"
+    assert "id" in data
+    assert "tenant_id" in data
+    assert "parent_name" not in data, "parent_name should not be returned in create category response"
+    assert "product_count" not in data, "product_count should not be returned in create category response"
+    assert "subcategory_count" not in data, "subcategory_count should not be returned in create category response"
+
+
 def test_create_category_reject_invalid_names(tenant_fixture):
     headers = tenant_fixture["headers"]
     invalid_names = [
@@ -154,6 +171,19 @@ def test_create_category_reject_invalid_names(tenant_fixture):
         "!@#$%",
         "test",
         "sample",
+        "PP",
+        "AAA",
+        "0@0P0",
+        "--",
+        "[Category]",
+        "{Category}",
+        "(Category)",
+        "Category // Sub",
+        "Category ??",
+        "<<Category>>",
+        "Category || Sub",
+        "Category \\ Sub",
+        "Cat,,,Sub",
     ]
     for name in invalid_names:
         resp = client.post(
@@ -200,6 +230,8 @@ def test_create_category_description_validation(tenant_fixture):
         "----",
         "@#$%^",
         "1234",
+        "0@0P0",
+        "aaaaa",
     ]
     for desc in invalid_descs:
         resp = client.post(
@@ -243,6 +275,114 @@ def test_create_category_parent_validation(tenant_fixture):
     )
     assert child_resp.status_code == 201
     assert child_resp.json()["parent_id"] == parent_id
+
+
+def test_create_category_duplicate_name_within_same_tenant_rejected(tenant_fixture):
+    headers = tenant_fixture["headers"]
+
+    # 1. First creation succeeds
+    resp1 = client.post(
+        "/api/v1/categories",
+        json={"name": "Beauty & Personal Care", "description": "Skin and hair items"},
+        headers=headers,
+    )
+    assert resp1.status_code == 201, resp1.text
+
+    # 2. Duplicate creation with exact same name -> 409 Conflict
+    resp_dup = client.post(
+        "/api/v1/categories",
+        json={"name": "Beauty & Personal Care", "description": "Another description"},
+        headers=headers,
+    )
+    assert resp_dup.status_code == 409, f"Expected 409 Conflict, got {resp_dup.status_code}: {resp_dup.text}"
+    assert "already exists" in resp_dup.text
+
+    # 3. Duplicate creation with different case (case-insensitive) -> 409 Conflict
+    resp_case = client.post(
+        "/api/v1/categories",
+        json={"name": "beauty & personal care", "description": "Different case"},
+        headers=headers,
+    )
+    assert resp_case.status_code == 409
+    assert "already exists" in resp_case.text
+
+
+def test_create_category_same_name_different_tenants_allowed(tenant_fixture):
+    headers_a = tenant_fixture["headers"]
+
+    # Tenant A creates "Home & Living"
+    resp_a = client.post(
+        "/api/v1/categories",
+        json={"name": "Home & Living", "description": "Furniture and decor"},
+        headers=headers_a,
+    )
+    assert resp_a.status_code == 201
+
+    # Register Tenant B
+    slug_b = f"cat-dup-{uuid.uuid4().hex[:8]}"
+    email_b = f"owner-{slug_b}@example.com"
+    client.post(
+        "/api/v1/auth/register",
+        params={
+            "tenant_name": f"Store {slug_b}",
+            "slug": slug_b,
+            "email": email_b,
+            "admin_name": "Admin B",
+            "password": "Password123!",
+        },
+    )
+    login_b = client.post(
+        "/api/v1/auth/login",
+        json={"email": email_b, "password": "Password123!"},
+    )
+    headers_b = {"Authorization": f"Bearer {login_b.json()['access_token']}"}
+
+    # Tenant B creates "Home & Living" -> 201 (Allowed across different tenants)
+    resp_b = client.post(
+        "/api/v1/categories",
+        json={"name": "Home & Living", "description": "Decor items for Tenant B"},
+        headers=headers_b,
+    )
+    assert resp_b.status_code == 201
+
+
+def test_update_category_duplicate_name_rejected(tenant_fixture):
+    headers = tenant_fixture["headers"]
+
+    # Create Category 1
+    resp1 = client.post(
+        "/api/v1/categories",
+        json={"name": "Stationery Items"},
+        headers=headers,
+    )
+    assert resp1.status_code == 201
+    cat1_id = resp1.json()["id"]
+
+    # Create Category 2
+    resp2 = client.post(
+        "/api/v1/categories",
+        json={"name": "Sports Gear"},
+        headers=headers,
+    )
+    assert resp2.status_code == 201
+    cat2_id = resp2.json()["id"]
+
+    # Update Category 2 to have Category 1's name -> 409 Conflict
+    resp_update_dup = client.put(
+        f"/api/v1/categories/{cat2_id}",
+        json={"name": "Stationery Items"},
+        headers=headers,
+    )
+    assert resp_update_dup.status_code == 409
+    assert "already exists" in resp_update_dup.text
+
+    # Update Category 2 keeping its own name -> 200 OK
+    resp_update_same = client.put(
+        f"/api/v1/categories/{cat2_id}",
+        json={"name": "Sports Gear", "description": "Updated sports description"},
+        headers=headers,
+    )
+    assert resp_update_same.status_code == 200
 
 
 def test_create_category_cross_tenant_parent(tenant_fixture):
