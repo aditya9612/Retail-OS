@@ -29,6 +29,7 @@ class StoreTargetCreate(BaseModel):
         ...,
         gt=0,
         description="The ID of the store to which this target applies",
+        examples=[1],
     )
 
     target_type: str = Field(
@@ -36,6 +37,7 @@ class StoreTargetCreate(BaseModel):
         min_length=2,
         max_length=30,
         description="Target type (e.g. Sales, Revenue, Orders, New Customers)",
+        examples=["Sales Target"],
     )
 
     target_value: Decimal = Field(
@@ -43,6 +45,7 @@ class StoreTargetCreate(BaseModel):
         gt=0,
         le=Decimal("9999999999.99"),
         description="Target goal value (must be greater than 0 with at most 2 decimal places)",
+        examples=[Decimal("50000.00")],
     )
 
     period: str = Field(
@@ -50,22 +53,26 @@ class StoreTargetCreate(BaseModel):
         min_length=1,
         max_length=20,
         description="Target period: daily, weekly, monthly, quarterly, yearly",
+        examples=["monthly"],
     )
 
     start_date: datetime = Field(
         ...,
         description="Start date and time of the target period",
+        examples=["2026-10-01T00:00:00"],
     )
 
     end_date: datetime = Field(
         ...,
         description="End date and time of the target period",
+        examples=["2026-10-31T23:59:59"],
     )
 
     status: Optional[str] = Field(
         default="active",
         max_length=20,
         description="Target status: active, inactive, completed, cancelled",
+        examples=["active"],
     )
 
     @field_validator("target_type")
@@ -131,6 +138,7 @@ class StoreTargetUpdate(BaseModel):
         min_length=2,
         max_length=30,
         description="Updated target type",
+        examples=["Sales Target"],
     )
 
     target_value: Optional[Decimal] = Field(
@@ -138,6 +146,7 @@ class StoreTargetUpdate(BaseModel):
         gt=0,
         le=Decimal("9999999999.99"),
         description="Updated target goal value",
+        examples=[Decimal("60000.00")],
     )
 
     period: Optional[str] = Field(
@@ -145,22 +154,26 @@ class StoreTargetUpdate(BaseModel):
         min_length=1,
         max_length=20,
         description="Updated period: daily, weekly, monthly, quarterly, yearly",
+        examples=["monthly"],
     )
 
     start_date: Optional[datetime] = Field(
         default=None,
         description="Updated start date",
+        examples=["2026-10-01T00:00:00"],
     )
 
     end_date: Optional[datetime] = Field(
         default=None,
         description="Updated end date",
+        examples=["2026-10-31T23:59:59"],
     )
 
     status: Optional[str] = Field(
         default=None,
         max_length=20,
         description="Updated status: active, inactive, completed, cancelled",
+        examples=["active"],
     )
 
     @field_validator("target_type")
@@ -225,34 +238,76 @@ class StoreTargetUpdate(BaseModel):
 
 
 class StoreTargetResponse(BaseModel):
-    id: int
-    store_id: int
-    target_type: str
-    target_value: Decimal
-    period: str
-    start_date: datetime
-    end_date: datetime
-    status: str
-    created_at: datetime
-    updated_at: datetime
+    id: int = Field(..., description="Unique Store Target ID", examples=[1])
+    store_id: int = Field(..., description="Target Store ID", examples=[2])
+    store_name: Optional[str] = Field(None, description="Target Store Name", examples=["Main Retail Outlet"])
+    store_code: Optional[str] = Field(None, description="Target Store Code", examples=["STR-MUM-01"])
+    target_type: str = Field(..., description="Target Type", examples=["Sales Target"])
+    target_value: Decimal = Field(..., description="Target Goal Value", examples=[Decimal("50000.00")])
+    period: str = Field(..., description="Target Period (daily, weekly, monthly, quarterly, yearly)", examples=["monthly"])
+    start_date: datetime = Field(..., description="Start Date and Time")
+    end_date: datetime = Field(..., description="End Date and Time")
+    status: str = Field(..., description="Target Status (active, inactive, completed, cancelled)", examples=["active"])
+    created_at: datetime = Field(..., description="Creation Timestamp")
+    updated_at: datetime = Field(..., description="Last Update Timestamp")
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class StoreTargetProgressResponse(BaseModel):
-    id: int
-    store_id: int
-    target_type: str
-    target_value: Decimal
-    current_value: Decimal
-    achievement_percentage: float
-    remaining_value: Decimal
-    period: str
-    start_date: datetime
-    end_date: datetime
-    status: str
-    is_achieved: bool
-    days_remaining: int
+    id: int = Field(..., description="Unique Store Target ID", examples=[1])
+    store_id: int = Field(..., description="Target Store ID", examples=[2])
+    store_name: Optional[str] = Field(None, description="Target Store Name", examples=["Main Retail Outlet"])
+    store_code: Optional[str] = Field(None, description="Target Store Code", examples=["STR-MUM-01"])
+    target_type: str = Field(..., description="Target Type", examples=["Sales Target"])
+    target_value: Decimal = Field(..., description="Target Goal Value", examples=[Decimal("50000.00")])
+    current_value: Decimal = Field(..., description="Current Realized Value from Sales and Orders", examples=[Decimal("32500.00")])
+    achievement_percentage: float = Field(..., description="Percentage of Goal Achieved", examples=[65.0])
+    remaining_value: Decimal = Field(..., description="Remaining Value to Reach Goal", examples=[Decimal("17500.00")])
+    period: str = Field(..., description="Target Period", examples=["monthly"])
+    start_date: datetime = Field(..., description="Start Date and Time")
+    end_date: datetime = Field(..., description="End Date and Time")
+    status: str = Field(..., description="Target Status", examples=["active"])
+    is_achieved: bool = Field(..., description="Whether Target Has Been Fully Achieved", examples=[False])
+    days_remaining: int = Field(..., description="Days Remaining Until Target Period Closes", examples=[12])
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class StoreTargetLeaderboardItem(BaseModel):
+    rank: int = Field(..., description="Store Ranking Position", examples=[1])
+    target_id: int = Field(..., description="Target ID", examples=[10])
+    store_id: int = Field(..., description="Store ID", examples=[2])
+    store_name: str = Field(..., description="Store Name", examples=["Dadar Branch"])
+    store_code: Optional[str] = Field(None, description="Store Code", examples=["STR-DADAR"])
+    target_type: str = Field(..., description="Target Type", examples=["Sales Target"])
+    target_value: Decimal = Field(..., description="Target Goal Value", examples=[Decimal("100000.00")])
+    current_value: Decimal = Field(..., description="Current Realized Value", examples=[Decimal("112000.00")])
+    achievement_percentage: float = Field(..., description="Achievement Percentage", examples=[112.0])
+    remaining_value: Decimal = Field(..., description="Remaining Target Value", examples=[Decimal("0.00")])
+    period: str = Field(..., description="Target Period", examples=["monthly"])
+    is_achieved: bool = Field(..., description="Whether target has been met or exceeded", examples=[True])
+    status: str = Field(..., description="Target Status", examples=["active"])
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StoreTargetLeaderboardResponse(BaseModel):
+    total_ranked: int = Field(..., description="Total Stores Ranked", examples=[5])
+    period_filter: Optional[str] = Field(None, description="Active Period Filter", examples=["monthly"])
+    target_type_filter: Optional[str] = Field(None, description="Active Target Type Filter", examples=["Sales Target"])
+    leaderboard: list[StoreTargetLeaderboardItem] = Field(default_factory=list)
+
+
+class StoreTargetSummaryResponse(BaseModel):
+    total_targets: int = Field(default=0, description="Total active targets count", examples=[8])
+    total_stores_with_targets: int = Field(default=0, description="Total distinct stores with active targets", examples=[5])
+    total_target_value: Decimal = Field(default=Decimal("0.00"), description="Total monetary/order target value", examples=[Decimal("500000.00")])
+    total_current_value: Decimal = Field(default=Decimal("0.00"), description="Total achieved value across targets", examples=[Decimal("320000.00")])
+    overall_achievement_percentage: float = Field(default=0.0, description="Overall company-wide achievement rate", examples=[64.0])
+    achieved_targets_count: int = Field(default=0, description="Count of targets meeting or exceeding 100%", examples=[3])
+    on_track_targets_count: int = Field(default=0, description="Count of targets achieving 50%-99%", examples=[3])
+    lagging_targets_count: int = Field(default=0, description="Count of targets achieving <50% or lagging near deadline", examples=[2])
+    period: Optional[str] = Field(None, description="Period filter applied if any", examples=["monthly"])
+
 

@@ -7,8 +7,10 @@ from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.store_target import (
     StoreTargetCreate,
+    StoreTargetLeaderboardResponse,
     StoreTargetProgressResponse,
     StoreTargetResponse,
+    StoreTargetSummaryResponse,
     StoreTargetUpdate,
 )
 from app.services.store_target_service import StoreTargetService
@@ -111,6 +113,56 @@ def get_targets(
         current_user_store_id=current_user.store_id,
     )
 
+
+@router.get(
+    "/leaderboard",
+    response_model=StoreTargetLeaderboardResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Store Performance Leaderboard",
+    description="Ranks stores and targets by achievement percentage to identify top-performing and lagging branches.",
+)
+def get_store_targets_leaderboard(
+    period: Optional[str] = Query(
+        default=None,
+        description="Filter leaderboard by period (daily, weekly, monthly, quarterly, yearly)",
+    ),
+    target_type: Optional[str] = Query(
+        default=None,
+        description="Filter leaderboard by target type (e.g. Sales, Revenue, Orders)",
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("stores:read")),
+):
+    return StoreTargetService.get_leaderboard(
+        db=db,
+        tenant_id=current_user.tenant_id,
+        period=period,
+        target_type=target_type,
+        current_user_store_id=current_user.store_id,
+    )
+
+
+@router.get(
+    "/summary",
+    response_model=StoreTargetSummaryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Company-wide Target Overview",
+    description="Aggregated organization-level targets snapshot: total targets value, achieved value, overall percentage, and count of lagging/on-track targets.",
+)
+def get_store_targets_summary(
+    period: Optional[str] = Query(
+        default=None,
+        description="Filter summary by period (e.g. monthly, quarterly, yearly)",
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("stores:read")),
+):
+    return StoreTargetService.get_targets_summary(
+        db=db,
+        tenant_id=current_user.tenant_id,
+        period=period,
+        current_user_store_id=current_user.store_id,
+    )
 
 
 @router.get(

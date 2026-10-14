@@ -296,10 +296,12 @@ class StoreTargetService:
         if current_user_store_id is not None and current_user_store_id != target.store_id:
             raise ForbiddenException("You do not have permission to access targets for this store")
 
-        # Query actual progress from sales excluding cancelled/failed/refunded
+        # Query actual progress from both sales and orders excluding cancelled/failed/refunded
+        from app.models.order import Order
+
         if "order" in target.target_type.lower():
             # Count of completed sales/orders
-            count_res = (
+            sale_count = (
                 db.query(func.count(Sale.id))
                 .filter(
                     Sale.tenant_id == tenant_id,
@@ -309,11 +311,24 @@ class StoreTargetService:
                     func.lower(Sale.payment_status).notin_(["cancelled", "failed", "refunded"]),
                 )
                 .scalar()
+                or 0
             )
-            current_value = Decimal(count_res or 0)
+            order_count = (
+                db.query(func.count(Order.id))
+                .filter(
+                    Order.tenant_id == tenant_id,
+                    Order.store_id == target.store_id,
+                    Order.created_at >= target.start_date,
+                    Order.created_at <= target.end_date,
+                    Order.status != "cancelled",
+                )
+                .scalar()
+                or 0
+            )
+            current_value = Decimal(sale_count + order_count)
         else:
-            # Total sales amount
-            sum_res = (
+            # Total sales amount from both sales and orders
+            sale_sum = (
                 db.query(func.coalesce(func.sum(Sale.total_amount), 0))
                 .filter(
                     Sale.tenant_id == tenant_id,
@@ -323,8 +338,21 @@ class StoreTargetService:
                     func.lower(Sale.payment_status).notin_(["cancelled", "failed", "refunded"]),
                 )
                 .scalar()
+                or 0
             )
-            current_value = Decimal(str(sum_res or 0)).quantize(Decimal("0.01"))
+            order_sum = (
+                db.query(func.coalesce(func.sum(Order.total_amount), 0))
+                .filter(
+                    Order.tenant_id == tenant_id,
+                    Order.store_id == target.store_id,
+                    Order.created_at >= target.start_date,
+                    Order.created_at <= target.end_date,
+                    Order.status != "cancelled",
+                )
+                .scalar()
+                or 0
+            )
+            current_value = (Decimal(str(sale_sum)) + Decimal(str(order_sum))).quantize(Decimal("0.01"))
 
         target_value = Decimal(str(target.target_value)).quantize(Decimal("0.01"))
         achievement_pct = (
@@ -340,6 +368,8 @@ class StoreTargetService:
         return StoreTargetProgressResponse(
             id=target.id,
             store_id=target.store_id,
+            store_name=target.store_name,
+            store_code=target.store_code,
             target_type=target.target_type,
             target_value=target_value,
             current_value=current_value,
@@ -352,6 +382,149 @@ class StoreTargetService:
             is_achieved=is_achieved,
             days_remaining=days_remaining,
         )
+
+    @staticmethod
+    def get_leaderboard(
+        db: Session,
+        tenant_id: int,
+        period: Optional[str] = None,
+        target_type: Optional[str] = None,
+        current_user_store_id: Optional[int] = None,
+    ) -> dict:
+        if tenant_id is None:
+            raise AppException("Tenant ID is required")
+
+        query = (
+            db.query(StoreTarget)
+            .join(Store, Store.id == StoreTarget.store_id)
+            .filter(
+                Store.tenant_id == tenant_id,
+                Store.is_active.is_(True),
+                StoreTarget.status == "active",
+            )
+        )
+
+        if current_user_store_id is not None:
+            query = query.filter(StoreTarget.store_id == current_user_store_id)
+
+        if period is not None and period.strip():
+            query = query.filter(StoreTarget.period == period.strip().lower())
+
+        if target_type is not None and target_type.strip():
+            query = query.filter(func.lower(StoreTarget.target_type) == target_type.strip().lower())
+
+        targets = query.all()
+
+        items = []
+        for target in targets:
+            progress = StoreTargetService.get_target_progress(
+                db=db,
+                tenant_id=tenant_id,
+                target_id=target.id,
+                current_user_store_id=current_user_store_id,
+            )
+            store_name = target.store_name or (target.store.name if getattr(target, "store", None) else f"Store {target.store_id}")
+            store_code = target.store_code or (target.store.code if getattr(target, "store", None) else None)
+
+            items.append({
+                "target_id": target.id,
+                "store_id": target.store_id,
+                "store_name": store_name,
+                "store_code": store_code,
+                "target_type": target.target_type,
+                "target_value": progress.target_value,
+                "current_value": progress.current_value,
+                "achievement_percentage": progress.achievement_percentage,
+                "remaining_value": progress.remaining_value,
+                "period": target.period,
+                "is_achieved": progress.is_achieved,
+                "status": target.status,
+            })
+
+        # Sort by achievement_percentage DESC, then target_value DESC
+        items.sort(key=lambda x: (x["achievement_percentage"], x["target_value"]), reverse=True)
+
+        for idx, item in enumerate(items, start=1):
+            item["rank"] = idx
+
+        return {
+            "total_ranked": len(items),
+            "period_filter": period,
+            "target_type_filter": target_type,
+            "leaderboard": items,
+        }
+
+    @staticmethod
+    def get_targets_summary(
+        db: Session,
+        tenant_id: int,
+        period: Optional[str] = None,
+        current_user_store_id: Optional[int] = None,
+    ) -> dict:
+        if tenant_id is None:
+            raise AppException("Tenant ID is required")
+
+        query = (
+            db.query(StoreTarget)
+            .join(Store, Store.id == StoreTarget.store_id)
+            .filter(
+                Store.tenant_id == tenant_id,
+                Store.is_active.is_(True),
+                StoreTarget.status == "active",
+            )
+        )
+
+        if current_user_store_id is not None:
+            query = query.filter(StoreTarget.store_id == current_user_store_id)
+
+        if period is not None and period.strip():
+            query = query.filter(StoreTarget.period == period.strip().lower())
+
+        targets = query.all()
+
+        total_targets = len(targets)
+        distinct_stores = set()
+        total_target_value = Decimal("0.00")
+        total_current_value = Decimal("0.00")
+        achieved_count = 0
+        on_track_count = 0
+        lagging_count = 0
+
+        for target in targets:
+            distinct_stores.add(target.store_id)
+            progress = StoreTargetService.get_target_progress(
+                db=db,
+                tenant_id=tenant_id,
+                target_id=target.id,
+                current_user_store_id=current_user_store_id,
+            )
+            total_target_value += progress.target_value
+            total_current_value += progress.current_value
+
+            if progress.is_achieved:
+                achieved_count += 1
+            elif progress.achievement_percentage >= 50.0 and progress.days_remaining > 5:
+                on_track_count += 1
+            else:
+                lagging_count += 1
+
+        overall_pct = (
+            float(round((total_current_value / total_target_value) * 100, 2))
+            if total_target_value > 0
+            else 0.0
+        )
+
+        return {
+            "total_targets": total_targets,
+            "total_stores_with_targets": len(distinct_stores),
+            "total_target_value": total_target_value,
+            "total_current_value": total_current_value,
+            "overall_achievement_percentage": overall_pct,
+            "achieved_targets_count": achieved_count,
+            "on_track_targets_count": on_track_count,
+            "lagging_targets_count": lagging_count,
+            "period": period,
+        }
 
     @staticmethod
     def auto_complete_expired_targets(

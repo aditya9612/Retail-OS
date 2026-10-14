@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import Column, Integer, Numeric, String, DateTime, ForeignKey, Index
+from sqlalchemy.orm import relationship
 
 from app.core.database import Base
 
@@ -24,6 +25,16 @@ class StoreTarget(Base):
         nullable=False,
         index=True
     )
+
+    store = relationship("Store")
+
+    @property
+    def store_name(self) -> str | None:
+        return self.store.name if self.store else None
+
+    @property
+    def store_code(self) -> str | None:
+        return self.store.code if self.store else None
 
     target_type = Column(
         String(30),

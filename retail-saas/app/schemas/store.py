@@ -524,26 +524,105 @@ class StoreUpdate(BaseModel):
 
 
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from decimal import Decimal
+from typing import Any
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class StoreResponse(BaseModel):
-    id: int
-    tenant_id: int
+    id: int = Field(..., description="Unique Store ID", examples=[2])
+    tenant_id: int = Field(..., description="Organization / Tenant ID", examples=[1])
 
-    name: str
-    code: str | None = None
-    address: str | None = None
-    city: str | None = None
-    state: str | None = None
+    name: str = Field(..., description="Store Name", examples=["Main Retail Store"])
+    code: str | None = Field(None, description="Store Code", examples=["STR-MUM-01"])
+    address: str | None = Field(None, description="Street Address", examples=["Shop 12, Phoenix Marketcity"])
+    city: str | None = Field(None, description="City", examples=["Mumbai"])
+    state: str | None = Field(None, description="State", examples=["Maharashtra"])
 
-    pincode: int | None = None
-    phone: int | None = None
-    email: EmailStr | None = None
+    pincode: str | None = Field(None, description="Postal PIN Code", examples=["400001"])
+    phone: str | None = Field(None, description="Contact Phone Number", examples=["9876543210"])
+    email: EmailStr | None = Field(None, description="Store Email Address", examples=["store.mumbai@example.com"])
 
-    is_main: bool = False
-    gstin: str | None = None
-    is_active: bool = True
-    is_warehouse: bool = False
+    is_main: bool = Field(False, description="Whether this is the primary / main store", examples=[True])
+    gstin: str | None = Field(None, description="GSTIN Number", examples=["27AAPFU0939F1ZV"])
+    is_active: bool = Field(True, description="Active status of the store", examples=[True])
+    is_warehouse: bool = Field(False, description="Whether this is a warehouse location", examples=[False])
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("pincode", "phone", mode="before")
+    @classmethod
+    def coerce_to_str(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        return str(v).strip()
+
+
+class StoreDeleteResponse(BaseModel):
+    success: bool = Field(default=True, examples=[True])
+    message: str = Field(default="Store deleted successfully", examples=["Store deleted successfully"])
+    store_id: int = Field(..., examples=[2])
+
+
+class StoreStatusResponse(BaseModel):
+    success: bool = Field(default=True, examples=[True])
+    message: str = Field(..., examples=["Store activated successfully"])
+    store_id: int = Field(..., examples=[2])
+    is_active: bool = Field(..., examples=[True])
+
+
+class StoreSetMainResponse(BaseModel):
+    success: bool = Field(default=True, examples=[True])
+    message: str = Field(default="Store designated as main store successfully", examples=["Store designated as main store successfully"])
+    store_id: int = Field(..., examples=[2])
+    previous_main_store_id: int | None = Field(None, examples=[1])
+    is_main: bool = Field(default=True, examples=[True])
+
+
+class StoreStaffMember(BaseModel):
+    id: int = Field(..., examples=[10])
+    full_name: str = Field(..., examples=["Rahul Sharma"])
+    email: str = Field(..., examples=["rahul@example.com"])
+    phone: str | None = Field(None, examples=["9876543210"])
+    role: str = Field(..., examples=["cashier"])
+    is_active: bool = Field(..., examples=[True])
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StoreStaffListResponse(BaseModel):
+    store_id: int = Field(..., examples=[2])
+    store_name: str = Field(..., examples=["Main Retail Store"])
+    total_staff: int = Field(..., examples=[5])
+    staff: list[StoreStaffMember] = Field(default_factory=list)
+
+
+class StoreSummaryResponse(BaseModel):
+    store_id: int = Field(..., examples=[2])
+    store_name: str = Field(..., examples=["Main Retail Store"])
+    code: str | None = Field(None, examples=["STR-MUM-01"])
+    is_main: bool = Field(..., examples=[True])
+    is_active: bool = Field(..., examples=[True])
+    is_warehouse: bool = Field(..., examples=[False])
+
+    today_sales_amount: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("12500.50")])
+    today_orders_count: int = Field(default=0, examples=[24])
+    total_orders_count: int = Field(default=0, examples=[1420])
+
+    total_staff_count: int = Field(default=0, examples=[5])
+    active_pos_shifts_count: int = Field(default=0, examples=[2])
+
+    total_inventory_items: int = Field(default=0, examples=[150])
+    low_stock_items_count: int = Field(default=0, examples=[8])
+    out_of_stock_items_count: int = Field(default=0, examples=[3])
+
+
+class StoreInventorySummaryResponse(BaseModel):
+    store_id: int = Field(..., examples=[2])
+    store_name: str = Field(..., examples=["Main Retail Store"])
+    total_skus: int = Field(default=0, examples=[150])
+    total_stock_quantity: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("1250.00")])
+    total_stock_value: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("450000.00")])
+    in_stock_skus: int = Field(default=0, examples=[139])
+    low_stock_skus: int = Field(default=0, examples=[8])
+    out_of_stock_skus: int = Field(default=0, examples=[3])

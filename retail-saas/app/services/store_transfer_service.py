@@ -38,6 +38,11 @@ class StoreTransferService:
                 "Source store does not belong to the user's tenant"
             )
 
+        if not source_store.is_active:
+            raise ValueError(
+                "Source store is inactive or has been deleted"
+            )
+
         destination_store = db.query(Store).filter(
             Store.id == destination_store_id
         ).first()
@@ -52,6 +57,11 @@ class StoreTransferService:
                 "Destination store does not belong to the user's tenant"
             )
 
+        if not destination_store.is_active:
+            raise ValueError(
+                "Destination store is inactive or has been deleted"
+            )
+
         from app.models.product import Product
 
         for item in items:
@@ -60,6 +70,8 @@ class StoreTransferService:
                 raise ValueError(f"Product {item.product_id} not found")
             if product.tenant_id != tenant_id:
                 raise ValueError(f"Product {item.product_id} does not belong to the user's tenant")
+            if not product.is_active:
+                raise ValueError(f"Product {item.product_id} is inactive or deleted")
             if getattr(item, "quantity", 0) <= 0:
                 raise ValueError(f"Quantity must be greater than 0 for product {item.product_id}")
 
@@ -138,6 +150,14 @@ class StoreTransferService:
                 "Only pending transfers can be approved"
             )
 
+        source_store = db.query(Store).filter(Store.id == transfer.source_store_id).first()
+        if not source_store or not source_store.is_active:
+            raise ValueError("Source store is inactive or has been deleted")
+
+        destination_store = db.query(Store).filter(Store.id == transfer.destination_store_id).first()
+        if not destination_store or not destination_store.is_active:
+            raise ValueError("Destination store is inactive or has been deleted")
+
         transfer.status = "Approved"
         transfer.approved_by = approved_by
 
@@ -187,6 +207,14 @@ class StoreTransferService:
                 "Only approved transfers can be dispatched"
             )
 
+        source_store = db.query(Store).filter(Store.id == transfer.source_store_id).first()
+        if not source_store or not source_store.is_active:
+            raise ValueError("Source store is inactive or has been deleted")
+
+        destination_store = db.query(Store).filter(Store.id == transfer.destination_store_id).first()
+        if not destination_store or not destination_store.is_active:
+            raise ValueError("Destination store is inactive or has been deleted")
+
         transfer.status = "Dispatched"
 
         return StoreTransferRepository.update(
@@ -210,6 +238,10 @@ class StoreTransferService:
             raise ValueError(
                 "Only dispatched transfers can be received"
             )
+
+        destination_store = db.query(Store).filter(Store.id == transfer.destination_store_id).first()
+        if not destination_store or not destination_store.is_active:
+            raise ValueError("Destination store is inactive or has been deleted")
 
         transfer.status = "Received"
 
