@@ -236,6 +236,40 @@ def register_exception_handlers(app):
                         content=formatted,
                     )
 
+        clean_path = request.url.path.rstrip("/")
+        if (
+            request.method == "PATCH"
+            and "/coupons/" in clean_path
+            and clean_path.endswith("/status")
+        ):
+            has_json_invalid = any(err.get("type") == "json_invalid" for err in errors)
+            if has_json_invalid:
+                formatted = {
+                    "success": False,
+                    "message": "Validation failed: 'is_active': Invalid JSON format. Expected a boolean: true or false for 'is_active'.",
+                    "detail": [
+                        {
+                            "type": "bool_parsing",
+                            "loc": ["body", "is_active"],
+                            "msg": "Invalid JSON format. Expected a boolean: true or false for 'is_active'.",
+                            "input": None,
+                            "ctx": {"error": "Expected a boolean: true or false for 'is_active'."},
+                        }
+                    ],
+                    "errors": [
+                        {
+                            "field": "is_active",
+                            "message": "Invalid JSON format. Expected a boolean: true or false for 'is_active'.",
+                            "type": "bool_parsing",
+                            "loc": ["body", "is_active"],
+                        }
+                    ],
+                }
+                return JSONResponse(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    content=formatted,
+                )
+
         formatted = _format_pydantic_errors(errors)
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
