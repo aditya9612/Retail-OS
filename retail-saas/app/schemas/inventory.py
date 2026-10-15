@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 
 FORBIDDEN_PLACEHOLDERS = {
@@ -123,6 +123,8 @@ class StockInRequest(BaseModel):
         cleaned = v.strip()
         if not cleaned:
             raise ValueError("batch_number cannot be empty or whitespace")
+        if len(cleaned) < 3:
+            raise ValueError("batch_number must be at least 3 characters")
 
         lower = cleaned.lower()
         if lower in FORBIDDEN_BATCH_PLACEHOLDERS:
@@ -135,12 +137,12 @@ class StockInRequest(BaseModel):
         if not re.search(r"[a-zA-Z0-9]", cleaned):
             raise ValueError("batch_number must contain alphanumeric characters")
 
-        alnum_only = re.sub(r"[^a-zA-Z0-9]", "", cleaned)
-        if alnum_only and len(set(alnum_only)) == 1 and alnum_only[0] == "0":
-            raise ValueError("batch_number cannot be all zeros or a dummy value")
+        if not re.fullmatch(r"^[A-Za-z0-9][A-Za-z0-9\-_/. ]*$", cleaned) or "@" in cleaned or "*" in cleaned:
+            raise ValueError("batch_number contains invalid special characters")
 
-        if alnum_only.isdigit() and len(set(alnum_only)) == 1 and len(alnum_only) > 1:
-            raise ValueError("batch_number cannot be repeated dummy digits")
+        alnum_only = re.sub(r"[^a-zA-Z0-9]", "", cleaned)
+        if alnum_only and len(set(alnum_only.lower())) == 1 and len(alnum_only) > 1:
+            raise ValueError("batch_number cannot be repeated dummy characters")
 
         if alnum_only in {"123", "1234", "12345", "123456", "1234567", "12345678", "987654321", "012345"}:
             raise ValueError("batch_number cannot be a sequential dummy value")
@@ -184,7 +186,23 @@ class StockInRequest(BaseModel):
     @field_validator("notes")
     @classmethod
     def validate_notes(cls, v: Optional[str]) -> Optional[str]:
-        return _validate_semantic_text(v, "notes")
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("notes cannot be empty or whitespace")
+        if cleaned.isdigit():
+            raise ValueError("notes cannot be purely numeric, please provide meaningful text")
+        if len(cleaned) < 3:
+            raise ValueError("notes must be at least 3 characters")
+        if len(re.findall(r"[a-zA-Z]", cleaned)) < 3:
+            raise ValueError("notes must contain at least 3 alphabetic letters")
+        if "@" in cleaned or "*" in cleaned:
+            raise ValueError("notes contains invalid characters")
+        alnum = re.sub(r"[^a-zA-Z0-9]", "", cleaned)
+        if alnum and len(set(alnum.lower())) == 1 and len(alnum) > 1:
+            raise ValueError("notes cannot consist of repeated characters")
+        return _validate_semantic_text(cleaned, "notes", min_len=3)
 
 
 class StockOutRequest(BaseModel):
@@ -196,7 +214,23 @@ class StockOutRequest(BaseModel):
     @field_validator("notes")
     @classmethod
     def validate_notes(cls, v: Optional[str]) -> Optional[str]:
-        return _validate_semantic_text(v, "notes")
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("notes cannot be empty or whitespace")
+        if cleaned.isdigit():
+            raise ValueError("notes cannot be purely numeric, please provide meaningful text")
+        if len(cleaned) < 3:
+            raise ValueError("notes must be at least 3 characters")
+        if len(re.findall(r"[a-zA-Z]", cleaned)) < 3:
+            raise ValueError("notes must contain at least 3 alphabetic letters")
+        if "@" in cleaned or "*" in cleaned:
+            raise ValueError("notes contains invalid characters")
+        alnum = re.sub(r"[^a-zA-Z0-9]", "", cleaned)
+        if alnum and len(set(alnum.lower())) == 1 and len(alnum) > 1:
+            raise ValueError("notes cannot consist of repeated characters")
+        return _validate_semantic_text(cleaned, "notes", min_len=3)
 
 
 class StockTransferRequest(BaseModel):
@@ -216,7 +250,23 @@ class StockTransferRequest(BaseModel):
     @field_validator("notes")
     @classmethod
     def validate_notes(cls, v: Optional[str]) -> Optional[str]:
-        return _validate_semantic_text(v, "notes")
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("notes cannot be empty or whitespace")
+        if cleaned.isdigit():
+            raise ValueError("notes cannot be purely numeric, please provide meaningful text")
+        if len(cleaned) < 3:
+            raise ValueError("notes must be at least 3 characters")
+        if len(re.findall(r"[a-zA-Z]", cleaned)) < 3:
+            raise ValueError("notes must contain at least 3 alphabetic letters")
+        if "@" in cleaned or "*" in cleaned:
+            raise ValueError("notes contains invalid characters")
+        alnum = re.sub(r"[^a-zA-Z0-9]", "", cleaned)
+        if alnum and len(set(alnum.lower())) == 1 and len(alnum) > 1:
+            raise ValueError("notes cannot consist of repeated characters")
+        return _validate_semantic_text(cleaned, "notes", min_len=3)
 
 
 class StockMovementResponse(BaseModel):
@@ -235,6 +285,14 @@ class StockMovementResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def resolve_reference_fields(self) -> "StockMovementResponse":
+        if self.reference_type and any(self.reference_type.startswith(p) for p in ("IN-", "OUT-", "TR-", "ADJ-")):
+            if not self.reference or self.reference == self.reference_type:
+                self.reference = self.reference_type
+            self.reference_type = self.movement_type
+        return self
  
  
 class StockInResponse(StockMovementResponse):
@@ -267,14 +325,30 @@ class InventoryAdjustmentRequest(BaseModel):
         pattern="^(increase|decrease)$"
     )
     reason: str = Field(
-        min_length=2,
+        min_length=3,
         max_length=500,
     )
 
     @field_validator("reason")
     @classmethod
     def validate_reason(cls, v: str) -> str:
-        return _validate_semantic_text(v, "reason", min_len=2)
+        if v is None:
+            raise ValueError("reason cannot be null")
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("reason cannot be empty or whitespace")
+        if cleaned.isdigit():
+            raise ValueError("reason cannot be purely numeric, please provide meaningful text")
+        if len(cleaned) < 3:
+            raise ValueError("reason must be at least 3 characters")
+        if len(re.findall(r"[a-zA-Z]", cleaned)) < 3:
+            raise ValueError("reason must contain at least 3 alphabetic letters")
+        if "@" in cleaned or "*" in cleaned:
+            raise ValueError("reason contains invalid characters")
+        alnum = re.sub(r"[^a-zA-Z0-9]", "", cleaned)
+        if alnum and len(set(alnum.lower())) == 1 and len(alnum) > 1:
+            raise ValueError("reason cannot consist of repeated characters")
+        return _validate_semantic_text(cleaned, "reason", min_len=3)
 
 
 class InventoryDashboardResponse(BaseModel):

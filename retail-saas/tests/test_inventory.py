@@ -93,6 +93,9 @@ def test_stock_in_success(auth_context):
     assert data["new_stock"] == 100
     assert data["reference"] is not None
     assert data["reference"].startswith("IN-")
+    assert data["reference_type"] == "stock_in"
+    assert data["reference_id"] is not None
+    assert data["reference"] != data["reference_type"]
     assert data["notes"] == "Initial stock receipt"
     # Added response fields
     assert data["batch_number"] == "BATCH-2026-A"
@@ -154,6 +157,12 @@ def test_stock_in_accumulates_quantity(auth_context):
         "!@#$",
         "@#$%",
         "...",
+        "20",
+        "pp",
+        "xxxx",
+        "aaaaa",
+        "0pp@00",
+        "*",
         None,
     ],
 )
@@ -256,7 +265,10 @@ def test_stock_in_rejects_invalid_expiry(auth_context, invalid_expiry):
     assert resp.status_code == 422
 
 
-@pytest.mark.parametrize("invalid_notes", ["", "   ", "string", "test", "----", "!@#$"])
+@pytest.mark.parametrize(
+    "invalid_notes",
+    ["", "   ", "string", "test", "----", "!@#$", "70", "12345", "pp", "xxxx", "aaaaa", "0pp@00", "*"],
+)
 def test_stock_in_rejects_invalid_notes(auth_context, invalid_notes):
     headers = auth_context["headers"]
     store_id = auth_context["store1"]["id"]
@@ -329,6 +341,9 @@ def test_stock_out_success(auth_context):
     assert data["new_stock"] == 70
     assert data["reference"] is not None
     assert data["reference"].startswith("OUT-")
+    assert data["reference_type"] == "stock_out"
+    assert data["reference_id"] is not None
+    assert data["reference"] != data["reference_type"]
 
     inv = client.get(f"/api/v1/inventory/{product_id}", headers=headers).json()
     assert inv["quantity"] == 70
@@ -356,7 +371,10 @@ def test_stock_out_insufficient_stock(auth_context):
     assert "Insufficient stock" in resp.text
 
 
-@pytest.mark.parametrize("invalid_notes", ["", "   ", "string", "----", "!@#$"])
+@pytest.mark.parametrize(
+    "invalid_notes",
+    ["", "   ", "string", "----", "!@#$", "00", "70", "12345", "pp", "xxxx", "aaaaa", "0pp@00", "*"],
+)
 def test_stock_out_rejects_invalid_notes(auth_context, invalid_notes):
     headers = auth_context["headers"]
     store_id = auth_context["store1"]["id"]
@@ -409,6 +427,9 @@ def test_stock_transfer_success(auth_context):
     assert data["new_stock"] == 60
     assert data["reference"] is not None
     assert data["reference"].startswith("TR-")
+    assert data["reference_type"] == "transfer"
+    assert data["reference_id"] is not None
+    assert data["reference"] != data["reference_type"]
 
     # Verify inventory across stores
     inv_all = client.get("/api/v1/inventory", headers=headers).json()
@@ -436,6 +457,30 @@ def test_stock_transfer_rejects_same_store(auth_context):
     )
     assert resp.status_code == 422
     assert "from_store_id and to_store_id must be different" in resp.text
+
+
+@pytest.mark.parametrize(
+    "invalid_notes",
+    ["", "   ", "string", "----", "!@#$", "0-", "00", "70", "12345", "pp", "xxxx", "aaaaa", "0pp@00", "*"],
+)
+def test_stock_transfer_rejects_invalid_notes(auth_context, invalid_notes):
+    headers = auth_context["headers"]
+    s1 = auth_context["store1"]["id"]
+    s2 = auth_context["store2"]["id"]
+    p = auth_context["product"]["id"]
+
+    resp = client.post(
+        "/api/v1/inventory/transfer",
+        json={
+            "product_id": p,
+            "from_store_id": s1,
+            "to_store_id": s2,
+            "quantity": 5,
+            "notes": invalid_notes,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
 
 
 def test_stock_transfer_rejects_insufficient_stock(auth_context):
@@ -540,6 +585,9 @@ def test_inventory_adjustment_increase_and_decrease(auth_context):
     assert r1.json()["new_stock"] == 50
     assert r1.json()["reference"] is not None
     assert r1.json()["reference"].startswith("ADJ-")
+    assert r1.json()["reference_type"] == "adjustment"
+    assert r1.json()["reference_id"] is not None
+    assert r1.json()["reference"] != r1.json()["reference_type"]
 
     # Decrease 15
     r2 = client.post(
@@ -561,7 +609,10 @@ def test_inventory_adjustment_increase_and_decrease(auth_context):
     assert inv["quantity"] == 35
 
 
-@pytest.mark.parametrize("invalid_reason", ["", "   ", "string", "test", "----", "!@#$"])
+@pytest.mark.parametrize(
+    "invalid_reason",
+    ["", "   ", "string", "test", "----", "!@#$", "00", "0-", "70", "12345", "pp", "xxxx", "aaaaa", "0pp@00", "*"],
+)
 def test_inventory_adjustment_rejects_invalid_reason(auth_context, invalid_reason):
     headers = auth_context["headers"]
     s = auth_context["store1"]["id"]

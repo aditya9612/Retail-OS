@@ -28,7 +28,7 @@ class Inventory(Base, TimestampMixin):
 
     @property
     def low_stock_threshold(self) -> int:
-        return self.min_stock_level or self.reorder_point
+        return self.min_stock_level or self.reorder_point or (getattr(self.product, "min_stock_alert", None) if getattr(self, "product", None) else 5)
 
     @low_stock_threshold.setter
     def low_stock_threshold(self, val: int) -> None:
