@@ -117,11 +117,23 @@ class InventoryService:
         )
 
         if not inventory:
+            product = (
+                self.db.query(Product)
+                .filter(
+                    Product.id == product_id,
+                    Product.tenant_id == tenant_id,
+                )
+                .first()
+            )
+            min_alert = getattr(product, "min_stock_alert", None) or 5
             inventory = Inventory(
                 tenant_id=tenant_id,
                 store_id=store_id,
                 product_id=product_id,
                 quantity=0,
+                min_stock_level=min_alert,
+                reorder_point=min_alert,
+                max_stock_level=max(min_alert * 20, 100),
             )
             self.db.add(inventory)
             self.db.flush()
@@ -137,7 +149,7 @@ class InventoryService:
         reference_id: Optional[int] = None,
         reference_type: Optional[str] = None,
     ) -> StockMovement:
-        self._get_product(tenant_id, data.product_id)
+        product = self._get_product(tenant_id, data.product_id)
         self._get_store(tenant_id, data.store_id)
 
         if data.quantity <= 0:
@@ -171,6 +183,9 @@ class InventoryService:
         previous_stock = inventory.quantity
         inventory.quantity += data.quantity
         new_stock = inventory.quantity
+
+        if data.unit_cost is not None and data.unit_cost > Decimal("0.00"):
+            product.cost_price = data.unit_cost
 
         if data.batch_number:
             inventory.batch_number = data.batch_number
@@ -425,7 +440,7 @@ class InventoryService:
         tenant_id: int,
         product_id: int,
     ):
-        self._get_product(tenant_id, product_id)
+        product = self._get_product(tenant_id, product_id)
 
         inventory = (
             self.db.query(Inventory)
@@ -440,6 +455,25 @@ class InventoryService:
             raise NotFoundException(
                 f"Inventory record for product with ID {product_id} not found"
             )
+
+        updated = False
+        default_min = getattr(product, "min_stock_alert", None) or 5
+        if not inventory.min_stock_level:
+            inventory.min_stock_level = default_min
+            updated = True
+        if not inventory.reorder_point:
+            inventory.reorder_point = default_min
+            updated = True
+        if not inventory.max_stock_level:
+            inventory.max_stock_level = max(default_min * 20, 100)
+            updated = True
+
+        if updated:
+            try:
+                self.db.commit()
+                self.db.refresh(inventory)
+            except Exception:
+                self.db.rollback()
 
         return inventory
 

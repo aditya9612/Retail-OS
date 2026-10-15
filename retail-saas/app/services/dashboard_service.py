@@ -15,10 +15,12 @@ class DashboardService:
         self,
         tenant_id: int,
         store_id: Optional[int] = None,
+        period: str = "this_month",
     ):
         return self.repo.get_dashboard(
             tenant_id=tenant_id,
             store_id=store_id,
+            period=period,
         )
 
     def get_dashboard_overview(
@@ -52,6 +54,18 @@ class DashboardService:
         limit: int = 10,
     ):
         return self.repo.get_top_products(
+            tenant_id=tenant_id,
+            store_id=store_id,
+            limit=limit,
+        )
+
+    def get_recent_transactions(
+        self,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+        limit: int = 10,
+    ):
+        return self.repo.get_recent_transactions(
             tenant_id=tenant_id,
             store_id=store_id,
             limit=limit,
