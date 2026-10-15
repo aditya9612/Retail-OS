@@ -839,3 +839,18 @@ def test_update_category_reject_null_name(tenant_fixture):
     )
     assert resp.status_code == 422
 
+
+def test_create_category_invalid_json_specifies_expected_value(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    invalid_body = '{"name": "nailpaint", "description": "bast quality", "parent_id": **}'
+    resp = client.post(
+        "/api/v1/categories",
+        content=invalid_body,
+        headers={"Content-Type": "application/json", **headers},
+    )
+    assert resp.status_code == 422
+    data = resp.json()
+    assert "parent_id" in str(data)
+    assert "Expected an integer" in str(data)
+
+
