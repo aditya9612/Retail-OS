@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 import secrets
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -225,15 +225,18 @@ def blacklist_token(
 
 
 def get_current_user(
+    request: Request,
     credentials: Optional[
         HTTPAuthorizationCredentials
     ] = Depends(security_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-    if not credentials:
-        raise UnauthorizedException()
+    token = credentials.credentials if credentials else None
+    if not token and request is not None:
+        token = request.query_params.get("token")
 
-    token = credentials.credentials
+    if not token:
+        raise UnauthorizedException()
 
     payload = decode_token(token)
 

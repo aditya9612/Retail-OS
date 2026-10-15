@@ -468,6 +468,13 @@ class BarcodeMode(str, Enum):
     PREVIEW = "preview"
 
 
+class BarcodeLabelMode(str, Enum):
+    JSON = "json"
+    PREVIEW = "preview"
+    HTML = "html"
+    DOWNLOAD = "download"
+
+
 class ProductImageCreate(BaseModel):
     image_url: str = Field(
         min_length=1,

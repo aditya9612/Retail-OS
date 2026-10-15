@@ -262,6 +262,36 @@ def test_barcode_label_endpoint(setup_product_data):
     assert label["store_name"] == store.name
     assert label["barcode_image_base64"].startswith("data:image/png;base64,")
 
+    # Test HTML visual sticker preview
+    html_resp = client.get(
+        f"/api/v1/products/{prod_id}/barcode-label?store_id={store.id}&mode=html",
+        headers=t1["headers"],
+    )
+    assert html_resp.status_code == 200
+    assert "text/html" in html_resp.headers.get("content-type", "")
+    assert "Print Barcode Sticker" in html_resp.text
+    assert label["barcode"] in html_resp.text
+
+    # Test mode=preview returns direct image/png
+    prev_resp = client.get(
+        f"/api/v1/products/{prod_id}/barcode-label?mode=preview",
+        headers=t1["headers"],
+    )
+    assert prev_resp.status_code == 200
+    assert prev_resp.headers["content-type"] == "image/png"
+    assert "inline" in prev_resp.headers.get("content-disposition", "")
+    assert len(prev_resp.content) > 100
+
+    # Test mode=download returns direct image/png attachment
+    down_resp = client.get(
+        f"/api/v1/products/{prod_id}/barcode-label?mode=download",
+        headers=t1["headers"],
+    )
+    assert down_resp.status_code == 200
+    assert down_resp.headers["content-type"] == "image/png"
+    assert "attachment" in down_resp.headers.get("content-disposition", "")
+
+
 
 def test_lookup_barcode_resolves_product_and_variant(setup_product_data):
     """Verify barcode lookup resolves base product and variant barcode."""
@@ -415,3 +445,39 @@ def test_expiring_soon_returns_real_expiring_products(setup_product_data):
         assert safe_prod.id not in ids
     finally:
         db.close()
+
+
+def test_generate_barcode_overwrite_protection(setup_product_data):
+    """Safety check: generate-barcode must reject if barcode exists, unless overwrite=true."""
+    t1 = setup_product_data["t1"]
+    sku = f"PROT-{uuid.uuid4().hex[:6]}".upper()
+    initial_bc = "85623014789652"
+
+    c_resp = client.post("/api/v1/products", json={
+        "name": "Protected Barcode Item",
+        "sku": sku,
+        "barcode": initial_bc,
+        "selling_price": "299.00",
+        "price": "299.00",
+    }, headers=t1["headers"])
+    assert c_resp.status_code == 201
+    prod_id = c_resp.json()["id"]
+    assert c_resp.json()["barcode"] == initial_bc
+
+    # 1. Attempt generate-barcode without overwrite -> Must fail with 409
+    g_resp1 = client.post(f"/api/v1/products/{prod_id}/generate-barcode", headers=t1["headers"])
+    assert g_resp1.status_code in (400, 409)
+    assert "already has barcode" in str(g_resp1.json()).lower()
+
+    # 2. Check barcode-label preview still returns the original barcode
+    lbl_resp = client.get(f"/api/v1/products/{prod_id}/barcode-label", headers=t1["headers"])
+    assert lbl_resp.status_code == 200
+    assert lbl_resp.json()["barcode"] == initial_bc
+
+    # 3. Explicit overwrite=true succeeds
+    g_resp2 = client.post(f"/api/v1/products/{prod_id}/generate-barcode?overwrite=true", headers=t1["headers"])
+    assert g_resp2.status_code == 200
+    new_bc = g_resp2.json()["barcode"]
+    assert new_bc != initial_bc
+    assert len(new_bc) == 13
+

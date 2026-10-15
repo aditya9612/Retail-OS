@@ -17,7 +17,7 @@ from fastapi import (
     status,
 )
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -26,7 +26,7 @@ from app.core.security import require_operational_write, require_permission
 from app.models.product import ProductImage
 from app.models.user import User
 from app.schemas.product import (
-    BarcodeMode,
+    BarcodeLabelMode,
     ProductBarcodeLabelResponse,
     ProductBulkCreateRequest,
     ProductBulkCreateResponse,
@@ -1220,86 +1220,240 @@ def toggle_product_status(
     )
 
 
-@router.get(
-    "/{product_id}/barcode",
-)
-def barcode_image(
-    product_id: int,
-    mode: BarcodeMode = Query(
-        default=BarcodeMode.DOWNLOAD,
-        description="download or preview",
-    ),
-    user: User = Depends(
-        require_permission("products:read")
-    ),
-    db: Session = Depends(get_db),
-):
-    product = ProductService(db).get_product(
-        user.tenant_id,
-        product_id,
-    )
-
-    image_bytes = ProductService(db).get_barcode_image(
-        user.tenant_id,
-        product_id,
-    )
-
-    disposition = (
-        "inline"
-        if mode == BarcodeMode.PREVIEW
-        else "attachment"
-    )
-
-    return Response(
-        content=image_bytes,
-        media_type="image/png",
-        headers={
-            "Content-Disposition": (
-                f"{disposition}; "
-                f"filename=barcode-{product.barcode}.png"
-            )
-        },
-    )
 
 
 @router.get(
     "/{product_id}/barcode-label",
     response_model=ProductBarcodeLabelResponse,
     summary="Printable Barcode Sticker",
-    description="Generates print-ready thermal barcode sticker data (50x25mm) with product details, price, MRP, and base64 barcode image.",
+    description="Generates print-ready thermal barcode sticker data (50x25mm). Select mode: 'preview' (display barcode image directly in Swagger/browser), 'download' (download PNG file), 'html' (printable web page), or 'json' (raw sticker data).",
 )
 def get_barcode_label(
     product_id: int,
+    mode: BarcodeLabelMode = Query(
+        default=BarcodeLabelMode.JSON,
+        description="Select output mode: json, preview (direct barcode image in Swagger), html (printable sticker page), or download",
+    ),
     store_id: Optional[int] = Query(
         default=None,
         gt=0,
         description="Optional store ID to include store name on label",
     ),
+    format: Optional[str] = Query(
+        default=None,
+        description="Deprecated alias for mode ('json', 'html', 'preview', 'download')",
+        include_in_schema=False,
+    ),
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    return ProductService(db).get_barcode_label(
+    label_data = ProductService(db).get_barcode_label(
         tenant_id=user.tenant_id,
         product_id=product_id,
         store_id=store_id,
     )
+    label = ProductBarcodeLabelResponse.model_validate(label_data) if isinstance(label_data, dict) else label_data
+
+    selected_mode = (format or mode.value).lower()
+
+    if selected_mode in ("preview", "download"):
+        sticker_bytes = ProductService(db).get_barcode_sticker_image(
+            tenant_id=user.tenant_id,
+            product_id=product_id,
+            store_id=store_id,
+        )
+        disposition = "inline" if selected_mode == "preview" else "attachment"
+        return Response(
+            content=sticker_bytes,
+            media_type="image/png",
+            headers={
+                "Content-Disposition": f"{disposition}; filename=sticker-{label.barcode}.png"
+            },
+        )
+
+    if selected_mode == "html":
+        store_title = label.store_name or "RETAIL STORE"
+        curr = label.currency_symbol or "₹"
+        mrp_val = float(label.mrp) if label.mrp is not None else 0.0
+        price_val = float(label.selling_price) if label.selling_price is not None else 0.0
+        mrp_line = f'<span class="mrp">MRP: {curr}{mrp_val:.2f}</span>' if mrp_val > 0 else '<span></span>'
+        price_line = f'<span class="price">OUR PRICE: {curr}{price_val:.2f}</span>'
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Barcode Sticker - {label.product_name}</title>
+    <style>
+        @page {{
+            size: 50mm 25mm;
+            margin: 0;
+        }}
+        body {{
+            margin: 0;
+            padding: 24px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            background: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 80vh;
+        }}
+        .controls {{
+            margin-bottom: 24px;
+            display: flex;
+            gap: 12px;
+        }}
+        .btn {{
+            background: #2563eb;
+            color: #ffffff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 15px;
+            box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+            transition: all 0.2s;
+        }}
+        .btn:hover {{
+            background: #1d4ed8;
+            transform: translateY(-1px);
+        }}
+        .preview-wrapper {{
+            padding: 16px;
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+        }}
+        .sticker {{
+            width: 50mm;
+            height: 25mm;
+            box-sizing: border-box;
+            background: #ffffff;
+            border: 1px dashed #94a3b8;
+            padding: 1.5mm 2mm;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            text-align: center;
+        }}
+        .store-name {{
+            font-size: 7.5pt;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            line-height: 1;
+            margin: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 46mm;
+            color: #0f172a;
+        }}
+        .prod-name {{
+            font-size: 7pt;
+            font-weight: 600;
+            line-height: 1.1;
+            margin: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 46mm;
+            color: #1e293b;
+        }}
+        .barcode-img {{
+            height: 11mm;
+            max-width: 46mm;
+            object-fit: contain;
+            margin: 0;
+        }}
+        .pricing {{
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 6.5pt;
+            line-height: 1;
+            margin: 0;
+            padding: 0 0.5mm;
+            box-sizing: border-box;
+        }}
+        .mrp {{
+            color: #64748b;
+            text-decoration: line-through;
+            font-weight: 500;
+        }}
+        .price {{
+            font-weight: 800;
+            font-size: 7.5pt;
+            color: #000000;
+        }}
+        @media print {{
+            body {{
+                background: none;
+                padding: 0;
+                display: block;
+            }}
+            .controls, .preview-wrapper {{
+                background: none;
+                padding: 0;
+                box-shadow: none;
+                border-radius: 0;
+            }}
+            .controls {{
+                display: none !important;
+            }}
+            .sticker {{
+                border: none;
+                margin: 0;
+                page-break-after: always;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <button class="btn" onclick="window.print()">🖨️ Print Barcode Sticker (50x25mm)</button>
+    </div>
+    <div class="preview-wrapper">
+        <div class="sticker">
+            <div class="store-name">{store_title}</div>
+            <div class="prod-name">{label.product_name}</div>
+            <img class="barcode-img" src="{label.barcode_image_base64}" alt="Barcode {label.barcode}" />
+            <div class="pricing">
+                {mrp_line}
+                {price_line}
+            </div>
+        </div>
+    </div>
+</body>
+</html>"""
+        return HTMLResponse(content=html)
+    return label
 
 
 @router.post(
     "/{product_id}/generate-barcode",
     response_model=ProductResponse,
     summary="Generate Barcode for Product",
-    description="Automatically generates and assigns a unique 13-digit EAN barcode for the specified product.",
+    description="Automatically generates and assigns a unique 13-digit EAN barcode for the specified product. If the product already has a barcode, it will be protected and rejected with 409 Conflict unless overwrite=true is provided.",
     dependencies=[Depends(require_operational_write)],
 )
 def generate_product_barcode(
     product_id: int,
+    overwrite: bool = Query(
+        default=False,
+        description="Set to true to explicitly overwrite an existing barcode",
+    ),
     user: User = Depends(require_permission("products:write")),
     db: Session = Depends(get_db),
 ):
     return ProductService(db).generate_barcode_for_product(
         user.tenant_id,
         product_id,
+        overwrite=overwrite,
     )
 
 

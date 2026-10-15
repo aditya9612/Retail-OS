@@ -19,7 +19,11 @@ from app.schemas.product import (
     ProductUpdate,
 )
 from app.services.saas_entitlement_service import SaaSEntitlementService
-from app.utils.barcode_generator import generate_barcode_image, generate_ean13_barcode
+from app.utils.barcode_generator import (
+    generate_barcode_image,
+    generate_ean13_barcode,
+    generate_thermal_sticker_image,
+)
 
 
 class ProductService:
@@ -681,11 +685,17 @@ class ProductService:
         self,
         tenant_id: int,
         product_id: int,
+        overwrite: bool = False,
     ) -> Product:
         product = self.get_product(
             tenant_id,
             product_id,
         )
+
+        if product.barcode and not overwrite:
+            raise ConflictException(
+                f"Product already has barcode '{product.barcode}'. To overwrite, pass overwrite=true."
+            )
 
         for _ in range(10):
             candidate = generate_ean13_barcode(tenant_id)
@@ -845,8 +855,25 @@ class ProductService:
             if store:
                 store_name = store.name
 
-        image_bytes = generate_barcode_image(product.barcode, product.name)
-        b64_str = base64.b64encode(image_bytes).decode("ascii")
+        if not store_name:
+            main_store = (
+                self.db.query(Store)
+                .filter(Store.tenant_id == tenant_id, Store.is_active.is_(True))
+                .order_by(Store.is_main.desc(), Store.id.asc())
+                .first()
+            )
+            if main_store:
+                store_name = main_store.name
+
+        sticker_bytes = generate_thermal_sticker_image(
+            barcode_value=product.barcode,
+            product_name=product.name,
+            selling_price=product.selling_price,
+            mrp=product.mrp,
+            store_name=store_name,
+            sku=product.sku,
+        )
+        b64_str = base64.b64encode(sticker_bytes).decode("ascii")
 
         return {
             "product_id": product.id,
@@ -860,3 +887,45 @@ class ProductService:
             "barcode_image_base64": f"data:image/png;base64,{b64_str}",
             "label_format": "50x25mm",
         }
+
+    def get_barcode_sticker_image(
+        self,
+        tenant_id: int,
+        product_id: int,
+        store_id: Optional[int] = None,
+    ) -> bytes:
+        product = self.get_product(tenant_id, product_id)
+        if not product.barcode:
+            product = self.generate_barcode_for_product(tenant_id, product_id)
+
+        store_name = None
+        if store_id is not None:
+            store = (
+                self.db.query(Store)
+                .filter(
+                    Store.id == store_id,
+                    Store.tenant_id == tenant_id,
+                )
+                .first()
+            )
+            if store:
+                store_name = store.name
+
+        if not store_name:
+            main_store = (
+                self.db.query(Store)
+                .filter(Store.tenant_id == tenant_id, Store.is_active.is_(True))
+                .order_by(Store.is_main.desc(), Store.id.asc())
+                .first()
+            )
+            if main_store:
+                store_name = main_store.name
+
+        return generate_thermal_sticker_image(
+            barcode_value=product.barcode,
+            product_name=product.name,
+            selling_price=product.selling_price,
+            mrp=product.mrp,
+            store_name=store_name,
+            sku=product.sku,
+        )
