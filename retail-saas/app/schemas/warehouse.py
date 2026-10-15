@@ -12,6 +12,121 @@ from pydantic import (
 )
 
 
+DISALLOWED_WAREHOUSE_PLACEHOLDERS = {
+    "string",
+    "test",
+    "null",
+    "none",
+    "undefined",
+    "n/a",
+    "na",
+    "unknown",
+    "placeholder",
+    "dummy",
+    "sample",
+    "address",
+}
+
+
+def validate_warehouse_name(value: str | None, required: bool = True) -> str | None:
+    if value is None:
+        if required:
+            raise ValueError("Warehouse name cannot be null")
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("Warehouse name must be a string")
+
+    v = value.strip()
+    if not v:
+        raise ValueError("Warehouse name cannot be empty")
+
+    if v.lower() in DISALLOWED_WAREHOUSE_PLACEHOLDERS:
+        raise ValueError("Please provide a valid warehouse name")
+
+    if len(v) < 2 or len(v) > 100:
+        raise ValueError("Warehouse name must be between 2 and 100 characters")
+
+    if v.isdigit():
+        raise ValueError("Warehouse name cannot contain only numbers")
+
+    if not re.search(r"[A-Za-z]", v):
+        raise ValueError("Warehouse name must contain at least one alphabetic character")
+
+    alpha_chars = [c.lower() for c in v if c.isalpha()]
+    if len(set(alpha_chars)) < 2:
+        raise ValueError("Warehouse name cannot consist of repeating characters")
+
+    return v
+
+
+def validate_warehouse_code(value: str | None, required: bool = True) -> str | None:
+    if value is None:
+        if required:
+            raise ValueError("Warehouse code cannot be null")
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("Warehouse code must be a string")
+
+    v = value.strip().upper()
+    if not v:
+        raise ValueError("Warehouse code cannot be empty")
+
+    if v in ("STRING", "TEST", "NULL", "NONE", "UNDEFINED", "DUMMY", "00000"):
+        raise ValueError("Please provide a valid warehouse code")
+
+    if len(v) < 2 or len(v) > 50:
+        raise ValueError("Warehouse code must be between 2 and 50 characters")
+
+    if v.isdigit():
+        raise ValueError("Warehouse code cannot contain only numbers")
+
+    if not re.fullmatch(r"[A-Z0-9_-]+", v):
+        raise ValueError("Warehouse code can contain only letters, numbers, '-' and '_'")
+
+    alnum_chars = [c for c in v if c.isalnum()]
+    if len(set(alnum_chars)) < 2:
+        raise ValueError("Warehouse code cannot consist of repeating characters")
+
+    return v
+
+
+def validate_warehouse_address(value: str | None, required: bool = False) -> str | None:
+    if value is None:
+        if required:
+            raise ValueError("Warehouse address cannot be null")
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("Warehouse address must be a string")
+
+    v = value.strip()
+    if not v:
+        raise ValueError("Warehouse address cannot be empty")
+
+    if v.lower() in DISALLOWED_WAREHOUSE_PLACEHOLDERS:
+        raise ValueError("Please provide a valid warehouse address")
+
+    if len(v) < 5 or len(v) > 500:
+        raise ValueError("Warehouse address must be between 5 and 500 characters")
+
+    if v.isdigit():
+        raise ValueError("Warehouse address cannot contain only numbers")
+
+    if not re.search(r"[A-Za-z]", v):
+        raise ValueError("Warehouse address must contain at least one letter")
+
+    alnum_chars = [c.lower() for c in v if c.isalnum()]
+    if len(set(alnum_chars)) < 2:
+        raise ValueError("Warehouse address cannot consist of repeating characters")
+
+    if not re.fullmatch(r"[A-Za-z0-9\s,./#&'()\-]+", v):
+        raise ValueError("Warehouse address contains invalid characters")
+
+    return v
+
+
 class WarehouseCreate(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -33,75 +148,26 @@ class WarehouseCreate(BaseModel):
         max_length=50,
     )
 
-    address: str | None = None
+    address: str | None = Field(
+        default=None,
+        min_length=5,
+        max_length=500,
+    )
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: str) -> str:
-        value = value.strip()
-
-        if not value:
-            raise ValueError("Warehouse name cannot be empty")
-        
-        if value.lower() == "string":
-           raise ValueError("Please provide a valid warehouse name")
-        
-        if value.isdigit():
-            raise ValueError("Warehouse name cannot contain only numbers")
-
-        if not re.search(r"[A-Za-z]", value):
-            raise ValueError("Warehouse name must contain at least one alphabetic character")
-
-        return value
+        return validate_warehouse_name(value, required=True)
 
     @field_validator("code")
     @classmethod
     def validate_code(cls, value: str) -> str:
-        value = value.strip().upper()
-
-        if not value:
-            raise ValueError(
-                "Warehouse code cannot be empty"
-            )
-        
-        if value == "STRING":
-           raise ValueError("Please provide a valid warehouse code")
-        
-        if value.isdigit():
-            raise ValueError(
-                "Warehouse code cannot contain only numbers"
-            )
-
-        if not re.fullmatch(r"[A-Z0-9_-]+", value):
-            raise ValueError(
-                "Warehouse code can contain only letters, numbers, '-' and '_'"
-            )
-
-        return value
+        return validate_warehouse_code(value, required=True)
 
     @field_validator("address")
     @classmethod
-    def validate_address(
-        cls,
-        value: str | None,
-    ) -> str | None:
-
-        if value is None:
-            return None
-
-        value = value.strip()
-
-        if not value:
-            raise ValueError(
-                "Warehouse address cannot be empty"
-            )
-        
-        if value.lower() == "string":
-            raise ValueError(
-               "Please provide a valid warehouse address"
-            )
-        
-        return value
+    def validate_address(cls, value: str | None) -> str | None:
+        return validate_warehouse_address(value, required=False)
 
 
 class WarehouseUpdate(BaseModel):
@@ -127,9 +193,9 @@ class WarehouseUpdate(BaseModel):
         max_length=50,
     )
 
-    address: str = Field(
+    address: str | None = Field(
         default=None,
-        min_length=2,
+        min_length=5,
         max_length=500,
     )
 
@@ -150,111 +216,24 @@ class WarehouseUpdate(BaseModel):
         cls,
         value: int | None,
     ) -> int | None:
-
         if value is None:
-            raise ValueError(
-                "Store ID cannot be null"
-            )
-
+            raise ValueError("Store ID cannot be null")
         return value
 
     @field_validator("name")
     @classmethod
-    def validate_name(
-        cls,
-        value: str | None,
-    ) -> str | None:
-
-        if value is None:
-            raise ValueError(
-                "Warehouse name cannot be null"
-            )
-
-        value = value.strip()
-
-        if not value:
-            raise ValueError(
-                "Warehouse name cannot be empty"
-            )
-        
-        if value.lower() == "string":
-            raise ValueError(
-               "Please provide a valid warehouse name"
-            )
-        
-        if value.isdigit():
-            raise ValueError(
-                "Warehouse name cannot contain only numbers"
-            )
-
-        if not re.search(r"[A-Za-z]", value):
-            raise ValueError(
-                "Warehouse name must contain at least one alphabetic character"
-            )
-
-        return value
+    def validate_name(cls, value: str | None) -> str | None:
+        return validate_warehouse_name(value, required=True)
 
     @field_validator("code")
     @classmethod
-    def validate_code(
-        cls,
-        value: str | None,
-    ) -> str | None:
-
-        if value is None:
-            raise ValueError(
-                "Warehouse code cannot be null"
-            )
-
-        value = value.strip().upper()
-
-        if not value:
-            raise ValueError(
-                "Warehouse code cannot be empty"
-            )
-        
-        if value == "STRING":
-            raise ValueError(
-               "Please provide a valid warehouse code"
-            )
-        
-        if value.isdigit():
-            raise ValueError(
-                "Warehouse code cannot contain only numbers"
-            )
-
-        if not re.fullmatch(r"[A-Z0-9_-]+", value):
-            raise ValueError(
-                "Warehouse code can contain only letters, numbers, '-' and '_'"
-            )
-
-        return value
+    def validate_code(cls, value: str | None) -> str | None:
+        return validate_warehouse_code(value, required=True)
 
     @field_validator("address")
     @classmethod
-    def validate_address(
-        cls,
-        value: str | None,
-    ) -> str | None:
-
-        if value is None:
-            raise ValueError(
-                "Warehouse address cannot be null"
-            )
-
-        value = value.strip()
-
-        if not value:
-            raise ValueError(
-                "Warehouse address cannot be empty"
-            )
-        
-        if value.lower() == "string":
-            raise ValueError(
-               "Please provide a valid warehouse address"
-            )
-        
-        return value
+    def validate_address(cls, value: str | None) -> str | None:
+        return validate_warehouse_address(value, required=True)
 
     @field_validator("is_active")
     @classmethod
@@ -262,12 +241,8 @@ class WarehouseUpdate(BaseModel):
         cls,
         value: bool | None,
     ) -> bool | None:
-
         if value is None:
-            raise ValueError(
-                "is_active cannot be null"
-            )
-
+            raise ValueError("is_active cannot be null")
         return value
 
 
