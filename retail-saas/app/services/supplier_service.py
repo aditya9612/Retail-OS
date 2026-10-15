@@ -171,7 +171,7 @@ class SupplierService:
             self.db.query(Supplier)
             .filter(
                 Supplier.tenant_id == tenant_id,
-                func.lower(Supplier.name) == search.lower(),
+                Supplier.name.ilike(f"%{search}%"),
             )
             .order_by(Supplier.name.asc())
             .all()
