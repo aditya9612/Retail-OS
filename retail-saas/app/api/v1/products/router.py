@@ -27,6 +27,10 @@ from app.models.product import ProductImage
 from app.models.user import User
 from app.schemas.product import (
     BarcodeMode,
+    ProductBarcodeLabelResponse,
+    ProductBulkCreateRequest,
+    ProductBulkCreateResponse,
+    ProductCatalogSummaryResponse,
     ProductCreate,
     ProductImageCreate,
     ProductImageResponse,
@@ -60,6 +64,33 @@ def list_products(
     include_inactive: bool = Query(
         default=False,
     ),
+    category_id: Optional[int] = Query(
+        default=None,
+        gt=0,
+        description="Filter products by category ID",
+    ),
+    brand: Optional[str] = Query(
+        default=None,
+        description="Filter products by brand name",
+    ),
+    stock_status: Optional[str] = Query(
+        default=None,
+        description="Filter products by stock status (in_stock, out_of_stock)",
+    ),
+    min_price: Optional[Decimal] = Query(
+        default=None,
+        ge=0,
+        description="Filter products by minimum selling price",
+    ),
+    max_price: Optional[Decimal] = Query(
+        default=None,
+        ge=0,
+        description="Filter products by maximum selling price",
+    ),
+    sort_by: Optional[str] = Query(
+        default=None,
+        description="Sort products: name_asc, name_desc, price_asc, price_desc, created_asc, created_desc",
+    ),
     user: User = Depends(
         require_permission("products:read")
     ),
@@ -67,9 +98,15 @@ def list_products(
 ):
     return ProductService(db).list_products(
         user.tenant_id,
-        page,
-        page_size,
-        include_inactive,
+        page=page,
+        page_size=page_size,
+        include_inactive=include_inactive,
+        category_id=category_id,
+        brand=brand,
+        stock_status=stock_status,
+        min_price=min_price,
+        max_price=max_price,
+        sort_by=sort_by,
     )
 
 
@@ -749,6 +786,46 @@ def generate_missing_barcodes(
 
 
 @router.get(
+    "/summary",
+    response_model=ProductCatalogSummaryResponse,
+    summary="Catalog Overview & Stock Valuation Dashboard",
+    description="Get comprehensive product catalog overview, stock valuation, alert counts, and category breakdown.",
+)
+def get_catalog_summary(
+    store_id: Optional[int] = Query(
+        default=None,
+        gt=0,
+        description="Filter summary and stock valuation for a specific store ID",
+    ),
+    user: User = Depends(require_permission("products:read")),
+    db: Session = Depends(get_db),
+):
+    return ProductService(db).get_catalog_summary(
+        tenant_id=user.tenant_id,
+        store_id=store_id,
+    )
+
+
+@router.post(
+    "/bulk",
+    response_model=ProductBulkCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Bulk Product Creation / Import",
+    description="Creates multiple products in bulk with validation and entitlement checks in a single atomic transaction.",
+    dependencies=[Depends(require_operational_write)],
+)
+def bulk_create_products(
+    payload: ProductBulkCreateRequest,
+    user: User = Depends(require_permission("products:write")),
+    db: Session = Depends(get_db),
+):
+    return ProductService(db).bulk_create_products(
+        tenant_id=user.tenant_id,
+        items=payload.products,
+    )
+
+
+@router.get(
     "/{product_id}",
     response_model=ProductResponse,
 )
@@ -1185,6 +1262,29 @@ def barcode_image(
     )
 
 
+@router.get(
+    "/{product_id}/barcode-label",
+    response_model=ProductBarcodeLabelResponse,
+    summary="Printable Barcode Sticker",
+    description="Generates print-ready thermal barcode sticker data (50x25mm) with product details, price, MRP, and base64 barcode image.",
+)
+def get_barcode_label(
+    product_id: int,
+    store_id: Optional[int] = Query(
+        default=None,
+        gt=0,
+        description="Optional store ID to include store name on label",
+    ),
+    user: User = Depends(require_permission("products:read")),
+    db: Session = Depends(get_db),
+):
+    return ProductService(db).get_barcode_label(
+        tenant_id=user.tenant_id,
+        product_id=product_id,
+        store_id=store_id,
+    )
+
+
 @router.post(
     "/{product_id}/generate-barcode",
     response_model=ProductResponse,
@@ -1234,18 +1334,25 @@ ADD_IMAGE_OPENAPI_EXTRA = {
                 "schema": {
                     "type": "object",
                     "title": "AddProductImageFormData",
-                    "required": ["image"],
                     "properties": {
+                        "images": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "format": "binary",
+                            },
+                            "title": "Product Photos (Multiple Files)",
+                            "description": "Upload multiple product photo files (.jpg, .jpeg, .png, .webp - Max 10MB each)",
+                        },
                         "image": {
                             "type": "string",
                             "format": "binary",
-                            "title": "Product Photo File",
-                            "description": "Upload photo file (.jpg, .jpeg, .png, .webp - Max 10MB)",
+                            "title": "Single Photo File (Backward Compatible)",
                         },
                         "is_primary": {
                             "type": "boolean",
-                            "title": "Set as Primary Photo",
-                            "description": "True to make this the main product photo, or false for gallery photo",
+                            "title": "Set First Photo as Primary",
+                            "description": "True to make first photo the primary cover photo",
                             "default": False,
                         },
                     },
@@ -1255,12 +1362,17 @@ ADD_IMAGE_OPENAPI_EXTRA = {
                 "schema": {
                     "type": "object",
                     "title": "AddProductImageJSON",
-                    "required": ["image_url"],
                     "properties": {
                         "image_url": {
                             "type": "string",
                             "title": "Photo URL / Path",
                             "description": "Public URL or relative path of the photo (e.g. /uploads/products/photo.png)",
+                        },
+                        "image_urls": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "title": "Multiple Photo URLs",
+                            "description": "List of photo URLs to add",
                         },
                         "is_primary": {
                             "type": "boolean",
@@ -1278,10 +1390,10 @@ ADD_IMAGE_OPENAPI_EXTRA = {
 
 @router.post(
     "/{product_id}/images",
-    response_model=ProductImageResponse,
+    response_model=Union[list[ProductImageResponse], ProductImageResponse],
     status_code=status.HTTP_201_CREATED,
-    summary="Add Product Image",
-    description="Uploads an additional image file for a product gallery. Supports both multipart/form-data (direct file upload) and application/json.",
+    summary="Add Product Images",
+    description="Uploads one or multiple photo files for a product gallery. Supports both multipart/form-data (multi-file upload) and application/json.",
     openapi_extra=ADD_IMAGE_OPENAPI_EXTRA,
     dependencies=[Depends(require_operational_write)],
 )
@@ -1299,34 +1411,80 @@ async def add_product_image(
     )
 
     content_type = request.headers.get("content-type", "").lower()
-    img_url = None
-    is_primary = False
+    created_images: list[ProductImage] = []
 
     if "application/json" in content_type:
         try:
             body = await request.json()
         except Exception as e:
             raise HTTPException(status_code=400, detail="Invalid JSON body") from e
-        img_url = body.get("image_url")
-        is_primary = bool(body.get("is_primary", False))
-    else:
-        form = await request.form()
-        upload_file: Any = None
-        for field_key in ("image", "file", "images"):
-            val = form.get(field_key)
-            if hasattr(val, "filename") and hasattr(val, "read") and getattr(val, "filename", None):
-                upload_file = val
-                break
-        if upload_file:
-            img_url = await _save_product_image(upload_file)
-        else:
-            img_url = _clean_str(form.get("image_url"))
-        is_primary = _clean_bool(form.get("is_primary"), default=False)
 
-    if not img_url:
+        is_primary = bool(body.get("is_primary", False))
+        urls = []
+        if body.get("image_urls") and isinstance(body.get("image_urls"), list):
+            urls.extend(body.get("image_urls"))
+        elif body.get("image_url"):
+            urls.append(body.get("image_url"))
+
+        if not urls:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="image_url or image_urls is required",
+            )
+
+        if is_primary:
+            db.query(ProductImage).filter(
+                ProductImage.product_id == product.id
+            ).update({"is_primary": False})
+
+        has_existing_primary = (
+            db.query(ProductImage.id)
+            .filter(ProductImage.product_id == product.id, ProductImage.is_primary.is_(True))
+            .first()
+            is not None
+        )
+
+        for idx, u in enumerate(urls):
+            should_be_primary = False
+            if is_primary and idx == 0:
+                should_be_primary = True
+            elif not has_existing_primary and idx == 0:
+                should_be_primary = True
+
+            img = ProductImage(product_id=product.id, image_url=u, is_primary=should_be_primary)
+            db.add(img)
+            created_images.append(img)
+
+        db.commit()
+        for img in created_images:
+            db.refresh(img)
+
+        return created_images if len(created_images) > 1 else created_images[0]
+
+    # Multipart / Form-data handling (supports multi-file upload)
+    form = await request.form()
+    is_primary = _clean_bool(form.get("is_primary"), default=False)
+
+    upload_files: list[Any] = []
+    for field_key in ("images", "image", "files", "file"):
+        for f in form.getlist(field_key):
+            if hasattr(f, "filename") and hasattr(f, "read") and getattr(f, "filename", None):
+                upload_files.append(f)
+
+    uploaded_urls: list[str] = []
+    for f in upload_files:
+        u = await _save_product_image(f)
+        if u:
+            uploaded_urls.append(u)
+
+    raw_single_url = _clean_str(form.get("image_url"))
+    if raw_single_url and not uploaded_urls:
+        uploaded_urls.append(raw_single_url)
+
+    if not uploaded_urls:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Image file or image_url is required",
+            detail="At least one image file or image_url is required",
         )
 
     if is_primary:
@@ -1334,17 +1492,29 @@ async def add_product_image(
             ProductImage.product_id == product.id
         ).update({"is_primary": False})
 
-    image = ProductImage(
-        product_id=product.id,
-        image_url=img_url,
-        is_primary=is_primary,
+    has_existing_primary = (
+        db.query(ProductImage.id)
+        .filter(ProductImage.product_id == product.id, ProductImage.is_primary.is_(True))
+        .first()
+        is not None
     )
 
-    db.add(image)
-    db.commit()
-    db.refresh(image)
+    for idx, u in enumerate(uploaded_urls):
+        should_be_primary = False
+        if is_primary and idx == 0:
+            should_be_primary = True
+        elif not has_existing_primary and idx == 0:
+            should_be_primary = True
 
-    return image
+        img = ProductImage(product_id=product.id, image_url=u, is_primary=should_be_primary)
+        db.add(img)
+        created_images.append(img)
+
+    db.commit()
+    for img in created_images:
+        db.refresh(img)
+
+    return created_images if len(created_images) > 1 else created_images[0]
 
 
 @router.get(
@@ -1414,5 +1584,28 @@ def delete_product_image(
             detail="Product image not found",
         )
 
+    was_primary = image.is_primary
+    img_url = image.image_url
+
     db.delete(image)
     db.commit()
+
+    if was_primary:
+        next_img = (
+            db.query(ProductImage)
+            .filter(ProductImage.product_id == product.id)
+            .order_by(ProductImage.id.asc())
+            .first()
+        )
+        if next_img:
+            next_img.is_primary = True
+            db.commit()
+
+    if img_url and img_url.startswith("/uploads/products/"):
+        import os
+        rel_path = img_url.lstrip("/")
+        try:
+            if os.path.exists(rel_path):
+                os.remove(rel_path)
+        except Exception:
+            pass

@@ -50,3 +50,29 @@ class StoreTransfer(Base):
         back_populates="transfer",
         cascade="all, delete-orphan"
     )
+
+    source_store = relationship("Store", foreign_keys=[source_store_id])
+    destination_store = relationship("Store", foreign_keys=[destination_store_id])
+    approver = relationship("User", foreign_keys=[approved_by])
+
+    @property
+    def source_store_name(self):
+        return self.source_store.name if self.source_store else None
+
+    @property
+    def destination_store_name(self):
+        return self.destination_store.name if self.destination_store else None
+
+    @property
+    def approved_by_name(self):
+        return self.approver.full_name if self.approver else None
+
+    @property
+    def total_items(self) -> int:
+        return len(self.items) if self.items else 0
+
+    @property
+    def total_quantity(self) -> int:
+        if not self.items:
+            return 0
+        return int(sum(item.quantity for item in self.items))

@@ -703,12 +703,16 @@ from pydantic import BaseModel, ConfigDict
 class StoreExpenseResponse(BaseModel):
     id: int
     store_id: int
+    store_name: Optional[str] = None
     amount: Decimal
     category: str
     description: Optional[str] = None
     expense_date: date
     payment_method: PaymentMethod
     reference_number: Optional[str] = None
+    status: Optional[str] = "active"
+    created_by: Optional[int] = None
+    created_by_name: Optional[str] = None
 
     @field_serializer("amount", mode="plain")
     def serialize_amount(self, v: Decimal) -> str:
@@ -718,10 +722,78 @@ class StoreExpenseResponse(BaseModel):
 
 
 # ============================================================
-# SUMMARY
+# SUMMARY & ANALYTICS SCHEMAS
 # ============================================================
 
 class StoreExpenseSummary(BaseModel):
-
     total_expenses: Decimal
     expense_count: int
+
+
+class CategoryExpenseStat(BaseModel):
+    category: str
+    total_amount: Decimal
+    percentage: float
+    count: int
+
+    @field_serializer("total_amount", mode="plain")
+    def serialize_amount(self, v: Decimal) -> str:
+        return f"{Decimal(str(v)):.2f}"
+
+
+class PaymentMethodExpenseStat(BaseModel):
+    payment_method: str
+    total_amount: Decimal
+    percentage: float
+    count: int
+
+    @field_serializer("total_amount", mode="plain")
+    def serialize_amount(self, v: Decimal) -> str:
+        return f"{Decimal(str(v)):.2f}"
+
+
+class StoreExpenseComparisonStat(BaseModel):
+    store_id: int
+    store_name: str
+    total_amount: Decimal
+    percentage: float
+    count: int
+
+    @field_serializer("total_amount", mode="plain")
+    def serialize_amount(self, v: Decimal) -> str:
+        return f"{Decimal(str(v)):.2f}"
+
+
+class StoreExpenseAnalyticsSummary(BaseModel):
+    total_expenses: Decimal
+    total_count: int
+    cash_expenses: Decimal
+    digital_expenses: Decimal
+    categories_breakdown: list[CategoryExpenseStat] = []
+    payment_methods_breakdown: list[PaymentMethodExpenseStat] = []
+    store_comparison: list[StoreExpenseComparisonStat] = []
+    recent_expenses: list[StoreExpenseResponse] = []
+
+    @field_serializer("total_expenses", "cash_expenses", "digital_expenses", mode="plain")
+    def serialize_amount(self, v: Decimal) -> str:
+        return f"{Decimal(str(v)):.2f}"
+
+
+# ============================================================
+# DAILY REPORT SCHEMAS
+# ============================================================
+
+class StoreExpenseDailyReportResponse(BaseModel):
+    report_date: date
+    store_id: Optional[int] = None
+    store_name: Optional[str] = None
+    total_expenses: Decimal
+    total_count: int
+    cash_expense_total: Decimal
+    non_cash_expense_total: Decimal
+    cash_drawer_payout_count: int
+    expenses: list[StoreExpenseResponse] = []
+
+    @field_serializer("total_expenses", "cash_expense_total", "non_cash_expense_total", mode="plain")
+    def serialize_amount(self, v: Decimal) -> str:
+        return f"{Decimal(str(v)):.2f}"

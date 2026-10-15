@@ -27,10 +27,15 @@ class StoreExpenseRepository:
         expense_id: int,
         tenant_id: int,
     ) -> Optional[StoreExpense]:
+        from sqlalchemy.orm import joinedload
         from app.models.store import Store
 
         return (
             db.query(StoreExpense)
+            .options(
+                joinedload(StoreExpense.store),
+                joinedload(StoreExpense.creator),
+            )
             .join(Store, StoreExpense.store_id == Store.id)
             .filter(
                 StoreExpense.id == expense_id,
@@ -69,13 +74,21 @@ class StoreExpenseRepository:
         tenant_id: int,
         store_id: Optional[int] = None,
         category: Optional[str] = None,
+        payment_method: Optional[str] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        skip: int = 0,
+        limit: Optional[int] = None,
     ):
+        from sqlalchemy.orm import joinedload
         from app.models.store import Store
 
         query = (
             db.query(StoreExpense)
+            .options(
+                joinedload(StoreExpense.store),
+                joinedload(StoreExpense.creator),
+            )
             .join(Store, StoreExpense.store_id == Store.id)
             .filter(
                 StoreExpense.status == "active",
@@ -90,7 +103,12 @@ class StoreExpenseRepository:
 
         if category:
             query = query.filter(
-                StoreExpense.category == category
+                StoreExpense.category.ilike(category.strip())
+            )
+
+        if payment_method:
+            query = query.filter(
+                StoreExpense.payment_method == payment_method.strip().lower()
             )
 
         if start_date:
@@ -103,10 +121,46 @@ class StoreExpenseRepository:
                 StoreExpense.expense_date <= end_date
             )
 
-        return query.order_by(
+        query = query.order_by(
             StoreExpense.expense_date.desc(),
             StoreExpense.id.desc(),
-        ).all()
+        )
+
+        if skip > 0:
+            query = query.offset(skip)
+        if limit is not None and limit > 0:
+            query = query.limit(limit)
+
+        return query.all()
+
+    @staticmethod
+    def get_daily_report_expenses(
+        db: Session,
+        tenant_id: int,
+        report_date: date,
+        store_id: Optional[int] = None,
+    ):
+        from sqlalchemy.orm import joinedload
+        from app.models.store import Store
+
+        query = (
+            db.query(StoreExpense)
+            .options(
+                joinedload(StoreExpense.store),
+                joinedload(StoreExpense.creator),
+            )
+            .join(Store, StoreExpense.store_id == Store.id)
+            .filter(
+                StoreExpense.status == "active",
+                Store.tenant_id == tenant_id,
+                StoreExpense.expense_date == report_date,
+            )
+        )
+
+        if store_id is not None:
+            query = query.filter(StoreExpense.store_id == store_id)
+
+        return query.order_by(StoreExpense.id.desc()).all()
 
     @staticmethod
     def update(

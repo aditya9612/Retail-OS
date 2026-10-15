@@ -184,6 +184,10 @@ class Product(Base, TimestampMixin):
     def image_url(self, val: str | None) -> None:
         self._image_url = val
 
+    @property
+    def category_name(self) -> Optional[str]:
+        return self.category.name if self.category else None
+
     category: Mapped["Category | None"] = relationship(
         "Category",
         back_populates="products"

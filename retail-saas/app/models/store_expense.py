@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Optional
 
 from sqlalchemy import (
     Column,
@@ -97,3 +98,11 @@ class StoreExpense(Base):
         "User",
         foreign_keys=[created_by],
     )
+
+    @property
+    def store_name(self) -> Optional[str]:
+        return self.store.name if self.store else None
+
+    @property
+    def created_by_name(self) -> Optional[str]:
+        return self.creator.full_name if self.creator else None

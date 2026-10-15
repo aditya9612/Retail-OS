@@ -371,27 +371,157 @@ class StoreTransferUpdate(BaseModel):
 
 
 class StoreTransferApprove(BaseModel):
-    approved_by: StrictInt = Field(
-        ...,
+    approved_by: Optional[StrictInt] = Field(
+        default=None,
         ge=1,
-        description="Enter the User ID of the person approving this store transfer. Example: 5.",
-        json_schema_extra={"example": 5},
+        description="Enter the User ID of the person approving this store transfer (leave empty or null to use logged-in user ID). Example: 2.",
+        json_schema_extra={"example": 2},
     )
 
     @field_validator("approved_by", mode="before")
     @classmethod
     def validate_approved_by(cls, value):
         if value is None or (isinstance(value, str) and not value.strip()):
-            raise ValueError("Required field is not provided.")
+            return None
         return validate_staff_id(value, "Approved by user ID")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "approved_by": 5
+                "approved_by": 2
             }
         }
     )
+
+
+class StoreTransferReject(BaseModel):
+    rejection_reason: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Optional reason for rejecting the transfer request",
+        json_schema_extra={"example": "Source branch has insufficient stock available"},
+    )
+
+
+# ============================================================
+# DISCREPANCY SCHEMAS
+# ============================================================
+
+class StoreTransferDiscrepancyItemInput(BaseModel):
+    product_id: StrictInt = Field(..., gt=0, description="Product ID being received")
+    received_quantity: StrictInt = Field(..., ge=0, description="Quantity received in good sellable condition")
+    damaged_quantity: StrictInt = Field(default=0, ge=0, description="Quantity received damaged or defective")
+    missing_quantity: StrictInt = Field(default=0, ge=0, description="Quantity missing or lost in transit")
+    remarks: Optional[str] = Field(default=None, max_length=255, description="Item-level discrepancy remarks")
+
+    @field_validator("product_id", mode="before")
+    @classmethod
+    def validate_pid(cls, value):
+        return validate_positive_integer_id(value, "Product ID")
+
+    @field_validator("received_quantity", "damaged_quantity", "missing_quantity", mode="before")
+    @classmethod
+    def validate_quantities(cls, value, info):
+        if value is None:
+            return 0
+        if isinstance(value, bool):
+            raise ValueError(f"{info.field_name} must be a whole number")
+        if isinstance(value, (float, Decimal)):
+            if not math.isclose(float(value), int(value)):
+                raise ValueError(f"{info.field_name} must be a whole number")
+            value = int(value)
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned.isdigit():
+                raise ValueError(f"{info.field_name} must contain only numbers")
+            value = int(cleaned)
+        if not isinstance(value, int) or value < 0:
+            raise ValueError(f"{info.field_name} must be greater than or equal to 0")
+        return value
+
+
+class StoreTransferDiscrepancyRequest(BaseModel):
+    items: List[StoreTransferDiscrepancyItemInput] = Field(
+        ...,
+        min_length=1,
+        description="List of received items with their discrepancy breakdown",
+    )
+    notes: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Overall discrepancy notes or remarks",
+    )
+
+
+class StoreTransferDiscrepancyItemResponse(BaseModel):
+    product_id: int
+    product_name: Optional[str] = None
+    sku: Optional[str] = None
+    dispatched_quantity: int
+    received_quantity: int
+    damaged_quantity: int = 0
+    missing_quantity: int = 0
+    remarks: Optional[str] = None
+
+
+class StoreTransferDiscrepancyResponse(BaseModel):
+    transfer_id: int
+    transfer_number: str
+    source_store_id: int
+    source_store_name: Optional[str] = None
+    destination_store_id: int
+    destination_store_name: Optional[str] = None
+    status: str
+    has_discrepancy: bool
+    total_dispatched_quantity: int
+    total_received_quantity: int
+    total_damaged_quantity: int
+    total_missing_quantity: int
+    discrepancy_notes: Optional[str] = None
+    items: List[StoreTransferDiscrepancyItemResponse] = []
+    message: str
+
+
+# ============================================================
+# SUMMARY / ANALYTICS SCHEMAS
+# ============================================================
+
+class TopStoreStat(BaseModel):
+    store_id: int
+    store_name: str
+    transfer_count: int
+
+
+class TopProductStat(BaseModel):
+    product_id: int
+    product_name: str
+    sku: Optional[str] = None
+    total_quantity: int
+
+
+class RecentTransferStat(BaseModel):
+    id: int
+    transfer_number: str
+    source_store_name: Optional[str] = None
+    destination_store_name: Optional[str] = None
+    status: str
+    created_at: datetime
+    total_items: int
+
+
+class StoreTransferSummaryResponse(BaseModel):
+    total_transfers: int
+    pending_transfers: int
+    approved_transfers: int
+    dispatched_transfers: int
+    received_transfers: int
+    rejected_transfers: int
+    in_transit_transfers: int
+    total_units_transferred: int
+    top_source_stores: List[TopStoreStat] = []
+    top_destination_stores: List[TopStoreStat] = []
+    top_transferred_products: List[TopProductStat] = []
+    recent_transfers: List[RecentTransferStat] = []
 
 
 # ============================================================
@@ -401,6 +531,8 @@ class StoreTransferApprove(BaseModel):
 class StoreTransferItemResponse(BaseModel):
     product_id: int = Field(..., description="Product ID")
     quantity: int = Field(..., description="Quantity transferred")
+    product_name: Optional[str] = Field(default=None, description="Product Name")
+    sku: Optional[str] = Field(default=None, description="Product SKU")
 
     @field_validator("quantity", mode="before")
     @classmethod
@@ -416,14 +548,19 @@ class StoreTransferResponse(BaseModel):
     id: int = Field(..., description="Transfer ID")
     transfer_number: str = Field(..., description="Transfer reference number")
     source_store_id: int = Field(..., description="Source store ID")
+    source_store_name: Optional[str] = Field(default=None, description="Source store name")
     destination_store_id: int = Field(..., description="Destination store ID")
+    destination_store_name: Optional[str] = Field(default=None, description="Destination store name")
     status: str = Field(..., description="Transfer status")
     approved_by: Optional[int] = Field(default=None, description="Approver user ID")
+    approved_by_name: Optional[str] = Field(default=None, description="Approver user full name")
     created_at: datetime = Field(
         ...,
         description="Creation timestamp",
         json_schema_extra={"example": "2026-10-05T03:57:21.992Z"},
     )
     items: List[StoreTransferItemResponse] = Field(default=[], description="List of transferred items")
+    total_items: Optional[int] = Field(default=None, description="Total unique items in transfer")
+    total_quantity: Optional[int] = Field(default=None, description="Total units transferred")
 
     model_config = ConfigDict(from_attributes=True)

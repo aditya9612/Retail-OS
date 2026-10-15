@@ -30,3 +30,13 @@ class StoreTransferItem(Base):
         "StoreTransfer",
         back_populates="items"
     )
+
+    product = relationship("Product", foreign_keys=[product_id])
+
+    @property
+    def product_name(self):
+        return self.product.name if self.product else None
+
+    @property
+    def sku(self):
+        return self.product.sku if self.product else None

@@ -1,11 +1,14 @@
 from datetime import datetime
 from decimal import Decimal
+import logging
 import threading
 from typing import Any, Dict, List, Optional
 
 import boto3
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import get_settings
 from app.core.exceptions import AppException, ForbiddenException, NotFoundException
@@ -927,10 +930,17 @@ class BillingService:
             settings.AWS_S3_BUCKET
             and settings.AWS_ACCESS_KEY_ID
         ):
-            self._upload_to_s3(
-                invoice,
-                pdf_bytes,
-            )
+            try:
+                self._upload_to_s3(
+                    invoice,
+                    pdf_bytes,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to upload invoice %s PDF to S3: %s",
+                    invoice.invoice_number,
+                    exc,
+                )
 
         return pdf_bytes
 

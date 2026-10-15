@@ -910,6 +910,13 @@ class SuperAdminAuditLogItem(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("entity_id", mode="before")
+    @classmethod
+    def coerce_entity_id(cls, v: Any) -> Optional[str]:
+        if v is not None:
+            return str(v)
+        return None
+
 
 class SuperAdminAuditLogListResponse(BaseModel):
     items: list[SuperAdminAuditLogItem]
