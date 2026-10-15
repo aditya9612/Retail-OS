@@ -239,29 +239,45 @@ def register_exception_handlers(app):
         clean_path = request.url.path.rstrip("/")
         if (
             request.method == "PATCH"
-            and "/coupons/" in clean_path
+            and ("/coupons/" in clean_path or "/suppliers/" in clean_path or clean_path.endswith("/status"))
             and clean_path.endswith("/status")
         ):
             has_json_invalid = any(err.get("type") == "json_invalid" for err in errors)
             if has_json_invalid:
+                try:
+                    raw_body = await request.body()
+                    body_text = raw_body.decode("utf-8", errors="replace")
+                except Exception:
+                    body_text = ""
+
+                field_name = "status" if ('"status"' in body_text or "'status'" in body_text) else "is_active"
+                if field_name == "status":
+                    msg = "Invalid JSON format. Expected 'active' or 'inactive' for 'status'."
+                    err_type = "string_type"
+                    ctx_err = "Expected 'active' or 'inactive' for 'status'."
+                else:
+                    msg = "Invalid JSON format. Expected a boolean: true or false for 'is_active'."
+                    err_type = "bool_parsing"
+                    ctx_err = "Expected a boolean: true or false for 'is_active'."
+
                 formatted = {
                     "success": False,
-                    "message": "Validation failed: 'is_active': Invalid JSON format. Expected a boolean: true or false for 'is_active'.",
+                    "message": f"Validation failed: '{field_name}': {msg}",
                     "detail": [
                         {
-                            "type": "bool_parsing",
-                            "loc": ["body", "is_active"],
-                            "msg": "Invalid JSON format. Expected a boolean: true or false for 'is_active'.",
+                            "type": err_type,
+                            "loc": ["body", field_name],
+                            "msg": msg,
                             "input": None,
-                            "ctx": {"error": "Expected a boolean: true or false for 'is_active'."},
+                            "ctx": {"error": ctx_err},
                         }
                     ],
                     "errors": [
                         {
-                            "field": "is_active",
-                            "message": "Invalid JSON format. Expected a boolean: true or false for 'is_active'.",
-                            "type": "bool_parsing",
-                            "loc": ["body", "is_active"],
+                            "field": field_name,
+                            "message": msg,
+                            "type": err_type,
+                            "loc": ["body", field_name],
                         }
                     ],
                 }
