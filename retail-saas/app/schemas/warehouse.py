@@ -1,5 +1,7 @@
 from datetime import datetime
+from decimal import Decimal
 import re
+from typing import Any, Optional
 
 from pydantic import (
     BaseModel,
@@ -110,10 +112,7 @@ class WarehouseUpdate(BaseModel):
         str_strip_whitespace=True,
     )
 
-    store_id: StrictInt | None = Field(
-        default=None,
-        gt=0,
-    )
+    store_id: StrictInt | None = None
 
     name: str | None = Field(
         default=None,
@@ -127,11 +126,7 @@ class WarehouseUpdate(BaseModel):
         max_length=50,
     )
 
-    address: str = Field(
-        default=None,
-        min_length=2,
-        max_length=500,
-    )
+    address: str | None = None
 
     is_active: StrictBool | None = None
 
@@ -150,12 +145,8 @@ class WarehouseUpdate(BaseModel):
         cls,
         value: int | None,
     ) -> int | None:
-
-        if value is None:
-            raise ValueError(
-                "Store ID cannot be null"
-            )
-
+        if value is not None and value <= 0:
+            raise ValueError("Store ID must be greater than 0")
         return value
 
     @field_validator("name")
@@ -238,9 +229,7 @@ class WarehouseUpdate(BaseModel):
     ) -> str | None:
 
         if value is None:
-            raise ValueError(
-                "Warehouse address cannot be null"
-            )
+            return None
 
         value = value.strip()
 
@@ -249,6 +238,11 @@ class WarehouseUpdate(BaseModel):
                 "Warehouse address cannot be empty"
             )
         
+        if len(value) < 2 or len(value) > 500:
+            raise ValueError(
+                "Warehouse address must be between 2 and 500 characters"
+            )
+
         if value.lower() == "string":
             raise ValueError(
                "Please provide a valid warehouse address"
@@ -278,19 +272,104 @@ class WarehouseResponse(BaseModel):
 
     id: int = Field(gt=0)
     tenant_id: int = Field(gt=0)
-    store_id: int | None
+    store_id: int | None = None
+    store_name: str | None = None
     name: str
     code: str
-    address: str | None
+    address: str | None = None
     is_active: bool
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
 
 class WarehouseDashboardResponse(BaseModel):
     total_warehouses: int = Field(ge=0)
     active_warehouses: int = Field(ge=0)
     inactive_warehouses: int = Field(ge=0)
+    total_stock_units: Decimal | int = 0
+    total_stock_value: Decimal = Decimal("0.00")
+    total_products_stored: int = 0
+
+
+class WarehouseDeleteData(BaseModel):
+    id: int
 
 
 class WarehouseDeleteResponse(BaseModel):
-    message: str
+    success: bool = True
+    message: str = "Warehouse deleted successfully"
+    data: Optional[WarehouseDeleteData] = None
+
+
+class WarehouseStatusUpdate(BaseModel):
+    is_active: bool
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_status_input(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            raise ValueError("Invalid status format")
+        if "is_active" in data:
+            val = data["is_active"]
+        elif "status" in data:
+            val = data["status"]
+        else:
+            raise ValueError("Field 'is_active' or 'status' is required")
+
+        if isinstance(val, bool):
+            return {"is_active": val}
+        if isinstance(val, str):
+            clean = val.strip().lower()
+            if clean in ("active", "true"):
+                return {"is_active": True}
+            elif clean in ("inactive", "false"):
+                return {"is_active": False}
+        raise ValueError("Invalid status. Expected one of: active, inactive.")
+
+
+class WarehouseStockItem(BaseModel):
+    product_id: int
+    product_name: str
+    sku: str
+    category_name: Optional[str] = None
+    quantity: Decimal | int
+    min_stock_level: int = 0
+    unit_cost: Optional[Decimal] = None
+    selling_price: Optional[Decimal] = None
+    stock_value: Optional[Decimal] = None
+    is_low_stock: bool = False
+
+
+class WarehouseStockResponse(BaseModel):
+    success: bool = True
+    warehouse_id: int
+    warehouse_name: str
+    warehouse_code: str
+    store_id: Optional[int] = None
+    total_items: int
+    total_quantity: Decimal | int
+    total_stock_value: Decimal
+    page: int
+    page_size: int
+    data: list[WarehouseStockItem] = Field(default_factory=list)
+
+
+class WarehouseTransferItem(BaseModel):
+    transfer_id: int
+    transfer_number: Optional[str] = None
+    transfer_type: str
+    source_store_id: int
+    source_store_name: Optional[str] = None
+    destination_store_id: int
+    destination_store_name: Optional[str] = None
+    status: str
+    item_count: int = 0
+    created_at: datetime
+
+
+class WarehouseTransfersResponse(BaseModel):
+    success: bool = True
+    warehouse_id: int
+    warehouse_name: str
+    total_transfers: int
+    data: list[WarehouseTransferItem] = Field(default_factory=list)

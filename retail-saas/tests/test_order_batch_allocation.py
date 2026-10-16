@@ -48,6 +48,25 @@ def make_store(db, tenant_id, name="Order Store"):
     return store
 
 
+def make_user(db, tenant_id, store_id=None):
+    from app.core.security import get_password_hash
+    from app.models.role import Role
+    role = db.query(Role).filter(Role.name == "admin").first()
+    role_id = role.id if role else 1
+    user = User(
+        tenant_id=tenant_id,
+        store_id=store_id,
+        email=f"usr-{uuid.uuid4().hex[:6]}@example.com",
+        full_name="Test User",
+        password_hash=get_password_hash("Pass123!"),
+        role_id=role_id,
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+    return user
+
+
 def make_product(db, tenant_id, name="Order Product", track_batch=True, track_expiry=False):
     prod = Product(
         tenant_id=tenant_id,
@@ -626,8 +645,8 @@ def test_order_item_variant_id_cross_session_persistence():
     db1 = SessionLocal()
     tenant = make_tenant(db1)
     store = make_store(db1, tenant.id)
-    user = db1.query(User).first()
-    user_id = user.id if user else 1
+    user = make_user(db1, tenant.id, store.id)
+    user_id = user.id
     product = make_product(db1, tenant.id)
     variant = make_variant(db1, tenant.id, product.id, name="Size-M")
     db1.commit()
@@ -666,8 +685,8 @@ def test_order_create_validates_variant_belongs_to_product(db):
     """Creating an order with variant belonging to a different product raises AppException."""
     tenant = make_tenant(db)
     store = make_store(db, tenant.id)
-    user = db.query(User).first()
-    user_id = user.id if user else 1
+    user = make_user(db, tenant.id, store.id)
+    user_id = user.id
     p1 = make_product(db, tenant.id, name="Product 1")
     p2 = make_product(db, tenant.id, name="Product 2")
     var2 = make_variant(db, tenant.id, p2.id, name="Var of P2")
@@ -696,8 +715,8 @@ def test_order_create_validates_variant_tenant_isolation(db):
     t1 = make_tenant(db, "Tenant 1")
     t2 = make_tenant(db, "Tenant 2")
     s1 = make_store(db, t1.id, "Store 1")
-    user = db.query(User).first()
-    user_id = user.id if user else 1
+    user = make_user(db, t1.id, s1.id)
+    user_id = user.id
 
     p1 = make_product(db, t1.id, name="P1")
     p2 = make_product(db, t2.id, name="P2")
@@ -747,8 +766,8 @@ def test_order_confirm_end_to_end_variant_allocation_fresh_session():
 
     tenant_id = tenant.id
     order_svc = OrderService(setup_db)
-    user = setup_db.query(User).first()
-    user_id = user.id if user else 1
+    user = make_user(setup_db, tenant.id, store.id)
+    user_id = user.id
 
     create_dto = OrderCreate(
         store_id=store.id,
@@ -817,8 +836,8 @@ def test_order_confirm_strict_variant_isolation_fresh_session():
 
     tenant_id = tenant.id
     order_svc = OrderService(setup_db)
-    user = setup_db.query(User).first()
-    user_id = user.id if user else 1
+    user = make_user(setup_db, tenant.id, store.id)
+    user_id = user.id
 
     create_dto = OrderCreate(
         store_id=store.id,
@@ -871,8 +890,8 @@ def test_order_confirm_non_variant_product_level_batch_allocation_fresh_session(
 
     tenant_id = tenant.id
     order_svc = OrderService(setup_db)
-    user = setup_db.query(User).first()
-    user_id = user.id if user else 1
+    user = make_user(setup_db, tenant.id, store.id)
+    user_id = user.id
 
     create_dto = OrderCreate(
         store_id=store.id,

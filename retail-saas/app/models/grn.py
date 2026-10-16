@@ -60,6 +60,32 @@ class GRN(Base, TimestampMixin):
         cascade="all, delete-orphan",
     )
 
+    purchase_order = relationship(
+        "PurchaseOrder",
+        foreign_keys=[purchase_order_id],
+        lazy="joined",
+    )
+
+    warehouse = relationship(
+        "Warehouse",
+        foreign_keys=[warehouse_id],
+        lazy="joined",
+    )
+
+    @property
+    def warehouse_name(self) -> str | None:
+        return self.warehouse.name if getattr(self, "warehouse", None) else None
+
+    @property
+    def purchase_order_number(self) -> str | None:
+        return self.purchase_order.order_number if getattr(self, "purchase_order", None) else None
+
+    @property
+    def supplier_name(self) -> str | None:
+        if getattr(self, "purchase_order", None) and getattr(self.purchase_order, "supplier", None):
+            return self.purchase_order.supplier.name
+        return None
+
 
 class GRNItem(Base):
 
@@ -100,3 +126,29 @@ class GRNItem(Base):
         "GRN",
         back_populates="items",
     )
+
+    product = relationship(
+        "Product",
+        foreign_keys=[product_id],
+        lazy="joined",
+    )
+
+    @property
+    def product_name(self) -> str | None:
+        return self.product.name if getattr(self, "product", None) else None
+
+    @property
+    def product_sku(self) -> str | None:
+        return self.product.sku if getattr(self, "product", None) else None
+
+    @property
+    def unit_cost(self):
+        if hasattr(self, "_unit_cost") and self._unit_cost is not None:
+            return self._unit_cost
+        if getattr(self, "product", None) and getattr(self.product, "cost_price", None):
+            return self.product.cost_price
+        return None
+
+    @unit_cost.setter
+    def unit_cost(self, val):
+        self._unit_cost = val

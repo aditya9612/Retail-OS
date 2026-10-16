@@ -226,27 +226,47 @@ class PurchaseOrderService:
         elif getattr(data, "invoice_id", None) is not None:
             purchase_order.invoice_number = data.invoice_id
 
+        target_store_id = purchase_order.store_id
+        if not target_store_id:
+            main_store = (
+                self.db.query(Store)
+                .filter(Store.tenant_id == tenant_id, Store.is_active == True)
+                .order_by(Store.is_main.desc(), Store.id.asc())
+                .first()
+            )
+            target_store_id = main_store.id if main_store else None
+            if not target_store_id:
+                raise NotFoundException("No active store found for inventory receiving")
+
         inventory_service = InventoryService(self.db)
 
         for item in purchase_order.items:
+            batch_no = f"PO-{purchase_order.order_number[-6:]}-{item.product_id}"
+            cost = item.unit_price if item.unit_price and item.unit_price >= Decimal("1.00") else Decimal("10.00")
             inventory_service.stock_in(
                 tenant_id,
                 StockInRequest(
-                    store_id=purchase_order.store_id,
+                    store_id=target_store_id,
                     product_id=item.product_id,
                     quantity=item.quantity,
                     supplier_id=purchase_order.supplier_id,
-                    unit_cost=item.unit_price,
-                    reference=purchase_order.po_number,
-                    notes=data.remarks,
+                    unit_cost=cost,
+                    batch_number=batch_no,
+                    notes=data.remarks or f"PO Received: {purchase_order.order_number}",
                 ),
+                commit=False,
+                movement_type="PO_RECEIVED",
+                reference_id=purchase_order.id,
+                reference_type=purchase_order.order_number,
             )
+            item.received_quantity = item.quantity
 
         purchase_order.status = "received"
 
         if data.remarks:
             purchase_order.remarks = data.remarks
 
+        self.db.commit()
         return self.repo.update(purchase_order)
     
     def update_purchase_order_status(

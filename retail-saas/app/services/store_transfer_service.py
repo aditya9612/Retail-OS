@@ -70,15 +70,17 @@ class StoreTransferService:
             )
 
         for item in items:
-            product = db.query(Product).filter(Product.id == item.product_id).first()
+            p_id = item["product_id"] if isinstance(item, dict) else item.product_id
+            qty = item["quantity"] if isinstance(item, dict) else getattr(item, "quantity", 0)
+            product = db.query(Product).filter(Product.id == p_id).first()
             if not product:
-                raise ValueError(f"Product {item.product_id} not found")
+                raise ValueError(f"Product {p_id} not found")
             if product.tenant_id != tenant_id:
-                raise ValueError(f"Product {item.product_id} does not belong to the user's tenant")
+                raise ValueError(f"Product {p_id} does not belong to the user's tenant")
             if not product.is_active:
-                raise ValueError(f"Product {item.product_id} is inactive or deleted")
-            if getattr(item, "quantity", 0) <= 0:
-                raise ValueError(f"Quantity must be greater than 0 for product {item.product_id}")
+                raise ValueError(f"Product {p_id} is inactive or deleted")
+            if qty <= 0:
+                raise ValueError(f"Quantity must be greater than 0 for product {p_id}")
 
         seq = db.query(StoreTransfer).count() + 1
         rand_suffix = secrets.token_hex(2).upper()
@@ -97,10 +99,12 @@ class StoreTransferService:
         )
 
         for item in items:
+            p_id = item["product_id"] if isinstance(item, dict) else item.product_id
+            qty = item["quantity"] if isinstance(item, dict) else item.quantity
             transfer.items.append(
                 StoreTransferItem(
-                    product_id=item.product_id,
-                    quantity=item.quantity
+                    product_id=p_id,
+                    quantity=qty
                 )
             )
 

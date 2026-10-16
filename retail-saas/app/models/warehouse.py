@@ -46,3 +46,11 @@ class Warehouse(Base, TimestampMixin):
         nullable=False,
         default=True,
     )
+
+    @property
+    def store_name(self) -> str | None:
+        return getattr(self, "_store_name", None)
+
+    @store_name.setter
+    def store_name(self, val: str | None) -> None:
+        self._store_name = val
