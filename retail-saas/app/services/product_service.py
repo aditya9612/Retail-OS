@@ -253,11 +253,6 @@ class ProductService:
             page_size,
         )
 
-        if not products:
-            raise NotFoundException(
-                f"No products found matching '{query}'"
-            )
-
         return products
 
     def list_products(
