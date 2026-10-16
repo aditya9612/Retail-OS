@@ -1,6 +1,6 @@
 from datetime import date
 from decimal import Decimal
-from typing import Any, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 from sqlalchemy import Date, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.models.product import Product
     from app.models.store import Store
     from app.models.supplier import Supplier
+    from app.models.product_batch import ProductBatch
 
 
 class Inventory(Base, TimestampMixin):
@@ -26,6 +27,12 @@ class Inventory(Base, TimestampMixin):
     max_stock_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     reorder_point: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    batch: Mapped[Optional["ProductBatch"]] = relationship(
+        "ProductBatch",
+        foreign_keys=[batch_id],
+        lazy="joined",
+    )
+
     @property
     def low_stock_threshold(self) -> int:
         return self.min_stock_level or self.reorder_point or (getattr(self.product, "min_stock_alert", None) if getattr(self, "product", None) else 5)
@@ -36,11 +43,33 @@ class Inventory(Base, TimestampMixin):
 
     @property
     def batch_number(self) -> str | None:
+        if getattr(self, "batch", None) and getattr(self.batch, "batch_number", None):
+            return self.batch.batch_number
         return getattr(self, "_batch_number", None)
 
     @batch_number.setter
     def batch_number(self, val: str | None) -> None:
         self._batch_number = val
+
+    @property
+    def product_name(self) -> str | None:
+        return self.product.name if getattr(self, "product", None) else None
+
+    @property
+    def product_sku(self) -> str | None:
+        return self.product.sku if getattr(self, "product", None) else None
+
+    @property
+    def store_name(self) -> str | None:
+        return self.store.name if getattr(self, "store", None) else None
+
+    @property
+    def cost_price(self) -> Decimal | None:
+        return getattr(self.product, "cost_price", None) if getattr(self, "product", None) else None
+
+    @property
+    def selling_price(self) -> Decimal | None:
+        return getattr(self.product, "selling_price", None) if getattr(self, "product", None) else None
 
     expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
@@ -89,8 +118,16 @@ class StockMovement(Base, TimestampMixin):
             except (ValueError, TypeError):
                 pass
 
+    batch: Mapped[Optional["ProductBatch"]] = relationship(
+        "ProductBatch",
+        foreign_keys=[batch_id],
+        lazy="joined",
+    )
+
     @property
     def batch_number(self) -> str | None:
+        if getattr(self, "batch", None) and getattr(self.batch, "batch_number", None):
+            return self.batch.batch_number
         return getattr(self, "_batch_number", None)
 
     @batch_number.setter
@@ -99,6 +136,8 @@ class StockMovement(Base, TimestampMixin):
 
     @property
     def expiry_date(self) -> date | None:
+        if getattr(self, "batch", None) and getattr(self.batch, "expiry_date", None):
+            return self.batch.expiry_date
         return getattr(self, "_expiry_date", None)
 
     @expiry_date.setter

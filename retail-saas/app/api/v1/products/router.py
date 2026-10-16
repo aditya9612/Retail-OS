@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 import json
-from pathlib import Path
+import pathlib
 from typing import Any, Dict, List, Optional, Union
 import uuid
 
@@ -11,6 +11,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Path,
     Query,
     Request,
     UploadFile,
@@ -38,7 +39,13 @@ from app.schemas.product import (
     ProductResponse,
     ProductUpdate,
 )
+from app.schemas.product_variant import (
+    ProductVariantCreate,
+    ProductVariantListResponse,
+    ProductVariantResponse,
+)
 from app.services.product_service import ProductService
+from app.services.product_variant_service import ProductVariantService
 
 
 router = APIRouter(
@@ -276,7 +283,7 @@ async def _save_product_image(
             detail=f"Image file exceeds maximum allowed size of {max_mb}MB",
         )
 
-    ext = Path(filename).suffix.lower()
+    ext = pathlib.Path(filename).suffix.lower()
     if not ext:
         content_type = getattr(file, "content_type", "")
         if "png" in content_type:
@@ -296,7 +303,7 @@ async def _save_product_image(
         )
 
     unique_filename = f"prod_{uuid.uuid4().hex[:12]}{ext}"
-    product_upload_dir = Path("uploads") / "products"
+    product_upload_dir = pathlib.Path("uploads") / "products"
     product_upload_dir.mkdir(parents=True, exist_ok=True)
     file_path = product_upload_dir / unique_filename
     with open(file_path, "wb") as f:
@@ -1763,3 +1770,72 @@ def delete_product_image(
                 os.remove(rel_path)
         except Exception:
             pass
+
+
+# ============================================================================
+# PRODUCT VARIANT NESTED ROUTES
+# ============================================================================
+
+
+@router.post(
+    "/{product_id}/variants",
+    response_model=ProductVariantResponse,
+    status_code=201,
+    dependencies=[Depends(require_operational_write)],
+    description="Create a new variant for a specific product",
+)
+def create_product_variant(
+    product_id: int = Path(..., gt=0, description="Parent Product ID"),
+    data: ProductVariantCreate = ...,
+    user: User = Depends(require_permission("products:write")),
+    db: Session = Depends(get_db),
+):
+    return ProductVariantService(db).create_variant(
+        tenant_id=user.tenant_id,
+        product_id=product_id,
+        data=data,
+    )
+
+
+@router.get(
+    "/{product_id}/variants",
+    response_model=ProductVariantListResponse,
+    description="List all variants belonging to a specific product with pagination",
+)
+def list_product_variants(
+    product_id: int = Path(..., gt=0, description="Parent Product ID"),
+    page: int = Query(default=1, gt=0, description="Page number"),
+    page_size: int = Query(default=20, gt=0, le=100, description="Page size"),
+    include_inactive: bool = Query(default=False, description="Include inactive/soft-deleted variants"),
+    user: User = Depends(require_permission("products:read")),
+    db: Session = Depends(get_db),
+):
+    return ProductVariantService(db).list_variants(
+        tenant_id=user.tenant_id,
+        product_id=product_id,
+        page=page,
+        page_size=page_size,
+        include_inactive=include_inactive,
+    )
+
+
+@router.get(
+    "/{product_id}/variants/{variant_id}",
+    response_model=ProductVariantResponse,
+    description="Get details of a specific variant belonging to a product",
+)
+def get_product_variant(
+    product_id: int = Path(..., gt=0, description="Parent Product ID"),
+    variant_id: int = Path(..., gt=0, description="Variant ID"),
+    user: User = Depends(require_permission("products:read")),
+    db: Session = Depends(get_db),
+):
+    from app.core.exceptions import NotFoundException
+
+    variant = ProductVariantService(db).get_variant(
+        tenant_id=user.tenant_id,
+        variant_id=variant_id,
+    )
+    if variant.product_id != product_id:
+        raise NotFoundException("Variant not found for this product")
+    return variant

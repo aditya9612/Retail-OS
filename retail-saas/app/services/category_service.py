@@ -1,4 +1,6 @@
+from typing import Optional
 from fastapi import status
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -47,8 +49,30 @@ class CategoryService:
     def list_categories(
         self,
         tenant_id: int,
-    ) -> list[Category]:
-        return self.repository.get_all(tenant_id)
+        search: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        root_only: bool = False,
+        parent_id: Optional[int] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ) -> tuple[list[Category], int]:
+        items = self.repository.get_all(
+            tenant_id=tenant_id,
+            search=search,
+            is_active=is_active,
+            root_only=root_only,
+            parent_id=parent_id,
+            page=page,
+            page_size=page_size,
+        )
+        total = self.repository.count(
+            tenant_id=tenant_id,
+            search=search,
+            is_active=is_active,
+            root_only=root_only,
+            parent_id=parent_id,
+        )
+        return items, total
 
     def get_category(
         self,
@@ -211,3 +235,111 @@ class CategoryService:
             raise ConflictException(
                 f"Cannot delete category: {str(exc)}"
             )
+
+    def get_category_tree(self, tenant_id: int) -> list[dict]:
+        categories = self.repository.get_all(tenant_id=tenant_id)
+        if not categories:
+            return []
+
+        # Product count per category
+        prod_counts = dict(
+            self.db.query(Product.category_id, func.count(Product.id))
+            .filter(Product.tenant_id == tenant_id, Product.category_id.is_not(None))
+            .group_by(Product.category_id)
+            .all()
+        )
+
+        nodes: dict[int, dict] = {}
+        for cat in categories:
+            nodes[cat.id] = {
+                "id": cat.id,
+                "tenant_id": cat.tenant_id,
+                "parent_id": cat.parent_id,
+                "name": cat.name,
+                "is_active": cat.is_active,
+                "description": cat.description,
+                "product_count": prod_counts.get(cat.id, 0),
+                "children": [],
+                "created_at": cat.created_at,
+                "updated_at": cat.updated_at,
+            }
+
+        root_nodes: list[dict] = []
+        for cat in categories:
+            node = nodes[cat.id]
+            if cat.parent_id is not None and cat.parent_id in nodes:
+                nodes[cat.parent_id]["children"].append(node)
+            else:
+                root_nodes.append(node)
+
+        return root_nodes
+
+    def get_subcategories(
+        self,
+        tenant_id: int,
+        category_id: int,
+    ) -> list[Category]:
+        parent = self.repository.get_by_id(tenant_id=tenant_id, category_id=category_id)
+        if not parent:
+            raise NotFoundException("Category not found")
+
+        subcats = self.repository.get_subcategories(tenant_id=tenant_id, category_id=category_id)
+        for subcat in subcats:
+            subcat.parent_name = parent.name
+            subcat.product_count = (
+                self.db.query(Product)
+                .filter(Product.tenant_id == tenant_id, Product.category_id == subcat.id)
+                .count()
+            )
+            subcat.subcategory_count = (
+                self.db.query(Category)
+                .filter(Category.tenant_id == tenant_id, Category.parent_id == subcat.id)
+                .count()
+            )
+
+        return subcats
+
+    def get_category_products(
+        self,
+        tenant_id: int,
+        category_id: int,
+        search: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> dict:
+        category = self.repository.get_by_id(tenant_id=tenant_id, category_id=category_id)
+        if not category:
+            raise NotFoundException("Category not found")
+
+        products, total = self.repository.get_products_by_category(
+            tenant_id=tenant_id,
+            category_id=category_id,
+            search=search,
+            is_active=is_active,
+            page=page,
+            page_size=page_size,
+        )
+
+        return {
+            "success": True,
+            "message": "Category products retrieved successfully",
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "category_id": category.id,
+            "category_name": category.name,
+            "data": products,
+        }
+
+    def set_category_active(
+        self,
+        tenant_id: int,
+        category_id: int,
+        is_active: bool,
+    ) -> Category:
+        category = self.repository.get_by_id(tenant_id=tenant_id, category_id=category_id)
+        if not category:
+            raise NotFoundException("Category not found")
+
+        return self.repository.set_active_status(category, is_active)

@@ -1329,7 +1329,8 @@ class ProductResponse(BaseModel):
 
 class ProductLowStockResponse(ProductResponse):
     store_id: int = Field(
-        description="Store ID where stock is low"
+        default=0,
+        description="Store ID where stock is low",
     )
 
     current_stock: int = Field(

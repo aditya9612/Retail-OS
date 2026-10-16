@@ -59,3 +59,7 @@ class ProductVariant(Base, TimestampMixin):
         if self.product and getattr(self.product, "cost_price", None) is not None:
             return self.product.cost_price
         return Decimal("0.00")
+
+    @property
+    def product_name(self) -> Optional[str]:
+        return self.product.name if self.product else None

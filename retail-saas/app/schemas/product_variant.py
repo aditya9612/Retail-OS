@@ -40,6 +40,10 @@ class ProductVariantBase(BaseModel):
         description="Optional variant cost override; if null, falls back to parent product",
     )
     is_active: bool = True
+    auto_generate_barcode: bool = Field(
+        default=False,
+        description="Auto-generate unique EAN-13 barcode if barcode is not provided",
+    )
 
     @field_validator("variant_name")
     @classmethod
@@ -150,6 +154,7 @@ class ProductVariantResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    product_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -161,4 +166,56 @@ class ProductVariantListResponse(BaseModel):
     items: List[ProductVariantResponse]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class VariantMatrixGenerateRequest(BaseModel):
+    product_id: int = Field(gt=0, description="Parent product ID to generate variants for")
+    sizes: List[str] = Field(default=[], description="List of sizes (e.g. ['S', 'M', 'L'])")
+    colors: List[str] = Field(default=[], description="List of colors (e.g. ['Black', 'White', 'Blue'])")
+    attributes: Optional[Dict[str, Any]] = Field(default=None, description="Common attributes for all variants")
+    selling_price: Optional[Decimal] = Field(default=None, gt=0, le=Decimal("999999.99"))
+    cost_price: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("999999.99"))
+    sku_prefix: Optional[str] = Field(default=None, max_length=50, description="Optional custom SKU prefix")
+    auto_generate_barcode: bool = Field(
+        default=True,
+        description="Automatically generate unique EAN-13 barcodes for all matrix variants",
+    )
+
+    @field_validator("sizes", "colors")
+    @classmethod
+    def clean_lists(cls, v: List[str]) -> List[str]:
+        if v:
+            return [item.strip() for item in v if item and item.strip()]
+        return []
+
+    @field_validator("sku_prefix")
+    @classmethod
+    def clean_prefix(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = v.strip().upper()
+            return v if v else None
+        return None
+
+
+class VariantMatrixGenerateResponse(BaseModel):
+    product_id: int
+    product_name: str
+    generated_count: int
+    variants: List[ProductVariantResponse]
+
+
+class VariantBarcodeGenerateResponse(BaseModel):
+    success: bool = True
+    message: str
+    variant_id: int
+    sku: str
+    barcode: str
+
+
+class VariantMissingBarcodesResponse(BaseModel):
+    success: bool = True
+    message: str
+    updated_count: int
+    variants: List[Dict[str, Any]]
+
 

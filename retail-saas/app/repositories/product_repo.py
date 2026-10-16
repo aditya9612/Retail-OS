@@ -573,3 +573,83 @@ class ProductRepository:
         if not include_inactive:
             query = query.filter(ProductVariant.is_active.is_(True))
         return query.count()
+
+    def list_all_variants(
+        self,
+        tenant_id: int,
+        product_id: Optional[int] = None,
+        search: Optional[str] = None,
+        size: Optional[str] = None,
+        color: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        skip: int = 0,
+        limit: int = 20,
+    ) -> List[ProductVariant]:
+        from sqlalchemy import func, or_
+
+        query = (
+            self.db.query(ProductVariant)
+            .options(joinedload(ProductVariant.product))
+            .filter(ProductVariant.tenant_id == tenant_id)
+        )
+
+        if product_id is not None:
+            query = query.filter(ProductVariant.product_id == product_id)
+
+        if is_active is not None:
+            query = query.filter(ProductVariant.is_active.is_(is_active))
+
+        if size is not None:
+            query = query.filter(func.lower(ProductVariant.size) == size.strip().lower())
+
+        if color is not None:
+            query = query.filter(func.lower(ProductVariant.color) == color.strip().lower())
+
+        if search:
+            search_pattern = f"%{search.strip()}%"
+            query = query.filter(
+                or_(
+                    ProductVariant.variant_name.ilike(search_pattern),
+                    ProductVariant.sku.ilike(search_pattern),
+                    ProductVariant.barcode.ilike(search_pattern),
+                )
+            )
+
+        return query.order_by(ProductVariant.id.desc()).offset(skip).limit(limit).all()
+
+    def count_all_variants(
+        self,
+        tenant_id: int,
+        product_id: Optional[int] = None,
+        search: Optional[str] = None,
+        size: Optional[str] = None,
+        color: Optional[str] = None,
+        is_active: Optional[bool] = None,
+    ) -> int:
+        from sqlalchemy import func, or_
+
+        query = self.db.query(ProductVariant).filter(ProductVariant.tenant_id == tenant_id)
+
+        if product_id is not None:
+            query = query.filter(ProductVariant.product_id == product_id)
+
+        if is_active is not None:
+            query = query.filter(ProductVariant.is_active.is_(is_active))
+
+        if size is not None:
+            query = query.filter(func.lower(ProductVariant.size) == size.strip().lower())
+
+        if color is not None:
+            query = query.filter(func.lower(ProductVariant.color) == color.strip().lower())
+
+        if search:
+            search_pattern = f"%{search.strip()}%"
+            query = query.filter(
+                or_(
+                    ProductVariant.variant_name.ilike(search_pattern),
+                    ProductVariant.sku.ilike(search_pattern),
+                    ProductVariant.barcode.ilike(search_pattern),
+                )
+            )
+
+        return query.count()

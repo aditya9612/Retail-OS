@@ -631,6 +631,11 @@ class ProductService:
         result = []
 
         for product, qty in rows:
+            setattr(product, "store_id", store_id)
+            setattr(product, "current_stock", qty)
+            setattr(product, "quantity", qty)
+            setattr(product, "threshold", threshold)
+
             response = ProductLowStockResponse.model_validate(
                 product
             )
