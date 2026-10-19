@@ -1,4 +1,5 @@
 import io
+import uuid
 from datetime import date
 
 import openpyxl
@@ -51,12 +52,13 @@ def export_test_setup(unique_slug):
     ).json()
 
     # Supplier
+    supplier_phone = f"98{uuid.uuid4().int % 100000000:08d}"
     supplier_resp = client.post(
         "/api/v1/suppliers",
         json={
-            "name": "Main Supplier Ltd",
+            "name": f"Main Supplier {unique_slug}",
             "contact_person": "Vendor Bob",
-            "phone": "9876543210",
+            "phone": supplier_phone,
             "email": f"vendor-{unique_slug[:6]}@supplier.com",
             "address": "45 Industrial Area",
         },
