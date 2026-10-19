@@ -54,7 +54,7 @@ def validate_grn_remarks(value: str | None) -> str | None:
 
 class GRNItemCreate(BaseModel):
     product_id: int = Field(gt=0, description="Product ID must be positive")
-    ordered_quantity: Optional[int] = Field(default=None, ge=0, description="Ordered quantity")
+    ordered_quantity: Optional[int] = Field(default=None, gt=0, description="Ordered quantity must be greater than 0")
     received_quantity: int = Field(default=1, ge=0, description="Received quantity")
     accepted_quantity: Optional[int] = Field(default=None, ge=0, description="Accepted quantity")
     rejected_quantity: Optional[int] = Field(default=0, ge=0, description="Rejected quantity")

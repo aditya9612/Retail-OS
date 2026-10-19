@@ -25,10 +25,11 @@ class ProductVariantBase(BaseModel):
     variant_name: str = Field(min_length=1, max_length=255)
     sku: str = Field(min_length=2, max_length=100)
     barcode: Optional[str] = Field(default=None, max_length=100)
-    size: str = Field(min_length=1, max_length=50)
-    color: str = Field(min_length=1, max_length=50)
-    attributes: Dict[str, Any] = Field(
-        description="Non-empty key-value attributes for this variant"
+    size: Optional[str] = Field(default=None, max_length=50)
+    color: Optional[str] = Field(default=None, max_length=50)
+    attributes: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional key-value attributes for this variant",
     )
     selling_price: Optional[Decimal] = Field(
         default=None,
@@ -38,7 +39,7 @@ class ProductVariantBase(BaseModel):
     )
     cost_price: Optional[Decimal] = Field(
         default=None,
-        gt=0,
+        ge=0,
         le=PRICE_MAX,
         description="Optional variant cost-price override",
     )
@@ -103,11 +104,14 @@ class ProductVariantBase(BaseModel):
 
     @field_validator("size", "color")
     @classmethod
-    def validate_required_text(
+    def validate_optional_text(
         cls,
-        value: str,
+        value: Optional[str],
         info,
-    ) -> str:
+    ) -> Optional[str]:
+        if value is None:
+            return None
+
         value = value.strip()
 
         if not value:
@@ -121,12 +125,16 @@ class ProductVariantBase(BaseModel):
     @classmethod
     def validate_attributes(
         cls,
-        value: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        value: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        if value is None:
+            return None
+
         if not isinstance(value, dict) or not value:
             raise ValueError(
                 "attributes must be a non-empty object"
             )
+
 
         if len(value) > 50:
             raise ValueError(

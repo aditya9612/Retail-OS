@@ -269,6 +269,9 @@ class WarehouseStatusUpdateRequest(BaseModel):
         return self
 
 
+WarehouseStatusUpdate = WarehouseStatusUpdateRequest
+
+
 class WarehouseResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
@@ -306,10 +309,27 @@ class WarehouseStockItem(BaseModel):
     sku: str
     category_name: Optional[str] = None
     quantity: Decimal
-    cost_price: Decimal
-    total_value: Decimal
-    min_stock_level: int
-    is_low_stock: bool
+    cost_price: Optional[Decimal] = None
+    unit_cost: Optional[Decimal] = None
+    total_value: Optional[Decimal] = None
+    stock_value: Optional[Decimal] = None
+    selling_price: Optional[Decimal] = None
+    min_stock_level: int = 0
+    is_low_stock: bool = False
+
+    @model_validator(mode="after")
+    def populate_aliases(self) -> "WarehouseStockItem":
+        if self.cost_price is None and self.unit_cost is not None:
+            self.cost_price = self.unit_cost
+        elif self.unit_cost is None and self.cost_price is not None:
+            self.unit_cost = self.cost_price
+
+        if self.total_value is None and self.stock_value is not None:
+            self.total_value = self.stock_value
+        elif self.stock_value is None and self.total_value is not None:
+            self.stock_value = self.total_value
+
+        return self
 
 
 class WarehouseStockResponse(BaseModel):

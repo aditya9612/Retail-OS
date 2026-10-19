@@ -117,7 +117,7 @@ class ProductVariantService:
             tenant_id,
         )
 
-        if not variant or not variant.is_active:
+        if not variant:
             raise NotFoundException(
                 "Product variant not found"
             )
