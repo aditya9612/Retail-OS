@@ -53,6 +53,12 @@ class TestEmailValidator:
         with pytest.raises(ValueError, match="username before @"):
             validate_email_address("@example.com")
 
+        with pytest.raises(ValueError, match="username must be at least 2 characters"):
+            validate_email_address("0@rahul.com")
+
+        with pytest.raises(ValueError, match="cannot be purely numeric"):
+            validate_email_address("123@domain.com")
+
         with pytest.raises(ValueError, match="cannot start or end with a dot"):
             validate_email_address(".user@example.com")
 

@@ -1,13 +1,60 @@
 from datetime import date, datetime
 from decimal import Decimal
+import re
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+DISALLOWED_REMARKS_PLACEHOLDERS = {
+    "string",
+    "test",
+    "null",
+    "none",
+    "undefined",
+    "n/a",
+    "na",
+    "unknown",
+    "placeholder",
+    "dummy",
+    "sample",
+    "remarks",
+}
+
+
+def validate_grn_remarks(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("Remarks must be a string")
+
+    v = value.strip()
+    if not v:
+        raise ValueError("Remarks cannot be empty")
+
+    if v.lower() in DISALLOWED_REMARKS_PLACEHOLDERS:
+        raise ValueError("Please provide a valid remarks")
+
+    if len(v) < 3 or len(v) > 500:
+        raise ValueError("Remarks must be between 3 and 500 characters")
+
+    if v.isdigit():
+        raise ValueError("Remarks cannot contain only numbers")
+
+    if not re.search(r"[A-Za-z]", v):
+        raise ValueError("Remarks must contain at least one alphabetic character")
+
+    alpha_chars = [c.lower() for c in v if c.isalpha()]
+    if len(set(alpha_chars)) < 2:
+        raise ValueError("Remarks cannot consist of repeating characters")
+
+    return v
 
 
 class GRNItemCreate(BaseModel):
     product_id: int = Field(gt=0, description="Product ID must be positive")
-    ordered_quantity: Optional[int] = Field(default=None, ge=0)
+    ordered_quantity: Optional[int] = Field(default=None, ge=0, description="Ordered quantity")
     received_quantity: int = Field(default=1, ge=0, description="Received quantity")
     accepted_quantity: Optional[int] = Field(default=None, ge=0, description="Accepted quantity")
     rejected_quantity: Optional[int] = Field(default=0, ge=0, description="Rejected quantity")
@@ -17,17 +64,41 @@ class GRNItemCreate(BaseModel):
     expiry_date: Optional[date] = None
     remarks: Optional[str] = Field(default=None, max_length=500)
 
+    @field_validator("remarks")
+    @classmethod
+    def validate_item_remarks(cls, v: str | None) -> str | None:
+        return validate_grn_remarks(v)
+
+    @model_validator(mode="after")
+    def validate_received_vs_ordered(self) -> "GRNItemCreate":
+        if self.ordered_quantity is not None and self.ordered_quantity > 0 and self.received_quantity > self.ordered_quantity:
+            raise ValueError(
+                f"Received quantity ({self.received_quantity}) cannot be greater than ordered quantity ({self.ordered_quantity})"
+            )
+        return self
+
 
 class GRNCreate(BaseModel):
-    purchase_order_id: Optional[int] = Field(default=None, gt=0)
-    warehouse_id: Optional[int] = Field(default=None, gt=0)
-    store_id: Optional[int] = Field(default=None, gt=0)
+    purchase_order_id: Optional[int] = Field(default=None, gt=0, description="Purchase order ID")
+    warehouse_id: Optional[int] = Field(default=None, gt=0, description="Warehouse ID")
+    store_id: Optional[int] = Field(default=None, gt=0, description="Store ID")
     invoice_number: Optional[str] = Field(default=None, max_length=100)
     invoice_date: Optional[date] = None
     vehicle_number: Optional[str] = Field(default=None, max_length=50)
     transporter_name: Optional[str] = Field(default=None, max_length=100)
     remarks: Optional[str] = Field(default=None, max_length=1000)
     items: list[GRNItemCreate] = Field(default_factory=list)
+
+    @field_validator("remarks")
+    @classmethod
+    def validate_root_remarks(cls, v: str | None) -> str | None:
+        return validate_grn_remarks(v)
+
+    @model_validator(mode="after")
+    def validate_items_present(self) -> "GRNCreate":
+        if not self.purchase_order_id and not self.items:
+            raise ValueError("At least one item is required")
+        return self
 
 
 class GRNItemResponse(BaseModel):

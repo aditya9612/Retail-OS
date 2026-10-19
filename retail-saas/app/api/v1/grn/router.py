@@ -1,7 +1,9 @@
 from datetime import date, datetime
 from typing import Literal, Optional
+
 from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import HTMLResponse
+
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppException
@@ -236,16 +238,41 @@ def grn_history(
 
 @router.get(
     "/{grn_id}/print",
-    response_model=GRNPrintResponse,
+    summary="Download or Preview Goods Receipt Note (GRN) PDF",
+    description="Rendered Goods Receipt Note (GRN) printable PDF document. Delivery mode can be `download` (attachment) or `preview` (inline).",
+    responses={
+        200: {
+            "content": {"application/pdf": {}},
+            "description": "Rendered Goods Receipt Note (GRN) printable PDF document.",
+        }
+    },
 )
 def print_grn(
     grn_id: int,
-    user: User = Depends(require_permission("inventory:read")),
+    mode: Literal["download", "preview"] = Query(default="download"),
+    user: User = Depends(
+        require_permission("inventory:read")
+    ),
     db: Session = Depends(get_db),
 ):
-    return GRNService(db).print_grn(
+    service = GRNService(db)
+    grn = service.get(
         tenant_id=user.tenant_id,
         grn_id=grn_id,
+    )
+    pdf_bytes = service.generate_pdf(
+        tenant_id=user.tenant_id,
+        grn_id=grn_id,
+    )
+
+    disposition = "inline" if mode == "preview" else "attachment"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"{disposition}; filename={grn.grn_number}.pdf"
+        },
     )
 
 

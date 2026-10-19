@@ -1,9 +1,13 @@
 from typing import Optional
+
 from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import require_operational_write, require_permission
+from app.core.security import (
+    require_operational_write,
+    require_permission,
+)
 from app.models.user import User
 from app.schemas.product_variant import (
     ProductVariantCreate,
@@ -18,14 +22,12 @@ from app.schemas.product_variant import (
 )
 from app.services.product_variant_service import ProductVariantService
 
-router = APIRouter(
-    prefix="/variants",
-    tags=["product-variants"],
-)
+
+router = APIRouter(tags=["product-variants"])
 
 
 @router.get(
-    "",
+    "/variants",
     response_model=ProductVariantListResponse,
     description="List and filter all product variants across all products",
 )
@@ -53,7 +55,7 @@ def list_variants(
 
 
 @router.post(
-    "",
+    "/variants",
     response_model=ProductVariantResponse,
     status_code=201,
     dependencies=[Depends(require_operational_write)],
@@ -64,27 +66,15 @@ def create_variant(
     user: User = Depends(require_permission("products:write")),
     db: Session = Depends(get_db),
 ):
-    create_dto = ProductVariantCreate(
-        variant_name=data.variant_name,
-        sku=data.sku,
-        barcode=data.barcode,
-        size=data.size,
-        color=data.color,
-        attributes=data.attributes,
-        selling_price=data.selling_price,
-        cost_price=data.cost_price,
-        is_active=data.is_active,
-        auto_generate_barcode=data.auto_generate_barcode,
-    )
     return ProductVariantService(db).create_variant(
         tenant_id=user.tenant_id,
         product_id=data.product_id,
-        data=create_dto,
+        data=data,
     )
 
 
 @router.post(
-    "/matrix-generate",
+    "/variants/matrix-generate",
     response_model=VariantMatrixGenerateResponse,
     status_code=201,
     dependencies=[Depends(require_operational_write)],
@@ -102,7 +92,7 @@ def generate_variant_matrix(
 
 
 @router.post(
-    "/generate-missing-barcodes",
+    "/variants/generate-missing-barcodes",
     response_model=VariantMissingBarcodesResponse,
     dependencies=[Depends(require_operational_write)],
     description="Auto-generate unique EAN-13 barcodes for all product variants that currently have no barcode",
@@ -117,7 +107,7 @@ def generate_missing_variant_barcodes(
 
 
 @router.get(
-    "/by-barcode/{barcode}",
+    "/variants/by-barcode/{barcode}",
     response_model=ProductVariantResponse,
     description="Scan and lookup a product variant by its barcode (POS scanner integration)",
 )
@@ -133,7 +123,7 @@ def get_variant_by_barcode(
 
 
 @router.get(
-    "/by-sku/{sku}",
+    "/variants/by-sku/{sku}",
     response_model=ProductVariantResponse,
     description="Lookup a product variant by its unique SKU (warehouse and logistics lookup)",
 )
@@ -148,13 +138,18 @@ def get_variant_by_sku(
     )
 
 
+
 @router.get(
-    "/{variant_id}",
+    "/variants/{variant_id}",
     response_model=ProductVariantResponse,
     description="Get details of a product variant by ID",
 )
 def get_variant(
-    variant_id: int = Path(..., gt=0, description="Variant ID"),
+    variant_id: int = Path(
+        ...,
+        gt=0,
+        description="Variant ID",
+    ),
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
@@ -165,14 +160,18 @@ def get_variant(
 
 
 @router.put(
-    "/{variant_id}",
+    "/variants/{variant_id}",
     response_model=ProductVariantResponse,
     dependencies=[Depends(require_operational_write)],
     description="Update a product variant by ID",
 )
 def update_variant(
     data: ProductVariantUpdate,
-    variant_id: int = Path(..., gt=0, description="Variant ID"),
+    variant_id: int = Path(
+        ...,
+        gt=0,
+        description="Variant ID",
+    ),
     user: User = Depends(require_permission("products:write")),
     db: Session = Depends(get_db),
 ):
@@ -184,14 +183,18 @@ def update_variant(
 
 
 @router.patch(
-    "/{variant_id}",
+    "/variants/{variant_id}",
     response_model=ProductVariantResponse,
     dependencies=[Depends(require_operational_write)],
     description="Partially update a product variant by ID",
 )
 def patch_variant(
     data: ProductVariantUpdate,
-    variant_id: int = Path(..., gt=0, description="Variant ID"),
+    variant_id: int = Path(
+        ...,
+        gt=0,
+        description="Variant ID",
+    ),
     user: User = Depends(require_permission("products:write")),
     db: Session = Depends(get_db),
 ):
@@ -203,13 +206,17 @@ def patch_variant(
 
 
 @router.delete(
-    "/{variant_id}",
+    "/variants/{variant_id}",
     response_model=ProductVariantResponse,
     dependencies=[Depends(require_operational_write)],
     description="Soft delete (deactivate) a product variant",
 )
 def delete_variant(
-    variant_id: int = Path(..., gt=0, description="Variant ID"),
+    variant_id: int = Path(
+        ...,
+        gt=0,
+        description="Variant ID",
+    ),
     user: User = Depends(require_permission("products:write")),
     db: Session = Depends(get_db),
 ):
@@ -220,7 +227,7 @@ def delete_variant(
 
 
 @router.patch(
-    "/{variant_id}/activate",
+    "/variants/{variant_id}/activate",
     response_model=ProductVariantResponse,
     dependencies=[Depends(require_operational_write)],
     description="Reactivate a previously deactivated or deleted product variant",
@@ -238,7 +245,7 @@ def activate_variant(
 
 
 @router.patch(
-    "/{variant_id}/deactivate",
+    "/variants/{variant_id}/deactivate",
     response_model=ProductVariantResponse,
     dependencies=[Depends(require_operational_write)],
     description="Deactivate a product variant",
@@ -256,7 +263,7 @@ def deactivate_variant(
 
 
 @router.post(
-    "/{variant_id}/generate-barcode",
+    "/variants/{variant_id}/generate-barcode",
     response_model=VariantBarcodeGenerateResponse,
     dependencies=[Depends(require_operational_write)],
     description="Generate or regenerate a unique EAN-13 barcode for a specific variant",
@@ -279,4 +286,77 @@ def generate_barcode_for_variant(
         "sku": variant.sku,
         "barcode": variant.barcode,
     }
+
+
+@router.post(
+    "/products/{product_id}/variants",
+    response_model=ProductVariantResponse,
+    status_code=201,
+    dependencies=[Depends(require_operational_write)],
+)
+def create_product_variant(
+    data: ProductVariantCreate,
+    product_id: int = Path(
+        ...,
+        gt=0,
+        description="Parent product ID",
+    ),
+    user: User = Depends(require_permission("products:write")),
+    db: Session = Depends(get_db),
+):
+    return ProductVariantService(db).create_variant(
+        tenant_id=user.tenant_id,
+        product_id=product_id,
+        data=data,
+    )
+
+
+@router.get(
+    "/products/{product_id}/variants",
+    response_model=ProductVariantListResponse,
+)
+def list_product_variants(
+    product_id: int = Path(
+        ...,
+        gt=0,
+        description="Parent product ID",
+    ),
+    page: int = Query(1, gt=0),
+    page_size: int = Query(20, gt=0, le=100),
+    include_inactive: bool = Query(False),
+    user: User = Depends(require_permission("products:read")),
+    db: Session = Depends(get_db),
+):
+    return ProductVariantService(db).list_variants(
+        tenant_id=user.tenant_id,
+        product_id=product_id,
+        page=page,
+        page_size=page_size,
+        include_inactive=include_inactive,
+    )
+
+
+@router.get(
+    "/products/{product_id}/variants/{variant_id}",
+    response_model=ProductVariantResponse,
+)
+def get_product_variant(
+    product_id: int = Path(
+        ...,
+        gt=0,
+        description="Parent product ID",
+    ),
+    variant_id: int = Path(
+        ...,
+        gt=0,
+        description="Variant ID",
+    ),
+    user: User = Depends(require_permission("products:read")),
+    db: Session = Depends(get_db),
+):
+    return ProductVariantService(db).get_variant(
+        tenant_id=user.tenant_id,
+        variant_id=variant_id,
+        product_id=product_id,
+    )
 

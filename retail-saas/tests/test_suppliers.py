@@ -319,6 +319,7 @@ def test_supplier_create_invalid_name(tenant_fixture):
         "null",
         "none",
         "undefined",
+        "dd",
     ]
 
     for name in invalid_names:
@@ -350,6 +351,7 @@ def test_supplier_create_invalid_contact_person(tenant_fixture):
         "null",
         "none",
         "undefined",
+        "pp",
     ]
 
     for contact in invalid_contacts:
@@ -382,6 +384,8 @@ def test_supplier_create_invalid_address(tenant_fixture):
         "null",
         "none",
         "undefined",
+        "pp",
+        "ppp",
     ]
 
     for addr in invalid_addresses:
@@ -410,6 +414,10 @@ def test_supplier_create_invalid_email(tenant_fixture):
         "user@.com",
         "sandeep.joshi@gmli.com",
         "test@yaho.com",
+        "0@rahul.com",
+        "0@gmail.com",
+        "12345@domain.com",
+        "a@example.com",
     ]
 
     for em in invalid_emails:
@@ -423,6 +431,24 @@ def test_supplier_create_invalid_email(tenant_fixture):
             headers=headers,
         )
         assert resp.status_code == 422, f"Expected 422 for email '{em}', got {resp.status_code}: {resp.text}"
+
+
+def test_supplier_create_qa_reported_payload_rejected(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    # QA tested with name="dd", contact="pp", email="0@rahul.com", address="pp"
+    resp = client.post(
+        "/api/v1/suppliers",
+        json={
+            "name": "dd",
+            "contact_person": "pp",
+            "email": "0@rahul.com",
+            "phone": "9212346780",
+            "address": "pp",
+            "gstin": "27FGHIJ5678K1Z2",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422, f"Expected 422 for QA payload, got {resp.status_code}: {resp.text}"
 
 
 def test_supplier_create_invalid_phone(tenant_fixture):
@@ -561,6 +587,17 @@ def test_supplier_status_update_contract_and_error(tenant_fixture):
     assert bad3.status_code == 422, bad3.text
     assert "Invalid status. Expected one of: active, inactive." in bad3.text
 
+    # 8. Unquoted/invalid JSON: {"is_active": fdf} -> 422 with clear expected boolean message
+    bad_json = client.patch(
+        f"/api/v1/suppliers/{supplier_id}/status",
+        content=b'{\n  "is_active": fdf\n}',
+        headers={**headers, "Content-Type": "application/json"},
+    )
+    assert bad_json.status_code == 422, bad_json.text
+    bad_json_data = bad_json.json()
+    assert bad_json_data["errors"][0]["field"] == "is_active"
+    assert "Expected a boolean: true or false" in bad_json_data["message"]
+
 
 def test_supplier_list_and_search_empty_responses():
     # Register a new isolated tenant with NO suppliers
@@ -625,4 +662,20 @@ def test_supplier_list_and_search_empty_responses():
     assert isinstance(search_data2, list)
     assert len(search_data2) == 1
     assert search_data2[0]["name"] == "Found Supplier"
+
+    # 4. Partial / half name search
+    half_resp = client.get("/api/v1/suppliers/search?search=Found", headers=headers)
+    assert half_resp.status_code == 200
+    assert len(half_resp.json()) == 1
+    assert half_resp.json()[0]["name"] == "Found Supplier"
+
+    half_resp2 = client.get("/api/v1/suppliers/search?search=supp", headers=headers)
+    assert half_resp2.status_code == 200
+    assert len(half_resp2.json()) == 1
+    assert half_resp2.json()[0]["name"] == "Found Supplier"
+
+    # 5. Empty search should be rejected with 422
+    assert client.get("/api/v1/suppliers/search?search=", headers=headers).status_code == 422
+    assert client.get("/api/v1/suppliers/search?search=   ", headers=headers).status_code == 422
+    assert client.get("/api/v1/suppliers/search", headers=headers).status_code == 422
 

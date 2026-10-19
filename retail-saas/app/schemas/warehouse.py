@@ -14,6 +14,121 @@ from pydantic import (
 )
 
 
+DISALLOWED_WAREHOUSE_PLACEHOLDERS = {
+    "string",
+    "test",
+    "null",
+    "none",
+    "undefined",
+    "n/a",
+    "na",
+    "unknown",
+    "placeholder",
+    "dummy",
+    "sample",
+    "address",
+}
+
+
+def validate_warehouse_name(value: str | None, required: bool = True) -> str | None:
+    if value is None:
+        if required:
+            raise ValueError("Warehouse name cannot be null")
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("Warehouse name must be a string")
+
+    v = value.strip()
+    if not v:
+        raise ValueError("Warehouse name cannot be empty")
+
+    if v.lower() in DISALLOWED_WAREHOUSE_PLACEHOLDERS:
+        raise ValueError("Please provide a valid warehouse name")
+
+    if len(v) < 2 or len(v) > 100:
+        raise ValueError("Warehouse name must be between 2 and 100 characters")
+
+    if v.isdigit():
+        raise ValueError("Warehouse name cannot contain only numbers")
+
+    if not re.search(r"[A-Za-z]", v):
+        raise ValueError("Warehouse name must contain at least one alphabetic character")
+
+    alpha_chars = [c.lower() for c in v if c.isalpha()]
+    if len(set(alpha_chars)) < 2:
+        raise ValueError("Warehouse name cannot consist of repeating characters")
+
+    return v
+
+
+def validate_warehouse_code(value: str | None, required: bool = True) -> str | None:
+    if value is None:
+        if required:
+            raise ValueError("Warehouse code cannot be null")
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("Warehouse code must be a string")
+
+    v = value.strip().upper()
+    if not v:
+        raise ValueError("Warehouse code cannot be empty")
+
+    if v in ("STRING", "TEST", "NULL", "NONE", "UNDEFINED", "DUMMY", "00000"):
+        raise ValueError("Please provide a valid warehouse code")
+
+    if len(v) < 2 or len(v) > 50:
+        raise ValueError("Warehouse code must be between 2 and 50 characters")
+
+    if v.isdigit():
+        raise ValueError("Warehouse code cannot contain only numbers")
+
+    if not re.fullmatch(r"[A-Z0-9_-]+", v):
+        raise ValueError("Warehouse code can contain only letters, numbers, '-' and '_'")
+
+    alnum_chars = [c for c in v if c.isalnum()]
+    if len(set(alnum_chars)) < 2:
+        raise ValueError("Warehouse code cannot consist of repeating characters")
+
+    return v
+
+
+def validate_warehouse_address(value: str | None, required: bool = False) -> str | None:
+    if value is None:
+        if required:
+            raise ValueError("Warehouse address cannot be null")
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("Warehouse address must be a string")
+
+    v = value.strip()
+    if not v:
+        raise ValueError("Warehouse address cannot be empty")
+
+    if v.lower() in DISALLOWED_WAREHOUSE_PLACEHOLDERS:
+        raise ValueError("Please provide a valid warehouse address")
+
+    if len(v) < 5 or len(v) > 500:
+        raise ValueError("Warehouse address must be between 5 and 500 characters")
+
+    if v.isdigit():
+        raise ValueError("Warehouse address cannot contain only numbers")
+
+    if not re.search(r"[A-Za-z]", v):
+        raise ValueError("Warehouse address must contain at least one letter")
+
+    alnum_chars = [c.lower() for c in v if c.isalnum()]
+    if len(set(alnum_chars)) < 2:
+        raise ValueError("Warehouse address cannot consist of repeating characters")
+
+    if not re.fullmatch(r"[A-Za-z0-9\s,./#&'()\-]+", v):
+        raise ValueError("Warehouse address contains invalid characters")
+
+    return v
+
+
 class WarehouseCreate(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -35,75 +150,26 @@ class WarehouseCreate(BaseModel):
         max_length=50,
     )
 
-    address: str | None = None
+    address: str | None = Field(
+        default=None,
+        min_length=5,
+        max_length=500,
+    )
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: str) -> str:
-        value = value.strip()
-
-        if not value:
-            raise ValueError("Warehouse name cannot be empty")
-        
-        if value.lower() == "string":
-           raise ValueError("Please provide a valid warehouse name")
-        
-        if value.isdigit():
-            raise ValueError("Warehouse name cannot contain only numbers")
-
-        if not re.search(r"[A-Za-z]", value):
-            raise ValueError("Warehouse name must contain at least one alphabetic character")
-
-        return value
+        return validate_warehouse_name(value, required=True)
 
     @field_validator("code")
     @classmethod
     def validate_code(cls, value: str) -> str:
-        value = value.strip().upper()
-
-        if not value:
-            raise ValueError(
-                "Warehouse code cannot be empty"
-            )
-        
-        if value == "STRING":
-           raise ValueError("Please provide a valid warehouse code")
-        
-        if value.isdigit():
-            raise ValueError(
-                "Warehouse code cannot contain only numbers"
-            )
-
-        if not re.fullmatch(r"[A-Z0-9_-]+", value):
-            raise ValueError(
-                "Warehouse code can contain only letters, numbers, '-' and '_'"
-            )
-
-        return value
+        return validate_warehouse_code(value, required=True)
 
     @field_validator("address")
     @classmethod
-    def validate_address(
-        cls,
-        value: str | None,
-    ) -> str | None:
-
-        if value is None:
-            return None
-
-        value = value.strip()
-
-        if not value:
-            raise ValueError(
-                "Warehouse address cannot be empty"
-            )
-        
-        if value.lower() == "string":
-            raise ValueError(
-               "Please provide a valid warehouse address"
-            )
-        
-        return value
+    def validate_address(cls, value: str | None) -> str | None:
+        return validate_warehouse_address(value, required=False)
 
 
 class WarehouseUpdate(BaseModel):
@@ -112,7 +178,10 @@ class WarehouseUpdate(BaseModel):
         str_strip_whitespace=True,
     )
 
-    store_id: StrictInt | None = None
+    store_id: StrictInt | None = Field(
+        default=None,
+        gt=0,
+    )
 
     name: str | None = Field(
         default=None,
@@ -145,110 +214,24 @@ class WarehouseUpdate(BaseModel):
         cls,
         value: int | None,
     ) -> int | None:
-        if value is not None and value <= 0:
-            raise ValueError("Store ID must be greater than 0")
+        if value is None:
+            raise ValueError("Store ID cannot be null")
         return value
 
     @field_validator("name")
     @classmethod
-    def validate_name(
-        cls,
-        value: str | None,
-    ) -> str | None:
-
-        if value is None:
-            raise ValueError(
-                "Warehouse name cannot be null"
-            )
-
-        value = value.strip()
-
-        if not value:
-            raise ValueError(
-                "Warehouse name cannot be empty"
-            )
-        
-        if value.lower() == "string":
-            raise ValueError(
-               "Please provide a valid warehouse name"
-            )
-        
-        if value.isdigit():
-            raise ValueError(
-                "Warehouse name cannot contain only numbers"
-            )
-
-        if not re.search(r"[A-Za-z]", value):
-            raise ValueError(
-                "Warehouse name must contain at least one alphabetic character"
-            )
-
-        return value
+    def validate_name(cls, value: str | None) -> str | None:
+        return validate_warehouse_name(value, required=True)
 
     @field_validator("code")
     @classmethod
-    def validate_code(
-        cls,
-        value: str | None,
-    ) -> str | None:
-
-        if value is None:
-            raise ValueError(
-                "Warehouse code cannot be null"
-            )
-
-        value = value.strip().upper()
-
-        if not value:
-            raise ValueError(
-                "Warehouse code cannot be empty"
-            )
-        
-        if value == "STRING":
-            raise ValueError(
-               "Please provide a valid warehouse code"
-            )
-        
-        if value.isdigit():
-            raise ValueError(
-                "Warehouse code cannot contain only numbers"
-            )
-
-        if not re.fullmatch(r"[A-Z0-9_-]+", value):
-            raise ValueError(
-                "Warehouse code can contain only letters, numbers, '-' and '_'"
-            )
-
-        return value
+    def validate_code(cls, value: str | None) -> str | None:
+        return validate_warehouse_code(value, required=True)
 
     @field_validator("address")
     @classmethod
-    def validate_address(
-        cls,
-        value: str | None,
-    ) -> str | None:
-
-        if value is None:
-            return None
-
-        value = value.strip()
-
-        if not value:
-            raise ValueError(
-                "Warehouse address cannot be empty"
-            )
-        
-        if len(value) < 2 or len(value) > 500:
-            raise ValueError(
-                "Warehouse address must be between 2 and 500 characters"
-            )
-
-        if value.lower() == "string":
-            raise ValueError(
-               "Please provide a valid warehouse address"
-            )
-        
-        return value
+    def validate_address(cls, value: str | None) -> str | None:
+        return validate_warehouse_address(value, required=False)
 
     @field_validator("is_active")
     @classmethod
@@ -256,13 +239,34 @@ class WarehouseUpdate(BaseModel):
         cls,
         value: bool | None,
     ) -> bool | None:
-
         if value is None:
-            raise ValueError(
-                "is_active cannot be null"
-            )
-
+            raise ValueError("is_active cannot be null")
         return value
+
+
+class WarehouseStatusUpdateRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    is_active: Optional[StrictBool] = Field(default=None, description="Active status as boolean")
+    status: Optional[str] = Field(default=None, description="Active status as string ('active' or 'inactive')")
+
+    @model_validator(mode="after")
+    def validate_status_input(self):
+        if self.is_active is None and self.status is None:
+            raise ValueError("Either 'is_active' (bool) or 'status' (str) must be provided")
+
+        if self.status is not None:
+            clean_s = self.status.strip().lower()
+            if clean_s in ("active", "true", "enabled", "1"):
+                self.is_active = True
+            elif clean_s in ("inactive", "false", "disabled", "0"):
+                self.is_active = False
+            else:
+                raise ValueError("Status string must be 'active' or 'inactive'")
+
+        return self
 
 
 class WarehouseResponse(BaseModel):
@@ -272,59 +276,28 @@ class WarehouseResponse(BaseModel):
 
     id: int = Field(gt=0)
     tenant_id: int = Field(gt=0)
-    store_id: int | None = None
-    store_name: str | None = None
+    store_id: int | None
+    store_name: Optional[str] = None
     name: str
     code: str
-    address: str | None = None
+    address: str | None
     is_active: bool
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class WarehouseDashboardResponse(BaseModel):
     total_warehouses: int = Field(ge=0)
     active_warehouses: int = Field(ge=0)
     inactive_warehouses: int = Field(ge=0)
-    total_stock_units: Decimal | int = 0
-    total_stock_value: Decimal = Decimal("0.00")
-    total_products_stored: int = 0
-
-
-class WarehouseDeleteData(BaseModel):
-    id: int
+    total_stock_units: Decimal = Field(default=Decimal("0.0000"))
+    total_stock_value: Decimal = Field(default=Decimal("0.00"))
 
 
 class WarehouseDeleteResponse(BaseModel):
     success: bool = True
-    message: str = "Warehouse deleted successfully"
-    data: Optional[WarehouseDeleteData] = None
-
-
-class WarehouseStatusUpdate(BaseModel):
-    is_active: bool
-
-    @model_validator(mode="before")
-    @classmethod
-    def validate_status_input(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            raise ValueError("Invalid status format")
-        if "is_active" in data:
-            val = data["is_active"]
-        elif "status" in data:
-            val = data["status"]
-        else:
-            raise ValueError("Field 'is_active' or 'status' is required")
-
-        if isinstance(val, bool):
-            return {"is_active": val}
-        if isinstance(val, str):
-            clean = val.strip().lower()
-            if clean in ("active", "true"):
-                return {"is_active": True}
-            elif clean in ("inactive", "false"):
-                return {"is_active": False}
-        raise ValueError("Invalid status. Expected one of: active, inactive.")
+    message: str
+    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class WarehouseStockItem(BaseModel):
@@ -332,25 +305,22 @@ class WarehouseStockItem(BaseModel):
     product_name: str
     sku: str
     category_name: Optional[str] = None
-    quantity: Decimal | int
-    min_stock_level: int = 0
-    unit_cost: Optional[Decimal] = None
-    selling_price: Optional[Decimal] = None
-    stock_value: Optional[Decimal] = None
-    is_low_stock: bool = False
+    quantity: Decimal
+    cost_price: Decimal
+    total_value: Decimal
+    min_stock_level: int
+    is_low_stock: bool
 
 
 class WarehouseStockResponse(BaseModel):
     success: bool = True
     warehouse_id: int
     warehouse_name: str
-    warehouse_code: str
     store_id: Optional[int] = None
+    store_name: Optional[str] = None
     total_items: int
-    total_quantity: Decimal | int
+    total_quantity: Decimal
     total_stock_value: Decimal
-    page: int
-    page_size: int
     data: list[WarehouseStockItem] = Field(default_factory=list)
 
 
@@ -372,4 +342,4 @@ class WarehouseTransfersResponse(BaseModel):
     warehouse_id: int
     warehouse_name: str
     total_transfers: int
-    data: list[WarehouseTransferItem] = Field(default_factory=list)
+    data: list[WarehouseTransferItem] = Field(default_factory=list)

@@ -57,6 +57,10 @@ def validate_name_value(value: Optional[str]) -> str:
     if alpha_count < 2:
         raise ValueError("Supplier name must contain at least 2 alphabetic characters")
 
+    distinct_alpha = set(c.lower() for c in trimmed if c.isalpha())
+    if len(distinct_alpha) < 2:
+        raise ValueError("Supplier name cannot consist of repeating characters")
+
     allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .'-&,()")
     if any(c not in allowed_chars for c in trimmed):
         raise ValueError("Supplier name contains invalid characters")
@@ -84,6 +88,10 @@ def validate_contact_person_value(value: Optional[str]) -> Optional[str]:
     if alpha_count < 2:
         raise ValueError("Contact person must contain at least 2 alphabetic characters")
 
+    distinct_alpha = set(c.lower() for c in trimmed if c.isalpha())
+    if len(distinct_alpha) < 2:
+        raise ValueError("Contact person cannot consist of repeating characters")
+
     allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ .'-")
     if any(c not in allowed_chars for c in trimmed):
         raise ValueError("Contact person can contain only letters, spaces, '.', '-' and '''")
@@ -99,14 +107,18 @@ def validate_address_value(value: Optional[str]) -> Optional[str]:
     trimmed = value.strip()
     if not trimmed:
         raise ValueError("Address cannot be empty or whitespace")
-    if len(trimmed) < 2 or len(trimmed) > 500:
-        raise ValueError("Address must be between 2 and 500 characters")
+    if len(trimmed) < 3 or len(trimmed) > 500:
+        raise ValueError("Address must be between 3 and 500 characters")
     if trimmed.lower() in DISALLOWED_PLACEHOLDERS:
         raise ValueError("Address cannot be a placeholder")
 
     alpha_count = sum(1 for c in trimmed if c.isalpha())
     if alpha_count < 2:
         raise ValueError("Address must contain at least 2 alphabetic characters")
+
+    distinct_alnum = set(c.lower() for c in trimmed if c.isalnum())
+    if len(distinct_alnum) < 2:
+        raise ValueError("Address cannot consist of repeating characters")
 
     allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ,.-/#()'")
     if any(c not in allowed_chars for c in trimmed):
@@ -136,6 +148,12 @@ def validate_email_value(value: Optional[Any]) -> Optional[Any]:
         raise ValueError("Invalid top-level domain in email")
     if domain_part in DISALLOWED_EMAIL_DOMAINS:
         raise ValueError(f"Disallowed email domain: {domain_part}")
+    if len(local_part) < 2:
+        raise ValueError("Email username must be at least 2 characters")
+    if local_part.isdigit():
+        raise ValueError("Email username cannot be purely numeric")
+    if not any(c.isalpha() for c in local_part):
+        raise ValueError("Email username must contain at least one letter")
     if local_part in DISALLOWED_PLACEHOLDERS:
         raise ValueError("Email username cannot be a placeholder")
     validate_email_address(str(value), field_name="Supplier email", required=True)
@@ -235,9 +253,9 @@ class SupplierBase(BaseModel):
 
     address: Optional[str] = Field(
         default=None,
-        min_length=2,
+        min_length=3,
         max_length=500,
-        description="Address must be between 2 and 500 characters"
+        description="Address must be between 3 and 500 characters"
     )
 
     gstin: Optional[str] = Field(
@@ -302,7 +320,7 @@ class SupplierUpdate(BaseModel):
 
     address: Optional[str] = Field(
         default=None,
-        min_length=2,
+        min_length=3,
         max_length=500
     )
 

@@ -1,4 +1,6 @@
+
 from typing import Any, Dict, List, Optional
+
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictException, NotFoundException
@@ -26,17 +28,17 @@ class ProductVariantService:
         if product_id <= 0:
             raise NotFoundException("Invalid product ID")
 
-        # Verify parent product exists and belongs to tenant
         product = self.repo.get_by_id(product_id, tenant_id)
+
         if not product:
             raise NotFoundException("Product not found")
 
         sku = data.sku.strip().upper()
-        if not sku:
-            raise ConflictException("SKU cannot be empty")
 
         if self.repo.is_sku_taken(sku, tenant_id):
-            raise ConflictException(f"SKU '{sku}' already exists")
+            raise ConflictException(
+                f"SKU '{sku}' already exists"
+            )
 
         barcode = data.barcode.strip() if data.barcode else None
         if not barcode and getattr(data, "auto_generate_barcode", False):
@@ -82,34 +84,51 @@ class ProductVariantService:
                     f"Product variant with size '{data.size.strip()}' and color '{data.color.strip()}' already exists for this product"
                 )
 
-        variant_dict = data.model_dump()
-        variant_dict.pop("auto_generate_barcode", None)
-        variant_dict.pop("product_id", None)
-        variant_dict["sku"] = sku
-        variant_dict["barcode"] = barcode
+        variant_data = data.model_dump(exclude={"product_id", "auto_generate_barcode"})
+        variant_data["sku"] = sku
+        variant_data["barcode"] = barcode
 
         variant = ProductVariant(
             tenant_id=tenant_id,
             product_id=product_id,
-            **variant_dict,
+            **variant_data,
         )
 
-        variant = self.repo.create_variant(variant)
-        self.db.commit()
-        self.db.refresh(variant)
-        return variant
+        try:
+            self.repo.create_variant(variant)
+            self.db.commit()
+            self.db.refresh(variant)
+            return variant
+        except Exception:
+            self.db.rollback()
+            raise
 
     def get_variant(
         self,
         tenant_id: int,
         variant_id: int,
+        product_id: int | None = None,
     ) -> ProductVariant:
         if variant_id <= 0:
             raise NotFoundException("Invalid variant ID")
 
-        variant = self.repo.get_variant_by_id(variant_id, tenant_id)
-        if not variant:
-            raise NotFoundException("Product variant not found")
+        variant = self.repo.get_variant_by_id(
+            variant_id,
+            tenant_id,
+        )
+
+        if not variant or not variant.is_active:
+            raise NotFoundException(
+                "Product variant not found"
+            )
+
+        if (
+            product_id is not None
+            and variant.product_id != product_id
+        ):
+            raise NotFoundException(
+                "Product variant not found for this product"
+            )
 
         return variant
 
@@ -124,16 +143,26 @@ class ProductVariantService:
         if product_id <= 0:
             raise NotFoundException("Invalid product ID")
 
-        product = self.repo.get_by_id(product_id, tenant_id)
+        product = self.repo.get_by_id(
+            product_id,
+            tenant_id,
+        )
+
         if not product:
             raise NotFoundException("Product not found")
 
         if page <= 0:
-            raise ConflictException("Page must be greater than 0")
+            raise ConflictException(
+                "Page must be greater than 0"
+            )
+
         if page_size <= 0 or page_size > 100:
-            raise ConflictException("Page size must be between 1 and 100")
+            raise ConflictException(
+                "Page size must be between 1 and 100"
+            )
 
         skip = (page - 1) * page_size
+
         items = self.repo.list_variants(
             product_id=product_id,
             tenant_id=tenant_id,
@@ -141,6 +170,7 @@ class ProductVariantService:
             skip=skip,
             limit=page_size,
         )
+
         total = self.repo.count_variants(
             product_id=product_id,
             tenant_id=tenant_id,
@@ -160,34 +190,42 @@ class ProductVariantService:
         variant_id: int,
         data: ProductVariantUpdate,
     ) -> ProductVariant:
-        variant = self.get_variant(tenant_id, variant_id)
+        variant = self.get_variant(
+            tenant_id,
+            variant_id,
+        )
+
         update_data = data.model_dump(exclude_unset=True)
 
-        if "sku" in update_data and update_data["sku"]:
+        if "sku" in update_data:
             new_sku = update_data["sku"].strip().upper()
-            if not new_sku:
-                raise ConflictException("SKU cannot be empty")
-            if new_sku != variant.sku and self.repo.is_sku_taken(
-                new_sku, tenant_id, exclude_variant_id=variant.id
+
+            if self.repo.is_sku_taken(
+                new_sku,
+                tenant_id,
+                exclude_variant_id=variant.id,
             ):
-                raise ConflictException(f"SKU '{new_sku}' already exists")
+                raise ConflictException(
+                    f"SKU '{new_sku}' already exists"
+                )
+
             update_data["sku"] = new_sku
 
         if "barcode" in update_data:
-            new_barcode = (
-                update_data["barcode"].strip() if update_data["barcode"] else None
-            )
-            if new_barcode:
-                if not new_barcode.isdigit():
-                    raise ConflictException("Barcode must contain digits only")
-                if len(new_barcode) < 8 or len(new_barcode) > 50:
-                    raise ConflictException(
-                        "Barcode must contain between 8 and 50 digits"
-                    )
-                if new_barcode != variant.barcode and self.repo.is_barcode_taken(
-                    new_barcode, tenant_id, exclude_variant_id=variant.id
-                ):
-                    raise ConflictException(f"Barcode '{new_barcode}' already exists")
+            new_barcode = update_data["barcode"]
+
+            if new_barcode is not None:
+                new_barcode = new_barcode.strip() or None
+
+            if new_barcode and self.repo.is_barcode_taken(
+                new_barcode,
+                tenant_id,
+                exclude_variant_id=variant.id,
+            ):
+                raise ConflictException(
+                    f"Barcode '{new_barcode}' already exists"
+                )
+
             update_data["barcode"] = new_barcode
 
         new_name = update_data.get("variant_name") or variant.variant_name
@@ -226,7 +264,11 @@ class ProductVariantService:
         for key, value in update_data.items():
             setattr(variant, key, value)
 
-        return self.repo.update_variant(variant)
+        try:
+            return self.repo.update_variant(variant)
+        except Exception:
+            self.db.rollback()
+            raise
 
     def delete_variant(
         self,
@@ -234,8 +276,12 @@ class ProductVariantService:
         variant_id: int,
     ) -> ProductVariant:
         variant = self.get_variant(tenant_id, variant_id)
-        self.repo.delete_variant(variant)
-        return variant
+        try:
+            self.repo.delete_variant(variant)
+            return variant
+        except Exception:
+            self.db.rollback()
+            raise
 
     def list_all_variants(
         self,
@@ -471,5 +517,4 @@ class ProductVariantService:
             "updated_count": updated_count,
             "variants": updated_variants,
         }
-
 
