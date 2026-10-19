@@ -260,9 +260,7 @@ class ProductService:
             skip,
             page_size,
         )
-
         return products or []
-
     def list_products(
         self,
         tenant_id: int,
@@ -631,11 +629,6 @@ class ProductService:
         result = []
 
         for product, qty in rows:
-            setattr(product, "store_id", store_id)
-            setattr(product, "current_stock", qty)
-            setattr(product, "quantity", qty)
-            setattr(product, "threshold", threshold)
-
             response = ProductLowStockResponse.model_validate(
                 product
             )
@@ -933,4 +926,4 @@ class ProductService:
             mrp=product.mrp,
             store_name=store_name,
             sku=product.sku,
-        )
+        )

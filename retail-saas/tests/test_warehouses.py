@@ -619,7 +619,7 @@ def test_warehouse_patch_invalid_json_expected_value_message(tenant_fixture):
     assert data["errors"][0]["field"] == "is_active"
     assert "Expected a boolean: true or false" in data["message"]
 
-    # 2. QA reported: PATCH with missing value: "is_active": 
+    # 2. QA reported: PATCH with missing value: "is_active":
     bad_json_resp2 = client.patch(
         f"/api/v1/warehouses/{wh_id}",
         content=b'{\n  "is_active": \n}',

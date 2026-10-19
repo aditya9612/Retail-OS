@@ -706,4 +706,3 @@ def test_historical_status_backfill_rules():
         assert inv_unpaid.status == "issued"
     finally:
         db.close()
-

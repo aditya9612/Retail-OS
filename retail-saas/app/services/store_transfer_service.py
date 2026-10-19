@@ -416,7 +416,6 @@ class StoreTransferService:
         for pid, d_item in req_items_map.items():
             if pid not in transfer_items_map:
                 raise ValueError(f"Product {pid} was not part of this transfer")
-            
             orig_qty = int(transfer_items_map[pid].quantity)
             total_accounted = d_item.received_quantity + d_item.damaged_quantity + d_item.missing_quantity
             if total_accounted != orig_qty:

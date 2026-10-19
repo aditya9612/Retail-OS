@@ -76,4 +76,3 @@ def downgrade() -> None:
 
         if "invoice_number" not in indexes:
             op.create_index("invoice_number", "invoices", ["invoice_number"], unique=True)
-

@@ -135,4 +135,4 @@ def generate_thermal_sticker_image(
     out = io.BytesIO()
     sticker.save(out, format="PNG")
     out.seek(0)
-    return out.read()
+    return out.read()

@@ -413,4 +413,3 @@ def test_reject_transfer_with_optional_reason():
     )
     assert rej_resp.status_code == 200, rej_resp.text
     assert rej_resp.json()["status"] == "Rejected"
-

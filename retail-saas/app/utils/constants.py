@@ -262,4 +262,4 @@ DEFAULT_ROLE_PERMISSIONS = {
 # Ensure DEFAULT_ROLE_PERMISSIONS is also indexable by string role name
 for _r, _p in list(DEFAULT_ROLE_PERMISSIONS.items()):
     if isinstance(_r, UserRole):
-        DEFAULT_ROLE_PERMISSIONS[_r.value] = _p
+        DEFAULT_ROLE_PERMISSIONS[_r.value] = _p

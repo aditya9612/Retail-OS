@@ -111,4 +111,3 @@ def test_users_module_enhancements_flow():
     )
     assert delete_owner_res.status_code == 409
     assert "cannot delete" in delete_owner_res.text.lower() or "owner" in delete_owner_res.text.lower()
-

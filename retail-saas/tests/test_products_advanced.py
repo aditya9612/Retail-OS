@@ -480,4 +480,3 @@ def test_generate_barcode_overwrite_protection(setup_product_data):
     new_bc = g_resp2.json()["barcode"]
     assert new_bc != initial_bc
     assert len(new_bc) == 13
-

@@ -50,4 +50,3 @@ class InvoiceItemReturn(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_invoice_item_returns_tenant_idemp", "tenant_id", "idempotency_key", unique=True),
     )
-

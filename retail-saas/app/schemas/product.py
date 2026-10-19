@@ -1329,8 +1329,7 @@ class ProductResponse(BaseModel):
 
 class ProductLowStockResponse(ProductResponse):
     store_id: int = Field(
-        default=0,
-        description="Store ID where stock is low",
+        description="Store ID where stock is low"
     )
 
     current_stock: int = Field(
@@ -1410,4 +1409,4 @@ class ProductBarcodeLabelResponse(BaseModel):
 
     @field_serializer("mrp", "selling_price", mode="plain", check_fields=False)
     def serialize_decimal(self, v: Decimal) -> float:
-        return float(v) if v is not None else 0.0
+        return float(v) if v is not None else 0.0

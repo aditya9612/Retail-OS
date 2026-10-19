@@ -1164,5 +1164,3 @@ def test_mysql_multi_connection_refund_concurrency(db):
     assert len(results) == 1
     assert len(errors) == 1
     assert "cannot exceed eligible paid amount" in str(errors[0]).lower()
-
-
