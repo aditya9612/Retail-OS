@@ -14,6 +14,7 @@ from pydantic import (
 
 from app.utils.validators import validate_pan_number, validate_aadhaar_number, validate_email_address
 from app.utils.phone import normalize_phone_number
+from app.utils.constants import RoleEnum, OFFICIAL_ROLES
 
 
 PHONE_PATTERN = re.compile(r"^(?:\+91)?[6-9]\d{9}$")
@@ -54,7 +55,7 @@ class UserBase(BaseModel):
 
     role: Optional[str] = Field(
         default=None,
-        description="Role name (e.g. manager, staff, admin, owner). Automatically mapped to role_id.",
+        description=f"Role name ({', '.join(OFFICIAL_ROLES)}). Automatically mapped to role_id.",
     )
 
     pancard: Optional[str] = Field(
@@ -141,16 +142,34 @@ class UserCreate(UserBase):
     phone: str = Field(
         ...,
         description="Mandatory 10-digit Indian phone number",
+        examples=["9876543210"],
     )
 
-    role: str = Field(
+    role: Optional[str] = Field(
         "staff",
         description="Role name (e.g. staff, manager, cashier, admin, accountant)",
+        examples=["cashier"],
     )
 
     password: str = Field(
         min_length=8,
         max_length=100,
+        examples=["SecurePass@123"],
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "email": "cashier@retailmart.com",
+                "full_name": "Amit Sharma",
+                "password": "SecurePassword@123",
+                "phone": "9876543210",
+                "role": "cashier",
+                "store_id": 1,
+                "pan_number": "ABCDE1234F",
+                "addhar_number": "987654321012",
+            }
+        }
     )
 
     @field_validator("phone", mode="before")
@@ -199,10 +218,26 @@ class UserCreate(UserBase):
 
         return value
 
+    @field_validator("role")
+    @classmethod
+    def validate_role_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v.strip():
+            clean_role = v.strip().lower()
+            if len(clean_role) < 2 or len(clean_role) > 50:
+                raise ValueError("Role name must be between 2 and 50 characters")
+            if not clean_role[0].isalpha():
+                raise ValueError("Role must start with a letter")
+            if not all(c.isalnum() or c in ("_", "-", " ") for c in clean_role):
+                raise ValueError(
+                    f"Invalid role '{v}'. Role can only contain letters, numbers, spaces, hyphens, and underscores."
+                )
+            return clean_role
+        return v
+
     @model_validator(mode="after")
     def validate_role_specified(self):
         if not self.role_id and not (self.role and self.role.strip()):
-            raise ValueError("Either 'role' (e.g. 'manager', 'staff') or 'role_id' must be provided")
+            raise ValueError("Either 'role' name or 'role_id' must be provided")
         return self
 
 
@@ -212,49 +247,72 @@ class UserUpdate(BaseModel):
         default=None,
         min_length=2,
         max_length=100,
+        description="Updated full name of user",
+        examples=["Amit Sharma"],
     )
 
     phone: Optional[str] = Field(
         default=None,
+        description="Updated 10-digit phone number",
+        examples=["9876543210"],
     )
 
     store_id: Optional[int] = Field(
         default=None,
         gt=0,
+        description="Assigned Store ID",
+        examples=[1],
     )
 
     role_id: Optional[int] = Field(
         default=None,
         gt=0,
         description="Role ID from GET /api/v1/roles.",
+        examples=[2],
     )
 
-    is_active: Optional[bool] = None
+    is_active: Optional[bool] = Field(
+        default=None,
+        description="Account active status",
+        examples=[True],
+    )
 
     password: Optional[str] = Field(
         default=None,
         min_length=8,
         max_length=100,
+        description="New account password",
+        examples=["NewPassword@123!"],
     )
 
     pancard: Optional[str] = Field(
         default=None,
+        description="PAN card document URL",
+        examples=["/uploads/users/pancard_abc.pdf"],
     )
 
     addhar_card: Optional[str] = Field(
         default=None,
+        description="Aadhaar card document URL",
+        examples=["/uploads/users/addhar_xyz.pdf"],
     )
 
     profile_photo: Optional[str] = Field(
         default=None,
+        description="Profile photo image URL",
+        examples=["/uploads/users/photo_123.jpg"],
     )
 
     pan_number: Optional[str] = Field(
         default=None,
+        description="PAN card number (e.g. ABCDE1234F)",
+        examples=["ABCDE1234F"],
     )
 
     addhar_number: Optional[str] = Field(
         default=None,
+        description="Aadhaar card 12-digit number",
+        examples=["987654321012"],
     )
 
     @field_validator("pan_number")
@@ -390,10 +448,14 @@ class MyProfileUpdate(BaseModel):
         default=None,
         min_length=2,
         max_length=100,
+        description="Updated full name",
+        examples=["Amit Sharma"],
     )
 
     phone: Optional[str] = Field(
         default=None,
+        description="Updated 10-digit phone number",
+        examples=["9876543210"],
     )
 
     model_config = ConfigDict(
@@ -463,10 +525,9 @@ class MyProfileUpdate(BaseModel):
 
 
 class RoleResponse(BaseModel):
-
-    id: int
-    name: str
-    permissions: list[str] = Field(default_factory=list)
+    id: int = Field(..., description="Role ID", examples=[1])
+    name: str = Field(..., description="Role name", examples=["cashier"])
+    permissions: list[str] = Field(default_factory=list, description="Assigned permission codes", examples=[["products:read", "billing:write"]])
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -474,22 +535,21 @@ class RoleResponse(BaseModel):
 
 
 class UserResponse(BaseModel):
-
-    id: int
-    tenant_id: int
-    email: str
-    full_name: str
-    phone: Optional[str]
-    store_id: Optional[int]
-    role_id: int
-    is_active: bool
+    id: int = Field(..., description="Unique User ID", examples=[1])
+    tenant_id: int = Field(..., description="Tenant ID", examples=[1])
+    email: str = Field(..., description="User email address", examples=["cashier@retailmart.com"])
+    full_name: str = Field(..., description="Full name of user", examples=["Amit Sharma"])
+    phone: Optional[str] = Field(None, description="Normalized phone number", examples=["9876543210"])
+    store_id: Optional[int] = Field(None, description="Assigned store ID", examples=[1])
+    role_id: int = Field(..., description="Assigned role ID", examples=[2])
+    is_active: bool = Field(True, description="Account active status", examples=[True])
     role: Optional[RoleResponse] = None
-    created_at: datetime
-    pancard: Optional[str] = None
-    addhar_card: Optional[str] = None
-    profile_photo: Optional[str] = None
-    pan_number: Optional[str] = None
-    addhar_number: Optional[str] = None
+    created_at: datetime = Field(..., description="Account creation timestamp", examples=["2026-10-14T10:00:00Z"])
+    pancard: Optional[str] = Field(None, description="PAN card file URL", examples=["/uploads/users/pancard_abc.pdf"])
+    addhar_card: Optional[str] = Field(None, description="Aadhaar card file URL", examples=["/uploads/users/addhar_xyz.pdf"])
+    profile_photo: Optional[str] = Field(None, description="Profile photo URL", examples=["/uploads/users/photo_123.jpg"])
+    pan_number: Optional[str] = Field(None, description="PAN card number", examples=["ABCDE1234F"])
+    addhar_number: Optional[str] = Field(None, description="Aadhaar card 12-digit number", examples=["987654321012"])
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -501,15 +561,16 @@ class AssignStoreRequest(BaseModel):
         ...,
         gt=0,
         description="Store ID to assign to the user",
+        examples=[1],
     )
 
 
 class AssignStoreResponse(BaseModel):
-    message: str = "Store assigned successfully"
-    user_id: int
-    store_id: int
-    store_name: Optional[str] = None
-    role: Optional[str] = None
+    message: str = Field("Store assigned successfully", description="Status message", examples=["Store assigned successfully"])
+    user_id: int = Field(..., description="User ID", examples=[1])
+    store_id: int = Field(..., description="Assigned Store ID", examples=[1])
+    store_name: Optional[str] = Field(None, description="Assigned Store Name", examples=["Downtown Branch"])
+    role: Optional[str] = Field(None, description="User role name", examples=["cashier"])
 
 
 class RemoveStoreRequest(BaseModel):
@@ -517,15 +578,16 @@ class RemoveStoreRequest(BaseModel):
         default=None,
         gt=0,
         description="Optional Store ID to verify before removing user from store. If provided, ensures user is assigned to this store.",
+        examples=[1],
     )
 
 
 class RemoveStoreResponse(BaseModel):
-    message: str = "User removed from store successfully"
-    user_id: int
-    store_id: Optional[int] = None
-    previous_store_id: Optional[int] = None
-    role: Optional[str] = None
+    message: str = Field("User removed from store successfully", description="Status message", examples=["User removed from store successfully"])
+    user_id: int = Field(..., description="User ID", examples=[1])
+    store_id: Optional[int] = Field(None, description="New Store ID (null)", examples=[None])
+    previous_store_id: Optional[int] = Field(None, description="Previously assigned Store ID", examples=[1])
+    role: Optional[str] = Field(None, description="User role name", examples=["cashier"])
 
 
 class StoreUserItem(BaseModel):

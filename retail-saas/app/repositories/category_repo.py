@@ -1,3 +1,4 @@
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.category import Category
@@ -49,6 +50,22 @@ class CategoryRepository:
             .filter(
                 Category.id == category_id,
                 Category.tenant_id == tenant_id,
+            )
+            .first()
+        )
+
+    def get_by_name(
+        self,
+        tenant_id: int,
+        name: str,
+    ) -> Category | None:
+        if not name:
+            return None
+        return (
+            self.db.query(Category)
+            .filter(
+                Category.tenant_id == tenant_id,
+                func.lower(Category.name) == func.lower(name.strip()),
             )
             .first()
         )    

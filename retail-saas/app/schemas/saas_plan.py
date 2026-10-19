@@ -14,7 +14,12 @@ from pydantic import (
 class SaaSPlanBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Plan display name")
     description: Optional[str] = Field(None, description="Plan description")
-    price: Decimal = Field(default=Decimal("0.00"), ge=Decimal("0.00"), description="Plan price in Decimal")
+    price: Decimal = Field(
+        default=Decimal("0.00"),
+        ge=Decimal("0.00"),
+        description="Plan price in Decimal",
+        examples=[Decimal("999.00")],
+    )
     currency: str = Field(default="INR", min_length=3, max_length=3, description="ISO currency code")
     billing_interval: str = Field(default="monthly", description="Billing interval (monthly or yearly)")
     trial_days: int = Field(default=14, ge=0, description="Trial duration in days")
@@ -73,7 +78,7 @@ class SaaSPlanCreate(SaaSPlanBase):
 class SaaSPlanUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = None
-    price: Optional[Decimal] = Field(None, ge=Decimal("0.00"))
+    price: Optional[Decimal] = Field(None, ge=Decimal("0.00"), examples=[Decimal("999.00")])
     currency: Optional[str] = Field(None, min_length=3, max_length=3)
     billing_interval: Optional[str] = None
     trial_days: Optional[int] = Field(None, ge=0)
@@ -129,7 +134,7 @@ class SaaSPlanResponse(BaseModel):
     name: str
     code: str
     description: Optional[str] = None
-    price: Decimal
+    price: Decimal = Field(default=Decimal("0.00"), examples=[Decimal("999.00")])
     currency: str
     billing_interval: str
     trial_days: int

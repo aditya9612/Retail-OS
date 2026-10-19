@@ -1,14 +1,35 @@
 from enum import Enum
 
 
+class RoleEnum(str, Enum):
+    ADMIN = "admin"
+    OWNER = "owner"
+    MANAGER = "manager"
+    CASHIER = "cashier"
+    INVENTORY_MANAGER = "inventory_manager"
+    WAREHOUSE_STAFF = "warehouse_staff"
+    PURCHASE_MANAGER = "purchase_manager"
+    SALES_EXECUTIVE = "sales_executive"
+    CRM_SUPPORT = "crm_support"
+
+
 class UserRole(str, Enum):
     SUPERADMIN = "superadmin"
     ADMIN = "admin"
     OWNER = "owner"
     MANAGER = "manager"
-    ACCOUNTANT = "accountant"
     CASHIER = "cashier"
+    INVENTORY_MANAGER = "inventory_manager"
+    WAREHOUSE_STAFF = "warehouse_staff"
+    PURCHASE_MANAGER = "purchase_manager"
+    SALES_EXECUTIVE = "sales_executive"
+    CRM_SUPPORT = "crm_support"
+    # Legacy roles for backward compatibility
+    ACCOUNTANT = "accountant"
     STAFF = "staff"
+
+
+OFFICIAL_ROLES = [r.value for r in RoleEnum]
 
 
 class OrderStatus(str, Enum):
@@ -169,6 +190,61 @@ DEFAULT_ROLE_PERMISSIONS = {
         "pos:shift_manage",
     ],
 
+    UserRole.INVENTORY_MANAGER: [
+        "products:read",
+        "products:write",
+        "categories:read",
+        "categories:write",
+        "inventory:read",
+        "inventory:write",
+        "batches:read",
+        "batches:write",
+        "purchase_orders:read",
+        "purchase_orders:write",
+        "suppliers:read",
+        "reports:read",
+    ],
+
+    UserRole.WAREHOUSE_STAFF: [
+        "products:read",
+        "inventory:read",
+        "inventory:write",
+        "batches:read",
+        "batches:write",
+        "orders:read",
+    ],
+
+    UserRole.PURCHASE_MANAGER: [
+        "products:read",
+        "inventory:read",
+        "purchase_orders:read",
+        "purchase_orders:write",
+        "suppliers:read",
+        "suppliers:write",
+        "reports:read",
+    ],
+
+    UserRole.SALES_EXECUTIVE: [
+        "products:read",
+        "orders:read",
+        "orders:write",
+        "sales:read",
+        "sales:write",
+        "customers:read",
+        "customers:write",
+        "coupons:read",
+        "billing:read",
+    ],
+
+    UserRole.CRM_SUPPORT: [
+        "customers:read",
+        "customers:write",
+        "reviews:read",
+        "reviews:write",
+        "orders:read",
+        "reports:read",
+    ],
+
     UserRole.STAFF: [
         "products:read",
         "inventory:read",
@@ -182,3 +258,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         "purchase_orders:read",
     ],
 }
+
+# Ensure DEFAULT_ROLE_PERMISSIONS is also indexable by string role name
+for _r, _p in list(DEFAULT_ROLE_PERMISSIONS.items()):
+    if isinstance(_r, UserRole):
+        DEFAULT_ROLE_PERMISSIONS[_r.value] = _p

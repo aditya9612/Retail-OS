@@ -10,13 +10,16 @@ from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.store import (
     StoreCreate,
+    StoreDeleteResponse,
+    StoreInventorySummaryResponse,
     StoreResponse,
+    StoreSetMainResponse,
+    StoreStaffListResponse,
+    StoreStatusResponse,
+    StoreSummaryResponse,
     StoreUpdate,
 )
-from app.schemas.user import UserCreate, UserResponse
 from app.services.store_service import StoreService
-from app.services.user_service import UserService
-
 
 router = APIRouter(
     prefix="/stores",
@@ -38,18 +41,34 @@ def get_store_service(
     "/",
     response_model=list[StoreResponse],
     summary="List Stores",
-    description=(
-        "Store Owner sees all stores in their organization. "
-        "Store-assigned staff only see their assigned store."
-    ),
+    description="Store Owner sees all stores in their organization with optional filters. Store-assigned staff only sees their assigned store.",
 )
 def list_stores(
-    user: User = Depends(require_permission("stores:read")),
-    service: StoreService = Depends(get_store_service),
+    include_inactive: bool = Query(
+        False,
+        description="Include deactivated or soft-deleted stores in the list",
+    ),
+    search: str | None = Query(
+        None,
+        description="Filter stores by name, code, or city",
+    ),
+    is_warehouse: bool | None = Query(
+        None,
+        description="Filter by warehouse location (true) or retail outlet (false)",
+    ),
+    user: User = Depends(
+        require_permission("stores:read")
+    ),
+    service: StoreService = Depends(
+        get_store_service
+    ),
 ):
     return service.list_stores(
         tenant_id=user.tenant_id,
         store_id=user.store_id,
+        include_inactive=include_inactive,
+        search=search,
+        is_warehouse=is_warehouse,
     )
 
 
@@ -83,6 +102,7 @@ def create_store(
     "/{store_id}",
     response_model=StoreResponse,
     summary="Get Store Details",
+    description="Retrieve details of a specific store. Inactive stores are also accessible to authorized admins/staff.",
 )
 def get_store(
     store_id: Annotated[
@@ -93,8 +113,16 @@ def get_store(
             description="Store ID must be a positive integer up to 999999",
         ),
     ],
-    user: User = Depends(require_permission("stores:read")),
-    service: StoreService = Depends(get_store_service),
+    include_inactive: bool = Query(
+        True,
+        description="Include store even if deactivated/inactive (defaults to True)",
+    ),
+    user: User = Depends(
+        require_permission("stores:read")
+    ),
+    service: StoreService = Depends(
+        get_store_service
+    ),
 ):
     if user.store_id is not None and user.store_id != store_id:
         raise ForbiddenException("Access denied to this store")
@@ -102,6 +130,7 @@ def get_store(
     return service.get_store(
         user.tenant_id,
         store_id,
+        include_inactive=include_inactive,
     )
 
 
@@ -109,6 +138,7 @@ def get_store(
     "/{store_id}",
     response_model=StoreResponse,
     summary="Update Store Details",
+    description="Update store attributes. Quota verification applies when reactivating an inactive store.",
 )
 def update_store(
     store_id: Annotated[
@@ -135,7 +165,9 @@ def update_store(
 
 @router.delete(
     "/{store_id}",
+    response_model=StoreDeleteResponse,
     summary="Delete Store",
+    description="Soft-deletes a store if it has no active inventory or stock movements. Requires store owner privileges.",
 )
 def delete_store(
     store_id: Annotated[
@@ -159,64 +191,24 @@ def delete_store(
         store_id,
     )
 
-    return {
-        "message": "Store deleted successfully"
-    }
-
-
-# ============================================================
-# ROLE-BASED STORE USER APIs (PER STORE)
-# ============================================================
-
-@router.get(
-    "/{store_id}/users",
-    response_model=list[UserResponse],
-    summary="List Store Users",
-    description="List role-based users assigned to a specific store.",
-)
-def list_store_users(
-    store_id: Annotated[
-        int,
-        Path(
-            gt=0,
-            le=999999,
-            description="Store ID must be a positive integer up to 999999",
-        ),
-    ],
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    include_inactive: bool = Query(False),
-    user: User = Depends(require_permission("users:read")),
-    service: StoreService = Depends(get_store_service),
-    db: Session = Depends(get_db),
-):
-    # Verify that the store belongs to the caller's tenant.
-    service.get_store(user.tenant_id, store_id)
-
-    if user.store_id is not None and user.store_id != store_id:
-        raise ForbiddenException(
-            "Access denied to users of this store"
-        )
-
-    skip = (page - 1) * page_size
-
-    return UserService(db).list_users(
-        tenant_id=user.tenant_id,
-        skip=skip,
-        limit=page_size,
-        include_inactive=include_inactive,
+    return StoreDeleteResponse(
+        success=True,
+        message="Store deleted successfully",
         store_id=store_id,
     )
 
 
-@router.post(
-    "/{store_id}/users",
-    response_model=UserResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create Store User",
-    description="Create a role-based user for a specific store.",
+# ============================================================
+# ADVANCED MULTI-STORE APIs
+# ============================================================
+
+@router.get(
+    "/{store_id}/summary",
+    response_model=StoreSummaryResponse,
+    summary="Store KPI & Performance Snapshot",
+    description="Real-time branch summary including today sales, orders count, total staff, open POS shifts, and stock alerts.",
 )
-def create_store_user(
+def get_store_summary(
     store_id: Annotated[
         int,
         Path(
@@ -225,24 +217,172 @@ def create_store_user(
             description="Store ID must be a positive integer up to 999999",
         ),
     ],
-    data: UserCreate,
-    user: User = Depends(require_permission("users:write")),
-    service: StoreService = Depends(get_store_service),
-    db: Session = Depends(get_db),
+    user: User = Depends(
+        require_permission("stores:read")
+    ),
+    service: StoreService = Depends(
+        get_store_service
+    ),
 ):
-    # Verify that the store belongs to the caller's tenant.
-    service.get_store(user.tenant_id, store_id)
-
     if user.store_id is not None and user.store_id != store_id:
-        raise ForbiddenException(
-            "You can only create users for your assigned store"
-        )
+        raise ForbiddenException("Access denied to this store")
 
-    # Assign the user to the store specified in the URL.
-    data.store_id = store_id
+    return service.get_store_summary(
+        user.tenant_id,
+        store_id,
+    )
 
-    return UserService(db).create_user(
-        tenant_id=user.tenant_id,
-        data=data,
-        current_user_store_id=user.store_id,
+
+@router.get(
+    "/{store_id}/staff",
+    response_model=StoreStaffListResponse,
+    summary="List Store Staff",
+    description="List all active and assigned employees (cashiers, managers, stock keepers) for this branch.",
+)
+def get_store_staff(
+    store_id: Annotated[
+        int,
+        Path(
+            gt=0,
+            le=999999,
+            description="Store ID must be a positive integer up to 999999",
+        ),
+    ],
+    user: User = Depends(
+        require_permission("stores:read")
+    ),
+    service: StoreService = Depends(
+        get_store_service
+    ),
+):
+    if user.store_id is not None and user.store_id != store_id:
+        raise ForbiddenException("Access denied to this store")
+
+    return service.get_store_staff(
+        user.tenant_id,
+        store_id,
+    )
+
+
+@router.post(
+    "/{store_id}/set-main",
+    response_model=StoreSetMainResponse,
+    summary="Set Primary / Main Store",
+    description="Designates this store as the primary/main store and demotes previous main store atomically.",
+)
+def set_main_store(
+    store_id: Annotated[
+        int,
+        Path(
+            gt=0,
+            le=999999,
+            description="Store ID must be a positive integer up to 999999",
+        ),
+    ],
+    user: User = Depends(
+        require_permission("stores:write")
+    ),
+    service: StoreService = Depends(
+        get_store_service
+    ),
+):
+    if user.store_id is not None:
+        raise ForbiddenException("Only Store Owner can designate the main store")
+
+    return service.set_main_store(
+        user.tenant_id,
+        store_id,
+    )
+
+
+@router.patch(
+    "/{store_id}/activate",
+    response_model=StoreStatusResponse,
+    summary="Activate Store",
+    description="Reactivates a deactivated store. Checks tenant SaaS subscription store quota.",
+)
+def activate_store(
+    store_id: Annotated[
+        int,
+        Path(
+            gt=0,
+            le=999999,
+            description="Store ID must be a positive integer up to 999999",
+        ),
+    ],
+    user: User = Depends(
+        require_permission("stores:write")
+    ),
+    service: StoreService = Depends(
+        get_store_service
+    ),
+):
+    if user.store_id is not None:
+        raise ForbiddenException("Only Store Owner can activate stores")
+
+    return service.activate_store(
+        user.tenant_id,
+        store_id,
+    )
+
+
+@router.patch(
+    "/{store_id}/deactivate",
+    response_model=StoreStatusResponse,
+    summary="Deactivate Store",
+    description="Deactivates a store branch. Validates that it is not the main store and has no open POS shifts.",
+)
+def deactivate_store(
+    store_id: Annotated[
+        int,
+        Path(
+            gt=0,
+            le=999999,
+            description="Store ID must be a positive integer up to 999999",
+        ),
+    ],
+    user: User = Depends(
+        require_permission("stores:write")
+    ),
+    service: StoreService = Depends(
+        get_store_service
+    ),
+):
+    if user.store_id is not None:
+        raise ForbiddenException("Only Store Owner can deactivate stores")
+
+    return service.deactivate_store(
+        user.tenant_id,
+        store_id,
+    )
+
+
+@router.get(
+    "/{store_id}/inventory-summary",
+    response_model=StoreInventorySummaryResponse,
+    summary="Store Stock & Valuation Summary",
+    description="Aggregated inventory statistics including total SKUs, total quantity, monetary stock valuation, and stock health counts.",
+)
+def get_store_inventory_summary(
+    store_id: Annotated[
+        int,
+        Path(
+            gt=0,
+            le=999999,
+            description="Store ID must be a positive integer up to 999999",
+        ),
+    ],
+    user: User = Depends(
+        require_permission("stores:read")
+    ),
+    service: StoreService = Depends(
+        get_store_service
+    ),
+):
+    if user.store_id is not None and user.store_id != store_id:
+        raise ForbiddenException("Access denied to this store")
+
+    return service.get_store_inventory_summary(
+        user.tenant_id,
+        store_id,
     )

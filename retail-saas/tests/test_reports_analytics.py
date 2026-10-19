@@ -733,6 +733,35 @@ def test_export_pdf(reports_fixture):
     assert resp.content.startswith(b"%PDF")
 
 
+def test_export_sales_yearly_pdf(reports_fixture):
+    headers = reports_fixture["owner_headers"]
+    year = reports_fixture["today"].year
+    body = {
+        "report_type": "sales_yearly",
+        "format": "pdf",
+        "year": year,
+    }
+    resp = client.post("/api/v1/reports/export", json=body, headers=headers)
+    assert resp.status_code == 200
+    assert "application/pdf" in resp.headers["content-type"]
+    assert "attachment" in resp.headers["content-disposition"]
+    assert resp.content.startswith(b"%PDF")
+
+
+def test_export_sales_yearly_get_pdf(reports_fixture):
+    headers = reports_fixture["owner_headers"]
+    store_id = reports_fixture["store1"].id
+    resp = client.get(
+        f"/api/v1/reports/export?report_type=sales_yearly&format=pdf&store_id={store_id}",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert "application/pdf" in resp.headers["content-type"]
+    assert "attachment" in resp.headers["content-disposition"]
+    assert resp.content.startswith(b"%PDF")
+
+
+
 # ============================================================================
 # 8. SECURITY & TENANT ISOLATION TESTS
 # ============================================================================

@@ -589,8 +589,17 @@ def validate_email_address(
     if not local_part:
         raise ValueError("Email must contain a username before @")
 
+    if len(local_part) < 2:
+        raise ValueError("Email username must be at least 2 characters")
+
     if len(local_part) > 64:
         raise ValueError("Email username must not exceed 64 characters")
+
+    if local_part.isdigit():
+        raise ValueError("Email username cannot be purely numeric")
+
+    if not any(c.isalpha() for c in local_part):
+        raise ValueError("Email username must contain at least one letter")
 
     if local_part.startswith(".") or local_part.endswith("."):
         raise ValueError("Email username cannot start or end with a dot")

@@ -24,6 +24,7 @@ def create_refund(
         payload.refund_amount,
         payload.refund_method,
         payload.reason,
+        user=user,
     )
 
 
@@ -33,7 +34,11 @@ def list_refunds(
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
-    return BillingService(db).list_refunds(user.tenant_id, invoice_id)
+    return BillingService(db).list_refunds(
+        user.tenant_id,
+        invoice_id,
+        user=user,
+    )
 
 
 @router.get("/{refund_id}", response_model=RefundResponse)
@@ -42,7 +47,11 @@ def get_refund(
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
-    return BillingService(db).get_refund(user.tenant_id, refund_id)
+    return BillingService(db).get_refund(
+        user.tenant_id,
+        refund_id,
+        user=user,
+    )
 
 
 @router.post("/{refund_id}/approve", response_model=RefundResponse)
@@ -51,7 +60,12 @@ def approve_refund(
     user: User = Depends(require_permission("billing:refund")),
     db: Session = Depends(get_db),
 ):
-    return BillingService(db).approve_refund(user.tenant_id, refund_id, user.id)
+    return BillingService(db).approve_refund(
+        user.tenant_id,
+        refund_id,
+        user.id,
+        user=user,
+    )
 
 
 @router.post("/{refund_id}/reject", response_model=RefundResponse)
@@ -60,4 +74,8 @@ def reject_refund(
     user: User = Depends(require_permission("billing:refund")),
     db: Session = Depends(get_db),
 ):
-    return BillingService(db).reject_refund(user.tenant_id, refund_id)
+    return BillingService(db).reject_refund(
+        user.tenant_id,
+        refund_id,
+        user=user,
+    )

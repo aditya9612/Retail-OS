@@ -290,6 +290,153 @@ def validate_reference_number(
 
 
 # ============================================================
+# EXTRACT DATE FROM REFERENCE NUMBER
+# ============================================================
+
+def extract_date_from_reference_number(
+    ref: str,
+) -> tuple[Optional[date], Optional[int]]:
+    """
+    Extract a date or year from reference_number if present.
+
+    Supported formats:
+    YYYY-MM-DD
+    YYYY/MM/DD
+    YYYY_MM_DD
+    DD-MM-YYYY
+    DD/MM/YYYY
+    DD_MM_YYYY
+    YYYYMMDD
+    DDMMYYYY
+    YYYY
+    """
+
+    # 1. YYYY-MM-DD / YYYY/MM/DD / YYYY_MM_DD
+    m = re.search(
+        r"\b(20\d{2})[-/_](0[1-9]|1[0-2])[-/_]"
+        r"(0[1-9]|[12]\d|3[01])\b",
+        ref,
+    )
+
+    if m:
+        try:
+            return (
+                date(
+                    int(m.group(1)),
+                    int(m.group(2)),
+                    int(m.group(3)),
+                ),
+                int(m.group(1)),
+            )
+        except ValueError:
+            pass
+
+    # 2. DD-MM-YYYY / DD/MM/YYYY / DD_MM_YYYY
+    m = re.search(
+        r"\b(0[1-9]|[12]\d|3[01])[-/_]"
+        r"(0[1-9]|1[0-2])[-/_](20\d{2})\b",
+        ref,
+    )
+
+    if m:
+        try:
+            return (
+                date(
+                    int(m.group(3)),
+                    int(m.group(2)),
+                    int(m.group(1)),
+                ),
+                int(m.group(3)),
+            )
+        except ValueError:
+            pass
+
+    # 3. YYYYMMDD
+    for m in re.finditer(
+        r"(?<!\d)"
+        r"(20\d{2})"
+        r"(0[1-9]|1[0-2])"
+        r"(0[1-9]|[12]\d|3[01])"
+        r"(?!\d)",
+        ref,
+    ):
+        try:
+            return (
+                date(
+                    int(m.group(1)),
+                    int(m.group(2)),
+                    int(m.group(3)),
+                ),
+                int(m.group(1)),
+            )
+        except ValueError:
+            pass
+
+    # 4. DDMMYYYY
+    for m in re.finditer(
+        r"(?<!\d)"
+        r"(0[1-9]|[12]\d|3[01])"
+        r"(0[1-9]|1[0-2])"
+        r"(20\d{2})"
+        r"(?!\d)",
+        ref,
+    ):
+        try:
+            return (
+                date(
+                    int(m.group(3)),
+                    int(m.group(2)),
+                    int(m.group(1)),
+                ),
+                int(m.group(3)),
+            )
+        except ValueError:
+            pass
+
+    # 5. Four-digit year 2000-2099
+    m = re.search(
+        r"(?<!\d)(20\d{2})(?!\d)",
+        ref,
+    )
+
+    if m:
+        return None, int(m.group(1))
+
+    return None, None
+
+
+# ============================================================
+# REFERENCE NUMBER / EXPENSE DATE VALIDATION
+# ============================================================
+
+def validate_reference_number_date(
+    reference_number: Optional[str],
+    expense_date: Optional[date],
+) -> None:
+
+    if not reference_number or not expense_date:
+        return
+
+    ref_date, ref_year = extract_date_from_reference_number(
+        reference_number
+    )
+
+    if ref_date is not None:
+        if ref_date != expense_date:
+            raise ValueError(
+                f"Reference number date ({ref_date}) does not match "
+                f"expense date ({expense_date})."
+            )
+
+    elif ref_year is not None:
+        if ref_year != expense_date.year:
+            raise ValueError(
+                f"Reference number year ({ref_year}) does not match "
+                f"expense date year ({expense_date.year})."
+            )
+
+
+# ============================================================
 # CREATE STORE EXPENSE
 # ============================================================
 
@@ -445,26 +592,97 @@ class StoreExpenseUpdate(BaseModel):
 class StoreExpenseResponse(BaseModel):
     id: int
     store_id: int
-    amount: float
+    store_name: Optional[str] = None
+    amount: Decimal
     category: str
     description: Optional[str] = None
     expense_date: date
     payment_method: PaymentMethod
     reference_number: Optional[str] = None
+    status: Optional[str] = "active"
+    created_by: Optional[int] = None
+    created_by_name: Optional[str] = None
 
-
-    @field_serializer("amount")
-    def serialize_amount(self, value: Decimal) -> float:
-        return float(value)
-
+    @field_serializer("amount", mode="plain")
+    def serialize_amount(self, v: Decimal) -> str:
+        return f"{Decimal(str(v)):.2f}"
 
     model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================
-# SUMMARy
+# SUMMARY & ANALYTICS SCHEMAS
 # ============================================================
 
 class StoreExpenseSummary(BaseModel):
     total_expenses: Decimal
     expense_count: int
+
+
+class CategoryExpenseStat(BaseModel):
+    category: str
+    total_amount: Decimal
+    percentage: float
+    count: int
+
+    @field_serializer("total_amount", mode="plain")
+    def serialize_amount(self, v: Decimal) -> str:
+        return f"{Decimal(str(v)):.2f}"
+
+
+class PaymentMethodExpenseStat(BaseModel):
+    payment_method: str
+    total_amount: Decimal
+    percentage: float
+    count: int
+
+    @field_serializer("total_amount", mode="plain")
+    def serialize_amount(self, v: Decimal) -> str:
+        return f"{Decimal(str(v)):.2f}"
+
+
+class StoreExpenseComparisonStat(BaseModel):
+    store_id: int
+    store_name: str
+    total_amount: Decimal
+    percentage: float
+    count: int
+
+    @field_serializer("total_amount", mode="plain")
+    def serialize_amount(self, v: Decimal) -> str:
+        return f"{Decimal(str(v)):.2f}"
+
+
+class StoreExpenseAnalyticsSummary(BaseModel):
+    total_expenses: Decimal
+    total_count: int
+    cash_expenses: Decimal
+    digital_expenses: Decimal
+    categories_breakdown: list[CategoryExpenseStat] = []
+    payment_methods_breakdown: list[PaymentMethodExpenseStat] = []
+    store_comparison: list[StoreExpenseComparisonStat] = []
+    recent_expenses: list[StoreExpenseResponse] = []
+
+    @field_serializer("total_expenses", "cash_expenses", "digital_expenses", mode="plain")
+    def serialize_amount(self, v: Decimal) -> str:
+        return f"{Decimal(str(v)):.2f}"
+
+
+# ============================================================
+# DAILY REPORT SCHEMAS
+# ============================================================
+
+class StoreExpenseDailyReportResponse(BaseModel):
+    report_date: date
+    store_id: Optional[int] = None
+    store_name: Optional[str] = None
+    total_expenses: Decimal
+    total_count: int
+    cash_expense_total: Decimal
+    non_cash_expense_total: Decimal
+    cash_drawer_payout_count: int
+    expenses: list[StoreExpenseResponse] = []
+
+    @field_serializer("total_expenses", "cash_expense_total", "non_cash_expense_total", mode="plain")
+    def serialize_amount(self, v: Decimal) -> str:
+        return f"{Decimal(str(v)):.2f}"

@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from fastapi import status
 
 from app.core.exceptions import (
     ConflictException,
@@ -137,7 +138,7 @@ class CouponService:
             coupon.usage_limit,
         )
 
-        if final_start_date < date.today():
+        if "start_date" in update_data and final_start_date < date.today():
             raise AppException(
                "Start date cannot be in the past"
             )
@@ -156,13 +157,17 @@ class CouponService:
                "'percentage' or 'fixed'"
             )
 
-        if (
-            final_discount_type == "percentage"
-            and final_discount_value > Decimal("100")
-        ):
-            raise AppException(
-                "Percentage discount cannot be greater than 100"
-            )
+        if final_discount_type == "percentage":
+            if final_discount_value < Decimal("1"):
+                raise AppException(
+                    "Percentage discount must be greater than or equal to 1",
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
+            if final_discount_value > Decimal("100"):
+                raise AppException(
+                    "Percentage discount cannot be greater than 100",
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
 
         if final_usage_limit < coupon.used_count:
             raise AppException(
@@ -269,7 +274,7 @@ class CouponService:
 
         if today < coupon.start_date:
             raise AppException(
-                "Coupon is not started yet"
+                "Coupon is not active yet"
             )
 
         if today > coupon.end_date:
@@ -346,15 +351,16 @@ class CouponService:
             order_amount,
         )
         
-        final_amount = (
-            order_amount - discount
+        final_amount = max(
+            Decimal("0.00"),
+            order_amount - discount,
         )
 
         return {
             "coupon_code": coupon.code,
-            "original_amount": order_amount,
-            "discount_amount": discount,
-            "final_amount": final_amount,
+            "original_amount": float(round(order_amount, 2)),
+            "discount_amount": float(round(discount, 2)),
+            "final_amount": float(round(final_amount, 2)),
             "message": "Coupon applied successfully",
         }
 

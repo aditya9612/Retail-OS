@@ -24,6 +24,7 @@ def create_credit_note(
         payload.refund_amount,
         payload.reason,
         user.id,
+        user=user,
     )
 
 
@@ -36,6 +37,7 @@ def list_credit_notes(
     return BillingService(db).list_credit_notes(
         user.tenant_id,
         invoice_id,
+        user=user,
     )
 
 
@@ -48,6 +50,7 @@ def get_credit_note(
     return BillingService(db).get_credit_note(
         user.tenant_id,
         credit_note_id,
+        user=user,
     )
 
 
@@ -76,11 +79,13 @@ def credit_note_pdf(
     credit_note = BillingService(db).get_credit_note(
         user.tenant_id,
         credit_note_id,
+        user=user,
     )
 
     pdf_bytes = BillingService(db).generate_credit_note_pdf(
         user.tenant_id,
         credit_note_id,
+        user=user,
     )
 
     disposition = "inline" if mode == "preview" else "attachment"

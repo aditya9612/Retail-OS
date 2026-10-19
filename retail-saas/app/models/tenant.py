@@ -44,6 +44,14 @@ class Tenant(Base, TimestampMixin):
         self.domain = val
 
     @property
+    def business_name(self) -> str:
+        return self.name
+
+    @business_name.setter
+    def business_name(self, val: str) -> None:
+        self.name = val
+
+    @property
     def gstin(self) -> Optional[str]:
         if self.settings and isinstance(self.settings, dict):
             return self.settings.get("gstin")
@@ -56,8 +64,19 @@ class Tenant(Base, TimestampMixin):
     @property
     def email(self) -> Optional[str]:
         if self.settings and isinstance(self.settings, dict):
-            return self.settings.get("email")
-        return getattr(self, "_email", None)
+            val = self.settings.get("email")
+            if val:
+                return val
+        if getattr(self, "_email", None):
+            return self._email
+        try:
+            if hasattr(self, "users") and self.users:
+                for u in self.users:
+                    if getattr(u, "email", None) and not getattr(u, "is_deleted", False):
+                        return u.email
+        except Exception:
+            pass
+        return None
 
     @email.setter
     def email(self, val: Optional[str]) -> None:
@@ -66,8 +85,19 @@ class Tenant(Base, TimestampMixin):
     @property
     def phone(self) -> Optional[str]:
         if self.settings and isinstance(self.settings, dict):
-            return self.settings.get("phone")
-        return getattr(self, "_phone", None)
+            val = self.settings.get("phone")
+            if val:
+                return val
+        if getattr(self, "_phone", None):
+            return self._phone
+        try:
+            if hasattr(self, "users") and self.users:
+                for u in self.users:
+                    if getattr(u, "phone", None) and not getattr(u, "is_deleted", False):
+                        return u.phone
+        except Exception:
+            pass
+        return None
 
     @phone.setter
     def phone(self, val: Optional[str]) -> None:

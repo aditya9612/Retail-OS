@@ -18,5 +18,6 @@ class InvoiceItem(Base, TimestampMixin):
     gst_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
     gst_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    returned_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("0.0000"), nullable=False)
 
     invoice: Mapped["Invoice"] = relationship("Invoice", back_populates="items")

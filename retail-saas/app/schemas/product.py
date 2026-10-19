@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import (
     BaseModel,
@@ -468,6 +468,13 @@ class BarcodeMode(str, Enum):
     PREVIEW = "preview"
 
 
+class BarcodeLabelMode(str, Enum):
+    JSON = "json"
+    PREVIEW = "preview"
+    HTML = "html"
+    DOWNLOAD = "download"
+
+
 class ProductImageCreate(BaseModel):
     image_url: str = Field(
         min_length=1,
@@ -618,7 +625,7 @@ class ProductBase(BaseModel):
         },
     )
 
-    variants: Optional[Dict[str, Any]] = None
+    variants: Optional[Any] = None
 
     track_batch: bool = False
 
@@ -980,7 +987,7 @@ class ProductUpdate(BaseModel):
         },
     )
 
-    variants: Optional[Dict[str, Any]] = None
+    variants: Optional[Any] = None
 
     track_batch: Optional[bool] = None
 
@@ -1247,30 +1254,17 @@ class ProductUpdate(BaseModel):
                 "SKU and Barcode cannot have the same value"
             )
 
-        if self.track_batch is True:
-            if (
-                not self.batch_number
-                or not str(self.batch_number).strip()
-            ):
-                raise ValueError(
-                    "batch_number is required when track_batch is true"
-                )
-
+        if self.batch_number is not None:
             batch_value = str(
                 self.batch_number
             ).strip()
 
-            if batch_value.lower() in PLACEHOLDER_VALUES:
+            if not batch_value or batch_value.lower() in PLACEHOLDER_VALUES:
                 raise ValueError(
                     f"Batch number cannot be placeholder '{batch_value}'"
                 )
 
-        if self.track_expiry is True:
-            if self.expiry_date is None:
-                raise ValueError(
-                    "expiry_date is required when track_expiry is true"
-                )
-
+        if self.expiry_date is not None:
             if self.expiry_date < date.today():
                 raise ValueError(
                     "expiry_date cannot be in the past"
@@ -1291,13 +1285,15 @@ class ProductResponse(BaseModel):
     hsn_code: Optional[str] = None
     gst_rate: Decimal
     selling_price: Decimal
+    cost_price: Optional[Decimal] = Decimal("0.00")
     mrp: Decimal
     tax_rate: Decimal
+    category_name: Optional[str] = None
     min_stock_alert: int = 5
     stock_status: str = "in_stock"
     unit: str = "pcs"
     price: Decimal
-    variants: Optional[Dict[str, Any]] = None
+    variants: Optional[Any] = None
     track_batch: bool = False
     track_expiry: bool = False
     batch_number: Optional[str] = None
@@ -1312,6 +1308,7 @@ class ProductResponse(BaseModel):
 
     @field_serializer(
         "selling_price",
+        "cost_price",
         "mrp",
         "tax_rate",
         "gst_rate",
@@ -1349,3 +1346,67 @@ class ProductLowStockResponse(ProductResponse):
         default=10,
         description="Low-stock threshold used for alert",
     )
+
+
+# ============================================================
+# NEW ADVANCED ENTERPRISE SCHEMAS
+# ============================================================
+
+class CategoryProductStat(BaseModel):
+    category_id: Optional[int] = None
+    category_name: str
+    product_count: int
+
+
+class ProductCatalogSummaryResponse(BaseModel):
+    total_products: int
+    active_products: int
+    inactive_products: int
+    total_inventory_cost_value: Decimal
+    total_inventory_retail_value: Decimal
+    out_of_stock_count: int
+    low_stock_count: int
+    expiring_soon_count: int
+    missing_barcodes_count: int
+    category_breakdown: list[CategoryProductStat] = []
+
+    @field_serializer(
+        "total_inventory_cost_value",
+        "total_inventory_retail_value",
+        mode="plain",
+        check_fields=False,
+    )
+    def serialize_decimal(self, v: Decimal) -> float:
+        return float(v) if v is not None else 0.0
+
+
+class ProductBulkCreateRequest(BaseModel):
+    products: list[ProductCreate] = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="List of products to create in bulk (1-500)",
+    )
+
+
+class ProductBulkCreateResponse(BaseModel):
+    success: bool
+    total_created: int
+    products: list[ProductResponse] = []
+
+
+class ProductBarcodeLabelResponse(BaseModel):
+    product_id: int
+    product_name: str
+    sku: str
+    barcode: str
+    mrp: Decimal
+    selling_price: Decimal
+    store_name: Optional[str] = None
+    currency_symbol: str = "₹"
+    barcode_image_base64: str
+    label_format: str = "50x25mm"
+
+    @field_serializer("mrp", "selling_price", mode="plain", check_fields=False)
+    def serialize_decimal(self, v: Decimal) -> float:
+        return float(v) if v is not None else 0.0

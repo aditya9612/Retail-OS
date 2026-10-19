@@ -420,7 +420,7 @@ def export_report(
     },
 )
 def export_report_get(
-    report_type: ReportType = Query(..., description="Report type identifier (22 supported reports)"),
+    report_type: ReportType = Query(..., description="Report type identifier (23 supported reports)"),
     format: ExportFormat = Query(default=ExportFormat.CSV, description="Export file format: csv, excel, or pdf"),
     start_date: Optional[date] = Query(default=None, description="Start date (YYYY-MM-DD) for date-filtered reports"),
     end_date: Optional[date] = Query(default=None, description="End date (YYYY-MM-DD) for date-filtered reports"),

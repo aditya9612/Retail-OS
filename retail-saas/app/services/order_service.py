@@ -1,4 +1,5 @@
 import uuid
+from typing import Optional
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
@@ -11,9 +12,11 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
     AppException,
+    ForbiddenException,
     NotFoundException,
     ConflictException,
 )
+from app.core.security import is_tenant_wide_authorized
 from app.models.customer import (
     Customer,
     CustomerFeedback,
@@ -26,6 +29,7 @@ from app.models.customer import (
 )
 from app.models.invoice import Invoice
 from app.models.store import Store
+from app.models.user import User
 from app.models.coupon import Coupon
 from app.models.order import Order, OrderTracking
 from app.models.order_item import OrderItem
@@ -70,7 +74,20 @@ class OrderService:
             query = query.filter(ProductBatch.variant_id == variant_id)
         return query.first() is not None
 
-    def _generate_order_number(self) -> str:
+    def _generate_order_number(
+        self,
+        tenant_id: Optional[int] = None,
+        store_id: Optional[int] = None,
+        pos_id: Optional[int] = None,
+    ) -> str:
+        if tenant_id:
+            try:
+                from app.services.document_number_service import DocumentNumberService
+                return DocumentNumberService(self.db).generate_order_number(
+                    tenant_id=tenant_id, store_id=store_id, pos_id=pos_id
+                )
+            except Exception:
+                pass
         return f"ORD-{uuid.uuid4().hex[:8].upper()}"
 
     def _get_store(
@@ -235,6 +252,7 @@ class OrderService:
         self,
         product: Product,
         item: OrderItemCreate,
+        same_state: bool = True,
     ) -> OrderItem:
 
         unit_price = (
@@ -254,24 +272,15 @@ class OrderService:
                 f"{gross_amount}"
             )
 
-        subtotal = (
-            gross_amount - item.discount
-        )
+        from app.utils.gst_engine import calculate_line_tax, resolve_gst_rate
 
-        tax_rate = product.gst_rate
-
-        tax_amount = (
-            subtotal
-            * tax_rate
-            / Decimal("100")
-        ).quantize(
-            Decimal("0.01")
-        )
-
-        total = (
-            subtotal + tax_amount
-        ).quantize(
-            Decimal("0.01")
+        gst_rate = resolve_gst_rate(self.db, product.tenant_id, product)
+        tax = calculate_line_tax(
+            quantity=Decimal(str(item.quantity)),
+            unit_price=unit_price,
+            discount=item.discount,
+            gst_rate=gst_rate,
+            same_state=same_state,
         )
 
         return OrderItem(
@@ -281,9 +290,12 @@ class OrderService:
             quantity=item.quantity,
             unit_price=unit_price,
             discount=item.discount,
-            tax_rate=tax_rate,
-            tax_amount=tax_amount,
-            total=total,
+            tax_rate=tax["gst_rate"],
+            tax_amount=tax["gst_amount"],
+            total=tax["total_amount"],
+            cgst_amount=tax["cgst_amount"],
+            sgst_amount=tax["sgst_amount"],
+            igst_amount=tax["igst_amount"],
             variant=item.variant,
             variant_id=getattr(item, "variant_id", None),
         )
@@ -373,7 +385,25 @@ class OrderService:
         tenant_id: int,
         user_id: int,
         data: OrderCreate,
+        commit: bool = True,
     ) -> Order:
+
+        user = (
+            self.db.query(User)
+            .filter(
+                User.id == user_id,
+                User.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if not user:
+            raise ForbiddenException("Access denied: user context required")
+
+        if user.store_id is not None and data.store_id != user.store_id:
+            raise ForbiddenException("Access denied: cannot create order for another store")
+
+        if user.store_id is None and not is_tenant_wide_authorized(user, self.db):
+            raise ForbiddenException("Access denied: user has no assigned store")
 
         self._get_store(
             tenant_id,
@@ -391,7 +421,9 @@ class OrderService:
             store_id=data.store_id,
             customer_id=data.customer_id,
             user_id=user_id,
-            order_number=self._generate_order_number(),
+            order_number=self._generate_order_number(
+                tenant_id=tenant_id, store_id=data.store_id
+            ),
             order_type=data.order_type,
             status=OrderStatus.DRAFT.value,
             coupon_code=data.coupon_code,
@@ -399,6 +431,8 @@ class OrderService:
             delivery_address=data.delivery_address,
             notes=data.notes,
         )
+
+        same_state = getattr(data, "same_state", True)
 
         for item_data in data.items:
 
@@ -439,6 +473,7 @@ class OrderService:
                 self._calculate_item_totals(
                     product,
                     item_data,
+                    same_state=same_state,
                 )
             )
 
@@ -482,13 +517,16 @@ class OrderService:
 
         self._recalculate_order(order)
 
-        created_order = self.repo.create(order)
+        created_order = self.repo.create(order, commit=commit)
 
         if data.coupon_code:
 
             coupon.used_count += 1
-            self.db.commit()
-            self.db.refresh(created_order)
+            if commit:
+                self.db.commit()
+                self.db.refresh(created_order)
+            else:
+                self.db.flush()
 
         return created_order
 
@@ -668,6 +706,7 @@ class OrderService:
         self,
         tenant_id: int,
         order_id: int,
+        commit: bool = True,
     ) -> Order:
 
         order = self.get_order(
@@ -773,11 +812,15 @@ class OrderService:
 
                 self.db.flush()
 
-            self.db.commit()
-            self.db.refresh(order)
+            if commit:
+                self.db.commit()
+                self.db.refresh(order)
+            else:
+                self.db.flush()
             return order
         except Exception:
-            self.db.rollback()
+            if commit:
+                self.db.rollback()
             raise
 
     def cancel_order(
@@ -899,7 +942,8 @@ class OrderService:
                 OrderTracking.order_id == order.id
             )
             .order_by(
-                OrderTracking.updated_at.desc()
+                OrderTracking.created_at.desc(),
+                OrderTracking.id.desc(),
             )
             .all()
         )

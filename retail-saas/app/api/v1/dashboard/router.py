@@ -11,6 +11,7 @@ from app.models.user import User
 from app.schemas.dashboard import (
     DashboardOverviewResponse,
     DashboardResponse,
+    RecentTransactionsResponse,
     RevenueVsCostResponse,
     TopProductsResponse,
 )
@@ -29,6 +30,7 @@ def _resolve_effective_store_id(
             raise ForbiddenException(
                 "Store staff are not authorized to access other stores' dashboard data"
             )
+
         return user.store_id
 
     return store_id
@@ -37,9 +39,14 @@ def _resolve_effective_store_id(
 @router.get(
     "",
     response_model=DashboardResponse,
-    summary="Get dashboard summary",
+    summary="Get dashboard summary and KPI metrics",
 )
 def dashboard(
+    period: str = Query(
+        default="this_month",
+        description="KPI period: this_month, last_month, or this_year",
+        pattern="^(this_month|last_month|this_year)$",
+    ),
     store_id: Optional[int] = Query(
         default=None,
         gt=0,
@@ -56,6 +63,7 @@ def dashboard(
     return DashboardService(db).get_dashboard(
         tenant_id=user.tenant_id,
         store_id=effective_store_id,
+        period=period,
     )
 
 
@@ -93,7 +101,7 @@ def dashboard_overview(
 @router.get(
     "/revenue-vs-cost",
     response_model=RevenueVsCostResponse,
-    summary="Get revenue versus cost",
+    summary="Get revenue, cost, gross profit, and gross margin",
 )
 def revenue_vs_cost(
     period: str = Query(
@@ -147,6 +155,38 @@ def top_products(
     )
 
     return DashboardService(db).get_top_products(
+        tenant_id=user.tenant_id,
+        store_id=effective_store_id,
+        limit=limit,
+    )
+
+
+@router.get(
+    "/recent-transactions",
+    response_model=RecentTransactionsResponse,
+    summary="Get latest orders and payment statuses",
+)
+def recent_transactions(
+    limit: int = Query(
+        default=10,
+        ge=1,
+        le=100,
+        description="Number of recent transactions to return",
+    ),
+    store_id: Optional[int] = Query(
+        default=None,
+        gt=0,
+        description="Optional store ID filter",
+    ),
+    user: User = Depends(require_permission("dashboard:read")),
+    db: Session = Depends(get_db),
+):
+    effective_store_id = _resolve_effective_store_id(
+        user,
+        store_id,
+    )
+
+    return DashboardService(db).get_recent_transactions(
         tenant_id=user.tenant_id,
         store_id=effective_store_id,
         limit=limit,

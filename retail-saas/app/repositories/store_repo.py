@@ -25,16 +25,31 @@ class StoreRepository:
             query = query.filter(Store.is_active == True)
         return query.first()
 
-    def list_stores(self, tenant_id: int):
+    def list_stores(
+        self,
+        tenant_id: int,
+        include_inactive: bool = False,
+        search: str | None = None,
+        is_warehouse: bool | None = None,
+    ) -> list[Store]:
+        query = self.db.query(Store).filter(Store.tenant_id == tenant_id)
 
-        return (
-            self.db.query(Store)
-            .filter(
-                Store.tenant_id == tenant_id,
-                Store.is_active == True
+        if not include_inactive:
+            query = query.filter(Store.is_active == True)
+
+        if search and search.strip():
+            term = f"%{search.strip()}%"
+            query = query.filter(
+                (Store.name.ilike(term))
+                | (Store.code.ilike(term))
+                | (Store.city.ilike(term))
             )
-            .all()
-        )
+
+        if is_warehouse is not None:
+            # is_warehouse maps to `not is_main`
+            query = query.filter(Store.is_main == (not is_warehouse))
+
+        return query.order_by(Store.id.asc()).all()
 
     def update(self, store: Store) -> Store:
         self.db.commit()

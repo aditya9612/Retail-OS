@@ -1,5 +1,6 @@
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -76,11 +77,22 @@ class UserService:
             role = (
                 self.db.query(Role)
                 .filter(
-                    Role.name == role_str,
+                    func.lower(Role.name) == role_str,
                     Role.tenant_id == tenant_id,
                 )
                 .first()
             )
+            if not role:
+                from app.utils.constants import DEFAULT_ROLE_PERMISSIONS
+                if role_str in DEFAULT_ROLE_PERMISSIONS:
+                    role = Role(
+                        tenant_id=tenant_id,
+                        name=role_str,
+                        permissions=DEFAULT_ROLE_PERMISSIONS[role_str],
+                        is_system=False,
+                    )
+                    self.db.add(role)
+                    self.db.flush()
 
         if not role:
             raise NotFoundException(
@@ -239,6 +251,7 @@ class UserService:
         user_id: int,
         data: UserUpdate,
         current_user_store_id: Optional[int] = None,
+        current_user_id: Optional[int] = None,
     ) -> User:
         user = self.get_user(
             tenant_id,
@@ -253,6 +266,12 @@ class UserService:
             raise ConflictException(
                 "No fields provided for update"
             )
+
+        if "is_active" in update_data and update_data["is_active"] is False:
+            if current_user_id is not None and user.id == current_user_id:
+                raise ConflictException("You cannot deactivate your own account")
+            if user.role and user.role.name.lower() == "owner":
+                raise ConflictException("Store Owner account cannot be deactivated")
 
         if "role_id" in update_data:
             role = (
@@ -464,6 +483,11 @@ class UserService:
                 "You cannot deactivate your own account"
             )
 
+        if user.role and user.role.name.lower() == "owner":
+            raise ConflictException(
+                "Store Owner account cannot be deactivated"
+            )
+
         if not user.is_active:
             raise ConflictException(
                 "User is already inactive"
@@ -495,6 +519,11 @@ class UserService:
         if user.id == current_user_id:
             raise ConflictException(
                 "You cannot delete your own account"
+            )
+
+        if user.role and user.role.name.lower() == "owner":
+            raise ConflictException(
+                "Store Owner account cannot be deleted"
             )
 
         if user.is_deleted:

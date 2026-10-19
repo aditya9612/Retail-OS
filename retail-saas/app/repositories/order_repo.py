@@ -31,10 +31,13 @@ class OrderRepository:
             query = query.filter(Order.store_id == store_id)
         return query.order_by(Order.created_at.desc()).offset(skip).limit(limit).all()
 
-    def create(self, order: Order) -> Order:
+    def create(self, order: Order, commit: bool = True) -> Order:
         self.db.add(order)
-        self.db.commit()
-        self.db.refresh(order)
+        if commit:
+            self.db.commit()
+            self.db.refresh(order)
+        else:
+            self.db.flush()
         return order
 
     def update(self, order: Order) -> Order:

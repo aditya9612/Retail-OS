@@ -11,14 +11,18 @@ from app.core.security import (
 )
 from app.models.user import User
 from app.schemas.auth import (
+    AuthMessageResponse,
     ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
     MobileOTPRequestSchema,
     MobileOTPVerifySchema,
     MobilePINLoginRequest,
+    OTPRequestResponse,
+    OTPVerifyResponse,
     PINChangeRequest,
     PINResetRequestSchema,
+    PINResetVerifyResponse,
     PINResetVerifySchema,
     PINSetupRequest,
     RefreshRequest,
@@ -98,7 +102,12 @@ def refresh(
     )
 
 
-@router.post("/logout")
+@router.post(
+    "/logout",
+    response_model=AuthMessageResponse,
+    summary="Logout User",
+    description="Revokes and blacklists the current JWT access token.",
+)
 def logout(
     credentials: HTTPAuthorizationCredentials | None = Depends(
         security_scheme
@@ -153,7 +162,12 @@ def register(
     }
 
 
-@router.post("/forgot-password")
+@router.post(
+    "/forgot-password",
+    response_model=OTPRequestResponse,
+    summary="Forgot Password",
+    description="Generates a 6-digit OTP and sends it to the user's registered email address for password recovery.",
+)
 def forgot_password(
     data: ForgotPasswordRequest,
     db: Session = Depends(get_db),
@@ -169,7 +183,12 @@ def forgot_password(
     }
 
 
-@router.post("/verify-otp")
+@router.post(
+    "/verify-otp",
+    response_model=OTPVerifyResponse,
+    summary="Verify Password Reset OTP",
+    description="Verifies the 6-digit OTP sent via email and returns a temporary single-use reset token valid for 10 minutes.",
+)
 def verify_otp(
     data: VerifyOTPRequest,
     db: Session = Depends(get_db),
@@ -186,7 +205,12 @@ def verify_otp(
     }
 
 
-@router.post("/reset-password")
+@router.post(
+    "/reset-password",
+    response_model=AuthMessageResponse,
+    summary="Reset Password",
+    description="Resets the account password using the single-use reset token obtained from /verify-otp.",
+)
 def reset_password(
     data: ResetPasswordRequest,
     db: Session = Depends(get_db),
@@ -201,7 +225,12 @@ def reset_password(
     }
 
 
-@router.post("/change-password")
+@router.post(
+    "/change-password",
+    response_model=AuthMessageResponse,
+    summary="Change Password",
+    description="Changes password for the currently authenticated user and revokes their current access token.",
+)
 def change_password(
     data: ChangePasswordRequest,
     request: Request,
@@ -235,6 +264,7 @@ def change_password(
 
 @router.post(
     "/login/mobile-otp/request",
+    response_model=OTPRequestResponse,
     summary="Request Mobile OTP Login",
     description=(
         "Generates a time-limited OTP for mobile number login. "
@@ -290,6 +320,7 @@ def mobile_pin_login(
 
 @router.post(
     "/pin/setup",
+    response_model=AuthMessageResponse,
     summary="Setup Initial Security PIN",
     description="Sets the initial 4-digit PIN for the authenticated user. Fails if PIN is already set.",
 )
@@ -307,6 +338,7 @@ def pin_setup(
 
 @router.post(
     "/pin/change",
+    response_model=AuthMessageResponse,
     summary="Change Security PIN",
     description="Changes the 4-digit PIN for the authenticated user after verifying the current PIN.",
 )
@@ -324,6 +356,7 @@ def pin_change(
 
 @router.post(
     "/pin/reset/request",
+    response_model=OTPRequestResponse,
     summary="Request PIN Reset OTP",
     description=(
         "Generates a time-limited OTP for resetting the security PIN. "
@@ -345,6 +378,7 @@ def pin_reset_request(
 
 @router.post(
     "/pin/reset/verify",
+    response_model=PINResetVerifyResponse,
     summary="Verify PIN Reset OTP",
     description="Verifies the OTP for PIN reset and issues a temporary single-use reset token.",
 )
@@ -363,6 +397,7 @@ def pin_reset_verify(
 
 @router.post(
     "/pin/reset",
+    response_model=AuthMessageResponse,
     summary="Reset Security PIN",
     description="Sets a new 4-digit security PIN using the authorization token from /pin/reset/verify.",
 )

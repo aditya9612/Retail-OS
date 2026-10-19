@@ -1,6 +1,7 @@
 from typing import Optional
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import NotFoundException
 from app.models.document_setting import DocumentSetting
 from app.models.store import Store
 from app.models.tenant import Tenant
@@ -25,6 +26,15 @@ class DocumentSettingsService:
         data: DocumentSettingCreate | DocumentSettingUpdate,
         store_id: Optional[int] = None,
     ) -> DocumentSetting:
+        if store_id is not None:
+            store = (
+                self.db.query(Store)
+                .filter(Store.id == store_id, Store.tenant_id == tenant_id)
+                .first()
+            )
+            if not store:
+                raise NotFoundException(f"Store with ID {store_id} not found for this tenant.")
+
         setting = self.get_setting(tenant_id, store_id=store_id)
         if not setting:
             setting = DocumentSetting(
