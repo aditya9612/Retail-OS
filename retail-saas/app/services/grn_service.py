@@ -1021,3 +1021,117 @@ class GRNService:
             ])
 
         return output.getvalue()
+
+    def generate_excel(self, tenant_id: int, grn_id: int) -> bytes:
+        from app.services.excel_export_service import ExcelExportService
+
+        grn = self.get(tenant_id, grn_id)
+        supplier_name = grn.purchase_order.supplier.name if grn.purchase_order and grn.purchase_order.supplier else "N/A"
+        destination = grn.warehouse.name if grn.warehouse else (grn.store.name if grn.store else "N/A")
+
+        metadata = {
+            "GRN Number": grn.grn_number,
+            "PO Number": grn.purchase_order.order_number if grn.purchase_order else "N/A",
+            "Supplier": supplier_name,
+            "Destination": destination,
+            "Status": grn.status.upper(),
+            "Date": grn.created_at.strftime("%Y-%m-%d %H:%M") if grn.created_at else "N/A",
+            "Invoice No": grn.invoice_number or "N/A",
+            "Vehicle No": grn.vehicle_number or "N/A",
+        }
+        total_ordered = sum(it.ordered_quantity or 0 for it in grn.items)
+        total_received = sum(it.received_quantity or 0 for it in grn.items)
+        total_rejected = sum(it.rejected_quantity or 0 for it in grn.items)
+        kpis = [
+            {"label": "Ordered Qty", "value": total_ordered},
+            {"label": "Received Qty", "value": total_received},
+            {"label": "Rejected Qty", "value": total_rejected},
+        ]
+        headers = [
+            "S.No",
+            "Product Name",
+            "SKU",
+            "Batch Number",
+            "Ordered Qty",
+            "Received Qty",
+            "Rejected Qty",
+            "Unit Cost (INR)",
+            "Total Cost (INR)",
+        ]
+        rows = []
+        for idx, item in enumerate(grn.items, 1):
+            p_name = item.product.name if item.product else f"Product #{item.product_id}"
+            sku = item.product.sku if item.product else ""
+            unit_cost = float(item.unit_cost or 0)
+            total_cost = unit_cost * float(item.received_quantity or 0)
+            rows.append([
+                idx,
+                p_name,
+                sku,
+                item.batch_number or "-",
+                item.ordered_quantity or 0,
+                item.received_quantity or 0,
+                item.rejected_quantity or 0,
+                unit_cost,
+                total_cost,
+            ])
+
+        sheet_title = f"GRN-{grn.grn_number[-12:]}"
+        wb = ExcelExportService().create_report_workbook(
+            sheet_title=sheet_title,
+            headers=headers,
+            rows=rows,
+            metadata=metadata,
+            kpis=kpis,
+            report_type="blue",
+        )
+        stream = io.BytesIO()
+        wb.save(stream)
+        return stream.getvalue()
+
+    def generate_single_csv(self, tenant_id: int, grn_id: int) -> bytes:
+        import csv
+        grn = self.get(tenant_id, grn_id)
+        supplier_name = grn.purchase_order.supplier.name if grn.purchase_order and grn.purchase_order.supplier else "N/A"
+        destination = grn.warehouse.name if grn.warehouse else (grn.store.name if grn.store else "N/A")
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["GOODS RECEIVED NOTE (GRN)"])
+        writer.writerow(["GRN Number", grn.grn_number])
+        writer.writerow(["PO Number", grn.purchase_order.order_number if grn.purchase_order else "N/A"])
+        writer.writerow(["Supplier", supplier_name])
+        writer.writerow(["Destination", destination])
+        writer.writerow(["Status", grn.status.upper()])
+        writer.writerow(["Date", grn.created_at.strftime("%Y-%m-%d %H:%M:%S") if grn.created_at else ""])
+        writer.writerow(["Invoice Number", grn.invoice_number or ""])
+        writer.writerow(["Vehicle Number", grn.vehicle_number or ""])
+        writer.writerow([])
+        writer.writerow([
+            "S.No",
+            "Product Name",
+            "SKU",
+            "Batch Number",
+            "Ordered Qty",
+            "Received Qty",
+            "Rejected Qty",
+            "Unit Cost (INR)",
+            "Total Cost (INR)",
+        ])
+        for idx, item in enumerate(grn.items, 1):
+            p_name = item.product.name if item.product else f"Product #{item.product_id}"
+            sku = item.product.sku if item.product else ""
+            unit_cost = float(item.unit_cost or 0)
+            total_cost = unit_cost * float(item.received_quantity or 0)
+            writer.writerow([
+                idx,
+                p_name,
+                sku,
+                item.batch_number or "-",
+                item.ordered_quantity or 0,
+                item.received_quantity or 0,
+                item.rejected_quantity or 0,
+                f"{unit_cost:.2f}",
+                f"{total_cost:.2f}",
+            ])
+        return output.getvalue().encode("utf-8")

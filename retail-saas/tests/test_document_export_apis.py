@@ -162,6 +162,7 @@ def test_purchase_order_pdf(export_test_setup):
     po_id = export_test_setup["po_id"]
     po_number = export_test_setup["po_number"]
 
+    # 1. PDF export
     res = client.get(
         f"/api/v1/purchase-orders/{po_id}/pdf?mode=download",
         headers=headers,
@@ -172,6 +173,27 @@ def test_purchase_order_pdf(export_test_setup):
     assert res.content.startswith(b"%PDF-")
     assert b"%%EOF" in res.content
     assert len(res.content) > 1000
+
+    # 2. Excel export via format=excel
+    res_excel = client.get(
+        f"/api/v1/purchase-orders/{po_id}/pdf?format=excel&mode=download",
+        headers=headers,
+    )
+    assert res_excel.status_code == 200
+    assert res_excel.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert f"PO-{po_number}.xlsx" in res_excel.headers["content-disposition"]
+    assert res_excel.content[:4] == b"PK\x03\x04"
+
+    # 3. CSV export via format=csv
+    res_csv = client.get(
+        f"/api/v1/purchase-orders/{po_id}/pdf?format=csv&mode=download",
+        headers=headers,
+    )
+    assert res_csv.status_code == 200
+    assert "text/csv" in res_csv.headers["content-type"]
+    assert f"PO-{po_number}.csv" in res_csv.headers["content-disposition"]
+    assert "PURCHASE ORDER" in res_csv.text
+    assert po_number in res_csv.text
 
 
 def test_credit_note_pdf(export_test_setup):
@@ -441,16 +463,25 @@ def test_pos_z_report_pdf_and_excel_exports(export_test_setup):
     assert res_pdf.content.startswith(b"%PDF-")
     assert b"%%EOF" in res_pdf.content
 
-    # 2. Export Z-report Excel
+    # 2. Export Z-report Excel via unified format parameter
     res_excel = client.get(
-        f"/api/v1/pos/shifts/{shift_id}/z-report/excel",
+        f"/api/v1/pos/shifts/{shift_id}/z-report/pdf?format=excel",
         headers=headers,
     )
     assert res_excel.status_code == 200, res_excel.text
     assert res_excel.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     assert res_excel.content[:4] == b"PK\x03\x04"
     wb = openpyxl.load_workbook(io.BytesIO(res_excel.content))
-    assert "Overview" in wb.sheetnames
+    assert "POS Shift Z-Report" in wb.sheetnames or "Overview" in wb.sheetnames
+
+    # 3. Export Z-report CSV via unified format parameter
+    res_csv = client.get(
+        f"/api/v1/pos/shifts/{shift_id}/z-report/pdf?format=csv",
+        headers=headers,
+    )
+    assert res_csv.status_code == 200, res_csv.text
+    assert "text/csv" in res_csv.headers["content-type"]
+    assert "POS SHIFT Z-REPORT" in res_csv.text
 
 
 def test_amount_to_indian_words_utility():

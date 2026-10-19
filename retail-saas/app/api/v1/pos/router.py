@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
@@ -94,7 +94,6 @@ def close_shift(
 @router.get(
     "/{shift_id}/z-report",
     response_model=POSZReportResponse,
-    tags=["POS Z-Reports"],
     summary="Get POS Shift Z-Report Data Summary",
     description=(
         "Generates a comprehensive Z-Report financial summary for the specified POS shift. "
@@ -113,52 +112,33 @@ def get_z_report(
 
 @router.get(
     "/{shift_id}/z-report/pdf",
-    tags=["POS Z-Reports"],
-    summary="Export POS Shift Z-Report as Branded PDF",
+    summary="Export POS Shift Z-Report (PDF, Excel, CSV)",
     description=(
-        "Downloads the official register shift Z-Report as a branded PDF document in Dark Green POS theme (#14532D). "
-        "Features full cash drawer reconciliation, transaction counts, and payment breakdowns. "
-        "Requires 'pos:shift_manage' permission."
-    ),
-    responses={
-        200: {
-            "content": {"application/pdf": {}},
-            "description": "Rendered POS Z-Report PDF stream.",
-        }
-    },
-)
-def export_z_report_pdf(
-    shift_id: int,
-    user: User = Depends(require_permission("pos:shift_manage")),
-    db: Session = Depends(get_db),
-):
-    return POSShiftService(db).export_z_report_pdf(user, shift_id)
-
-
-@router.get(
-    "/{shift_id}/z-report/excel",
-    tags=["POS Z-Reports"],
-    summary="Export POS Shift Z-Report as Analytical Excel Workbook",
-    description=(
-        "Downloads the official register shift Z-Report as a structured 2-sheet Excel spreadsheet (.xlsx). "
-        "Sheet 1 contains shift overview and KPI metrics; Sheet 2 contains financial transaction reconciliation with auto-filter and formatting. "
+        "Exports the official register shift Z-Report. "
+        "Supports 'pdf' (default, Dark Green POS theme #14532D), 'excel' (.xlsx structured workbook), "
+        "or 'csv' formats via the `format` query parameter. "
+        "Delivery mode can be `download` (attachment) or `preview` (inline display). "
         "Requires 'pos:shift_manage' permission."
     ),
     responses={
         200: {
             "content": {
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+                "application/pdf": {},
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {},
+                "text/csv": {},
             },
-            "description": "Generated 2-sheet POS Z-Report Excel workbook.",
+            "description": "Rendered POS Z-Report document stream in requested format.",
         }
     },
 )
-def export_z_report_excel(
+def export_z_report_pdf(
     shift_id: int,
+    format: Literal["pdf", "excel", "csv"] = Query(default="pdf", description="Export format: 'pdf', 'excel', or 'csv'"),
+    mode: Literal["download", "preview"] = Query(default="download", description="'preview' for browser inline view, 'download' for file attachment"),
     user: User = Depends(require_permission("pos:shift_manage")),
     db: Session = Depends(get_db),
 ):
-    return POSShiftService(db).export_z_report_excel(user, shift_id)
+    return POSShiftService(db).export_z_report(user, shift_id, format=format, mode=mode)
 
 
 @router.get(

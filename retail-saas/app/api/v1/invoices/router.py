@@ -196,7 +196,6 @@ def get_invoice(
 
 @router.get(
     "/{invoice_id}/pdf",
-    tags=["Invoice Documents", "Bill / Receipt"],
     summary="Download or Preview Tax Invoice / Bill PDF",
     description=(
         "Exports an authoritative, dynamically rendered PDF document for a sales transaction. "

@@ -966,3 +966,122 @@ class PurchaseOrderService:
 
         renderer = DocumentRenderer()
         return renderer.render("purchase_order", data, branding)
+
+    def generate_excel(self, tenant_id: int, purchase_order_id: int) -> bytes:
+        from app.services.excel_export_service import ExcelExportService
+
+        po = self.get_purchase_order(tenant_id, purchase_order_id)
+        supplier_name = po.supplier.name if po.supplier else "N/A"
+        destination = po.store.name if po.store else (po.warehouse.name if po.warehouse else "N/A")
+
+        metadata = {
+            "PO Number": po.order_number,
+            "Supplier": supplier_name,
+            "Destination": destination,
+            "Status": po.status.upper(),
+            "Order Date": po.created_at.strftime("%Y-%m-%d %H:%M") if po.created_at else "N/A",
+            "Expected Delivery": po.expected_delivery_date.strftime("%Y-%m-%d") if po.expected_delivery_date else "N/A",
+        }
+        kpis = [
+            {"label": "Total Quantity", "value": po.total_quantity},
+            {"label": "Received Quantity", "value": po.total_received_quantity},
+            {"label": "Subtotal", "value": float(po.subtotal or 0)},
+            {"label": "Grand Total", "value": float(po.total_amount)},
+        ]
+        headers = [
+            "S.No",
+            "Product Name",
+            "SKU",
+            "Quantity",
+            "Unit of Measure",
+            "Unit Cost (INR)",
+            "Tax Rate (%)",
+            "Tax Amount (INR)",
+            "Total Cost (INR)",
+        ]
+        rows = []
+        for idx, item in enumerate(po.items, 1):
+            p_name = item.product.name if item.product else f"Product #{item.product_id}"
+            sku = item.product.sku if item.product else ""
+            rows.append([
+                idx,
+                p_name,
+                sku,
+                item.quantity,
+                item.unit_of_measure or "pcs",
+                float(item.unit_cost),
+                float(item.tax_rate or 0),
+                float(item.tax_amount or 0),
+                float(item.total_cost),
+            ])
+
+        rows.append([
+            "Total",
+            "",
+            "",
+            po.total_quantity,
+            "",
+            "",
+            "",
+            float(po.tax_amount or 0),
+            float(po.total_amount),
+        ])
+
+        sheet_title = f"PO-{po.order_number[-12:]}"
+        wb = ExcelExportService().create_report_workbook(
+            sheet_title=sheet_title,
+            headers=headers,
+            rows=rows,
+            metadata=metadata,
+            kpis=kpis,
+            report_type="purple",
+        )
+        stream = io.BytesIO()
+        wb.save(stream)
+        return stream.getvalue()
+
+    def generate_single_csv(self, tenant_id: int, purchase_order_id: int) -> bytes:
+        po = self.get_purchase_order(tenant_id, purchase_order_id)
+        supplier_name = po.supplier.name if po.supplier else "N/A"
+        destination = po.store.name if po.store else (po.warehouse.name if po.warehouse else "N/A")
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["PURCHASE ORDER"])
+        writer.writerow(["PO Number", po.order_number])
+        writer.writerow(["Supplier", supplier_name])
+        writer.writerow(["Destination", destination])
+        writer.writerow(["Status", po.status.upper()])
+        writer.writerow(["Order Date", po.created_at.strftime("%Y-%m-%d %H:%M:%S") if po.created_at else ""])
+        writer.writerow(["Expected Delivery", po.expected_delivery_date.strftime("%Y-%m-%d") if po.expected_delivery_date else ""])
+        writer.writerow([])
+        writer.writerow([
+            "S.No",
+            "Product Name",
+            "SKU",
+            "Quantity",
+            "Unit of Measure",
+            "Unit Cost (INR)",
+            "Tax Rate (%)",
+            "Tax Amount (INR)",
+            "Total Cost (INR)",
+        ])
+        for idx, item in enumerate(po.items, 1):
+            p_name = item.product.name if item.product else f"Product #{item.product_id}"
+            sku = item.product.sku if item.product else ""
+            writer.writerow([
+                idx,
+                p_name,
+                sku,
+                item.quantity,
+                item.unit_of_measure or "pcs",
+                f"{item.unit_cost:.2f}",
+                f"{item.tax_rate or 0:.2f}",
+                f"{item.tax_amount or 0:.2f}",
+                f"{item.total_cost:.2f}",
+            ])
+        writer.writerow([])
+        writer.writerow(["Subtotal", "", "", "", "", "", "", "", f"{po.subtotal:.2f}"])
+        writer.writerow(["Tax Amount", "", "", "", "", "", "", "", f"{po.tax_amount:.2f}"])
+        writer.writerow(["Grand Total", "", "", "", "", "", "", "", f"{po.total_amount:.2f}"])
+        return output.getvalue().encode("utf-8")

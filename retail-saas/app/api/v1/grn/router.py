@@ -1,9 +1,10 @@
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import AppException
 from app.core.database import get_db
 from app.core.security import require_operational_write, require_permission
 from app.models.user import User
@@ -266,23 +267,54 @@ def print_grn_slip(
 
 @router.get(
     "/{grn_id}/download-pdf",
+    summary="Download or Preview GRN (PDF, Excel, CSV)",
+    description=(
+        "Exports Goods Received Note document. "
+        "Supports 'pdf' (default), 'excel' (.xlsx formatted workbook), "
+        "or 'csv' formats via the `format` query parameter. "
+        "Delivery mode can be `download` (attachment) or `preview` (inline display). "
+        "Requires 'inventory:read' permission."
+    ),
+    responses={
+        200: {
+            "content": {
+                "application/pdf": {},
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {},
+                "text/csv": {},
+            },
+            "description": "Rendered Goods Received Note document stream.",
+        }
+    },
 )
 def download_grn_pdf(
     grn_id: int,
+    format: Literal["pdf", "excel", "csv"] = Query(default="pdf", description="Export format: 'pdf', 'excel', or 'csv'"),
     mode: str = Query("download", description="'preview' for browser inline view, 'download' for file attachment"),
     user: User = Depends(require_permission("inventory:read")),
     db: Session = Depends(get_db),
 ):
-    pdf_bytes = GRNService(db).generate_pdf(
-        tenant_id=user.tenant_id,
-        grn_id=grn_id,
-    )
     grn = GRNService(db).get(user.tenant_id, grn_id)
     disposition = "inline" if mode == "preview" else "attachment"
-    filename = f"{grn.grn_number}.pdf"
+
+    if format == "pdf":
+        file_bytes = GRNService(db).generate_pdf(tenant_id=user.tenant_id, grn_id=grn_id)
+        media_type = "application/pdf"
+        ext = "pdf"
+    elif format == "excel":
+        file_bytes = GRNService(db).generate_excel(tenant_id=user.tenant_id, grn_id=grn_id)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ext = "xlsx"
+    elif format == "csv":
+        file_bytes = GRNService(db).generate_single_csv(tenant_id=user.tenant_id, grn_id=grn_id)
+        media_type = "text/csv"
+        ext = "csv"
+    else:
+        raise AppException(f"Unsupported export format '{format}'. Choose from: pdf, excel, csv")
+
+    filename = f"{grn.grn_number}.{ext}"
     return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
+        content=file_bytes,
+        media_type=media_type,
         headers={"Content-Disposition": f"{disposition}; filename={filename}"},
     )
 

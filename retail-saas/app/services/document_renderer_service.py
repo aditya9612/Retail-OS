@@ -415,6 +415,8 @@ class DocumentRenderer:
                 return self._render_credit_note(data, branding)
             elif clean_type in ("purchase_order", "purchase-order", "po"):
                 return self._render_purchase_order(data, branding)
+            elif clean_type in ("purchase_order_return", "purchase-order-return", "debit_note", "debit-note"):
+                return self._render_debit_note(data, branding)
             else:
                 raise RendererError(f"Unsupported template type: {template_type}")
         except RendererError:
@@ -2338,3 +2340,268 @@ class DocumentRenderer:
             c.line(width - margin - 120, y - 13, width - margin, y - 13)
 
         self._draw_footer(c, branding)
+
+    def _render_debit_note(self, data: Dict[str, Any], branding: BrandingContext) -> bytes:
+        """Renders an A4 Debit Note / Purchase Order Return PDF using ReportLab with Amber Orange styling."""
+        buffer = io.BytesIO()
+        c = canvas.Canvas(buffer, pagesize=A4, pageCompression=0)
+        self._draw_debit_note(c, data, branding)
+        c.save()
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    def _draw_debit_note(self, c: canvas.Canvas, data: Dict[str, Any], branding: BrandingContext):
+        """Draws a branded Debit Note / Return to Vendor slip with Amber/Orange styling (#D97706)."""
+        width, height = A4
+        margin = 40
+        y = height - margin
+
+        theme = THEMES.get("amber") or THEMES["credit_note"]
+        primary_color = theme.primary_color       # Amber #D97706
+        box_bg = theme.bg_light_color             # Soft Cream Amber #FFFBEB
+        border_color = theme.border_color         # #FDE68A
+        text_dark = colors.HexColor("#1E293B")
+        text_muted = colors.HexColor("#64748B")
+
+        # 1. Top Header: Logo & Buyer Details
+        logo_path = self._validate_logo_path(branding.logo_url)
+        if logo_path:
+            try:
+                img = ImageReader(logo_path)
+                img_w, img_h = img.getSize()
+                aspect = img_w / float(img_h)
+                draw_w = min(100, 48 * aspect)
+                draw_h = draw_w / aspect
+                c.drawImage(img, width - margin - draw_w, y - draw_h + 10, width=draw_w, height=draw_h)
+            except Exception as e:
+                logger.warning(f"Failed to draw logo: {e}")
+
+        c.setFont(self._get_font(branding.business_name, True), 16)
+        c.setFillColor(primary_color)
+        c.drawString(margin, y, branding.business_name or "Retail Store")
+        y -= 18
+
+        c.setFont(self._get_font(branding.address, False), 9)
+        c.setFillColor(text_dark)
+        if branding.address:
+            c.drawString(margin, y, branding.address[:75])
+            y -= 14
+
+        contact_info = []
+        if branding.phone:
+            contact_info.append(f"Tel: {branding.phone}")
+        if branding.email:
+            contact_info.append(f"Email: {branding.email}")
+        if contact_info:
+            c.setFont(self.default_font, 8.5)
+            c.setFillColor(text_muted)
+            c.drawString(margin, y, " | ".join(contact_info))
+            y -= 14
+
+        if branding.show_gstin and branding.gstin:
+            c.setFont(self.bold_font, 9)
+            c.setFillColor(primary_color)
+            c.drawString(margin, y, f"GSTIN: {branding.gstin}")
+            y -= 16
+
+        y -= 6
+
+        # 2. Title Banner: DEBIT NOTE / VENDOR RETURN SLIP
+        banner_height = 22
+        c.setFillColor(primary_color)
+        c.rect(margin, y - banner_height, width - 2 * margin, banner_height, fill=1, stroke=0)
+        c.setFont(self.bold_font, 12)
+        c.setFillColor(colors.white)
+        c.drawCentredString(width / 2.0, y - banner_height + 6, "DEBIT NOTE / VENDOR RETURN SLIP")
+        y -= (banner_height + 10)
+
+        # 3. Document Details Box
+        ret_num = data.get("return_number") or f"POR-{data.get('id', 'N/A')}"
+        dn_num = data.get("debit_note_number") or ret_num
+        po_num = data.get("purchase_order_number") or f"PO #{data.get('purchase_order_id', 'N/A')}"
+
+        meta_box_h = 44
+        c.setFillColor(box_bg)
+        c.setStrokeColor(border_color)
+        c.rect(margin, y - meta_box_h, width - 2 * margin, meta_box_h, fill=1, stroke=1)
+
+        c.setFillColor(text_dark)
+        c.setFont(self.bold_font, 9)
+        c.drawString(margin + 10, y - 14, f"Return Number: {ret_num}")
+        c.drawString(margin + 210, y - 14, f"Debit Note Ref: {dn_num}")
+
+        created_val = data.get("created_at")
+        date_str = ""
+        if created_val:
+            date_str = created_val.strftime("%d-%m-%Y") if hasattr(created_val, "strftime") else str(created_val)[:10]
+            c.drawString(margin + 380, y - 14, f"Date: {date_str}")
+
+        ret_status = str(data.get("status") or "REQUESTED").upper()
+        c.setFont(self.default_font, 8.5)
+        c.drawString(margin + 10, y - 30, f"Original PO: {po_num}")
+        c.drawString(margin + 210, y - 30, f"Status: {ret_status}")
+        c.drawString(margin + 380, y - 30, f"Reason: {str(data.get('reason') or 'N/A')[:20]}")
+
+        y -= (meta_box_h + 12)
+
+        # 4. Structured Origin Location & Vendor Cards
+        card_w = (width - 2 * margin - 15) / 2.0
+        card_h = 56
+
+        # Origin Facility Card (Left)
+        c.setFillColor(colors.HexColor("#FAFAFA"))
+        c.setStrokeColor(border_color)
+        c.rect(margin, y - card_h, card_w, card_h, fill=1, stroke=1)
+        c.setFillColor(primary_color)
+        c.setFont(self.bold_font, 9)
+        c.drawString(margin + 8, y - 14, "DISPATCHED FROM (ORIGIN)")
+        c.setFillColor(text_dark)
+        origin_name = data.get("store_name") or data.get("warehouse_name") or branding.business_name or "Store / Warehouse"
+        c.setFont(self._get_font(origin_name, False), 8.5)
+        c.drawString(margin + 8, y - 27, origin_name[:35])
+        c.setFont(self.default_font, 8)
+        if branding.address:
+            c.drawString(margin + 8, y - 39, branding.address[:35])
+        if branding.show_gstin and branding.gstin:
+            c.drawString(margin + 8, y - 49, f"GSTIN: {branding.gstin}")
+
+        # Vendor Card (Right)
+        supplier = data.get("supplier") or {}
+        supp_name = data.get("supplier_name") or supplier.get("name") or "Vendor / Supplier"
+        c.setFillColor(colors.HexColor("#FAFAFA"))
+        c.setStrokeColor(border_color)
+        c.rect(margin + card_w + 15, y - card_h, card_w, card_h, fill=1, stroke=1)
+        c.setFillColor(primary_color)
+        c.setFont(self.bold_font, 9)
+        c.drawString(margin + card_w + 23, y - 14, "RETURN TO VENDOR")
+        c.setFillColor(text_dark)
+        c.setFont(self._get_font(supp_name, False), 8.5)
+        c.drawString(margin + card_w + 23, y - 27, supp_name[:35])
+        c.setFont(self.default_font, 8)
+        s_contact = " | ".join(filter(None, [supplier.get("phone"), supplier.get("email")]))
+        if s_contact:
+            c.drawString(margin + card_w + 23, y - 39, s_contact[:38])
+        if supplier.get("gstin"):
+            c.drawString(margin + card_w + 23, y - 49, f"GSTIN: {supplier.get('gstin')}")
+
+        y -= (card_h + 12)
+
+        # 5. Items Table Header
+        th_h = 18
+        c.setFillColor(primary_color)
+        c.rect(margin, y - th_h, width - 2 * margin, th_h, fill=1, stroke=0)
+        c.setFont(self.bold_font, 8.5)
+        c.setFillColor(colors.white)
+        c.drawString(margin + 6, y - 13, "#")
+        c.drawString(margin + 26, y - 13, "Item Description & SKU")
+        c.drawString(margin + 240, y - 13, "Batch No")
+        c.drawString(margin + 330, y - 13, "Reason")
+        c.drawRightString(margin + 410, y - 13, "Return Qty")
+        c.drawRightString(margin + 465, y - 13, "Rate (₹)")
+        c.drawRightString(width - margin - 6, y - 13, "Total (₹)")
+        y -= (th_h + 2)
+
+        # 6. Items Rows
+        items = data.get("items") or []
+        row_h = 17
+        for idx, item in enumerate(items, 1):
+            if y < 140:
+                c.showPage()
+                y = height - margin - 20
+                c.setFillColor(primary_color)
+                c.rect(margin, y - th_h, width - 2 * margin, th_h, fill=1, stroke=0)
+                c.setFont(self.bold_font, 8.5)
+                c.setFillColor(colors.white)
+                c.drawString(margin + 6, y - 13, "#")
+                c.drawString(margin + 26, y - 13, "Item Description & SKU")
+                c.drawString(margin + 240, y - 13, "Batch No")
+                c.drawString(margin + 330, y - 13, "Reason")
+                c.drawRightString(margin + 410, y - 13, "Return Qty")
+                c.drawRightString(margin + 465, y - 13, "Rate (₹)")
+                c.drawRightString(width - margin - 6, y - 13, "Total (₹)")
+                y -= (th_h + 2)
+
+            if idx % 2 == 0:
+                c.setFillColor(box_bg)
+                c.rect(margin, y - row_h, width - 2 * margin, row_h, fill=1, stroke=0)
+
+            c.setFillColor(text_dark)
+            c.setFont(self.default_font, 8)
+            c.drawString(margin + 6, y - 12, str(idx))
+
+            p_name = item.get("product_name") or f"Product #{item.get('product_id')}"
+            sku = item.get("product_sku")
+            desc = f"{p_name} ({sku})" if sku else p_name
+            c.drawString(margin + 26, y - 12, desc[:36])
+
+            batch = item.get("batch_number") or "-"
+            c.drawString(margin + 240, y - 12, str(batch)[:15])
+
+            reason_str = item.get("item_reason") or data.get("reason") or "Return"
+            c.drawString(margin + 330, y - 12, str(reason_str)[:15])
+
+            qty = item.get("quantity") or 0
+            unit_price = float(item.get("unit_price") or 0)
+            total = float(item.get("total") or (qty * unit_price))
+
+            c.drawRightString(margin + 410, y - 12, str(qty))
+            c.drawRightString(margin + 465, y - 12, f"{unit_price:.2f}")
+            c.drawRightString(width - margin - 6, y - 12, f"{total:.2f}")
+
+            y -= row_h
+
+        c.setStrokeColor(border_color)
+        c.line(margin, y, width - margin, y)
+        y -= 12
+
+        # 7. Total Summary Box
+        totals_x = margin + 300
+        total_amount = float(data.get("total_amount") or 0)
+
+        c.setFont(self.bold_font, 9)
+        c.setFillColor(text_dark)
+        c.drawString(totals_x, y, "Total Return Lines:")
+        c.drawRightString(width - margin - 5, y, str(len(items)))
+        y -= 14
+
+        c.setFillColor(primary_color)
+        c.rect(totals_x - 5, y - 16, (width - margin) - (totals_x - 5), 18, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setFont(self.bold_font, 10)
+        c.drawString(totals_x, y - 12, "Total Debit Value:")
+        c.drawRightString(width - margin - 5, y - 12, f"INR {total_amount:.2f}")
+        y -= 26
+
+        # 8. Amount in Words
+        c.setFillColor(text_dark)
+        words = amount_to_indian_words(Decimal(str(total_amount)))
+        c.setFont(self.bold_font, 8.5)
+        c.drawString(margin, y, "Debit Amount in Words:")
+        c.setFont(self.default_font, 8.5)
+        c.drawString(margin + 120, y, words)
+        y -= 16
+
+        # 9. Remarks & Instructions
+        remarks_str = data.get("remarks") or "Goods returned to vendor as defective/non-conforming. Please credit our ledger."
+        c.setFont(self.default_font, 8)
+        c.setFillColor(text_muted)
+        c.drawString(margin, y, f"Remarks: {remarks_str[:90]}")
+        y -= 20
+
+        # 10. Multi-Signatory Handover Block
+        sig_w = (width - 2 * margin - 30) / 3.0
+        sig_y = y - 10
+
+        c.setFont(self.bold_font, 8)
+        c.setFillColor(text_dark)
+        c.drawString(margin, sig_y, "Prepared By")
+        c.drawString(margin + sig_w + 15, sig_y, "Carrier / Transporter Sign")
+        c.drawString(margin + (sig_w + 15) * 2, sig_y, "Authorized Signatory")
+
+        c.setStrokeColor(border_color)
+        c.line(margin, sig_y - 20, margin + sig_w, sig_y - 20)
+        c.line(margin + sig_w + 15, sig_y - 20, margin + sig_w * 2 + 15, sig_y - 20)
+        c.line(margin + (sig_w + 15) * 2, sig_y - 20, width - margin, sig_y - 20)
+
+        self._draw_footer(c, branding)
+

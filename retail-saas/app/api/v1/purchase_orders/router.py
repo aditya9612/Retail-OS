@@ -154,23 +154,29 @@ def get_purchase_order_grns(
 
 @router.get(
     "/{purchase_order_id}/pdf",
-    summary="Download or Preview Purchase Order PDF",
+    summary="Download or Preview Purchase Order (PDF, Excel, CSV)",
     description=(
-        "Exports a professional vendor Purchase Order PDF document in Purple Indigo theme (#6D28D9). "
-        "Includes buyer delivery information, supplier details, itemized procurement table with SKU, "
-        "quantities, unit costs, total order value in numbers and Indian words, and signature block. "
+        "Exports an official vendor Purchase Order document. "
+        "Supports 'pdf' (default, Purple Indigo theme #6D28D9), 'excel' (.xlsx formatted workbook), "
+        "or 'csv' formats via the `format` query parameter. "
+        "Delivery mode can be `download` (attachment) or `preview` (inline display). "
         "Requires 'purchase_orders:read' permission."
     ),
     responses={
         200: {
-            "content": {"application/pdf": {}},
-            "description": "Rendered Purchase Order PDF stream.",
+            "content": {
+                "application/pdf": {},
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {},
+                "text/csv": {},
+            },
+            "description": "Rendered Purchase Order document stream in requested format.",
         }
     },
 )
 def get_purchase_order_pdf(
     purchase_order_id: int,
-    mode: Literal["download", "preview"] = Query(default="download"),
+    format: Literal["pdf", "excel", "csv"] = Query(default="pdf", description="Export format: 'pdf', 'excel', or 'csv'"),
+    mode: Literal["download", "preview"] = Query(default="download", description="'preview' for browser inline view, 'download' for file attachment"),
     user: User = Depends(require_permission("purchase_orders:read")),
     db: Session = Depends(get_db),
 ):
@@ -179,18 +185,37 @@ def get_purchase_order_pdf(
         purchase_order_id=purchase_order_id,
     )
 
-    pdf_bytes = PurchaseOrderService(db).generate_pdf(
-        tenant_id=user.tenant_id,
-        purchase_order_id=purchase_order_id,
-    )
-
     disposition = "inline" if mode == "preview" else "attachment"
 
+    if format == "pdf":
+        file_bytes = PurchaseOrderService(db).generate_pdf(
+            tenant_id=user.tenant_id,
+            purchase_order_id=purchase_order_id,
+        )
+        media_type = "application/pdf"
+        ext = "pdf"
+    elif format == "excel":
+        file_bytes = PurchaseOrderService(db).generate_excel(
+            tenant_id=user.tenant_id,
+            purchase_order_id=purchase_order_id,
+        )
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ext = "xlsx"
+    elif format == "csv":
+        file_bytes = PurchaseOrderService(db).generate_single_csv(
+            tenant_id=user.tenant_id,
+            purchase_order_id=purchase_order_id,
+        )
+        media_type = "text/csv"
+        ext = "csv"
+    else:
+        raise AppException(f"Unsupported export format '{format}'. Choose from: pdf, excel, csv")
+
     return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
+        content=file_bytes,
+        media_type=media_type,
         headers={
-            "Content-Disposition": f"{disposition}; filename=PO-{po.order_number}.pdf"
+            "Content-Disposition": f"{disposition}; filename=PO-{po.order_number}.{ext}"
         },
     )
 

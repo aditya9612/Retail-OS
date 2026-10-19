@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse
@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.exceptions import AppException
 from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.report import (
@@ -51,58 +52,61 @@ class GSTReportAsyncRequest(BaseModel):
 # ============================================================================
 
 @router.get(
-    "/sales/daily",
-    response_model=DailySalesResponse,
+    "/sales",
+    response_model=Union[DailySalesResponse, MonthlySalesResponse, YearlySalesResponse],
     tags=["Sales Reports"],
-    summary="Daily Sales Report",
-    description="Retrieve daily sales analytics, turnover, tax, payments, and hour-by-hour sales trend for a specific date or today.",
+    summary="Sales Performance Report (Daily, Monthly, Yearly)",
+    description=(
+        "Unified sales performance report. Select aggregation period ('daily', 'monthly', 'yearly') via dropdown. "
+        "Returns comprehensive sales metrics, turnover, tax, payments, and trend breakdown."
+    ),
 )
-def get_daily_sales(
-    target_date: Optional[date] = None,
-    store_id: Optional[int] = None,
+def get_sales_report(
+    period: Literal["daily", "monthly", "yearly"] = Query(
+        default="daily",
+        description="Sales reporting period: 'daily', 'monthly', or 'yearly'",
+    ),
+    target_date: Optional[date] = Query(
+        None,
+        description="Target date for daily sales (YYYY-MM-DD). Defaults to today.",
+    ),
+    year: Optional[int] = Query(
+        None,
+        ge=2000,
+        le=2100,
+        description="Target year for monthly/yearly reports (e.g. 2026). Defaults to current year.",
+    ),
+    month: Optional[int] = Query(
+        None,
+        ge=1,
+        le=12,
+        description="Target month (1-12) for monthly report. Defaults to current month.",
+    ),
+    store_id: Optional[int] = Query(
+        None,
+        description="Filter by specific store ID. Optional.",
+    ),
     user: User = Depends(require_permission("reports:read")),
     db: Session = Depends(get_db),
 ):
-    return ReportService(db).daily_sales(
-        user_or_tenant=user, target_date=target_date, store_id=store_id
-    )
+    current_date = target_date or date.today()
+    target_year = year or current_date.year
+    target_month = month or current_date.month
 
-
-@router.get(
-    "/sales/monthly",
-    response_model=MonthlySalesResponse,
-    tags=["Sales Reports"],
-    summary="Monthly Sales Report",
-    description="Retrieve monthly sales breakdown, daily trend curve, discount totals, and day-by-day revenue.",
-)
-def get_monthly_sales(
-    year: int = Query(..., ge=2000, le=2100),
-    month: int = Query(..., ge=1, le=12),
-    store_id: Optional[int] = None,
-    user: User = Depends(require_permission("reports:read")),
-    db: Session = Depends(get_db),
-):
-    return ReportService(db).monthly_sales(
-        user_or_tenant=user, year=year, month=month, store_id=store_id
-    )
-
-
-@router.get(
-    "/sales/yearly",
-    response_model=YearlySalesResponse,
-    tags=["Sales Reports"],
-    summary="Yearly Sales Report",
-    description="Retrieve full-year annual sales performance, month-by-month revenue, and quarterly aggregates.",
-)
-def get_yearly_sales(
-    year: int = Query(..., ge=2000, le=2100),
-    store_id: Optional[int] = None,
-    user: User = Depends(require_permission("reports:read")),
-    db: Session = Depends(get_db),
-):
-    return ReportService(db).yearly_sales(
-        user_or_tenant=user, year=year, store_id=store_id
-    )
+    if period == "daily":
+        return ReportService(db).daily_sales(
+            user_or_tenant=user, target_date=target_date, store_id=store_id
+        )
+    elif period == "monthly":
+        return ReportService(db).monthly_sales(
+            user_or_tenant=user, year=target_year, month=target_month, store_id=store_id
+        )
+    elif period == "yearly":
+        return ReportService(db).yearly_sales(
+            user_or_tenant=user, year=target_year, store_id=store_id
+        )
+    else:
+        raise AppException(f"Unsupported period '{period}'. Choose from: daily, monthly, yearly")
 
 
 # ============================================================================

@@ -122,7 +122,6 @@ def get_delivery_stats(
 
 @router.get(
     "/export",
-    tags=["Delivery Exports"],
     summary="Export Deliveries to Excel or CSV",
     description=(
         "Exports tenant delivery and shipment dispatch records as an analytical Excel workbook (.xlsx) "

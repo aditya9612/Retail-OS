@@ -150,10 +150,6 @@ openapi_tags = [
         "description": "Delivery tracking, dispatch schedules, and courier management.",
     },
     {
-        "name": "Delivery Exports",
-        "description": "Bulk export of delivery shipments, fulfillment logs, and tracking records in CSV or Excel format.",
-    },
-    {
         "name": "Coupons",
         "description": "Discount vouchers, promotional codes, and coupon redemption.",
     },
@@ -171,23 +167,11 @@ openapi_tags = [
     },
     {
         "name": "pos-shifts",
-        "description": "POS cash registers, cashier drawer shifts, opening/closing floats.",
-    },
-    {
-        "name": "POS Z-Reports",
-        "description": "Cash register end-of-shift / end-of-day Z-Report JSON analytics, PDF downloads, and Excel spreadsheets.",
+        "description": "POS cash registers, cashier drawer shifts, opening/closing floats, and shift Z-Reports.",
     },
     {
         "name": "invoices",
-        "description": "Tax Invoices, invoice status, and billing history.",
-    },
-    {
-        "name": "Invoice Documents",
-        "description": "Tax Invoice document PDF generation, downloads, and print formatting.",
-    },
-    {
-        "name": "Bill / Receipt",
-        "description": "Compact POS thermal bill and customer payment receipt PDF generation.",
+        "description": "Tax Invoices, invoice status, billing history, and PDF invoice / POS bill generation.",
     },
     {
         "name": "gst-rates",
@@ -207,11 +191,7 @@ openapi_tags = [
     },
     {
         "name": "customers",
-        "description": "Customer directory, loyalty points, customer ledger, and credit limits.",
-    },
-    {
-        "name": "Customer Exports",
-        "description": "Bulk export of customer directory lists in CSV or Excel format.",
+        "description": "Customer directory, loyalty points, customer ledger, credit limits, and directory exports.",
     },
     {
         "name": "Document Settings",
