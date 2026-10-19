@@ -127,5 +127,41 @@ jobs:
       - name: Run Automated Test Suite
         run: |
           cd retail-saas
-          pytest -v --tb=short
+          pytest -v --tb=short 2>&1 | tee pytest_output.log
+        continue-on-error: true
+
+      - name: Publish Test Summary & Report
+        if: always()
+        run: |
+          cd retail-saas
+          echo "## 📊 Automated Test Execution Summary" >> $GITHUB_STEP_SUMMARY
+          if grep -q "FAILURES" pytest_output.log || grep -q "ERRORS" pytest_output.log; then
+            echo "### ❌ Failed Tests" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            grep -E "^FAILED " pytest_output.log || true >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "### 🔍 Failure Tracebacks" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            sed -n '/FAILURES/,/short test summary info/p' pytest_output.log | head -n 120 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "### 📈 Overview" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            tail -n 25 pytest_output.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "### ✅ All Tests Passed Successfully!" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            tail -n 20 pytest_output.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Test Logs Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-execution-logs
+          path: retail-saas/pytest_output.log
+          if-no-files-found: ignore
+
 
