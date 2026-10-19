@@ -113,32 +113,32 @@ class StoreCreate(BaseModel):
             raise ValueError("Store name is required")
 
         if len(value) < 2:
-             raise ValueError("Store name must contain at least 2 characters")
+            raise ValueError("Store name must contain at least 2 characters")
 
         if len(value) > 100:
-             raise ValueError("Store name must not exceed 100 characters")
+            raise ValueError("Store name must not exceed 100 characters")
 
-             # Must contain at least one alphabetic character
+        # Must contain at least one alphabetic character
         if not re.search(r"[A-Za-z]", value):
-             raise ValueError(
-                 "Store name must contain at least one letter"
-        )
+            raise ValueError(
+                "Store name must contain at least one letter"
+            )
 
-    # Allow letters, numbers, spaces and common name characters
+        # Allow letters, numbers, spaces and common name characters
         if not re.fullmatch(
             r"[A-Za-z0-9][A-Za-z0-9\s.&'()_-]*",
             value
         ):
-             raise ValueError(
-                 "Store name contains invalid characters"
-        )
+            raise ValueError(
+                "Store name contains invalid characters"
+            )
 
         return value
     @field_validator("code")
     @classmethod
     def validate_code(cls, value):
         if value is None:
-         return None
+            return None
 
         value = value.strip().upper()
 
@@ -221,22 +221,22 @@ class StoreCreate(BaseModel):
         )
 
         if value.casefold() in {
-            name.casefold() for name in NON_CITY_LOCATION_NAMES
-        }:
-            raise ValueError("Please enter a valid city name")
-
-        if value.casefold() in {
             state.casefold() for state in INDIAN_STATES_AND_UTS
         }:
             raise ValueError(
                 "City cannot be a state or union territory name"
             )
+
+        if value.casefold() in {
+            name.casefold() for name in NON_CITY_LOCATION_NAMES
+        }:
+            raise ValueError("Please enter a valid city name")
         return value
     @field_validator("state")
     @classmethod
     def validate_state(cls, value):
         if value is None:
-         return None
+            return None
 
         value = value.strip()
 
@@ -265,12 +265,15 @@ class StoreCreate(BaseModel):
     @classmethod
     def validate_pincode(cls, value):
         if value is None:
-         return None
-        value = value.strip()                                           # Exactly 6 digits
+            return None
+        value = value.strip()
+        # Exactly 6 digits
         if not re.fullmatch(r"\d{6}", value):
-            raise ValueError("Pincode must be exactly 6 digits")        # Reject all same digits
+            raise ValueError("Pincode must be exactly 6 digits")
+        # Reject all same digits
         if len(set(value)) == 1:
-            raise ValueError("Invalid pincode")                    # Reject obvious sequential test values
+            raise ValueError("Invalid pincode")
+        # Reject obvious sequential test values
         if value in {"123456", "654321"}:
             raise ValueError("Invalid pincode")
 
@@ -279,12 +282,11 @@ class StoreCreate(BaseModel):
             raise ValueError("Invalid Indian pincode")
 
         return value
-
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, v: str) -> str:
         if v is None:
-          return None
+            return None
 
         clean_phone = v.strip()
 
@@ -296,12 +298,41 @@ class StoreCreate(BaseModel):
 
         if len(set(clean_phone)) == 1:
             raise ValueError("Please enter a valid phone number")
-
         return clean_phone
     @field_validator("email")
     @classmethod
     def validate_email(cls, value):
-        return validate_email_address(value, field_name="Store email", required=False)
+        if value is None:
+            return None
+
+        cleaned = validate_email_address(
+            value,
+            field_name="Store email",
+            required=False,
+        )
+        if cleaned is None:
+            return None
+
+        try:
+            validated = email_validator(
+                cleaned,
+                check_deliverability=False,
+                allow_display_name=False,
+            )
+        except EmailNotValidError as exc:
+            raise ValueError("Please enter a valid email address") from exc
+
+        local_part = validated.local_part
+
+        if len(local_part) > 64:
+            raise ValueError("Email username must not exceed 64 characters")
+
+        if local_part.startswith("-") or local_part.endswith("-"):
+            raise ValueError(
+                "Email username cannot start or end with a hyphen"
+            )
+
+        return validated.normalized.lower()
     @field_validator("gstin")
     @classmethod
     def validate_gstin(cls, v: Optional[str]) -> Optional[str]:
@@ -353,7 +384,7 @@ class StoreUpdate(BaseModel):
         if not re.search(r"[A-Za-z]", value):
             raise ValueError("Store name must contain at least one letter")
 
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .&'()_-]*", value):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9\s.&'()_-]*", value):
             raise ValueError(
                 "Store name contains invalid characters"
             )
@@ -391,6 +422,12 @@ class StoreUpdate(BaseModel):
         ):
             raise ValueError("Address contains invalid characters")
 
+        # Require at least one number
+        if not any(char.isdigit() for char in value):
+            raise ValueError(
+                "Address must include a building number or other location number"
+            )
+
         return value
 
     @field_validator("city")
@@ -401,19 +438,14 @@ class StoreUpdate(BaseModel):
 
         value = value.strip()
 
-        if value.lower() in {
-            "string",
-            "test",
-            "city",
-            "example",
-            "null",
-            "none",
-            "n/a",
-        "na",
-        }:
-            raise ValueError("Please enter a valid city name")
         if not value:
             raise ValueError("City is required")
+
+        if value.casefold() in {
+            "string", "test", "city", "example", "null",
+            "none", "n/a", "na",
+        }:
+            raise ValueError("Please enter a valid city name")
 
         if len(value) < 2:
             raise ValueError("City must contain at least 2 characters")
@@ -426,10 +458,19 @@ class StoreUpdate(BaseModel):
 
         if not re.fullmatch(r"[A-Za-z]+(?:[ .'-][A-Za-z]+)*", value):
             raise ValueError(
-            "City must contain only letters, spaces, hyphens and apostrophes"
-        )
+                "City must contain only letters, spaces, hyphens and apostrophes"
+            )
 
-        if value.lower() in NON_CITY_LOCATION_NAMES:
+        if value.casefold() in {
+            state.casefold() for state in INDIAN_STATES_AND_UTS
+        }:
+            raise ValueError(
+                "City cannot be a state or union territory name"
+            )
+
+        if value.casefold() in {
+            name.casefold() for name in NON_CITY_LOCATION_NAMES
+        }:
             raise ValueError("Please enter a valid city name")
 
         return value
@@ -507,14 +548,44 @@ class StoreUpdate(BaseModel):
     @field_validator("email")
     @classmethod
     def validate_email(cls, value):
-        return validate_email_address(value, field_name="Store email", required=False)
+        if value is None:
+            return None
+
+        cleaned = validate_email_address(
+            value,
+            field_name="Store email",
+            required=False,
+        )
+        if cleaned is None:
+            return None
+
+        try:
+            validated = email_validator(
+                cleaned,
+                check_deliverability=False,
+                allow_display_name=False,
+            )
+        except EmailNotValidError as exc:
+            raise ValueError("Please enter a valid email address") from exc
+
+        local_part = validated.local_part
+
+        if len(local_part) > 64:
+            raise ValueError("Email username must not exceed 64 characters")
+
+        if local_part.startswith("-") or local_part.endswith("-"):
+            raise ValueError(
+                "Email username cannot start or end with a hyphen"
+            )
+
+        return validated.normalized.lower()
+
     @field_validator("gstin")
     @classmethod
     def validate_gstin(cls, v: Optional[str]) -> Optional[str]:
         if not v or not v.strip():
             return None
         return validate_gstin_number(v, field_name="GSTIN", required=False)
-
 class StoreResponse(BaseModel):
     id: int = Field(..., description="Unique Store ID", examples=[2])
     tenant_id: int = Field(..., description="Organization / Tenant ID", examples=[1])
