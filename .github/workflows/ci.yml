@@ -45,7 +45,7 @@ jobs:
       CELERY_BROKER_URL: redis://127.0.0.1:6379/1
       CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
       AUTH_FIXED_OTP_ENABLED: "false"
-      PYTHONPATH: retail-saas
+      PYTHONPATH: ${{ github.workspace }}/retail-saas:${{ github.workspace }}
 
     steps:
       - name: Checkout Source Code
@@ -65,6 +65,7 @@ jobs:
             default-libmysqlclient-dev \
             pkg-config \
             fonts-noto-core \
+            fonts-noto-extra \
             fonts-dejavu-core
 
       - name: Upgrade pip and Install Python Dependencies
