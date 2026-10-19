@@ -1,5 +1,5 @@
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 import secrets
 from typing import List, Optional
@@ -69,9 +69,19 @@ class StoreTransferService:
                 "Destination store is inactive or has been deleted"
             )
 
+        if not items or len(items) == 0:
+            raise ValueError("Transfer must contain at least one item")
+
+        seen_p_ids = set()
         for item in items:
             p_id = item["product_id"] if isinstance(item, dict) else item.product_id
             qty = item["quantity"] if isinstance(item, dict) else getattr(item, "quantity", 0)
+            if p_id in seen_p_ids:
+                raise ValueError(
+                    f"Duplicate product ID {p_id} in transfer items. Please consolidate quantities into a single item line."
+                )
+            seen_p_ids.add(p_id)
+
             product = db.query(Product).filter(Product.id == p_id).first()
             if not product:
                 raise ValueError(f"Product {p_id} not found")
@@ -82,7 +92,38 @@ class StoreTransferService:
             if qty <= 0:
                 raise ValueError(f"Quantity must be greater than 0 for product {p_id}")
 
-        seq = db.query(StoreTransfer).count() + 1
+        # Anti-double-click / duplicate transfer check (15 seconds window)
+        recent_cutoff = datetime.utcnow() - timedelta(seconds=15)
+        recent_pending = (
+            db.query(StoreTransfer)
+            .filter(
+                StoreTransfer.source_store_id == source_store_id,
+                StoreTransfer.destination_store_id == destination_store_id,
+                StoreTransfer.status == "Pending",
+                StoreTransfer.created_at >= recent_cutoff,
+            )
+            .first()
+        )
+        if recent_pending and len(recent_pending.items) == len(items):
+            pending_map = {it.product_id: it.quantity for it in recent_pending.items}
+            curr_map = {
+                (it["product_id"] if isinstance(it, dict) else it.product_id): (
+                    it["quantity"] if isinstance(it, dict) else it.quantity
+                )
+                for it in items
+            }
+            if pending_map == curr_map:
+                raise ValueError(
+                    f"Duplicate transfer submission detected. Identical pending transfer '{recent_pending.transfer_number}' was just created."
+                )
+
+        seq = (
+            db.query(StoreTransfer)
+            .join(Store, Store.id == StoreTransfer.source_store_id)
+            .filter(Store.tenant_id == tenant_id)
+            .count()
+            + 1
+        )
         rand_suffix = secrets.token_hex(2).upper()
         transfer_number = (
             f"TRF-{source_store_id}-"

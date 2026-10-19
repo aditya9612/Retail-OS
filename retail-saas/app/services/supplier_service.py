@@ -53,6 +53,20 @@ class SupplierService:
             if existing_gstin:
                 raise ConflictException(f"Supplier with GSTIN '{data.gstin.strip().upper()}' already exists")
 
+        # Check duplicate phone within tenant if provided
+        if data.phone and data.phone.strip():
+            clean_phone = data.phone.strip()
+            existing_phone = (
+                self.db.query(Supplier)
+                .filter(
+                    Supplier.tenant_id == tenant_id,
+                    Supplier.phone == clean_phone,
+                )
+                .first()
+            )
+            if existing_phone:
+                raise ConflictException(f"Supplier with phone '{clean_phone}' already exists ({existing_phone.name})")
+
         supplier = Supplier(
             tenant_id=tenant_id,
             name=data.name,
@@ -184,6 +198,21 @@ class SupplierService:
             )
             if existing_gstin:
                 raise ConflictException(f"Supplier with GSTIN '{update_data['gstin'].strip().upper()}' already exists")
+
+        if "phone" in update_data and update_data["phone"] is not None:
+            clean_phone = str(update_data["phone"]).strip()
+            if clean_phone:
+                existing_phone = (
+                    self.db.query(Supplier)
+                    .filter(
+                        Supplier.tenant_id == tenant_id,
+                        Supplier.phone == clean_phone,
+                        Supplier.id != supplier_id,
+                    )
+                    .first()
+                )
+                if existing_phone:
+                    raise ConflictException(f"Supplier with phone '{clean_phone}' already exists ({existing_phone.name})")
 
         for key, value in update_data.items():
 

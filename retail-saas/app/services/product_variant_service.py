@@ -54,6 +54,34 @@ class ProductVariantService:
             if self.repo.is_barcode_taken(barcode, tenant_id):
                 raise ConflictException(f"Barcode '{barcode}' already exists")
 
+        # Check duplicate variant attribute matrix or name for this parent product
+        existing_variants = (
+            self.db.query(ProductVariant)
+            .filter(
+                ProductVariant.tenant_id == tenant_id,
+                ProductVariant.product_id == product_id,
+                ProductVariant.is_active == True,
+            )
+            .all()
+        )
+        d_name = data.variant_name.strip().lower() if data.variant_name else None
+        d_size = data.size.strip().lower() if data.size else None
+        d_color = data.color.strip().lower() if data.color else None
+
+        for ev in existing_variants:
+            ev_name = ev.variant_name.strip().lower() if ev.variant_name else None
+            ev_size = ev.size.strip().lower() if ev.size else None
+            ev_color = ev.color.strip().lower() if ev.color else None
+
+            if d_name and ev_name and d_name == ev_name:
+                raise ConflictException(
+                    f"Product variant with name '{data.variant_name.strip()}' already exists for this product"
+                )
+            if d_size and d_color and ev_size == d_size and ev_color == d_color:
+                raise ConflictException(
+                    f"Product variant with size '{data.size.strip()}' and color '{data.color.strip()}' already exists for this product"
+                )
+
         variant_dict = data.model_dump()
         variant_dict.pop("auto_generate_barcode", None)
         variant_dict.pop("product_id", None)
@@ -161,6 +189,39 @@ class ProductVariantService:
                 ):
                     raise ConflictException(f"Barcode '{new_barcode}' already exists")
             update_data["barcode"] = new_barcode
+
+        new_name = update_data.get("variant_name") or variant.variant_name
+        new_size = update_data.get("size") if "size" in update_data else variant.size
+        new_color = update_data.get("color") if "color" in update_data else variant.color
+
+        if "variant_name" in update_data or "size" in update_data or "color" in update_data:
+            existing_others = (
+                self.db.query(ProductVariant)
+                .filter(
+                    ProductVariant.tenant_id == tenant_id,
+                    ProductVariant.product_id == variant.product_id,
+                    ProductVariant.id != variant_id,
+                    ProductVariant.is_active == True,
+                )
+                .all()
+            )
+            d_name = new_name.strip().lower() if new_name else None
+            d_size = new_size.strip().lower() if new_size else None
+            d_color = new_color.strip().lower() if new_color else None
+
+            for ev in existing_others:
+                ev_name = ev.variant_name.strip().lower() if ev.variant_name else None
+                ev_size = ev.size.strip().lower() if ev.size else None
+                ev_color = ev.color.strip().lower() if ev.color else None
+
+                if d_name and ev_name and d_name == ev_name:
+                    raise ConflictException(
+                        f"Product variant with name '{new_name.strip()}' already exists for this product"
+                    )
+                if d_size and d_color and ev_size == d_size and ev_color == d_color:
+                    raise ConflictException(
+                        f"Product variant with size '{new_size.strip()}' and color '{new_color.strip()}' already exists for this product"
+                    )
 
         for key, value in update_data.items():
             setattr(variant, key, value)

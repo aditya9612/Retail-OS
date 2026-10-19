@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     field_validator,
     model_validator,
@@ -36,6 +37,25 @@ class PurchaseOrderItemCreate(BaseModel):
         description="Unit price alias for unit_cost",
     )
 
+    tax_rate: Optional[Decimal] = Field(
+        default=Decimal("0.00"),
+        ge=Decimal("0.00"),
+        le=Decimal("100.00"),
+        description="GST tax rate percentage (e.g. 5.0, 12.0, 18.0)",
+    )
+
+    hsn_code: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        description="Harmonized System Nomenclature code for Indian GST compliance",
+    )
+
+    unit_of_measure: Optional[str] = Field(
+        default="pcs",
+        max_length=30,
+        description="Unit of measure (e.g. pcs, kg, box, litre)",
+    )
+
     @model_validator(mode="before")
     @classmethod
     def reconcile_unit_cost(cls, data):
@@ -56,13 +76,19 @@ class PurchaseOrderCreate(BaseModel):
     store_id: Optional[int] = Field(
         default=None,
         gt=0,
-        description="Store ID (optional)",
+        description="Store ID destination (optional if warehouse_id provided)",
+    )
+
+    warehouse_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Warehouse ID destination (optional if store_id provided)",
     )
 
     invoice_number: Optional[str] = Field(
         default=None,
         max_length=100,
-        description="Invoice number",
+        description="Invoice or Delivery Challan number",
     )
 
     invoice_id: Optional[str] = Field(
@@ -73,19 +99,31 @@ class PurchaseOrderCreate(BaseModel):
 
     notes: Optional[str] = Field(
         default=None,
-        max_length=500,
+        max_length=1000,
         description="Notes for the purchase order",
     )
 
     remarks: Optional[str] = Field(
         default=None,
-        max_length=500,
+        max_length=1000,
         description="Alias for notes",
     )
 
     expected_delivery_date: Optional[datetime] = Field(
         default=None,
         description="Expected delivery date",
+    )
+
+    discount_amount: Optional[Decimal] = Field(
+        default=Decimal("0.00"),
+        ge=Decimal("0.00"),
+        description="Discount amount applied to purchase order",
+    )
+
+    shipping_charges: Optional[Decimal] = Field(
+        default=Decimal("0.00"),
+        ge=Decimal("0.00"),
+        description="Shipping / Freight charges applied to purchase order",
     )
 
     items: list[PurchaseOrderItemCreate]
@@ -115,38 +153,58 @@ class PurchaseOrderCreate(BaseModel):
 
 
 class PurchaseOrderUpdate(BaseModel):
-    supplier_id: int | None = Field(
+    supplier_id: Optional[int] = Field(
         default=None,
         gt=0,
     )
 
-    store_id: int | None = Field(
+    store_id: Optional[int] = Field(
         default=None,
         gt=0,
     )
 
-    invoice_number: str | None = Field(
+    warehouse_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+    )
+
+    invoice_number: Optional[str] = Field(
         default=None,
         max_length=100,
     )
 
-    invoice_id: str | None = Field(
+    invoice_id: Optional[str] = Field(
         default=None,
         max_length=100,
     )
 
-    notes: str | None = Field(
+    notes: Optional[str] = Field(
         default=None,
-        max_length=500,
+        max_length=1000,
     )
 
-    remarks: str | None = Field(
+    remarks: Optional[str] = Field(
         default=None,
-        max_length=500,
+        max_length=1000,
     )
 
     expected_delivery_date: Optional[datetime] = None
 
+    discount_amount: Optional[Decimal] = Field(
+        default=None,
+        ge=Decimal("0.00"),
+    )
+
+    shipping_charges: Optional[Decimal] = Field(
+        default=None,
+        ge=Decimal("0.00"),
+    )
+
+    items: Optional[list[PurchaseOrderItemCreate]] = Field(
+        default=None,
+        description="Optional updated list of items (allowed for draft purchase orders)",
+    )
+
     @model_validator(mode="before")
     @classmethod
     def reconcile_notes_and_invoices(cls, data):
@@ -160,24 +218,44 @@ class PurchaseOrderUpdate(BaseModel):
             elif data.get("invoice_number") is not None and data.get("invoice_id") is None:
                 data["invoice_id"] = data["invoice_number"]
         return data
+
+
+class PurchaseOrderReceiveItem(BaseModel):
+    product_id: int = Field(gt=0, description="Product ID being received")
+    quantity: int = Field(gt=0, description="Quantity being received")
+    batch_number: Optional[str] = Field(default=None, max_length=100)
+    expiry_date: Optional[date] = None
 
 
 class PurchaseOrderReceive(BaseModel):
-    invoice_number: str | None = Field(
+    invoice_number: Optional[str] = Field(
         default=None,
         max_length=100,
     )
-    invoice_id: str | None = Field(
+    invoice_id: Optional[str] = Field(
         default=None,
         max_length=100,
     )
-    remarks: str | None = Field(
+    remarks: Optional[str] = Field(
         default=None,
         max_length=500,
     )
-    notes: str | None = Field(
+    notes: Optional[str] = Field(
         default=None,
         max_length=500,
+    )
+    batch_number: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Optional batch number for received items",
+    )
+    expiry_date: Optional[date] = Field(
+        default=None,
+        description="Optional expiry date for received items",
+    )
+    items: Optional[list[PurchaseOrderReceiveItem]] = Field(
+        default=None,
+        description="Optional item-level receive details for partial deliveries",
     )
 
     @model_validator(mode="before")
@@ -193,7 +271,6 @@ class PurchaseOrderReceive(BaseModel):
             elif data.get("invoice_number") is not None and data.get("invoice_id") is None:
                 data["invoice_id"] = data["invoice_number"]
         return data
-
 
 
 class PurchaseOrderStatusUpdate(BaseModel):
@@ -207,16 +284,33 @@ class PurchaseOrderStatusUpdate(BaseModel):
         allowed = {
             "draft",
             "approved",
+            "partially_received",
             "received",
             "cancelled",
         }
 
         if value not in allowed:
             raise ValueError(
-                "Status must be draft, approved, received or cancelled"
+                "Status must be draft, approved, partially_received, received or cancelled"
             )
 
         return value
+
+
+class PurchaseOrderApproveRequest(BaseModel):
+    notes: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Approval notes or vendor dispatch authorization comments",
+    )
+
+
+class PurchaseOrderCancelRequest(BaseModel):
+    reason: str = Field(
+        min_length=3,
+        max_length=500,
+        description="Mandatory reason for cancelling the purchase order",
+    )
 
 
 class PurchaseOrderItemResponse(BaseModel):
@@ -224,12 +318,19 @@ class PurchaseOrderItemResponse(BaseModel):
     po_id: Optional[int] = None
     purchase_order_id: Optional[int] = None
     product_id: int
+    product_name: Optional[str] = None
+    product_sku: Optional[str] = None
     quantity: int
     unit_cost: Decimal = Decimal("0.00")
     unit_price: Optional[Decimal] = None
     total_cost: Decimal = Decimal("0.00")
     total: Optional[Decimal] = None
+    tax_rate: Decimal = Decimal("0.00")
+    tax_amount: Decimal = Decimal("0.00")
+    hsn_code: Optional[str] = None
+    unit_of_measure: Optional[str] = "pcs"
     received_quantity: int = 0
+    remaining_quantity: int = 0
 
     @model_validator(mode="after")
     def sync_aliases(self):
@@ -239,28 +340,50 @@ class PurchaseOrderItemResponse(BaseModel):
             self.unit_price = self.unit_cost
         if self.total_cost is not None and self.total is None:
             self.total = self.total_cost
+        if self.quantity is not None and self.received_quantity is not None:
+            self.remaining_quantity = max(0, self.quantity - self.received_quantity)
         return self
 
-    model_config = {
-        "from_attributes": True,
-    }
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PurchaseOrderResponse(BaseModel):
     id: int
     tenant_id: int
     supplier_id: int
+    supplier_name: Optional[str] = None
+    supplier_email: Optional[str] = None
+    supplier_phone: Optional[str] = None
+    supplier_gstin: Optional[str] = None
     store_id: Optional[int] = None
+    store_name: Optional[str] = None
+    warehouse_id: Optional[int] = None
+    warehouse_name: Optional[str] = None
     order_number: str
     po_number: Optional[str] = None
     invoice_number: Optional[str] = None
     invoice_id: Optional[str] = None
     status: str
-    total_amount: Decimal
+    subtotal: Decimal = Decimal("0.00")
+    tax_amount: Decimal = Decimal("0.00")
+    discount_amount: Decimal = Decimal("0.00")
+    shipping_charges: Decimal = Decimal("0.00")
+    total_amount: Decimal = Decimal("0.00")
     notes: Optional[str] = None
     remarks: Optional[str] = None
     expected_delivery_date: Optional[datetime] = None
+    created_by_id: Optional[int] = None
+    created_by_name: Optional[str] = None
+    approved_by_id: Optional[int] = None
+    approved_by_name: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    cancellation_reason: Optional[str] = None
+    total_quantity: int = 0
+    total_received_quantity: int = 0
+    remaining_quantity: int = 0
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
     items: list[PurchaseOrderItemResponse] = []
 
@@ -274,11 +397,25 @@ class PurchaseOrderResponse(BaseModel):
             self.invoice_id = self.invoice_number
         elif self.invoice_id and not self.invoice_number:
             self.invoice_number = self.invoice_id
+        if self.items:
+            self.total_quantity = sum(it.quantity for it in self.items)
+            self.total_received_quantity = sum(it.received_quantity or 0 for it in self.items)
+            self.remaining_quantity = max(0, self.total_quantity - self.total_received_quantity)
         return self
 
-    model_config = {
-        "from_attributes": True,
-    }
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PurchaseOrderStatsResponse(BaseModel):
+    total_orders: int
+    draft_orders: int
+    approved_orders: int
+    partially_received_orders: int
+    received_orders: int
+    cancelled_orders: int
+    total_order_value: Decimal
+    total_received_value: Decimal
+    expected_deliveries_this_week: int
 
 
 class PurchaseOrderDeleteData(BaseModel):

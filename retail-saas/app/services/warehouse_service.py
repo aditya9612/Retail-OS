@@ -1,6 +1,7 @@
 from decimal import Decimal
 from typing import Optional
 from fastapi import HTTPException
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from app.core.exceptions import NotFoundException
@@ -46,6 +47,23 @@ class WarehouseService:
                 status_code=409,
                 detail=f"Warehouse code '{data.code}' already exists",
             )
+
+        # 1b. Per-tenant duplicate name check
+        if data.name and data.name.strip():
+            clean_name = data.name.strip()
+            existing_name = (
+                self.db.query(Warehouse)
+                .filter(
+                    Warehouse.tenant_id == tenant_id,
+                    func.lower(Warehouse.name) == clean_name.lower(),
+                )
+                .first()
+            )
+            if existing_name:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Warehouse name '{clean_name}' already exists",
+                )
 
         # 2. Store tenant isolation check
         store_name = None
@@ -193,6 +211,24 @@ class WarehouseService:
                 raise HTTPException(
                     status_code=409,
                     detail=f"Warehouse code '{new_code}' already exists",
+                )
+
+        # 2b. Duplicate name check for this tenant
+        if "name" in update_data and update_data["name"] is not None:
+            new_name = update_data["name"].strip()
+            existing_name = (
+                self.db.query(Warehouse)
+                .filter(
+                    Warehouse.tenant_id == tenant_id,
+                    func.lower(Warehouse.name) == new_name.lower(),
+                    Warehouse.id != warehouse_id,
+                )
+                .first()
+            )
+            if existing_name:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Warehouse name '{new_name}' already exists",
                 )
 
         for field, value in update_data.items():

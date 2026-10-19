@@ -398,3 +398,368 @@ def test_grn_cross_tenant_isolation(tenant_a, tenant_b):
         headers=headers_b,
     )
     assert spoofed.status_code == 404
+
+
+# =====================================================================
+# 5. Direct Store Delivery (DSD), Logistics & Commercial Metadata
+# =====================================================================
+
+def test_direct_store_delivery_and_logistics_details(tenant_a):
+    headers = tenant_a["headers"]
+    tenant_id = tenant_a["tenant_id"]
+    store_id = tenant_a["store_id"]
+    product_id = tenant_a["product_id"]
+
+    grn_payload = {
+        "store_id": store_id,
+        "invoice_number": "INV-MUM-8921",
+        "invoice_date": "2026-10-18",
+        "vehicle_number": "MH-12-AB-1234",
+        "transporter_name": "VRL Logistics",
+        "remarks": "Direct Store Delivery of organic rice",
+        "items": [
+            {
+                "product_id": product_id,
+                "ordered_quantity": 40,
+                "received_quantity": 40,
+                "unit_cost": 340.00,
+                "remarks": "Passed seal check",
+            }
+        ],
+    }
+
+    resp = client.post("/api/v1/grn", json=grn_payload, headers=headers)
+    assert resp.status_code == 201, resp.text
+    grn = resp.json()
+    assert grn["store_id"] == store_id
+    assert grn["store_name"] is not None
+    assert grn["invoice_number"] == "INV-MUM-8921"
+    assert grn["invoice_date"] == "2026-10-18"
+    assert grn["vehicle_number"] == "MH-12-AB-1234"
+    assert grn["transporter_name"] == "VRL Logistics"
+    assert grn["total_items_count"] == 1
+    assert grn["total_ordered_quantity"] == 40
+    assert grn["total_received_quantity"] == 40
+    assert Decimal(str(grn["total_cost_value"])) == Decimal("13600.00")
+    grn_id = grn["id"]
+
+    # Receive GRN into Store directly
+    rec = client.post(f"/api/v1/grn/{grn_id}/receive", headers=headers)
+    assert rec.status_code == 200, rec.text
+    rec_data = rec.json()
+    assert rec_data["status"] == "received"
+    assert rec_data["received_at"] is not None
+
+    # Verify inventory is credited to store_id
+    db = SessionLocal()
+    inv = db.query(Inventory).filter(
+        Inventory.tenant_id == tenant_id,
+        Inventory.store_id == store_id,
+        Inventory.product_id == product_id,
+    ).first()
+    assert inv is not None
+    assert inv.quantity >= Decimal("40.0000")
+    db.close()
+
+
+# =====================================================================
+# 6. Batch Number and Expiry Date Tracking
+# =====================================================================
+
+def test_grn_item_batch_and_expiry_date_tracking(tenant_a):
+    headers = tenant_a["headers"]
+    tenant_id = tenant_a["tenant_id"]
+    warehouse_id = tenant_a["warehouse_id"]
+    product_id = tenant_a["product_id"]
+
+    batch_no = f"BAT-{uuid.uuid4().hex[:6].upper()}"
+    expiry = "2027-12-31"
+
+    grn_payload = {
+        "warehouse_id": warehouse_id,
+        "items": [
+            {
+                "product_id": product_id,
+                "ordered_quantity": 15,
+                "received_quantity": 15,
+                "unit_cost": 300.00,
+                "batch_number": batch_no,
+                "expiry_date": expiry,
+                "remarks": "FMCG stock with batch stamp",
+            }
+        ],
+    }
+
+    create_resp = client.post("/api/v1/grn", json=grn_payload, headers=headers)
+    assert create_resp.status_code == 201, create_resp.text
+    grn = create_resp.json()
+    assert grn["items"][0]["batch_number"] == batch_no
+    assert grn["items"][0]["expiry_date"] == expiry
+
+    # Receive GRN
+    rec_resp = client.post(f"/api/v1/grn/{grn['id']}/receive", headers=headers)
+    assert rec_resp.status_code == 200, rec_resp.text
+
+    # Verify ProductBatch record was created in database
+    from app.models.product_batch import ProductBatch
+    db = SessionLocal()
+    batch_record = (
+        db.query(ProductBatch)
+        .filter(
+            ProductBatch.tenant_id == tenant_id,
+            ProductBatch.product_id == product_id,
+            ProductBatch.batch_number == batch_no,
+        )
+        .first()
+    )
+    assert batch_record is not None, "ProductBatch must be persisted"
+    assert str(batch_record.expiry_date) == expiry
+    db.close()
+
+
+# =====================================================================
+# 7. Quality Check (QC Inspection) & Damaged Goods Handling
+# =====================================================================
+
+def test_grn_quality_inspection_qc(tenant_a):
+    headers = tenant_a["headers"]
+    tenant_id = tenant_a["tenant_id"]
+    warehouse_id = tenant_a["warehouse_id"]
+    product_id = tenant_a["product_id"]
+
+    # Create GRN with 30 received units
+    create_resp = client.post(
+        "/api/v1/grn",
+        json={
+            "warehouse_id": warehouse_id,
+            "items": [
+                {
+                    "product_id": product_id,
+                    "ordered_quantity": 30,
+                    "received_quantity": 30,
+                    "unit_cost": 200.00,
+                }
+            ],
+        },
+        headers=headers,
+    )
+    grn = create_resp.json()
+    grn_id = grn["id"]
+    item_id = grn["items"][0]["id"]
+
+    # Perform Quality Inspection: 26 accepted, 4 rejected (broken/damaged)
+    qc_payload = {
+        "items": [
+            {
+                "item_id": item_id,
+                "accepted_quantity": 26,
+                "rejected_quantity": 4,
+                "damage_reason": "4 packs water-damaged during shipping",
+                "remarks": "QC Inspector stamp verified",
+            }
+        ],
+        "remarks": "Partial damage reported to vendor",
+    }
+    qc_resp = client.post(f"/api/v1/grn/{grn_id}/quality-check", json=qc_payload, headers=headers)
+    assert qc_resp.status_code == 200, qc_resp.text
+    qc_data = qc_resp.json()
+    assert qc_data["items"][0]["accepted_quantity"] == 26
+    assert qc_data["items"][0]["rejected_quantity"] == 4
+    assert qc_data["items"][0]["damage_reason"] == "4 packs water-damaged during shipping"
+    assert qc_data["total_accepted_quantity"] == 26
+    assert qc_data["total_rejected_quantity"] == 4
+
+    # Receive GRN -> only 26 units should be credited into warehouse stock
+    db = SessionLocal()
+    wh = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+    stock_before = Decimal("0.00")
+    if wh.store_id:
+        existing_inv = db.query(Inventory).filter(
+            Inventory.tenant_id == tenant_id,
+            Inventory.store_id == wh.store_id,
+            Inventory.product_id == product_id,
+        ).first()
+        if existing_inv:
+            stock_before = existing_inv.quantity
+    db.close()
+
+    rec_resp = client.post(f"/api/v1/grn/{grn_id}/receive", headers=headers)
+    assert rec_resp.status_code == 200
+
+    db = SessionLocal()
+    wh = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+    inv_after = db.query(Inventory).filter(
+        Inventory.tenant_id == tenant_id,
+        Inventory.store_id == wh.store_id,
+        Inventory.product_id == product_id,
+    ).first()
+    assert inv_after.quantity == stock_before + Decimal("26.0000"), "Only accepted quantity should be added to stock"
+    db.close()
+
+
+# =====================================================================
+# 8. Enterprise Stats, Barcode Lookup, Export & HTML Slip
+# =====================================================================
+
+def test_grn_stats_and_by_number_lookup(tenant_a):
+    headers = tenant_a["headers"]
+    product_id = tenant_a["product_id"]
+
+    # 1. Test Stats endpoint
+    stats_resp = client.get("/api/v1/grn/stats", headers=headers)
+    assert stats_resp.status_code == 200, stats_resp.text
+    stats = stats_resp.json()
+    assert "total_grns" in stats
+    assert "pending_grns" in stats
+    assert "received_grns" in stats
+    assert "total_inward_value" in stats
+    assert isinstance(stats["recent_grns"], list)
+
+    # 2. Create GRN and lookup by number
+    create_resp = client.post(
+        "/api/v1/grn",
+        json={
+            "items": [{"product_id": product_id, "ordered_quantity": 5, "received_quantity": 5}],
+        },
+        headers=headers,
+    )
+    grn = create_resp.json()
+    grn_number = grn["grn_number"]
+
+    by_num_resp = client.get(f"/api/v1/grn/by-number/{grn_number}", headers=headers)
+    assert by_num_resp.status_code == 200, by_num_resp.text
+    assert by_num_resp.json()["id"] == grn["id"]
+
+    # Non-existent number returns 404
+    missing_resp = client.get("/api/v1/grn/by-number/GRN-DOES-NOT-EXIST", headers=headers)
+    assert missing_resp.status_code == 404
+
+
+def test_grn_export_and_print_slip(tenant_a):
+    headers = tenant_a["headers"]
+    product_id = tenant_a["product_id"]
+
+    create_resp = client.post(
+        "/api/v1/grn",
+        json={
+            "invoice_number": "INV-EXPORT-TEST",
+            "items": [{"product_id": product_id, "ordered_quantity": 10, "received_quantity": 10}],
+        },
+        headers=headers,
+    )
+    grn_id = create_resp.json()["id"]
+
+    # 1. Export CSV
+    export_resp = client.get("/api/v1/grn/export", headers=headers)
+    assert export_resp.status_code == 200, export_resp.text
+    assert "text/csv" in export_resp.headers["content-type"]
+    assert "GRN Number,Date,Status" in export_resp.text
+    assert "INV-EXPORT-TEST" in export_resp.text
+
+    # 2. Print HTML Slip
+    slip_resp = client.get(f"/api/v1/grn/{grn_id}/print-slip", headers=headers)
+    assert slip_resp.status_code == 200, slip_resp.text
+    assert "text/html" in slip_resp.headers["content-type"]
+    assert "<!DOCTYPE html>" in slip_resp.text
+    assert "GOODS RECEIVED NOTE (GRN)" in slip_resp.text
+    assert "QC Inspector Signature" in slip_resp.text
+    assert "Print Slip" in slip_resp.text
+    assert "Download PDF" in slip_resp.text
+
+    # 3. Download PDF (Attachment)
+    pdf_resp = client.get(f"/api/v1/grn/{grn_id}/download-pdf", headers=headers)
+    assert pdf_resp.status_code == 200, pdf_resp.text
+    assert "application/pdf" in pdf_resp.headers["content-type"]
+    assert "attachment" in pdf_resp.headers["content-disposition"]
+    assert len(pdf_resp.content) > 500
+    assert pdf_resp.content[:4] == b"%PDF"
+
+    # 4. Preview PDF (Inline)
+    preview_resp = client.get(f"/api/v1/grn/{grn_id}/download-pdf?mode=preview", headers=headers)
+    assert preview_resp.status_code == 200
+    assert "application/pdf" in preview_resp.headers["content-type"]
+    assert "inline" in preview_resp.headers["content-disposition"]
+    assert preview_resp.content[:4] == b"%PDF"
+
+
+def test_grn_reject_with_reason_and_history_timeline(tenant_a):
+    headers = tenant_a["headers"]
+    product_id = tenant_a["product_id"]
+
+    create_resp = client.post(
+        "/api/v1/grn",
+        json={
+            "remarks": "Wrong shipment delivery",
+            "items": [{"product_id": product_id, "ordered_quantity": 8, "received_quantity": 8}],
+        },
+        headers=headers,
+    )
+    grn_id = create_resp.json()["id"]
+
+    # Reject with custom reason
+    reject_resp = client.post(
+        f"/api/v1/grn/{grn_id}/reject",
+        json={"reason": "Wrong product specifications received from supplier"},
+        headers=headers,
+    )
+    assert reject_resp.status_code == 200, reject_resp.text
+    rej_data = reject_resp.json()
+    assert rej_data["status"] == "rejected"
+    assert rej_data["rejection_reason"] == "Wrong product specifications received from supplier"
+
+    # Verify history timeline
+    hist_resp = client.get(f"/api/v1/grn/{grn_id}/history", headers=headers)
+    assert hist_resp.status_code == 200, hist_resp.text
+    hist = hist_resp.json()
+    assert hist["status"] == "rejected"
+    assert len(hist["timeline"]) >= 2
+    assert any(ev["event"] == "GRN Rejected" for ev in hist["timeline"])
+
+
+def test_duplicate_invoice_and_duplicate_grn_prevention(tenant_a):
+    headers = tenant_a["headers"]
+    product_id = tenant_a["product_id"]
+    warehouse_id = tenant_a["warehouse_id"]
+
+    inv_num = f"INV-DUP-{uuid.uuid4().hex[:6].upper()}"
+
+    # 1. First GRN with invoice creates successfully
+    res1 = client.post(
+        "/api/v1/grn",
+        json={
+            "warehouse_id": warehouse_id,
+            "invoice_number": inv_num,
+            "items": [{"product_id": product_id, "ordered_quantity": 10, "received_quantity": 10}],
+        },
+        headers=headers,
+    )
+    assert res1.status_code == 201
+
+    # 2. Second GRN with same invoice number must return 409 Conflict
+    res2 = client.post(
+        "/api/v1/grn",
+        json={
+            "warehouse_id": warehouse_id,
+            "invoice_number": inv_num,
+            "items": [{"product_id": product_id, "ordered_quantity": 10, "received_quantity": 10}],
+        },
+        headers=headers,
+    )
+    assert res2.status_code == 409, f"Expected 409 duplicate invoice conflict, got: {res2.status_code}"
+    assert "already exists" in res2.json()["message"].lower()
+
+    # 3. Duplicate product in same item list must return 409 Conflict
+    res3 = client.post(
+        "/api/v1/grn",
+        json={
+            "warehouse_id": warehouse_id,
+            "items": [
+                {"product_id": product_id, "ordered_quantity": 5, "received_quantity": 5},
+                {"product_id": product_id, "ordered_quantity": 3, "received_quantity": 3},
+            ],
+        },
+        headers=headers,
+    )
+    assert res3.status_code == 409
+    assert "duplicate product" in res3.json()["message"].lower()
+

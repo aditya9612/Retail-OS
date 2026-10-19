@@ -1,5 +1,7 @@
+from datetime import date, datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -10,7 +12,10 @@ from app.schemas.grn import (
     GRNDeleteResponse,
     GRNHistoryResponse,
     GRNPrintResponse,
+    GRNQualityCheckRequest,
+    GRNRejectRequest,
     GRNResponse,
+    GRNStatsResponse,
 )
 from app.services.grn_service import GRNService
 
@@ -35,6 +40,7 @@ def create_grn(
     return GRNService(db).create(
         tenant_id=user.tenant_id,
         data=data,
+        user_id=user.id,
     )
 
 
@@ -45,7 +51,16 @@ def create_grn(
 def list_grn(
     purchase_order_id: Optional[int] = Query(None, description="Filter by purchase order ID"),
     warehouse_id: Optional[int] = Query(None, description="Filter by warehouse ID"),
+    store_id: Optional[int] = Query(None, description="Filter by store ID"),
+    supplier_id: Optional[int] = Query(None, description="Filter by supplier ID"),
     status: Optional[str] = Query(None, description="Filter by GRN status (pending, received, rejected)"),
+    search: Optional[str] = Query(None, description="Search by GRN number, invoice, PO number, or remarks"),
+    from_date: Optional[date] = Query(None, description="Filter from creation date (YYYY-MM-DD)"),
+    to_date: Optional[date] = Query(None, description="Filter to creation date (YYYY-MM-DD)"),
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
+    page_size: Optional[int] = Query(None, ge=1, le=500, description="Items per page"),
+    skip: Optional[int] = Query(None, ge=0, description="Skip items"),
+    limit: Optional[int] = Query(None, ge=1, le=500, description="Limit items"),
     user: User = Depends(require_permission("inventory:read")),
     db: Session = Depends(get_db),
 ):
@@ -53,7 +68,66 @@ def list_grn(
         tenant_id=user.tenant_id,
         purchase_order_id=purchase_order_id,
         warehouse_id=warehouse_id,
+        store_id=store_id,
+        supplier_id=supplier_id,
         status=status,
+        search=search,
+        from_date=from_date,
+        to_date=to_date,
+        page=page,
+        page_size=page_size,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.get(
+    "/stats",
+    response_model=GRNStatsResponse,
+)
+def grn_stats(
+    user: User = Depends(require_permission("inventory:read")),
+    db: Session = Depends(get_db),
+):
+    return GRNService(db).stats(tenant_id=user.tenant_id)
+
+
+@router.get(
+    "/by-number/{grn_number}",
+    response_model=GRNResponse,
+)
+def get_grn_by_number(
+    grn_number: str,
+    user: User = Depends(require_permission("inventory:read")),
+    db: Session = Depends(get_db),
+):
+    return GRNService(db).get_by_number(
+        tenant_id=user.tenant_id,
+        grn_number=grn_number,
+    )
+
+
+@router.get(
+    "/export",
+)
+def export_grn(
+    from_date: Optional[date] = Query(None, description="Filter from date (YYYY-MM-DD)"),
+    to_date: Optional[date] = Query(None, description="Filter to date (YYYY-MM-DD)"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    user: User = Depends(require_permission("inventory:read")),
+    db: Session = Depends(get_db),
+):
+    csv_content = GRNService(db).export_csv(
+        tenant_id=user.tenant_id,
+        from_date=from_date,
+        to_date=to_date,
+        status=status,
+    )
+    filename = f"grn_export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 
@@ -73,6 +147,24 @@ def get_grn(
 
 
 @router.post(
+    "/{grn_id}/quality-check",
+    response_model=GRNResponse,
+    dependencies=[Depends(require_operational_write)],
+)
+def quality_check_grn(
+    grn_id: int,
+    data: GRNQualityCheckRequest,
+    user: User = Depends(require_permission("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    return GRNService(db).quality_check(
+        tenant_id=user.tenant_id,
+        grn_id=grn_id,
+        data=data,
+    )
+
+
+@router.post(
     "/{grn_id}/receive",
     response_model=GRNResponse,
     dependencies=[Depends(require_operational_write)],
@@ -85,6 +177,7 @@ def receive_grn(
     return GRNService(db).receive(
         tenant_id=user.tenant_id,
         grn_id=grn_id,
+        user_id=user.id,
     )
 
 
@@ -95,12 +188,17 @@ def receive_grn(
 )
 def reject_grn(
     grn_id: int,
+    data: Optional[GRNRejectRequest] = None,
+    reason: Optional[str] = Query(None, description="Optional rejection reason in query"),
     user: User = Depends(require_permission("inventory:write")),
     db: Session = Depends(get_db),
 ):
+    rejection_reason = (data.reason if data and data.reason else None) or reason or "Shipment rejected during receipt"
     return GRNService(db).reject(
         tenant_id=user.tenant_id,
         grn_id=grn_id,
+        reason=rejection_reason,
+        user_id=user.id,
     )
 
 
@@ -148,3 +246,43 @@ def print_grn(
         tenant_id=user.tenant_id,
         grn_id=grn_id,
     )
+
+
+@router.get(
+    "/{grn_id}/print-slip",
+    response_class=HTMLResponse,
+)
+def print_grn_slip(
+    grn_id: int,
+    user: User = Depends(require_permission("inventory:read")),
+    db: Session = Depends(get_db),
+):
+    html_content = GRNService(db).generate_slip_html(
+        tenant_id=user.tenant_id,
+        grn_id=grn_id,
+    )
+    return HTMLResponse(content=html_content)
+
+
+@router.get(
+    "/{grn_id}/download-pdf",
+)
+def download_grn_pdf(
+    grn_id: int,
+    mode: str = Query("download", description="'preview' for browser inline view, 'download' for file attachment"),
+    user: User = Depends(require_permission("inventory:read")),
+    db: Session = Depends(get_db),
+):
+    pdf_bytes = GRNService(db).generate_pdf(
+        tenant_id=user.tenant_id,
+        grn_id=grn_id,
+    )
+    grn = GRNService(db).get(user.tenant_id, grn_id)
+    disposition = "inline" if mode == "preview" else "attachment"
+    filename = f"{grn.grn_number}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"{disposition}; filename={filename}"},
+    )
+
