@@ -229,7 +229,8 @@ def test_purchase_order_create_with_invoice_number_and_list(tenant_fixture):
     po_data = create_resp.json()
     po_id = po_data["id"]
     assert po_data["invoice_number"] == invoice_no
-    assert po_data["invoice_id"] == invoice_no
+    assert "invoice_id" not in po_data
+    assert "remarks" not in po_data
     assert po_data["store_id"] == store_id
     assert po_data["status"] == "draft"
 
@@ -241,12 +242,13 @@ def test_purchase_order_create_with_invoice_number_and_list(tenant_fixture):
     matching = [o for o in orders if o["id"] == po_id]
     assert len(matching) == 1
     assert matching[0]["invoice_number"] == invoice_no
-    assert matching[0]["invoice_id"] == invoice_no
+    assert "invoice_id" not in matching[0]
 
     # 3. GET /api/v1/purchase-orders/{id}
     single_resp = client.get(f"/api/v1/purchase-orders/{po_id}", headers=headers)
     assert single_resp.status_code == 200
     assert single_resp.json()["invoice_number"] == invoice_no
+    assert "invoice_id" not in single_resp.json()
 
     # 4. PATCH /api/v1/purchase-orders/{id} -> update invoice_number
     updated_inv = f"INV-UPD-{uuid.uuid4().hex[:6].upper()}"
@@ -257,10 +259,10 @@ def test_purchase_order_create_with_invoice_number_and_list(tenant_fixture):
     )
     assert patch_resp.status_code == 200, patch_resp.text
     assert patch_resp.json()["invoice_number"] == updated_inv
-    assert patch_resp.json()["invoice_id"] == updated_inv
+    assert "invoice_id" not in patch_resp.json()
 
 
-def test_purchase_order_create_with_invoice_id_and_empty_validation(tenant_fixture):
+def test_purchase_order_create_with_invoice_number_and_empty_validation(tenant_fixture):
     headers = tenant_fixture["headers"]
     store_id = tenant_fixture["store_id"]
     supplier_id = tenant_fixture["supplier_id"]
@@ -268,11 +270,11 @@ def test_purchase_order_create_with_invoice_id_and_empty_validation(tenant_fixtu
 
     custom_inv_id = f"INV-CUSTOM-{uuid.uuid4().hex[:6].upper()}"
 
-    # 1. Valid custom invoice_id
+    # 1. Valid custom invoice_number
     payload_valid = {
         "supplier_id": supplier_id,
         "store_id": store_id,
-        "invoice_id": custom_inv_id,
+        "invoice_number": custom_inv_id,
         "items": [
             {
                 "product_id": product_id,
@@ -284,49 +286,39 @@ def test_purchase_order_create_with_invoice_id_and_empty_validation(tenant_fixtu
     resp1 = client.post("/api/v1/purchase-orders", json=payload_valid, headers=headers)
     assert resp1.status_code == 201, resp1.text
     data1 = resp1.json()
-    assert data1["invoice_id"] == custom_inv_id
     assert data1["invoice_number"] == custom_inv_id
+    assert "invoice_id" not in data1
+    assert "remarks" not in data1
 
-    # 2. Empty string invoice_id must be rejected with 422 (Cannot accept empty invoice ID)
+    # 2. Empty string invoice_number must be rejected with 422
     bad_payload_empty_id = {
         "supplier_id": supplier_id,
         "store_id": store_id,
-        "invoice_id": "",
+        "invoice_number": "",
         "items": [{"product_id": product_id, "quantity": 1, "unit_cost": 10.00}],
     }
     resp_empty_id = client.post("/api/v1/purchase-orders", json=bad_payload_empty_id, headers=headers)
-    assert resp_empty_id.status_code == 422, f"Expected 422 for empty invoice_id, got {resp_empty_id.status_code}"
+    assert resp_empty_id.status_code == 422, f"Expected 422 for empty invoice_number, got {resp_empty_id.status_code}"
 
-    # 3. Empty string invoice_number must be rejected with 422
-    bad_payload_empty_no = {
-        "supplier_id": supplier_id,
-        "store_id": store_id,
-        "invoice_number": "",
-        "invoice_id": "INV-1005",
-        "items": [{"product_id": product_id, "quantity": 1, "unit_cost": 10.00}],
-    }
-    resp_empty_no = client.post("/api/v1/purchase-orders", json=bad_payload_empty_no, headers=headers)
-    assert resp_empty_no.status_code == 422, f"Expected 422 for empty invoice_number, got {resp_empty_no.status_code}"
-
-    # 4. Whitespace only invoice_id must be rejected with 422
+    # 3. Whitespace only invoice_number must be rejected with 422
     bad_payload_ws = {
         "supplier_id": supplier_id,
         "store_id": store_id,
-        "invoice_id": "   ",
+        "invoice_number": "   ",
         "items": [{"product_id": product_id, "quantity": 1, "unit_cost": 10.00}],
     }
     resp_ws = client.post("/api/v1/purchase-orders", json=bad_payload_ws, headers=headers)
-    assert resp_ws.status_code == 422, f"Expected 422 for whitespace invoice_id, got {resp_ws.status_code}"
+    assert resp_ws.status_code == 422, f"Expected 422 for whitespace invoice_number, got {resp_ws.status_code}"
 
-    # 5. Placeholder 'string' must be rejected with 422
+    # 4. Placeholder 'string' must be rejected with 422
     bad_payload_placeholder = {
         "supplier_id": supplier_id,
         "store_id": store_id,
-        "invoice_id": "string",
+        "invoice_number": "string",
         "items": [{"product_id": product_id, "quantity": 1, "unit_cost": 10.00}],
     }
     resp_ph = client.post("/api/v1/purchase-orders", json=bad_payload_placeholder, headers=headers)
-    assert resp_ph.status_code == 422, f"Expected 422 for placeholder invoice_id, got {resp_ph.status_code}"
+    assert resp_ph.status_code == 422, f"Expected 422 for placeholder invoice_number, got {resp_ph.status_code}"
 
 
 def test_purchase_order_delete_draft_order(tenant_fixture):
@@ -498,40 +490,29 @@ def test_purchase_order_invalid_random_values_rejected(tenant_fixture):
             json={
                 "supplier_id": supplier_id,
                 "store_id": store_id,
-                "invoice_id": bad_inv,
+                "invoice_number": bad_inv,
                 "items": base_items,
             },
             headers=headers,
         )
-        assert resp.status_code == 422, f"Expected 422 for invalid invoice_id '{bad_inv}', got {resp.status_code}: {resp.text}"
+        assert resp.status_code == 422, f"Expected 422 for invalid invoice_number '{bad_inv}', got {resp.status_code}: {resp.text}"
 
-    # 4. Conflicting invoice_number and invoice_id rejected
-    resp_conflict_inv = client.post(
+    # 4. Verify invoice_id and remarks are completely removed from response
+    resp_clean = client.post(
         "/api/v1/purchase-orders",
         json={
             "supplier_id": supplier_id,
             "store_id": store_id,
-            "invoice_number": "PO-2026-021",
-            "invoice_id": "INV-PUNE-2026-021",
+            "invoice_number": "INV-PUNE-2026-025",
+            "notes": "Purchase order for electronics inventory replenishment",
             "items": base_items,
         },
         headers=headers,
     )
-    assert resp_conflict_inv.status_code == 422, f"Expected 422 for conflicting invoices, got {resp_conflict_inv.status_code}"
-    assert "conflicting" in resp_conflict_inv.text.lower()
-
-    # 5. Conflicting notes and remarks rejected
-    resp_conflict_notes = client.post(
-        "/api/v1/purchase-orders",
-        json={
-            "supplier_id": supplier_id,
-            "store_id": store_id,
-            "notes": "Purchase order for monthly inventory replenishment",
-            "remarks": "Please verify product quality and quantity during delivery",
-            "items": base_items,
-        },
-        headers=headers,
-    )
-    assert resp_conflict_notes.status_code == 422, f"Expected 422 for conflicting notes/remarks, got {resp_conflict_notes.status_code}"
-    assert "conflicting" in resp_conflict_notes.text.lower()
+    assert resp_clean.status_code == 201
+    created_data = resp_clean.json()
+    assert "invoice_id" not in created_data
+    assert "remarks" not in created_data
+    assert created_data["invoice_number"] == "INV-PUNE-2026-025"
+    assert created_data["notes"] == "Purchase order for electronics inventory replenishment"
 
