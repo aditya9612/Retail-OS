@@ -537,6 +537,8 @@ class PurchaseOrderService:
         target_store_id = self._resolve_receiving_store_id(tenant_id, purchase_order)
         inventory_service = InventoryService(self.db)
 
+        resolved_notes = getattr(data, "notes", None) or getattr(data, "remarks", None)
+
         # Partial receiving by specific item list vs receiving remaining balance
         if data.items:
             # Explicit item list provided
@@ -570,7 +572,7 @@ class PurchaseOrderService:
                     "supplier_id": purchase_order.supplier_id,
                     "unit_cost": cost,
                     "batch_number": batch_no,
-                    "notes": data.remarks or f"PO Received: {purchase_order.order_number}",
+                    "notes": resolved_notes or data.remarks or f"PO Received: {purchase_order.order_number}",
                 }
                 exp_date = rec_item.expiry_date or data.expiry_date
                 if exp_date is not None:
@@ -602,7 +604,7 @@ class PurchaseOrderService:
                     "supplier_id": purchase_order.supplier_id,
                     "unit_cost": cost,
                     "batch_number": batch_no,
-                    "notes": data.remarks or f"PO Received: {purchase_order.order_number}",
+                    "notes": resolved_notes or data.remarks or f"PO Received: {purchase_order.order_number}",
                 }
                 if data.expiry_date is not None:
                     stock_req_data["expiry_date"] = data.expiry_date
@@ -626,8 +628,8 @@ class PurchaseOrderService:
         elif total_received > 0:
             purchase_order.status = "partially_received"
 
-        if data.remarks:
-            purchase_order.remarks = data.remarks
+        if resolved_notes:
+            purchase_order.notes = resolved_notes
 
         self.db.commit()
         return self.repo.update(purchase_order)
