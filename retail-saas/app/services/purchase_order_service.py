@@ -228,7 +228,10 @@ class PurchaseOrderService:
 
         inventory_service = InventoryService(self.db)
 
+        resolved_notes = getattr(data, "notes", None) or getattr(data, "remarks", None)
+
         for item in purchase_order.items:
+            item.received_quantity = item.quantity
             inventory_service.stock_in(
                 tenant_id,
                 StockInRequest(
@@ -238,14 +241,14 @@ class PurchaseOrderService:
                     supplier_id=purchase_order.supplier_id,
                     unit_cost=item.unit_price,
                     reference=purchase_order.po_number,
-                    notes=data.remarks,
+                    notes=resolved_notes,
                 ),
             )
 
         purchase_order.status = "received"
 
-        if data.remarks:
-            purchase_order.remarks = data.remarks
+        if resolved_notes:
+            purchase_order.notes = resolved_notes
 
         return self.repo.update(purchase_order)
     
