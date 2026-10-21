@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import NotFoundException
 from app.models.document_setting import DocumentSetting
 from app.models.store import Store
+from app.models.storefront_setting import StorefrontSetting
 from app.models.tenant import Tenant
 from app.schemas.document_setting import BrandingContext, DocumentSettingCreate, DocumentSettingUpdate
 
@@ -85,6 +86,29 @@ class DocumentSettingsService:
         elif tenant and tenant.name:
             business_name = tenant.name
 
+        if not business_name:
+            sf_bname = (
+                self.db.query(StorefrontSetting)
+                .filter(
+                    StorefrontSetting.tenant_id == tenant_id,
+                    StorefrontSetting.store_id == store_id,
+                )
+                .first()
+                if store_id
+                else None
+            )
+            if not sf_bname:
+                sf_bname = (
+                    self.db.query(StorefrontSetting)
+                    .filter(
+                        StorefrontSetting.tenant_id == tenant_id,
+                        StorefrontSetting.store_id.is_(None),
+                    )
+                    .first()
+                )
+            if sf_bname and sf_bname.store_name and sf_bname.store_name != "RetailOS Shop":
+                business_name = sf_bname.store_name
+
         # Resolve Address
         address = ""
         if store_setting and store_setting.address is not None:
@@ -103,6 +127,29 @@ class DocumentSettingsService:
         elif t_settings.get("address"):
             address = str(t_settings.get("address"))
 
+        if not address:
+            sf_addr = (
+                self.db.query(StorefrontSetting)
+                .filter(
+                    StorefrontSetting.tenant_id == tenant_id,
+                    StorefrontSetting.store_id == store_id,
+                )
+                .first()
+                if store_id
+                else None
+            )
+            if not sf_addr:
+                sf_addr = (
+                    self.db.query(StorefrontSetting)
+                    .filter(
+                        StorefrontSetting.tenant_id == tenant_id,
+                        StorefrontSetting.store_id.is_(None),
+                    )
+                    .first()
+                )
+            if sf_addr and sf_addr.address:
+                address = sf_addr.address
+
         # Resolve Phone
         phone = ""
         if store_setting and store_setting.phone is not None:
@@ -114,6 +161,29 @@ class DocumentSettingsService:
         elif t_settings.get("phone"):
             phone = str(t_settings.get("phone"))
 
+        if not phone:
+            sf_phone = (
+                self.db.query(StorefrontSetting)
+                .filter(
+                    StorefrontSetting.tenant_id == tenant_id,
+                    StorefrontSetting.store_id == store_id,
+                )
+                .first()
+                if store_id
+                else None
+            )
+            if not sf_phone:
+                sf_phone = (
+                    self.db.query(StorefrontSetting)
+                    .filter(
+                        StorefrontSetting.tenant_id == tenant_id,
+                        StorefrontSetting.store_id.is_(None),
+                    )
+                    .first()
+                )
+            if sf_phone:
+                phone = sf_phone.contact_phone or sf_phone.whatsapp_number or ""
+
         # Resolve Email
         email = ""
         if store_setting and store_setting.email is not None:
@@ -124,6 +194,29 @@ class DocumentSettingsService:
             email = store.email
         elif tenant and tenant.email:
             email = tenant.email
+
+        if not email:
+            sf_email = (
+                self.db.query(StorefrontSetting)
+                .filter(
+                    StorefrontSetting.tenant_id == tenant_id,
+                    StorefrontSetting.store_id == store_id,
+                )
+                .first()
+                if store_id
+                else None
+            )
+            if not sf_email:
+                sf_email = (
+                    self.db.query(StorefrontSetting)
+                    .filter(
+                        StorefrontSetting.tenant_id == tenant_id,
+                        StorefrontSetting.store_id.is_(None),
+                    )
+                    .first()
+                )
+            if sf_email and sf_email.contact_email:
+                email = sf_email.contact_email
 
         # Resolve Website
         website = ""
@@ -192,6 +285,28 @@ class DocumentSettingsService:
             logo_url = getattr(store, "logo_url")
         elif t_settings.get("logo_url"):
             logo_url = str(t_settings.get("logo_url"))
+        else:
+            sf_logo = (
+                self.db.query(StorefrontSetting)
+                .filter(
+                    StorefrontSetting.tenant_id == tenant_id,
+                    StorefrontSetting.store_id == store_id,
+                )
+                .first()
+                if store_id
+                else None
+            )
+            if not sf_logo:
+                sf_logo = (
+                    self.db.query(StorefrontSetting)
+                    .filter(
+                        StorefrontSetting.tenant_id == tenant_id,
+                        StorefrontSetting.store_id.is_(None),
+                    )
+                    .first()
+                )
+            if sf_logo and sf_logo.logo_url:
+                logo_url = sf_logo.logo_url
 
         return BrandingContext(
             business_name=business_name,

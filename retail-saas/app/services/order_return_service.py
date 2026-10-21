@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -134,6 +135,7 @@ class OrderReturnService:
         tenant_id: int,
         skip: int = 0,
         limit: int = 20,
+        store_id: Optional[int] = None,
     ) -> list[OrderReturn]:
 
         if tenant_id <= 0:
@@ -159,6 +161,7 @@ class OrderReturnService:
             tenant_id,
             skip,
             limit,
+            store_id=store_id,
         )
 
     @staticmethod

@@ -406,8 +406,9 @@ class GRNService:
     def stats(
         self,
         tenant_id: int,
+        store_id: Optional[int] = None,
     ) -> dict:
-        return self.repo.get_stats(tenant_id)
+        return self.repo.get_stats(tenant_id, store_id=store_id)
 
     def receive(
         self,

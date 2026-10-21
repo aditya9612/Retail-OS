@@ -31,12 +31,14 @@ def create_refund(
 @router.get("", response_model=list[RefundResponse])
 def list_refunds(
     invoice_id: Optional[int] = Query(default=None),
+    store_id: Optional[int] = Query(default=None, gt=0, description="Filter refunds by store ID"),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
     return BillingService(db).list_refunds(
         user.tenant_id,
         invoice_id,
+        store_id=store_id,
         user=user,
     )
 

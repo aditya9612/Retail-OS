@@ -520,10 +520,11 @@ def legacy_gst_report(
 )
 def daily_billing_closure(
     target_date: Optional[date] = None,
+    store_id: Optional[int] = Query(None, gt=0, description="Filter daily billing closure by store ID"),
     user: User = Depends(require_permission("reports:read")),
     db: Session = Depends(get_db),
 ):
-    return ReportService(db).daily_billing_closure(user.tenant_id, target_date)
+    return ReportService(db).daily_billing_closure(user.tenant_id, target_date, store_id=store_id)
 
 
 @router.get(
@@ -535,10 +536,11 @@ def daily_billing_closure(
 def payment_summary(
     start_date: date,
     end_date: date,
+    store_id: Optional[int] = Query(None, gt=0, description="Filter payment summary by store ID"),
     user: User = Depends(require_permission("reports:read")),
     db: Session = Depends(get_db),
 ):
-    return ReportService(db).payment_summary(user.tenant_id, start_date, end_date)
+    return ReportService(db).payment_summary(user.tenant_id, start_date, end_date, store_id=store_id)
 
 
 @router.post(

@@ -109,12 +109,13 @@ def list_purchase_order_returns(
     summary="Get vendor returns dashboard metrics and KPIs",
 )
 def get_purchase_order_returns_stats(
+    store_id: Optional[int] = Query(None, gt=0, description="Filter return stats by store ID"),
     user: User = Depends(
         require_permission("purchase_orders:read")
     ),
     db: Session = Depends(get_db),
 ):
-    return PurchaseOrderReturnService(db).get_stats(tenant_id=user.tenant_id)
+    return PurchaseOrderReturnService(db).get_stats(tenant_id=user.tenant_id, store_id=store_id)
 
 
 @router.get(

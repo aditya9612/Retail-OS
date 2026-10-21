@@ -107,6 +107,7 @@ def list_deliveries(
     date_from: Optional[datetime] = Query(None, description="Filter deliveries created on or after datetime"),
     date_to: Optional[datetime] = Query(None, description="Filter deliveries created on or before datetime"),
     search: Optional[str] = Query(None, description="Search term for tracking number, rider, or order number"),
+    store_id: Optional[int] = Query(None, gt=0, description="Filter deliveries by store ID"),
     user: User = Depends(
         require_permission("orders:read")
     ),
@@ -124,6 +125,7 @@ def list_deliveries(
         date_from=date_from,
         date_to=date_to,
         search=search,
+        store_id=store_id,
     )
     if not deliveries:
         return DeliveryListResponse(
@@ -150,13 +152,14 @@ def list_deliveries(
 
 @router.get("/stats", response_model=DeliveryStatsResponse)
 def get_delivery_stats(
+    store_id: Optional[int] = Query(None, gt=0, description="Filter delivery stats by store ID"),
     user: User = Depends(
         require_permission("orders:read")
     ),
     db: Session = Depends(get_db),
 ):
     try:
-        return DeliveryService(db).get_stats(tenant_id=user.tenant_id)
+        return DeliveryService(db).get_stats(tenant_id=user.tenant_id, store_id=store_id)
     except AppException as exc:
         return JSONResponse(
             status_code=exc.status_code,
@@ -186,6 +189,7 @@ def get_delivery_stats(
 def export_deliveries(
     format: str = Query(..., description="Export format: excel, csv, or pdf (required)"),
     status: Optional[str] = Query(None, description="Optional status filter"),
+    store_id: Optional[int] = Query(None, gt=0, description="Filter exported deliveries by store ID"),
     user: User = Depends(
         require_permission("orders:read")
     ),
@@ -225,6 +229,7 @@ def export_deliveries(
             tenant_id=user.tenant_id,
             status=filter_status,
             format=export_format,
+            store_id=store_id,
         )
         return StreamingResponse(
             buffer,
@@ -247,6 +252,7 @@ def get_cod_reconciliation(
     status: Optional[str] = Query(None, description="Filter by COD status: collected, pending, all"),
     date_from: Optional[datetime] = Query(None, description="Start datetime"),
     date_to: Optional[datetime] = Query(None, description="End datetime"),
+    store_id: Optional[int] = Query(None, gt=0, description="Filter COD reconciliation by store ID"),
     user: User = Depends(require_permission("orders:read")),
     db: Session = Depends(get_db),
 ):
@@ -258,6 +264,7 @@ def get_cod_reconciliation(
             status=status,
             date_from=date_from,
             date_to=date_to,
+            store_id=store_id,
         )
         return CODReconciliationResponse(
             success=True,
@@ -1041,7 +1048,7 @@ def update_delivery_address(
     summary="Get Thermal Delivery Label",
     description=(
         "Generate a standard 4x6 inch thermal shipping label. "
-        "Supports 'preview' (visual image rendered directly in Swagger UI), "
+        "Supports 'preview' (visual image rendered directly in Swagger UI), 'download' or 'pdf' (4x6 inch PDF file download), "
         "'view' (inline browser preview with print trigger), "
         "'download' (HTML attachment file), "
         "'html' (direct print raw HTML), or 'json' (structured payload)."
@@ -1090,11 +1097,6 @@ def get_thermal_delivery_label(
                 headers={"Content-Disposition": "inline"},
             )
 
-        html_content = service.get_thermal_label_html(
-            tenant_id=user.tenant_id,
-            delivery_id=delivery_id,
-        )
-
         delivery = service.get_delivery(user.tenant_id, delivery_id)
         order = delivery.order
         if not order and delivery.order_id:
@@ -1111,6 +1113,25 @@ def get_thermal_delivery_label(
             else f"ORD-{delivery.order_id}"
         )
 
+        # Mode 'download' or 'pdf': Generates standard 4x6 inch PDF thermal shipping label
+        if mode in (ThermalLabelMode.download, ThermalLabelMode.pdf):
+            pdf_bytes = service.get_thermal_label_pdf(
+                tenant_id=user.tenant_id,
+                delivery_id=delivery_id,
+            )
+            filename = f"shipping_label_{order_number}.pdf"
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        html_content = service.get_thermal_label_html(
+            tenant_id=user.tenant_id,
+            delivery_id=delivery_id,
+            auto_print=(mode == ThermalLabelMode.view),
+        )
+
         if mode == ThermalLabelMode.json:
             return DeliveryThermalLabelResponse(
                 success=True,
@@ -1118,14 +1139,6 @@ def get_thermal_delivery_label(
                 html=html_content,
                 delivery_id=delivery.id,
                 order_number=order_number,
-            )
-
-        if mode == ThermalLabelMode.download:
-            filename = f"shipping_label_{order_number}.html"
-            return HTMLResponse(
-                content=html_content,
-                status_code=200,
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
             )
 
         # ThermalLabelMode.view and ThermalLabelMode.html

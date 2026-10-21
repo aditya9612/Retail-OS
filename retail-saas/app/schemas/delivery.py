@@ -350,6 +350,7 @@ class ThermalLabelMode(str, Enum):
     preview = "preview"
     view = "view"
     download = "download"
+    pdf = "pdf"
     html = "html"
     json = "json"
 

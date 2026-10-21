@@ -1668,6 +1668,7 @@ class BillingService:
         self,
         tenant_id: int,
         invoice_id: int | None = None,
+        store_id: int | None = None,
         user: Optional[User] = None,
         system_context: bool = False,
     ) -> list[Refund]:
@@ -1683,11 +1684,12 @@ class BillingService:
         elif not system_context:
             if user is None:
                 raise ForbiddenException("Access denied: user context required")
-            if user.store_id is not None:
+            effective_store_id = user.store_id if user.store_id is not None else store_id
+            if effective_store_id is not None:
                 query = query.join(
                     Invoice,
                     Refund.invoice_id == Invoice.id,
-                ).filter(Invoice.store_id == user.store_id)
+                ).filter(Invoice.store_id == effective_store_id)
             elif not is_tenant_wide_authorized(user, self.db):
                 raise ForbiddenException("Access denied: user has no assigned store")
 
@@ -1702,6 +1704,7 @@ class BillingService:
         self,
         tenant_id: int,
         invoice_id: int | None = None,
+        store_id: int | None = None,
         user: Optional[User] = None,
         system_context: bool = False,
     ) -> list[CreditNote]:
@@ -1717,11 +1720,12 @@ class BillingService:
         elif not system_context:
             if user is None:
                 raise ForbiddenException("Access denied: user context required")
-            if user.store_id is not None:
+            effective_store_id = user.store_id if user.store_id is not None else store_id
+            if effective_store_id is not None:
                 query = query.join(
                     Invoice,
                     CreditNote.invoice_id == Invoice.id,
-                ).filter(Invoice.store_id == user.store_id)
+                ).filter(Invoice.store_id == effective_store_id)
             elif not is_tenant_wide_authorized(user, self.db):
                 raise ForbiddenException("Access denied: user has no assigned store")
 

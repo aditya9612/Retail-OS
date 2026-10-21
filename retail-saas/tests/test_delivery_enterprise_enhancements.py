@@ -308,12 +308,19 @@ def test_thermal_delivery_label_html_and_json(t_session_a):
     assert "COD: ₹1200.00" in view_resp.text
     assert "4in 6in" in view_resp.text
 
-    # 4. Mode 'download' (HTML attachment file)
+    # 4. Mode 'download' (PDF attachment file)
     dl_resp = client.get(f"/api/v1/delivery/{delivery_id}/label/thermal?mode=download", headers=headers)
     assert dl_resp.status_code == 200
-    assert "text/html" in dl_resp.headers["content-type"]
-    assert f'attachment; filename="shipping_label_{order_num}.html"' in dl_resp.headers.get("content-disposition", "")
-    assert "AWB-THM-123456" in dl_resp.text
+    assert "application/pdf" in dl_resp.headers["content-type"]
+    assert f'attachment; filename="shipping_label_{order_num}.pdf"' in dl_resp.headers.get("content-disposition", "")
+    assert dl_resp.content.startswith(b"%PDF")
+
+    # 4b. Explicit mode 'pdf'
+    pdf_resp = client.get(f"/api/v1/delivery/{delivery_id}/label/thermal?mode=pdf", headers=headers)
+    assert pdf_resp.status_code == 200
+    assert "application/pdf" in pdf_resp.headers["content-type"]
+    assert f'attachment; filename="shipping_label_{order_num}.pdf"' in pdf_resp.headers.get("content-disposition", "")
+    assert pdf_resp.content.startswith(b"%PDF")
 
     # 5. Mode 'html' (Direct print compatibility)
     compat_resp = client.get(f"/api/v1/delivery/{delivery_id}/label/thermal?mode=html", headers=headers)

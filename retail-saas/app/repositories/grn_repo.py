@@ -159,24 +159,30 @@ class GRNRepository:
 
         return None
 
-    def get_stats(self, tenant_id: int) -> dict:
+    def get_stats(self, tenant_id: int, store_id: Optional[int] = None) -> dict:
         today_start = datetime.combine(date.today(), time.min)
-        total_grns = self.db.query(func.count(GRN.id)).filter(GRN.tenant_id == tenant_id).scalar() or 0
-        pending_grns = self.db.query(func.count(GRN.id)).filter(GRN.tenant_id == tenant_id, GRN.status == "pending").scalar() or 0
-        received_grns = self.db.query(func.count(GRN.id)).filter(GRN.tenant_id == tenant_id, GRN.status == "received").scalar() or 0
-        rejected_grns = self.db.query(func.count(GRN.id)).filter(GRN.tenant_id == tenant_id, GRN.status == "rejected").scalar() or 0
+        base_q = self.db.query(func.count(GRN.id)).filter(GRN.tenant_id == tenant_id)
+        if store_id is not None:
+            base_q = base_q.filter(GRN.store_id == store_id)
+
+        total_grns = base_q.scalar() or 0
+        pending_grns = base_q.filter(GRN.status == "pending").scalar() or 0
+        received_grns = base_q.filter(GRN.status == "received").scalar() or 0
+        rejected_grns = base_q.filter(GRN.status == "rejected").scalar() or 0
         received_today = (
-            self.db.query(func.count(GRN.id))
-            .filter(GRN.tenant_id == tenant_id, GRN.status == "received", GRN.received_at >= today_start)
+            base_q
+            .filter(GRN.status == "received", GRN.received_at >= today_start)
             .scalar() or 0
         )
 
-        received_list = (
+        rec_q = (
             self.db.query(GRN)
             .options(joinedload(GRN.items))
             .filter(GRN.tenant_id == tenant_id, GRN.status == "received")
-            .all()
         )
+        if store_id is not None:
+            rec_q = rec_q.filter(GRN.store_id == store_id)
+        received_list = rec_q.all()
         total_inward_value = sum(g.total_cost_value for g in received_list) if received_list else Decimal("0.00")
 
         recent = (

@@ -134,10 +134,12 @@ class PaymentService:
             .first()
         )
 
-    def list_payments(self, order_id=None, status=None, method=None):
+    def list_payments(self, order_id=None, status=None, method=None, store_id=None):
         query = self.db.query(Payment).filter(
             Payment.tenant_id == self.tenant_id
         )
+        if store_id is not None:
+            query = query.join(Order, Payment.order_id == Order.id).filter(Order.store_id == store_id)
 
         if order_id is not None:
             order = (
@@ -196,10 +198,11 @@ class PaymentService:
 
         return payment
 
-    def payment_history(self, status=None, method=None):
+    def payment_history(self, status=None, method=None, store_id=None):
         return self.list_payments(
             status=status,
             method=method,
+            store_id=store_id,
         )
 
     def generate_qr_payload(

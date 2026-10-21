@@ -89,10 +89,11 @@ def list_grn(
     response_model=GRNStatsResponse,
 )
 def grn_stats(
+    store_id: Optional[int] = Query(None, gt=0, description="Filter GRN stats by store ID"),
     user: User = Depends(require_permission("inventory:read")),
     db: Session = Depends(get_db),
 ):
-    return GRNService(db).stats(tenant_id=user.tenant_id)
+    return GRNService(db).stats(tenant_id=user.tenant_id, store_id=store_id)
 
 
 @router.get(

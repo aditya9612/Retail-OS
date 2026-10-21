@@ -111,11 +111,13 @@ def list_purchase_orders(
     description="Returns aggregate counts and valuation metrics for open, approved, received, and cancelled purchase orders.",
 )
 def get_purchase_order_stats(
+    store_id: Optional[int] = Query(None, gt=0, description="Filter PO stats by store ID"),
     user: User = Depends(require_permission("purchase_orders:read")),
     db: Session = Depends(get_db),
 ):
     return PurchaseOrderService(db).get_stats(
         tenant_id=user.tenant_id,
+        store_id=store_id,
     )
 
 

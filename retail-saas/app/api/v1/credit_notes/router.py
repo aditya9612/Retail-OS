@@ -31,12 +31,14 @@ def create_credit_note(
 @router.get("", response_model=list[CreditNoteResponse])
 def list_credit_notes(
     invoice_id: Optional[int] = Query(default=None, gt=0),
+    store_id: Optional[int] = Query(default=None, gt=0, description="Filter credit notes by store ID"),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
     return BillingService(db).list_credit_notes(
         user.tenant_id,
         invoice_id,
+        store_id=store_id,
         user=user,
     )
 

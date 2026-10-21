@@ -30,6 +30,7 @@ class DeliveryRepository:
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         search: str | None = None,
+        store_id: int | None = None,
     ) -> tuple[list[Delivery], int]:
         query = (
             self.db.query(Delivery)
@@ -64,6 +65,9 @@ class DeliveryRepository:
 
         if date_to is not None:
             query = query.filter(Delivery.created_at <= date_to)
+
+        if store_id is not None:
+            query = query.join(Delivery.order).filter(Order.store_id == store_id)
 
         if search and search.strip():
             term = f"%{search.strip().lower()}%"
@@ -165,16 +169,18 @@ class DeliveryRepository:
     def get_stats(
         self,
         tenant_id: int,
+        store_id: Optional[int] = None,
     ) -> dict[str, int]:
-        results = (
+        query = (
             self.db.query(
                 Delivery.status,
                 func.count(Delivery.id),
             )
             .filter(Delivery.tenant_id == tenant_id)
-            .group_by(Delivery.status)
-            .all()
         )
+        if store_id is not None:
+            query = query.join(Delivery.order).filter(Order.store_id == store_id)
+        results = query.group_by(Delivery.status).all()
         counts = {status: count for status, count in results}
         total = sum(counts.values())
         return {
@@ -190,10 +196,13 @@ class DeliveryRepository:
         self,
         tenant_id: int,
         status: str | None = None,
+        store_id: int | None = None,
     ) -> list[Delivery]:
         query = self.db.query(Delivery).filter(Delivery.tenant_id == tenant_id)
         if status:
             query = query.filter(Delivery.status == status)
+        if store_id is not None:
+            query = query.join(Delivery.order).filter(Order.store_id == store_id)
         return query.order_by(Delivery.created_at.desc()).all()
 
     def get_cod_reconciliation(
@@ -204,6 +213,7 @@ class DeliveryRepository:
         status: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        store_id: int | None = None,
     ) -> dict:
         query = (
             self.db.query(Delivery)
@@ -222,6 +232,9 @@ class DeliveryRepository:
 
         if partner_id is not None:
             query = query.filter(Delivery.partner_id == partner_id)
+
+        if store_id is not None:
+            query = query.join(Delivery.order).filter(Order.store_id == store_id)
 
         if status:
             s_clean = status.strip().lower()
@@ -495,4 +508,4 @@ class DeliveryRepository:
                 return zone
         return None
 
-
+

@@ -46,14 +46,19 @@ def open_shift(
     "/current",
     response_model=POSShiftResponse,
 )
+@router.get(
+    "/current-shift",
+    response_model=POSShiftResponse,
+)
 def get_current_shift(
+    store_id: Optional[int] = Query(None, gt=0, description="Filter current active shift by store ID"),
     user: User = Depends(require_permission("pos:shift_manage")),
     db: Session = Depends(get_db),
 ):
     """
-    Retrieves the currently active open shift for the authenticated cashier.
+    Retrieves the currently active open shift for the authenticated cashier or specified store.
     """
-    return POSShiftService(db).get_current_shift(user)
+    return POSShiftService(db).get_current_shift(user, store_id=store_id)
 
 
 @router.post(

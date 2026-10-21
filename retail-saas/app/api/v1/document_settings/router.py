@@ -88,11 +88,33 @@ def update_document_setting(
     Creates or updates DocumentSetting branding and display flags for the tenant (and optional store).
     """
     tenant_id = _require_tenant_id(user)
-    return DocumentSettingsService(db).create_or_update_setting(
+    res_setting = DocumentSettingsService(db).create_or_update_setting(
         tenant_id=tenant_id,
         data=payload,
         store_id=store_id,
     )
+
+    # Auto-sync branding and contact info to StorefrontSetting if exists
+    from app.models.storefront_setting import StorefrontSetting
+    sf_query = db.query(StorefrontSetting).filter(StorefrontSetting.tenant_id == tenant_id)
+    if store_id is not None:
+        sf_setting = sf_query.filter(StorefrontSetting.store_id == store_id).first()
+    else:
+        sf_setting = sf_query.filter(StorefrontSetting.store_id.is_(None)).first()
+    if sf_setting:
+        if payload.business_name is not None:
+            sf_setting.store_name = payload.business_name
+        if payload.address is not None:
+            sf_setting.address = payload.address
+        if payload.phone is not None:
+            sf_setting.contact_phone = payload.phone
+        if payload.email is not None:
+            sf_setting.contact_email = payload.email
+        if payload.logo_path is not None:
+            sf_setting.logo_url = payload.logo_path
+        db.commit()
+
+    return res_setting
 
 
 @router.post("/logo")
@@ -166,6 +188,17 @@ async def upload_document_logo(
         store_id=store_id,
     )
 
+    # Auto-sync logo to StorefrontSetting
+    from app.models.storefront_setting import StorefrontSetting
+    sf_query = db.query(StorefrontSetting).filter(StorefrontSetting.tenant_id == tenant_id)
+    if store_id is not None:
+        sf_setting = sf_query.filter(StorefrontSetting.store_id == store_id).first()
+    else:
+        sf_setting = sf_query.filter(StorefrontSetting.store_id.is_(None)).first()
+    if sf_setting:
+        sf_setting.logo_url = rel_logo_url
+        db.commit()
+
     return {
         "message": "Logo uploaded successfully",
         "logo_url": rel_logo_url,
@@ -207,6 +240,20 @@ def delete_logo(
             pass
 
     setting.logo_path = None
+
+    # Auto-sync logo deletion to StorefrontSetting
+    from app.models.storefront_setting import StorefrontSetting
+    sf_query = db.query(StorefrontSetting).filter(StorefrontSetting.tenant_id == tenant_id)
+    if store_id is not None:
+        sf_setting = sf_query.filter(StorefrontSetting.store_id == store_id).first()
+    else:
+        sf_setting = sf_query.filter(StorefrontSetting.store_id.is_(None)).first()
+
+    if sf_setting and sf_setting.logo_url:
+        clean_sf_url = sf_setting.logo_url.lstrip("/")
+        if clean_sf_url == old_path_str:
+            sf_setting.logo_url = None
+
     db.commit()
     db.refresh(setting)
 

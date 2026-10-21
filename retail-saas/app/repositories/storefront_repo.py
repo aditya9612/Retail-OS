@@ -2,6 +2,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundException
+from app.models.document_setting import DocumentSetting
 from app.models.store import Store
 from app.models.storefront_setting import StorefrontSetting
 from app.models.tenant import Tenant
@@ -94,6 +95,46 @@ class StorefrontRepository:
             self.db.commit()
             self.db.refresh(setting)
 
+        # Fallback to DocumentSetting if logo or business details are not set in storefront
+        doc_setting = (
+            self.db.query(DocumentSetting)
+            .filter(
+                DocumentSetting.tenant_id == tenant_id,
+                DocumentSetting.store_id == store_id,
+            )
+            .first()
+        )
+        if not doc_setting and store_id is not None:
+            doc_setting = (
+                self.db.query(DocumentSetting)
+                .filter(
+                    DocumentSetting.tenant_id == tenant_id,
+                    DocumentSetting.store_id.is_(None),
+                )
+                .first()
+            )
+
+        if doc_setting:
+            needs_save = False
+            if not setting.logo_url and doc_setting.logo_path:
+                setting.logo_url = doc_setting.logo_path
+                needs_save = True
+            if setting.store_name in (None, '', 'RetailOS Shop') and doc_setting.business_name:
+                setting.store_name = doc_setting.business_name
+                needs_save = True
+            if not setting.address and doc_setting.address:
+                setting.address = doc_setting.address
+                needs_save = True
+            if not setting.contact_phone and doc_setting.phone:
+                setting.contact_phone = doc_setting.phone
+                needs_save = True
+            if not setting.contact_email and doc_setting.email:
+                setting.contact_email = doc_setting.email
+                needs_save = True
+            if needs_save:
+                self.db.commit()
+                self.db.refresh(setting)
+
         return setting
 
     def update_settings(
@@ -125,6 +166,34 @@ class StorefrontRepository:
             if hasattr(setting, key) and val is not None:
                 setattr(setting, key, val)
 
+        # Auto-sync business name and contact info to DocumentSetting if present
+        sync_updates = {}
+        if "store_name" in update_dict and update_dict["store_name"]:
+            sync_updates["business_name"] = update_dict["store_name"]
+        if "address" in update_dict and update_dict["address"]:
+            sync_updates["address"] = update_dict["address"]
+        if "contact_phone" in update_dict and update_dict["contact_phone"]:
+            sync_updates["phone"] = update_dict["contact_phone"]
+        if "contact_email" in update_dict and update_dict["contact_email"]:
+            sync_updates["email"] = update_dict["contact_email"]
+
+        if sync_updates:
+            doc_q = self.db.query(DocumentSetting).filter(DocumentSetting.tenant_id == tenant_id)
+            if store_id is not None:
+                doc_setting = doc_q.filter(DocumentSetting.store_id == store_id).first()
+            else:
+                doc_setting = doc_q.filter(DocumentSetting.store_id.is_(None)).first()
+            if not doc_setting:
+                doc_setting = DocumentSetting(
+                    tenant_id=tenant_id,
+                    store_id=store_id,
+                    **sync_updates,
+                )
+                self.db.add(doc_setting)
+            else:
+                for k, v in sync_updates.items():
+                    setattr(doc_setting, k, v)
+
         self.db.commit()
         self.db.refresh(setting)
         return setting
@@ -151,6 +220,20 @@ class StorefrontRepository:
         setting = self.get_settings(tenant_id, store_id)
         if asset_type == "logo":
             setting.logo_url = asset_url
+            doc_q = self.db.query(DocumentSetting).filter(DocumentSetting.tenant_id == tenant_id)
+            if store_id is not None:
+                doc_setting = doc_q.filter(DocumentSetting.store_id == store_id).first()
+            else:
+                doc_setting = doc_q.filter(DocumentSetting.store_id.is_(None)).first()
+            if not doc_setting:
+                doc_setting = DocumentSetting(
+                    tenant_id=tenant_id,
+                    store_id=store_id,
+                    logo_path=asset_url,
+                )
+                self.db.add(doc_setting)
+            else:
+                doc_setting.logo_path = asset_url
         elif asset_type == "banner":
             setting.banner_url = asset_url
         elif asset_type == "favicon":

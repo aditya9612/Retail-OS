@@ -1,3 +1,4 @@
+from typing import Optional
 import csv
 from datetime import datetime
 from decimal import Decimal
@@ -60,6 +61,7 @@ class DeliveryService:
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         search: str | None = None,
+        store_id: int | None = None,
     ) -> tuple[list[Delivery], int]:
         return self.repo.list_deliveries(
             tenant_id=tenant_id,
@@ -73,6 +75,7 @@ class DeliveryService:
             date_from=date_from,
             date_to=date_to,
             search=search,
+            store_id=store_id,
         )
 
     def get_delivery(self, tenant_id: int, delivery_id: int):
@@ -384,6 +387,7 @@ class DeliveryService:
         self,
         tenant_id: int,
         delivery_id: int,
+        auto_print: bool = True,
     ) -> str:
         delivery = self.get_delivery(tenant_id, delivery_id)
         order = delivery.order
@@ -405,6 +409,7 @@ class DeliveryService:
         date_str = delivery.created_at.strftime("%d-%b-%Y")
         cod_badge = f'<div class="badge cod">COD: ₹{delivery.cod_amount:.2f}</div>' if delivery.is_cod else '<div class="badge prepaid">PREPAID</div>'
 
+        body_tag = '<body onload="window.print()">' if auto_print else '<body>'
         html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -506,7 +511,7 @@ class DeliveryService:
   }}
 </style>
 </head>
-<body onload="window.print()">
+{body_tag}
   <div class="label-container">
     <div class="header">
       <div class="carrier-title">{carrier_name}</div>
@@ -594,6 +599,24 @@ class DeliveryService:
             status=delivery.status or "PENDING",
         )
 
+    def get_thermal_label_pdf(
+        self,
+        tenant_id: int,
+        delivery_id: int,
+    ) -> bytes:
+        img_bytes = self.get_thermal_label_image(tenant_id, delivery_id)
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.units import inch
+        from reportlab.lib.utils import ImageReader
+        import io
+
+        pdf_buf = io.BytesIO()
+        c = canvas.Canvas(pdf_buf, pagesize=(4 * inch, 6 * inch))
+        c.drawImage(ImageReader(io.BytesIO(img_bytes)), 0, 0, width=4 * inch, height=6 * inch)
+        c.showPage()
+        c.save()
+        return pdf_buf.getvalue()
+
     def collect_cod(
         self,
         tenant_id: int,
@@ -634,6 +657,7 @@ class DeliveryService:
         status: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        store_id: Optional[int] = None,
     ) -> dict:
         return self.repo.get_cod_reconciliation(
             tenant_id=tenant_id,
@@ -642,6 +666,7 @@ class DeliveryService:
             status=status,
             date_from=date_from,
             date_to=date_to,
+            store_id=store_id,
         )
 
     def update_address(
@@ -802,8 +827,8 @@ class DeliveryService:
 
         return delivery_history
 
-    def get_stats(self, tenant_id: int) -> DeliveryStatsResponse:
-        stats_dict = self.repo.get_stats(tenant_id)
+    def get_stats(self, tenant_id: int, store_id: Optional[int] = None) -> DeliveryStatsResponse:
+        stats_dict = self.repo.get_stats(tenant_id, store_id=store_id)
         data = DeliveryStatsData(**stats_dict)
         return DeliveryStatsResponse(
             success=True,
@@ -816,8 +841,9 @@ class DeliveryService:
         tenant_id: int,
         status: str | None = None,
         format: str = "excel",
+        store_id: Optional[int] = None,
     ) -> tuple[BytesIO, str, str]:
-        deliveries = self.repo.get_for_export(tenant_id, status=status)
+        deliveries = self.repo.get_for_export(tenant_id, status=status, store_id=store_id)
 
         if format == "excel":
             headers = [

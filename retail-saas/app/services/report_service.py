@@ -1971,25 +1971,24 @@ class ReportService:
         }
 
     def daily_billing_closure(
-        self, tenant_id: int, target_date: date | None = None
+        self, tenant_id: int, target_date: date | None = None, store_id: Optional[int] = None
     ) -> dict:
         target_date = target_date or date.today()
         start = datetime.combine(target_date, datetime.min.time())
         end = start + timedelta(days=1)
 
-        invoices = (
-            self.db.query(Invoice)
-            .filter(
-                Invoice.tenant_id == tenant_id,
-                Invoice.created_at >= start,
-                Invoice.created_at < end,
-            )
-            .all()
+        inv_query = self.db.query(Invoice).filter(
+            Invoice.tenant_id == tenant_id,
+            Invoice.created_at >= start,
+            Invoice.created_at < end,
         )
+        if store_id is not None:
+            inv_query = inv_query.filter(Invoice.store_id == store_id)
+        invoices = inv_query.all()
         total_sales = sum((i.total_amount for i in invoices), Decimal("0"))
         discount_total = sum((i.discount_amount for i in invoices), Decimal("0"))
 
-        payments = (
+        pmt_query = (
             self.db.query(Payment)
             .join(Order, Payment.order_id == Order.id)
             .filter(
@@ -1998,8 +1997,10 @@ class ReportService:
                 Payment.created_at < end,
                 Payment.status == PaymentStatus.COMPLETED.value,
             )
-            .all()
         )
+        if store_id is not None:
+            pmt_query = pmt_query.filter(Order.store_id == store_id)
+        payments = pmt_query.all()
         cash_sales = sum(
             (p.amount for p in payments if p.payment_method == "cash"),
             Decimal("0"),
@@ -2048,9 +2049,9 @@ class ReportService:
         }
 
     def payment_summary(
-        self, tenant_id: int, start_date: date, end_date: date
+        self, tenant_id: int, start_date: date, end_date: date, store_id: Optional[int] = None
     ) -> dict:
-        payments = (
+        pmt_q = (
             self.db.query(
                 Payment.payment_method, func.sum(Payment.amount), func.count(Payment.id)
             )
@@ -2061,9 +2062,10 @@ class ReportService:
                 Payment.created_at >= datetime.combine(start_date, datetime.min.time()),
                 Payment.created_at <= datetime.combine(end_date, datetime.max.time()),
             )
-            .group_by(Payment.payment_method)
-            .all()
         )
+        if store_id is not None:
+            pmt_q = pmt_q.filter(Order.store_id == store_id)
+        payments = pmt_q.group_by(Payment.payment_method).all()
         breakdown = {
             row[0]: {"total_amount": float(row[1]), "transaction_count": row[2]}
             for row in payments
@@ -2076,8 +2078,8 @@ class ReportService:
             "grand_total": grand_total,
         }
 
-    def product_performance(self, tenant_id: int, limit: int = 10) -> list[dict]:
-        rows = (
+    def product_performance(self, tenant_id: int, limit: int = 10, store_id: Optional[int] = None) -> list[dict]:
+        q = (
             self.db.query(
                 OrderItem.product_id,
                 Product.name.label("product_name"),
@@ -2090,11 +2092,10 @@ class ReportService:
                 Order.tenant_id == tenant_id,
                 Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.DELIVERED.value]),
             )
-            .group_by(OrderItem.product_id, Product.name)
-            .order_by(func.sum(OrderItem.total_amount).desc())
-            .limit(limit)
-            .all()
         )
+        if store_id is not None:
+            q = q.filter(Order.store_id == store_id)
+        rows = q.group_by(OrderItem.product_id, Product.name).order_by(func.sum(OrderItem.total_amount).desc()).limit(limit).all()
         return [
             {
                 "product_id": r[0],

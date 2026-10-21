@@ -784,15 +784,18 @@ class PurchaseOrderService:
     def get_stats(
         self,
         tenant_id: int,
+        store_id: Optional[int] = None,
     ) -> PurchaseOrderStatsResponse:
-        orders = (
+        q = (
             self.db.query(PurchaseOrder)
             .filter(
                 PurchaseOrder.tenant_id == tenant_id,
                 PurchaseOrder.is_deleted == False,
             )
-            .all()
         )
+        if store_id is not None:
+            q = q.filter(PurchaseOrder.store_id == store_id)
+        orders = q.all()
 
         total_orders = len(orders)
         draft_orders = sum(1 for o in orders if o.status == "draft")

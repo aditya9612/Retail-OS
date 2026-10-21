@@ -50,12 +50,14 @@ def list_payments(
     order_id: int | None = Query(default=None),
     payment_method: PaymentMethodValue | None = Query(default=None),
     status: PaymentStatusValue | None = Query(default=None),
+    store_id: int | None = Query(default=None, gt=0, description="Filter payments by store ID"),
     service: PaymentService = Depends(get_payment_service),
 ):
     return service.list_payments(
         order_id=order_id,
         status=status,
         method=payment_method,
+        store_id=store_id,
     )
 
 
@@ -63,11 +65,13 @@ def list_payments(
 def payment_history(
     status: PaymentStatusValue | None = Query(default=None),
     payment_method: PaymentMethodValue | None = Query(default=None),
+    store_id: int | None = Query(default=None, gt=0, description="Filter payment history by store ID"),
     service: PaymentService = Depends(get_payment_service),
 ):
     return service.payment_history(
         status=status,
         method=payment_method,
+        store_id=store_id,
     )
 
 

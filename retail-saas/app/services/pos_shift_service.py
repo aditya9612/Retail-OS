@@ -82,20 +82,22 @@ class POSShiftService:
 
         return POSShiftResponse.model_validate(shift)
 
-    def get_current_shift(self, user: User) -> POSShiftResponse:
-        if user.tenant_id is None or user.store_id is None:
-            raise NotFoundException("No active open shift found for this cashier")
+    def get_current_shift(self, user: User, store_id: Optional[int] = None) -> POSShiftResponse:
+        effective_store_id = store_id if store_id is not None else user.store_id
+        if user.tenant_id is None or effective_store_id is None:
+            raise NotFoundException("No active open shift found for this cashier or store")
 
-        shift = (
+        q = (
             self.db.query(POSShift)
             .filter(
                 POSShift.tenant_id == user.tenant_id,
-                POSShift.store_id == user.store_id,
-                POSShift.cashier_id == user.id,
+                POSShift.store_id == effective_store_id,
                 POSShift.status == "open",
             )
-            .first()
         )
+        if store_id is None and user.store_id is not None:
+            q = q.filter(POSShift.cashier_id == user.id)
+        shift = q.order_by(POSShift.opened_at.desc()).first()
         if not shift:
             raise NotFoundException("No active open shift found for this cashier")
 

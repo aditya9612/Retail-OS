@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.orm import Session
 
@@ -52,6 +53,7 @@ def list_returns(
         le=100,
         description="Maximum records to return",
     ),
+    store_id: Optional[int] = Query(None, gt=0, description="Filter order returns by store ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -60,6 +62,7 @@ def list_returns(
         tenant_id=current_user.tenant_id,
         skip=skip,
         limit=limit,
+        store_id=store_id,
     )
 
 @router.get(
