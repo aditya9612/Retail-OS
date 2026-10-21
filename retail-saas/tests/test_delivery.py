@@ -1457,6 +1457,18 @@ def test_export_excel_success(tenant_a):
     assert len(resp.content) > 0
 
 
+def test_export_pdf_success(tenant_a):
+    headers, user = tenant_a
+    create_delivery_for_tenant(headers, user, initial_status="pending")
+
+    resp = client.get("/api/v1/delivery/export?format=pdf", headers=headers)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/pdf"
+    assert "deliveries.pdf" in resp.headers.get("content-disposition", "")
+    assert len(resp.content) > 0
+    assert resp.content.startswith(b"%PDF-")
+
+
 def test_export_csv_success(tenant_a):
     headers, user = tenant_a
     order_id = create_order_for_tenant(headers, user)
@@ -1511,7 +1523,7 @@ def test_export_empty_data(tenant_a):
     assert "ID,Order Number,Status,Delivery Person" in resp.text
 
 
-@pytest.mark.parametrize("invalid_format", ["pdf", "json", "xml", "", "   ", "xlsx"])
+@pytest.mark.parametrize("invalid_format", ["yaml", "json", "xml", "", "   ", "xlsx"])
 def test_export_invalid_format(tenant_a, invalid_format):
     headers, _ = tenant_a
     resp = client.get(f"/api/v1/delivery/export?format={invalid_format}", headers=headers)

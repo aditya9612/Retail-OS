@@ -30,6 +30,7 @@ from app.models.order_item_batch_allocation import OrderItemBatchAllocation
 from app.models.refund import Refund
 from app.models.role import Role
 from app.models.store import Store
+from app.models.storefront_setting import StorefrontSetting
 from app.models.store_transfer import StoreTransfer
 from app.models.store_transfer_item import StoreTransferItem
 from app.models.store_target import StoreTarget
@@ -91,6 +92,7 @@ __all__ = [
     "Refund",
     "Role",
     "Store",
+    "StorefrontSetting",
     "StoreTarget",
     "StoreTransfer",
     "StoreTransferItem",

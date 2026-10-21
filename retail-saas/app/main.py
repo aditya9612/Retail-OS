@@ -14,6 +14,7 @@ from app.api.v1.billing.router import router as billing_router
 from app.api.v1.credit_notes.router import router as credit_notes_router
 from app.api.v1.customers.router import router as customers_router
 from app.api.v1.dashboard.router import router as dashboard_router
+from app.api.v1.ecommerce.router import router as ecommerce_router
 from app.api.v1.coupons.router import router as coupons_router
 from app.api.v1.delivery.router import router as delivery_router
 from app.api.v1.gst_rates.router import router as gst_rates_router
@@ -240,6 +241,10 @@ openapi_tags = [
         "description": "Executive dashboard KPIs and summary metrics.",
     },
     {
+        "name": "E-Commerce",
+        "description": "E-Commerce storefront analytics, KPIs, online orders, and revenue metrics.",
+    },
+    {
         "name": "analytics",
         "description": "Advanced analytics and predictive retail business intelligence.",
     },
@@ -461,6 +466,7 @@ app.include_router(customers_router, prefix=API_PREFIX)
 app.include_router(whatsapp_router, prefix=API_PREFIX)
 app.include_router(reports_router, prefix=API_PREFIX)
 app.include_router(dashboard_router, prefix=API_PREFIX)
+app.include_router(ecommerce_router, prefix=API_PREFIX)
 app.include_router(analytics_router, prefix=API_PREFIX)
 app.include_router(ai_router, prefix=API_PREFIX)
 app.include_router(multi_store_router, prefix=API_PREFIX)

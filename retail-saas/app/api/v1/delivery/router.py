@@ -1,7 +1,8 @@
+from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, File, Path, Query, UploadFile, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, Body, Depends, File, Path, Query, Response, UploadFile, status
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -9,9 +10,14 @@ from app.core.exceptions import AppException
 from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.delivery import (
+    CODCollectRequest,
+    CODDeliveryItem,
+    CODReconciliationResponse,
+    CODReconciliationSummary,
     DeliveryAddressUpdateRequest,
     DeliveryCancelRequest,
     DeliveryCreate,
+    DeliveryFailedAttemptRequest,
     DeliveryHistoryItem,
     DeliveryHistoryResponse,
     DeliveryLabelResponse,
@@ -25,7 +31,9 @@ from app.schemas.delivery import (
     DeliveryResponse,
     DeliveryStatsResponse,
     DeliveryStatusUpdate,
+    DeliveryThermalLabelResponse,
     DeliveryTrackingResponse,
+    ThermalLabelMode,
     SingleDeliveryMethodResponse,
     SingleDeliveryResponse,
     SingleDeliveryZoneResponse,
@@ -65,6 +73,14 @@ def create_delivery(
             order_id=data.order_id,
             delivery_person=data.delivery_person,
             tracking_number=data.tracking_number,
+            partner_id=data.partner_id,
+            delivery_method_id=data.delivery_method_id,
+            zone_id=data.zone_id,
+            is_cod=data.is_cod,
+            cod_amount=data.cod_amount,
+            delivery_slot=data.delivery_slot,
+            estimated_delivery_time=data.estimated_delivery_time,
+            dispatched_at=data.dispatched_at,
         )
         return SingleDeliveryResponse(
             success=True,
@@ -80,13 +96,33 @@ def create_delivery(
 
 @router.get("", response_model=DeliveryListResponse)
 def list_deliveries(
+    page: Optional[int] = Query(None, ge=1, description="Page number (1-based)"),
+    page_size: Optional[int] = Query(None, ge=1, le=1000, description="Items per page"),
+    status: Optional[str] = Query(None, description="Filter by delivery status: pending, assigned, out_for_delivery, delivered, cancelled"),
+    delivery_person: Optional[str] = Query(None, description="Filter by delivery person name"),
+    partner_id: Optional[int] = Query(None, gt=0, description="Filter by delivery partner ID"),
+    order_id: Optional[int] = Query(None, gt=0, description="Filter by order ID"),
+    is_cod: Optional[bool] = Query(None, description="Filter by COD flag"),
+    date_from: Optional[datetime] = Query(None, description="Filter deliveries created on or after datetime"),
+    date_to: Optional[datetime] = Query(None, description="Filter deliveries created on or before datetime"),
+    search: Optional[str] = Query(None, description="Search term for tracking number, rider, or order number"),
     user: User = Depends(
         require_permission("orders:read")
     ),
     db: Session = Depends(get_db),
 ):
-    deliveries = DeliveryService(db).list_deliveries(
+    deliveries, total = DeliveryService(db).list_deliveries(
         tenant_id=user.tenant_id,
+        page=page,
+        page_size=page_size,
+        status=status,
+        delivery_person=delivery_person,
+        partner_id=partner_id,
+        order_id=order_id,
+        is_cod=is_cod,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
     )
     if not deliveries:
         return DeliveryListResponse(
@@ -94,13 +130,20 @@ def list_deliveries(
             message="No deliveries found",
             data=[],
             total=0,
+            page=page,
+            page_size=page_size,
+            total_pages=0 if page is not None else None,
         )
 
+    total_pages = ((total + page_size - 1) // page_size) if page_size else 1
     return DeliveryListResponse(
         success=True,
         message="Deliveries retrieved successfully",
         data=[DeliveryResponse.model_validate(d) for d in deliveries],
-        total=len(deliveries),
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages if page is not None else None,
     )
 
 
@@ -122,31 +165,32 @@ def get_delivery_stats(
 
 @router.get(
     "/export",
-    summary="Export Deliveries to Excel or CSV",
+    summary="Export Deliveries to Excel, CSV, or PDF",
     description=(
-        "Exports tenant delivery and shipment dispatch records as an analytical Excel workbook (.xlsx) "
-        "or raw machine-readable CSV. Supports filtering by delivery status ('pending', 'assigned', 'out_for_delivery', 'delivered', 'cancelled'). "
-        "Requires 'orders:read' permission."
+        "Exports tenant delivery and shipment dispatch records as an analytical Excel workbook (.xlsx), "
+        "raw machine-readable CSV, or professional PDF report. Supports filtering by delivery status ('pending', "
+        "'assigned', 'out_for_delivery', 'delivered', 'cancelled'). Requires 'orders:read' permission."
     ),
     responses={
         200: {
             "content": {
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {},
                 "text/csv": {},
+                "application/pdf": {},
             },
-            "description": "Exported Deliveries data stream (Excel or CSV).",
+            "description": "Exported Deliveries data stream (Excel, CSV, or PDF).",
         }
     },
 )
 def export_deliveries(
-    format: str = Query(..., description="Export format: excel or csv (required)"),
+    format: str = Query(..., description="Export format: excel, csv, or pdf (required)"),
     status: Optional[str] = Query(None, description="Optional status filter"),
     user: User = Depends(
         require_permission("orders:read")
     ),
     db: Session = Depends(get_db),
 ):
-    allowed_formats = {"excel", "csv"}
+    allowed_formats = {"excel", "csv", "pdf"}
     if not isinstance(format, str):
         raise AppException("Format must be a string", status_code=422)
     f_clean = format.strip().lower()
@@ -187,6 +231,38 @@ def export_deliveries(
             headers={
                 "Content-Disposition": f"attachment; filename={filename}"
             },
+        )
+    except AppException as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.detail,
+        )
+
+
+@router.get("/cod-reconciliation", response_model=CODReconciliationResponse)
+def get_cod_reconciliation(
+    delivery_person: Optional[str] = Query(None, description="Filter by delivery person"),
+    partner_id: Optional[int] = Query(None, gt=0, description="Filter by delivery partner ID"),
+    status: Optional[str] = Query(None, description="Filter by COD status: collected, pending, all"),
+    date_from: Optional[datetime] = Query(None, description="Start datetime"),
+    date_to: Optional[datetime] = Query(None, description="End datetime"),
+    user: User = Depends(require_permission("orders:read")),
+    db: Session = Depends(get_db),
+):
+    try:
+        rec_data = DeliveryService(db).get_cod_reconciliation(
+            tenant_id=user.tenant_id,
+            delivery_person=delivery_person,
+            partner_id=partner_id,
+            status=status,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        return CODReconciliationResponse(
+            success=True,
+            message="COD reconciliation data retrieved successfully",
+            summary=CODReconciliationSummary(**rec_data["summary"]),
+            deliveries=[CODDeliveryItem(**d) for d in rec_data["deliveries"]],
         )
     except AppException as exc:
         return JSONResponse(
@@ -878,6 +954,7 @@ def assign_delivery_partner(
             delivery_id=delivery_id,
             delivery_person=data.delivery_person,
             tracking_number=data.tracking_number,
+            partner_id=data.partner_id,
         )
         return SingleDeliveryResponse(
             success=True,
@@ -919,4 +996,171 @@ def update_delivery_address(
         return JSONResponse(
             status_code=exc.status_code,
             content=exc.detail,
-        )
+        )
+
+
+@router.get(
+    "/{delivery_id}/label/thermal",
+    summary="Get Thermal Delivery Label",
+    description=(
+        "Generate a standard 4x6 inch thermal shipping label. "
+        "Supports 'preview' (visual image rendered directly in Swagger UI), "
+        "'view' (inline browser preview with print trigger), "
+        "'download' (HTML attachment file), "
+        "'html' (direct print raw HTML), or 'json' (structured payload)."
+    ),
+    responses={
+        200: {
+            "model": DeliveryThermalLabelResponse,
+            "description": "Label visual preview (PNG), HTML render, file download, or JSON payload.",
+            "content": {
+                "image/png": {
+                    "schema": {"type": "string", "format": "binary"},
+                    "description": "Visual 4x6 inch thermal shipping label PNG rendered directly in Swagger UI",
+                },
+                "text/html": {
+                    "schema": {"type": "string"},
+                    "description": "HTML shipping label for browser viewing or thermal printing",
+                },
+            },
+        }
+    },
+)
+def get_thermal_delivery_label(
+    delivery_id: int = Path(
+        ...,
+        gt=0,
+        description="Delivery ID must be a positive integer",
+    ),
+    mode: ThermalLabelMode = Query(
+        default=ThermalLabelMode.preview,
+        description="Output mode: 'preview' (visual image rendered directly in Swagger UI), 'view' (inline browser preview with print trigger), 'download' (HTML file download), 'html' (raw HTML), or 'json' (structured payload)",
+    ),
+    user: User = Depends(require_permission("orders:read")),
+    db: Session = Depends(get_db),
+):
+    try:
+        service = DeliveryService(db)
+
+        if mode == ThermalLabelMode.preview:
+            image_bytes = service.get_thermal_label_image(
+                tenant_id=user.tenant_id,
+                delivery_id=delivery_id,
+            )
+            return Response(
+                content=image_bytes,
+                media_type="image/png",
+                headers={"Content-Disposition": "inline"},
+            )
+
+        html_content = service.get_thermal_label_html(
+            tenant_id=user.tenant_id,
+            delivery_id=delivery_id,
+        )
+
+        delivery = service.get_delivery(user.tenant_id, delivery_id)
+        order = delivery.order
+        if not order and delivery.order_id:
+            from app.models.order import Order
+
+            order = (
+                db.query(Order)
+                .filter(Order.id == delivery.order_id, Order.tenant_id == user.tenant_id)
+                .first()
+            )
+        order_number = (
+            order.order_number
+            if order and order.order_number
+            else f"ORD-{delivery.order_id}"
+        )
+
+        if mode == ThermalLabelMode.json:
+            return DeliveryThermalLabelResponse(
+                success=True,
+                message="Thermal delivery label generated successfully",
+                html=html_content,
+                delivery_id=delivery.id,
+                order_number=order_number,
+            )
+
+        if mode == ThermalLabelMode.download:
+            filename = f"shipping_label_{order_number}.html"
+            return HTMLResponse(
+                content=html_content,
+                status_code=200,
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        # ThermalLabelMode.view and ThermalLabelMode.html
+        return HTMLResponse(
+            content=html_content,
+            status_code=200,
+            headers={"Content-Disposition": "inline"},
+        )
+    except AppException as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.detail,
+        )
+
+
+@router.post("/{delivery_id}/failed-attempt", response_model=SingleDeliveryResponse)
+def record_failed_delivery_attempt(
+    delivery_id: int = Path(
+        ...,
+        gt=0,
+        description="Delivery ID must be a positive integer",
+    ),
+    data: DeliveryFailedAttemptRequest = ...,
+    user: User = Depends(require_permission("orders:write")),
+    db: Session = Depends(get_db),
+):
+    try:
+        delivery = DeliveryService(db).record_failed_attempt(
+            tenant_id=user.tenant_id,
+            delivery_id=delivery_id,
+            reason=data.reason,
+            remarks=data.remarks,
+            reschedule_date=data.reschedule_date,
+        )
+        return SingleDeliveryResponse(
+            success=True,
+            message=f"Delivery attempt #{delivery.attempt_count} recorded successfully",
+            data=DeliveryResponse.model_validate(delivery),
+        )
+    except AppException as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.detail,
+        )
+
+
+@router.patch("/{delivery_id}/collect-cod", response_model=SingleDeliveryResponse)
+def collect_delivery_cod(
+    delivery_id: int = Path(
+        ...,
+        gt=0,
+        description="Delivery ID must be a positive integer",
+    ),
+    data: Optional[CODCollectRequest] = None,
+    user: User = Depends(require_permission("orders:write")),
+    db: Session = Depends(get_db),
+):
+    try:
+        amount = data.amount if data else None
+        delivery = DeliveryService(db).collect_cod(
+            tenant_id=user.tenant_id,
+            delivery_id=delivery_id,
+            amount_collected=amount,
+        )
+        return SingleDeliveryResponse(
+            success=True,
+            message="COD payment collected successfully",
+            data=DeliveryResponse.model_validate(delivery),
+        )
+    except AppException as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.detail,
+        )
+

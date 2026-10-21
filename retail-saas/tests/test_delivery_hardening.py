@@ -207,7 +207,7 @@ def test_delivery_export_format_required_no_silent_default(tenant_a):
     assert resp_missing.status_code == 422
 
     # Invalid formats must return 422
-    for bad_fmt in ["pdf", "json", "xml", "txt", "string", "123"]:
+    for bad_fmt in ["yaml", "json", "xml", "txt", "string", "123"]:
         resp_bad = client.get(f"/api/v1/delivery/export?format={bad_fmt}", headers=headers)
         assert resp_bad.status_code == 422, f"Failed for {bad_fmt}"
 
@@ -219,6 +219,12 @@ def test_delivery_export_format_required_no_silent_default(tenant_a):
     resp_csv = client.get("/api/v1/delivery/export?format=csv", headers=headers)
     assert resp_csv.status_code == 200
     assert "text/csv" in resp_csv.headers.get("content-type", "")
+
+    resp_pdf = client.get("/api/v1/delivery/export?format=pdf", headers=headers)
+    assert resp_pdf.status_code == 200
+    assert resp_pdf.headers.get("content-type", "") == "application/pdf"
+    assert "deliveries.pdf" in resp_pdf.headers.get("content-disposition", "")
+    assert resp_pdf.content.startswith(b"%PDF-")
 
 
 # ==============================================================================
