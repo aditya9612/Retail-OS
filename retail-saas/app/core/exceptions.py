@@ -100,7 +100,13 @@ def _format_pydantic_errors(errors_raw: List[Dict[str, Any]]) -> Dict[str, Any]:
             )
             or field_str
         )
+        if clean_field.isdigit():
+            clean_field = "body"
         msg = err.get("msg", "Invalid value")
+        if err.get("type") == "json_invalid":
+            ctx_err = err.get("ctx", {}).get("error")
+            if ctx_err:
+                msg = f"Invalid JSON format. {ctx_err}."
         if msg.startswith("Value error, "):
             msg = msg[len("Value error, ") :]
         errors.append(
@@ -396,6 +402,117 @@ def register_exception_handlers(app):
                     "name": ("string_type", "Expected a string for warehouse name"),
                     "code": ("string_type", "Expected a string for warehouse code"),
                     "address": ("string_type", "Expected a string for warehouse address"),
+                }
+
+                if detected_field in field_expected:
+                    err_type, expected_desc = field_expected[detected_field]
+                    error_msg = f"Invalid value for {detected_field}. {expected_desc}."
+                    formatted = {
+                        "success": False,
+                        "message": f"Validation failed: '{detected_field}': {error_msg}",
+                        "detail": [
+                            {
+                                "type": err_type,
+                                "loc": ["body", detected_field],
+                                "msg": error_msg,
+                                "input": None,
+                                "ctx": {"error": expected_desc},
+                            }
+                        ],
+                        "errors": [
+                            {
+                                "field": detected_field,
+                                "message": error_msg,
+                                "type": err_type,
+                                "loc": ["body", detected_field],
+                            }
+                        ],
+                    }
+                    return JSONResponse(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        content=formatted,
+                    )
+
+        if (
+            request.method in ("POST", "PUT", "PATCH")
+            and "/delivery" in clean_path
+        ):
+            has_json_invalid = any(err.get("type") == "json_invalid" for err in errors)
+            if has_json_invalid:
+                try:
+                    raw_body = await request.body()
+                    body_text = raw_body.decode("utf-8", errors="replace")
+                except Exception:
+                    body_text = ""
+
+                detected_field = None
+                for err in errors:
+                    if err.get("type") == "json_invalid":
+                        loc = err.get("loc", ())
+                        pos = loc[1] if len(loc) > 1 and isinstance(loc[1], int) else None
+                        before_pos = body_text[:pos] if pos is not None else body_text
+                        m = re.findall(r'["\']([a-zA-Z0-9_]+)["\']\s*:\s*$', before_pos.rstrip())
+                        if m:
+                            detected_field = m[-1]
+                            break
+
+                if not detected_field:
+                    if re.search(r'["\']is_active["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']is_active["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "is_active"
+                    elif re.search(r'["\']cost["\']\s*:\s*[^0-9"\s{\[\]-]', body_text) or re.search(r'["\']cost["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "cost"
+                    elif re.search(r'["\']estimated_days["\']\s*:\s*[^0-9"\s{\[\]-]', body_text) or re.search(r'["\']estimated_days["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "estimated_days"
+                    elif re.search(r'["\']name["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']name["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "name"
+                    elif re.search(r'["\']code["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']code["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "code"
+                    elif re.search(r'["\']description["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']description["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "description"
+                    elif re.search(r'["\']delivery_person["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']delivery_person["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "delivery_person"
+                    elif re.search(r'["\']tracking_number["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']tracking_number["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "tracking_number"
+                    elif re.search(r'["\']delivery_address["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']delivery_address["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "delivery_address"
+                    elif re.search(r'["\']reason["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']reason["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "reason"
+                    elif re.search(r'["\']pincodes["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']pincodes["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "pincodes"
+                    elif re.search(r'["\']city["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']city["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "city"
+                    elif re.search(r'["\']state["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']state["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "state"
+                    elif re.search(r'["\']contact_email["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']contact_email["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "contact_email"
+                    elif re.search(r'["\']contact_phone["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']contact_phone["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "contact_phone"
+                    elif re.search(r'["\']api_key["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']api_key["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "api_key"
+                    elif re.search(r'["\']api_secret["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']api_secret["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "api_secret"
+                    elif re.search(r'["\']tracking_url_template["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']tracking_url_template["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "tracking_url_template"
+
+                field_expected = {
+                    "is_active": ("bool_parsing", "Expected a boolean: true or false for 'is_active'"),
+                    "cost": ("decimal_parsing", "Expected a positive number for 'cost'"),
+                    "estimated_days": ("int_parsing", "Expected an integer between 1 and 60 for 'estimated_days'"),
+                    "name": ("string_type", "Expected a string for 'name'"),
+                    "code": ("string_type", "Expected a unique code string for 'code'"),
+                    "description": ("string_type", "Expected a string for 'description'"),
+                    "city": ("string_type", "Expected a city name string for 'city'"),
+                    "state": ("string_type", "Expected an Indian state or union territory name for 'state'"),
+                    "delivery_person": ("string_type", "Expected a delivery person name for 'delivery_person'"),
+                    "tracking_number": ("string_type", "Expected a tracking number string for 'tracking_number'"),
+                    "delivery_address": ("string_type", "Expected a delivery address string for 'delivery_address'"),
+                    "reason": ("string_type", "Expected a cancellation reason string for 'reason'"),
+                    "pincodes": ("list_type", "Expected a list of 6-digit postal pincodes for 'pincodes'"),
+                    "contact_email": ("string_type", "Expected a valid email address for 'contact_email'"),
+                    "contact_phone": ("string_type", "Expected a 10-digit mobile number for 'contact_phone'"),
+                    "api_key": ("string_type", "Expected a carrier API key credential string for 'api_key'"),
+                    "api_secret": ("string_type", "Expected a carrier API secret credential string for 'api_secret'"),
+                    "tracking_url_template": ("string_type", "Expected a valid HTTP/HTTPS URL template for 'tracking_url_template'"),
                 }
 
                 if detected_field in field_expected:

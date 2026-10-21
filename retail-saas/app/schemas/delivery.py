@@ -7,10 +7,13 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.utils.validators import (
+    MAJOR_INDIAN_CITIES_STATE_MAP,
     validate_carrier_credentials,
+    validate_city_name,
     validate_code,
     validate_email_format,
     validate_indian_phone,
+    validate_indian_state,
     validate_meaningful_text,
     validate_person_name,
     validate_pincodes_list,
@@ -21,6 +24,7 @@ from app.utils.validators import (
     validate_strict_bool,
     validate_tracking_number,
     validate_tracking_url,
+    validate_zone_pincodes_match_state,
 )
 
 
@@ -282,8 +286,8 @@ class DeliveryMethodCreate(BaseModel):
     name: str = Field(..., description="Method name between 2 and 100 characters")
     code: str = Field(..., description="Unique method code (alphanumeric, underscores, hyphens)")
     description: Optional[str] = Field(default=None, description="Meaningful description (optional)")
-    cost: Decimal = Field(default=Decimal("0.00"), description="Delivery cost >= 0")
-    estimated_days: Optional[int] = Field(default=None, description="Estimated delivery days > 0")
+    cost: Decimal = Field(..., gt=Decimal("0.00"), description="Delivery cost must be greater than zero")
+    estimated_days: Optional[int] = Field(default=None, gt=0, le=60, description="Estimated delivery days (1-60)")
     is_active: bool = Field(default=True, description="Active status")
 
     @field_validator("name", mode="before")
@@ -310,13 +314,17 @@ class DeliveryMethodCreate(BaseModel):
     @field_validator("cost", mode="before")
     @classmethod
     def check_cost(cls, value: Any) -> Decimal:
-        res = validate_positive_money(value, field_name="Cost", required=True, allow_zero=True)
-        return res if res is not None else Decimal("0.00")
+        if value is None:
+            raise ValueError("Cost is required and must be greater than zero")
+        res = validate_positive_money(value, field_name="Cost", required=True, allow_zero=False)
+        if res is None or res <= Decimal("0.00"):
+            raise ValueError("Cost must be greater than zero")
+        return res
 
     @field_validator("estimated_days", mode="before")
     @classmethod
     def check_days(cls, value: Any) -> Optional[int]:
-        return validate_positive_int(value, field_name="Estimated days", required=False)
+        return validate_positive_int(value, field_name="Estimated days", required=False, max_value=60)
 
     @field_validator("is_active", mode="before")
     @classmethod
@@ -329,8 +337,8 @@ class DeliveryMethodUpdate(BaseModel):
     name: Optional[str] = Field(default=None, description="Method name between 2 and 100 characters")
     code: Optional[str] = Field(default=None, description="Unique method code")
     description: Optional[str] = Field(default=None, description="Optional description up to 255 characters")
-    cost: Optional[Decimal] = Field(default=None, description="Delivery cost >= 0")
-    estimated_days: Optional[int] = Field(default=None, description="Estimated delivery days > 0")
+    cost: Optional[Decimal] = Field(default=None, gt=Decimal("0.00"), description="Delivery cost must be greater than zero")
+    estimated_days: Optional[int] = Field(default=None, gt=0, le=60, description="Estimated delivery days (1-60)")
     is_active: Optional[bool] = Field(default=None, description="Active status")
 
     @field_validator("name", mode="before")
@@ -351,12 +359,17 @@ class DeliveryMethodUpdate(BaseModel):
     @field_validator("cost", mode="before")
     @classmethod
     def check_cost(cls, value: Any) -> Optional[Decimal]:
-        return validate_positive_money(value, field_name="Cost", required=False, allow_zero=True)
+        if value is None:
+            return None
+        res = validate_positive_money(value, field_name="Cost", required=False, allow_zero=False)
+        if res is not None and res <= Decimal("0.00"):
+            raise ValueError("Cost must be greater than zero")
+        return res
 
     @field_validator("estimated_days", mode="before")
     @classmethod
     def check_days(cls, value: Any) -> Optional[int]:
-        return validate_positive_int(value, field_name="Estimated days", required=False)
+        return validate_positive_int(value, field_name="Estimated days", required=False, max_value=60)
 
     @field_validator("is_active", mode="before")
     @classmethod
@@ -393,7 +406,7 @@ class DeliveryMethodListResponse(BaseModel):
 
 
 class DeliveryZoneCreate(BaseModel):
-    name: str = Field(..., description="Zone name between 2 and 100 characters")
+    name: str = Field(..., description="Zone name between 3 and 100 characters")
     code: str = Field(..., description="Unique zone code (alphanumeric, underscores, hyphens)")
     description: Optional[str] = Field(default=None, description="Zone description (optional)")
     city: Optional[str] = Field(default=None, description="Optional city name")
@@ -404,7 +417,7 @@ class DeliveryZoneCreate(BaseModel):
     @field_validator("name", mode="before")
     @classmethod
     def check_name(cls, value: Any) -> str:
-        res = validate_meaningful_text(value, field_name="Zone name", min_length=2, max_length=100, required=True)
+        res = validate_meaningful_text(value, field_name="Zone name", min_length=3, max_length=100, required=True)
         if not res:
             raise ValueError("Zone name cannot be empty")
         return res
@@ -420,17 +433,17 @@ class DeliveryZoneCreate(BaseModel):
     @field_validator("description", mode="before")
     @classmethod
     def check_description(cls, value: Any) -> Optional[str]:
-        return validate_meaningful_text(value, field_name="Description", min_length=2, max_length=255, required=False)
+        return validate_meaningful_text(value, field_name="Description", min_length=3, max_length=255, required=False)
 
     @field_validator("city", mode="before")
     @classmethod
     def check_city(cls, value: Any) -> Optional[str]:
-        return validate_meaningful_text(value, field_name="City", min_length=2, max_length=100, required=False)
+        return validate_city_name(value, required=False)
 
     @field_validator("state", mode="before")
     @classmethod
     def check_state(cls, value: Any) -> Optional[str]:
-        return validate_meaningful_text(value, field_name="State", min_length=2, max_length=100, required=False)
+        return validate_indian_state(value, required=False)
 
     @field_validator("pincodes", mode="before")
     @classmethod
@@ -443,9 +456,26 @@ class DeliveryZoneCreate(BaseModel):
         res = validate_strict_bool(value, field_name="is_active", required=True)
         return res if res is not None else True
 
+    @model_validator(mode="after")
+    def validate_geo_consistency(self) -> "DeliveryZoneCreate":
+        if self.city and self.state:
+            c_low = self.city.strip().lower()
+            s_low = self.state.strip().lower()
+            if c_low == s_low and s_low not in ("delhi", "chandigarh"):
+                raise ValueError(f"City '{self.city}' cannot be identical to state '{self.state}'")
+            if c_low in MAJOR_INDIAN_CITIES_STATE_MAP:
+                exp_st = MAJOR_INDIAN_CITIES_STATE_MAP[c_low]
+                if exp_st.lower() != s_low:
+                    raise ValueError(f"City '{self.city}' belongs to state '{exp_st}', not '{self.state}'")
+
+        if (self.state or self.city) and self.pincodes:
+            validate_zone_pincodes_match_state(self.pincodes, state=self.state, city=self.city)
+
+        return self
+
 
 class DeliveryZoneUpdate(BaseModel):
-    name: Optional[str] = Field(default=None, description="Zone name between 2 and 100 characters")
+    name: Optional[str] = Field(default=None, description="Zone name between 3 and 100 characters")
     code: Optional[str] = Field(default=None, description="Unique zone code")
     description: Optional[str] = Field(default=None, description="Optional description up to 255 characters")
     city: Optional[str] = Field(default=None, description="Optional city name")
@@ -456,7 +486,7 @@ class DeliveryZoneUpdate(BaseModel):
     @field_validator("name", mode="before")
     @classmethod
     def check_name(cls, value: Any) -> Optional[str]:
-        return validate_meaningful_text(value, field_name="Zone name", min_length=2, max_length=100, required=False)
+        return validate_meaningful_text(value, field_name="Zone name", min_length=3, max_length=100, required=False)
 
     @field_validator("code", mode="before")
     @classmethod
@@ -466,17 +496,17 @@ class DeliveryZoneUpdate(BaseModel):
     @field_validator("description", mode="before")
     @classmethod
     def check_description(cls, value: Any) -> Optional[str]:
-        return validate_meaningful_text(value, field_name="Description", min_length=2, max_length=255, required=False)
+        return validate_meaningful_text(value, field_name="Description", min_length=3, max_length=255, required=False)
 
     @field_validator("city", mode="before")
     @classmethod
     def check_city(cls, value: Any) -> Optional[str]:
-        return validate_meaningful_text(value, field_name="City", min_length=2, max_length=100, required=False)
+        return validate_city_name(value, required=False)
 
     @field_validator("state", mode="before")
     @classmethod
     def check_state(cls, value: Any) -> Optional[str]:
-        return validate_meaningful_text(value, field_name="State", min_length=2, max_length=100, required=False)
+        return validate_indian_state(value, required=False)
 
     @field_validator("pincodes", mode="before")
     @classmethod
@@ -487,6 +517,23 @@ class DeliveryZoneUpdate(BaseModel):
     @classmethod
     def check_active(cls, value: Any) -> Optional[bool]:
         return validate_strict_bool(value, field_name="is_active", required=False)
+
+    @model_validator(mode="after")
+    def validate_geo_consistency(self) -> "DeliveryZoneUpdate":
+        if self.city and self.state:
+            c_low = self.city.strip().lower()
+            s_low = self.state.strip().lower()
+            if c_low == s_low and s_low not in ("delhi", "chandigarh"):
+                raise ValueError(f"City '{self.city}' cannot be identical to state '{self.state}'")
+            if c_low in MAJOR_INDIAN_CITIES_STATE_MAP:
+                exp_st = MAJOR_INDIAN_CITIES_STATE_MAP[c_low]
+                if exp_st.lower() != s_low:
+                    raise ValueError(f"City '{self.city}' belongs to state '{exp_st}', not '{self.state}'")
+
+        if (self.state or self.city) and self.pincodes:
+            validate_zone_pincodes_match_state(self.pincodes, state=self.state, city=self.city)
+
+        return self
 
 
 class DeliveryZoneResponse(BaseModel):

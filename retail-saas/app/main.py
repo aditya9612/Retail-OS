@@ -311,6 +311,11 @@ def custom_openapi():
         )
         body_schema["properties"]["role"]["default"] = "cashier"
 
+    for path in ["/api/v1/delivery/methods", "/api/v1/delivery/zones"]:
+        for param in app.openapi_schema.get("paths", {}).get(path, {}).get("get", {}).get("parameters", []):
+            if param.get("name") == "is_active":
+                param["required"] = True
+
     return app.openapi_schema
 
 
