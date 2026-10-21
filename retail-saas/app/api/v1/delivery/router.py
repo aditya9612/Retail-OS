@@ -1,3 +1,4 @@
+from enum import Enum
 from datetime import datetime
 from typing import Optional
 
@@ -271,18 +272,45 @@ def get_cod_reconciliation(
         )
 
 
+class ActiveStatusFilter(str, Enum):
+    ALL = "all"
+    TRUE = "true"
+    FALSE = "false"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            val = value.strip().lower()
+            if val in ("1", "yes", "true"):
+                return cls.TRUE
+            if val in ("0", "no", "false"):
+                return cls.FALSE
+            if val in ("all", "none", "", "--"):
+                return cls.ALL
+        return None
+
+
 @router.get("/methods", response_model=DeliveryMethodListResponse)
 def list_delivery_methods(
-    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    is_active: ActiveStatusFilter = Query(
+        default=ActiveStatusFilter.ALL,
+        description="Filter by active status ('all' for both, 'true' for active only, 'false' for inactive only)",
+    ),
     user: User = Depends(
         require_permission("orders:read")
     ),
     db: Session = Depends(get_db),
 ):
     try:
+        active_bool: Optional[bool] = None
+        if is_active == ActiveStatusFilter.TRUE:
+            active_bool = True
+        elif is_active == ActiveStatusFilter.FALSE:
+            active_bool = False
+
         methods = DeliveryService(db).list_methods(
             tenant_id=user.tenant_id,
-            is_active=is_active,
+            is_active=active_bool,
         )
         if not methods:
             return DeliveryMethodListResponse(
@@ -432,16 +460,25 @@ def delete_delivery_method(
 
 @router.get("/zones", response_model=DeliveryZoneListResponse)
 def list_delivery_zones(
-    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    is_active: ActiveStatusFilter = Query(
+        default=ActiveStatusFilter.ALL,
+        description="Filter by active status ('all' for both, 'true' for active only, 'false' for inactive only)",
+    ),
     user: User = Depends(
         require_permission("orders:read")
     ),
     db: Session = Depends(get_db),
 ):
     try:
+        active_bool: Optional[bool] = None
+        if is_active == ActiveStatusFilter.TRUE:
+            active_bool = True
+        elif is_active == ActiveStatusFilter.FALSE:
+            active_bool = False
+
         zones = DeliveryService(db).list_zones(
             tenant_id=user.tenant_id,
-            is_active=is_active,
+            is_active=active_bool,
         )
         if not zones:
             return DeliveryZoneListResponse(

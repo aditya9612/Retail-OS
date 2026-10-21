@@ -1558,6 +1558,7 @@ def test_create_delivery_method_minimal(tenant_a):
         "name": "Standard Ground",
         "code": "standard_ground",
         "description": "Standard ground delivery",
+        "cost": 10.00,
     }
     resp = client.post("/api/v1/delivery/methods", json=payload, headers=headers)
     assert resp.status_code == 201
@@ -1567,7 +1568,7 @@ def test_create_delivery_method_minimal(tenant_a):
     method = res["data"]
     assert method["name"] == "Standard Ground"
     assert method["code"] == "STANDARD_GROUND"
-    assert float(method["cost"]) == 0.0
+    assert float(method["cost"]) == 10.0
     assert method["is_active"] is True
     assert method["description"] is not None
     assert method["estimated_days"] is None
@@ -1602,6 +1603,7 @@ def test_create_delivery_method_duplicate_code_conflict(tenant_a):
         "name": "Same Day Delivery",
         "code": "SAME_DAY_CONF",
         "description": "Same day delivery",
+        "cost": 15.00,
     }
     resp1 = client.post("/api/v1/delivery/methods", json=payload, headers=headers)
     assert resp1.status_code == 201
@@ -1620,6 +1622,7 @@ def test_create_delivery_method_tenant_isolation(tenant_a, tenant_b):
         "name": "Shared Code Method",
         "code": "SHARED_CODE_1",
         "description": "Shared code delivery",
+        "cost": 20.00,
     }
     # Both tenants can have identical codes without conflict
     resp_a = client.post("/api/v1/delivery/methods", json=payload, headers=headers_a)
@@ -1653,6 +1656,9 @@ def test_create_delivery_method_tenant_isolation(tenant_a, tenant_b):
         ("code", "C"),
         ("code", "CODE WITH SPACES"),
         ("code", "CODE#SPECIAL!"),
+        ("cost", 0),
+        ("cost", 0.0),
+        ("cost", "0.00"),
         ("cost", -10),
         ("cost", -0.01),
         ("cost", "invalid_cost"),
@@ -1677,8 +1683,8 @@ def test_create_delivery_method_validation_errors(tenant_a, field, value):
 def test_list_delivery_methods_filter_is_active(tenant_a):
     headers, _ = tenant_a
     # Create one active and one inactive method
-    p_act = {"name": "Active Courier", "code": "ACT_METH_1", "description": "Active courier", "is_active": True}
-    p_inact = {"name": "Inactive Courier", "code": "INACT_METH_1", "description": "Inactive courier", "is_active": False}
+    p_act = {"name": "Active Courier", "code": "ACT_METH_1", "description": "Active courier", "cost": 10.0, "is_active": True}
+    p_inact = {"name": "Inactive Courier", "code": "INACT_METH_1", "description": "Inactive courier", "cost": 10.0, "is_active": False}
 
     r1 = client.post("/api/v1/delivery/methods", json=p_act, headers=headers)
     assert r1.status_code == 201
@@ -1747,13 +1753,13 @@ def test_update_delivery_method_duplicate_code_conflict(tenant_a):
     headers, _ = tenant_a
     r1 = client.post(
         "/api/v1/delivery/methods",
-        json={"name": "Method One", "code": "METHOD_ONE_CODE", "description": "Method one desc"},
+        json={"name": "Method One", "code": "METHOD_ONE_CODE", "description": "Method one desc", "cost": 10.00},
         headers=headers,
     )
     assert r1.status_code == 201
     r2 = client.post(
         "/api/v1/delivery/methods",
-        json={"name": "Method Two", "code": "METHOD_TWO_CODE", "description": "Method two desc"},
+        json={"name": "Method Two", "code": "METHOD_TWO_CODE", "description": "Method two desc", "cost": 10.00},
         headers=headers,
     )
     assert r2.status_code == 201
@@ -1795,7 +1801,7 @@ def test_update_delivery_method_validation_errors(tenant_a, field, value):
     headers, _ = tenant_a
     create_resp = client.post(
         "/api/v1/delivery/methods",
-        json={"name": "Method For Validation", "code": "VAL_CODE_UPD", "description": "Validation description"},
+        json={"name": "Method For Validation", "code": "VAL_CODE_UPD", "description": "Validation description", "cost": 10.00},
         headers=headers,
     )
     assert create_resp.status_code == 201
@@ -1815,7 +1821,7 @@ def test_update_delivery_method_not_found_and_cross_tenant(tenant_a, tenant_b):
 
     create_resp = client.post(
         "/api/v1/delivery/methods",
-        json={"name": "Tenant A Method", "code": "T_A_METH_UPD", "description": "Tenant A description"},
+        json={"name": "Tenant A Method", "code": "T_A_METH_UPD", "description": "Tenant A description", "cost": 10.00},
         headers=headers_a,
     )
     assert create_resp.status_code == 201
@@ -1853,7 +1859,7 @@ def test_toggle_delivery_method_success(tenant_a):
     headers, _ = tenant_a
     create_resp = client.post(
         "/api/v1/delivery/methods",
-        json={"name": "Toggle Test Method", "code": "TOGGLE_METH_1", "description": "Toggle description", "is_active": True},
+        json={"name": "Toggle Test Method", "code": "TOGGLE_METH_1", "description": "Toggle description", "cost": 10.00, "is_active": True},
         headers=headers,
     )
     assert create_resp.status_code == 201
@@ -1876,7 +1882,7 @@ def test_toggle_delivery_method_not_found_and_cross_tenant(tenant_a, tenant_b):
 
     create_resp = client.post(
         "/api/v1/delivery/methods",
-        json={"name": "Toggle Tenant A", "code": "TOG_T_A", "description": "Toggle description"},
+        json={"name": "Toggle Tenant A", "code": "TOG_T_A", "description": "Toggle description", "cost": 10.00},
         headers=headers_a,
     )
     assert create_resp.status_code == 201
@@ -1902,7 +1908,7 @@ def test_delete_delivery_method_success(tenant_a):
     headers, _ = tenant_a
     create_resp = client.post(
         "/api/v1/delivery/methods",
-        json={"name": "Method To Delete", "code": "DEL_METH_1", "description": "Delete description"},
+        json={"name": "Method To Delete", "code": "DEL_METH_1", "description": "Delete description", "cost": 10.00},
         headers=headers,
     )
     assert create_resp.status_code == 201
@@ -1925,7 +1931,7 @@ def test_delete_delivery_method_not_found_and_cross_tenant(tenant_a, tenant_b):
 
     create_resp = client.post(
         "/api/v1/delivery/methods",
-        json={"name": "Delete Tenant A", "code": "DEL_T_A", "description": "Delete description"},
+        json={"name": "Delete Tenant A", "code": "DEL_T_A", "description": "Delete description", "cost": 10.00},
         headers=headers_a,
     )
     assert create_resp.status_code == 201

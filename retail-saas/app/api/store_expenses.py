@@ -166,29 +166,28 @@ def get_store_expenses_daily_report(
 
 
 @router.get(
-    "",
-    response_model=list[StoreExpenseResponse],
+    "/{expense_id}",
+    response_model=StoreExpenseResponse,
+    description="Get details of a specific store expense by ID",
 )
-def get_store_expenses(
-    store_id: int = Query(..., gt=0),
+def get_store_expense(
+    expense_id: int,
     user: User = Depends(
         require_permission("store_expenses:read")
     ),
     db: Session = Depends(get_db),
 ):
-    expenses = StoreExpenseService.get_expenses(
-        db=db,
-        tenant_id=user.tenant_id,
-        store_id=store_id,
-    )
-
-    if not expenses:
+    if expense_id <= 0:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Data Not Found",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Expense ID must be greater than 0",
         )
 
-    return expenses
+    return StoreExpenseService.get_expense(
+        db=db,
+        expense_id=expense_id,
+        tenant_id=user.tenant_id,
+    )
 @router.put(
     "/{expense_id}",
     response_model=StoreExpenseResponse,

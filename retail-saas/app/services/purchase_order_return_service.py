@@ -191,7 +191,7 @@ class PurchaseOrderReturnService:
             store_id=target_store_id,
             warehouse_id=target_wh_id,
             reason=data.reason,
-            remarks=data.remarks,
+            remarks=getattr(data, "remarks", None),
             status="requested",
             total_amount=Decimal("0.00"),
             created_by_id=user_id,
@@ -345,7 +345,7 @@ class PurchaseOrderReturnService:
         if data.reason is not None:
             purchase_order_return.reason = data.reason
 
-        if data.remarks is not None:
+        if getattr(data, "remarks", None) is not None:
             purchase_order_return.remarks = data.remarks
 
         if data.debit_note_number is not None:

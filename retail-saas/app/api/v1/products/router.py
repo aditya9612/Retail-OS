@@ -39,14 +39,7 @@ from app.schemas.product import (
     ProductResponse,
     ProductUpdate,
 )
-from app.core.exceptions import NotFoundException
-from app.schemas.product_variant import (
-    ProductVariantCreate,
-    ProductVariantListResponse,
-    ProductVariantResponse,
-)
 from app.services.product_service import ProductService
-from app.services.product_variant_service import ProductVariantService
 
 
 router = APIRouter(
@@ -1773,75 +1766,4 @@ def delete_product_image(
             pass
 
 
-# ============================================================================
-# Product Variants Nested Routes
-# ============================================================================
-
-
-@router.post(
-    "/{product_id}/variants",
-    response_model=ProductVariantResponse,
-    status_code=201,
-    dependencies=[Depends(require_operational_write)],
-    description="Create a new variant for a specific product",
-)
-def create_product_variant(
-    product_id: int,
-    data: ProductVariantCreate,
-    user: User = Depends(require_permission("products:write")),
-    db: Session = Depends(get_db),
-):
-    return ProductVariantService(db).create_variant(
-        tenant_id=user.tenant_id,
-        product_id=product_id,
-        data=data,
-    )
-
-
-@router.get(
-    "/{product_id}/variants",
-    response_model=ProductVariantListResponse,
-    description="List all variants belonging to a specific product with pagination",
-)
-def list_product_variants(
-    product_id: int,
-    page: int = Query(default=1, gt=0),
-    page_size: int = Query(default=20, gt=0, le=100),
-    include_inactive: bool = Query(default=False),
-    user: User = Depends(require_permission("products:read")),
-    db: Session = Depends(get_db),
-):
-    return ProductVariantService(db).list_variants(
-        tenant_id=user.tenant_id,
-        product_id=product_id,
-        page=page,
-        page_size=page_size,
-        include_inactive=include_inactive,
-    )
-
-
-@router.get(
-    "/{product_id}/variants/{variant_id}",
-    response_model=ProductVariantResponse,
-    description="Get details of a specific variant belonging to a product",
-)
-def get_product_variant(
-    product_id: int,
-    variant_id: int,
-    user: User = Depends(require_permission("products:read")),
-    db: Session = Depends(get_db),
-):
-    service = ProductVariantService(db)
-    if product_id <= 0:
-        raise NotFoundException("Invalid product ID")
-    product = service.repo.get_by_id(product_id, user.tenant_id)
-    if not product:
-        raise NotFoundException("Product not found")
-    variant = service.get_variant(
-        tenant_id=user.tenant_id,
-        variant_id=variant_id,
-    )
-    if variant.product_id != product_id:
-        raise NotFoundException("Product variant not found")
-    return variant
 

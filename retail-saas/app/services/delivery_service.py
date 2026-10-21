@@ -779,7 +779,28 @@ class DeliveryService:
             )
 
         delivery = self.get_delivery(tenant_id, delivery_id)
-        return self.repo.get_tracking_history(delivery.order_id)
+        raw_history = self.repo.get_tracking_history(delivery.order_id)
+        valid_delivery_statuses = set(DELIVERY_STATUS_TRANSITIONS.keys())
+        delivery_history = [
+            h for h in raw_history
+            if (h.status or "").strip().lower() in valid_delivery_statuses
+        ]
+
+        # If order tracking only contains order lifecycle events (e.g. "confirmed")
+        # and no delivery status was logged, return matching delivery.status in-memory without database mutation
+        if not delivery_history and raw_history:
+            current_status = (delivery.status or "pending").strip().lower()
+            return [
+                OrderTracking(
+                    id=raw_history[0].id,
+                    order_id=delivery.order_id,
+                    status=current_status,
+                    remarks=f"Delivery created with status '{current_status}'",
+                    created_at=delivery.created_at or datetime.utcnow(),
+                )
+            ]
+
+        return delivery_history
 
     def get_stats(self, tenant_id: int) -> DeliveryStatsResponse:
         stats_dict = self.repo.get_stats(tenant_id)
@@ -1085,6 +1106,27 @@ class DeliveryService:
                     f"Delivery zone with code '{data.code}' already exists"
                 )
             zone.code = data.code
+        effective_state = data.state if data.state is not None else zone.state
+        effective_pincodes = data.pincodes if data.pincodes is not None else zone.pincodes
+        effective_city = data.city if data.city is not None else zone.city
+
+        from app.utils.validators import validate_zone_pincodes_match_state, MAJOR_INDIAN_CITIES_STATE_MAP
+        if (effective_state or effective_city) and effective_pincodes:
+            try:
+                validate_zone_pincodes_match_state(effective_pincodes, state=effective_state, city=effective_city)
+            except ValueError as e:
+                raise AppException(str(e), status_code=422)
+
+        if effective_city and effective_state:
+            c_low = effective_city.strip().lower()
+            s_low = effective_state.strip().lower()
+            if c_low in MAJOR_INDIAN_CITIES_STATE_MAP:
+                exp_st = MAJOR_INDIAN_CITIES_STATE_MAP[c_low]
+                if exp_st.lower() != s_low:
+                    raise AppException(
+                        f"City '{effective_city}' belongs to state '{exp_st}', not '{effective_state}'",
+                        status_code=422,
+                    )
 
         if data.name is not None:
             zone.name = data.name

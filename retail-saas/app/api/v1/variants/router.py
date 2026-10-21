@@ -293,6 +293,7 @@ def generate_barcode_for_variant(
     response_model=ProductVariantResponse,
     status_code=201,
     dependencies=[Depends(require_operational_write)],
+    description="Create a new variant for a specific product",
 )
 def create_product_variant(
     data: ProductVariantCreate,
@@ -314,6 +315,7 @@ def create_product_variant(
 @router.get(
     "/products/{product_id}/variants",
     response_model=ProductVariantListResponse,
+    description="List all variants belonging to a specific product with pagination",
 )
 def list_product_variants(
     product_id: int = Path(
@@ -339,6 +341,7 @@ def list_product_variants(
 @router.get(
     "/products/{product_id}/variants/{variant_id}",
     response_model=ProductVariantResponse,
+    description="Get details of a specific variant belonging to a product",
 )
 def get_product_variant(
     product_id: int = Path(

@@ -150,7 +150,6 @@ def test_create_purchase_order_return_and_enrichment(tenant_a):
         json={
             "purchase_order_id": po_id,
             "reason": "Damaged goods packaging",
-            "remarks": "Bags torn during transport",
             "items": [
                 {
                     "purchase_order_item_id": po_item_id,
@@ -165,6 +164,7 @@ def test_create_purchase_order_return_and_enrichment(tenant_a):
     assert ret_resp.status_code == 201, ret_resp.text
     ret_data = ret_resp.json()
 
+    assert "remarks" not in ret_data
     assert ret_data["status"] == "requested"
     assert ret_data["return_number"].startswith("POR-")
     assert ret_data["debit_note_number"].startswith("DN-")
@@ -622,3 +622,90 @@ def test_returns_cross_tenant_isolation(tenant_a, tenant_b):
     # Tenant B cannot download Tenant A's PDF
     pdf_b = client.get(f"/api/v1/purchase-order-returns/{ret_a_id}/pdf", headers=headers_b)
     assert pdf_b.status_code == 404
+
+
+# =====================================================================
+# 9. Random & Invalid Garbage Values Blocked
+# =====================================================================
+
+def test_purchase_order_returns_invalid_random_values_rejected(tenant_a):
+    headers = tenant_a["headers"]
+    supplier_id = tenant_a["supplier_id"]
+    store_id = tenant_a["store_id"]
+    product_id = tenant_a["product_id"]
+
+    po_resp = client.post(
+        "/api/v1/purchase-orders",
+        json={
+            "supplier_id": supplier_id,
+            "store_id": store_id,
+            "items": [{"product_id": product_id, "quantity": 10, "unit_cost": 100.00}],
+        },
+        headers=headers,
+    )
+    po_id = po_resp.json()["id"]
+    po_item_id = po_resp.json()["items"][0]["id"]
+    client.post(f"/api/v1/purchase-orders/{po_id}/receive", json={}, headers=headers)
+
+    invalid_reasons = [
+        "ppppp",
+        "123455",
+        "!@#$$",
+        "((()))",
+        "\\\\\\\\",
+        "|||||",
+        "{{{}}}",
+        "[[[]]]",
+        "::::;;;;",
+        "????////",
+        "string",
+        "null",
+        "@#$p0*&",
+        "     ",
+    ]
+
+    for val in invalid_reasons:
+        # Invalid reason in create return must return 422
+        resp = client.post(
+            "/api/v1/purchase-order-returns",
+            json={
+                "purchase_order_id": po_id,
+                "reason": val,
+                "items": [{"purchase_order_item_id": po_item_id, "quantity": 1}],
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 422, f"Expected 422 for reason '{val}', got {resp.status_code}: {resp.text}"
+
+    invalid_debit_notes = [
+        "ppppp",
+        "0000",
+        "!@#$$",
+        "((()))",
+        "\\\\\\\\",
+        "|||||",
+        "{{{}}}",
+        "[[[]]]",
+        "::::;;;;",
+        "????////",
+        "string",
+        "null",
+        "@#$p0*&",
+        "     ",
+    ]
+
+    for val in invalid_debit_notes:
+        # Invalid debit_note_number must return 422
+        resp_dn = client.post(
+            "/api/v1/purchase-order-returns",
+            json={
+                "purchase_order_id": po_id,
+                "reason": "Damaged items return",
+                "debit_note_number": val,
+                "items": [{"purchase_order_item_id": po_item_id, "quantity": 1}],
+            },
+            headers=headers,
+        )
+        assert resp_dn.status_code == 422, f"Expected 422 for debit_note_number '{val}', got {resp_dn.status_code}: {resp_dn.text}"
+
+
