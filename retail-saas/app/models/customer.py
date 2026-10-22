@@ -73,9 +73,9 @@ class CustomerFeedback(Base, TimestampMixin):
 
     rating: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    comments: Mapped[str | None] = mapped_column(Text)
-
-    suggestions: Mapped[str | None] = mapped_column(Text)
+    comments: Mapped[str | None] = mapped_column(Text, nullable=True)
+    feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suggestions: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     customer: Mapped["Customer"] = relationship(
         "Customer",

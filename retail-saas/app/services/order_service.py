@@ -1352,6 +1352,7 @@ class CustomerService:
             invoice_id=data.invoice_id,
             rating=data.rating,
             comments=data.comments,
+            feedback=data.feedback,
             suggestions=data.suggestions,
         )
 
