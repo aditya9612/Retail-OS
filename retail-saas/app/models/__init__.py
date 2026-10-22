@@ -12,7 +12,7 @@ from app.models.invoice_item import InvoiceItem
 from app.models.invoice_item_return import InvoiceItemReturn
 from app.models.order import Order
 from app.models.order_item import OrderItem
-from app.models.order_return import OrderReturn
+from app.models.order_return import OrderReturn, OrderReturnItem
 from app.models.payment import Payment
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
 from app.models.purchase_order_return import PurchaseOrderReturn, PurchaseOrderReturnItem
@@ -76,6 +76,7 @@ __all__ = [
     "Order",
     "OrderItem",
     "OrderReturn",
+    "OrderReturnItem",
     "Payment",
     "PurchaseOrder",
     "PurchaseOrderItem",
