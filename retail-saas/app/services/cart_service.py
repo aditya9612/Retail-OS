@@ -392,6 +392,13 @@ class CartService:
             discount,
         )
 
+        if quantity is not None and Decimal(str(quantity)) == Decimal("0"):
+            return self.remove_item(
+                tenant_id,
+                user_id,
+                product_id,
+            )
+
         cart = self._load_cart(
             tenant_id,
             user_id,
@@ -694,9 +701,38 @@ class CartService:
             discount_amount
         )
 
-        if coupon_code:
-            cart["coupon_code"] = coupon_code.strip()
-        elif discount_type != "coupon":
+        if coupon_code or discount_type == "coupon":
+            code_str = (coupon_code or "").strip().upper()
+            if code_str:
+                from app.models.coupon import Coupon
+                from datetime import datetime as dt_cls
+                coupon = (
+                    self.db.query(Coupon)
+                    .filter(
+                        Coupon.tenant_id == tenant_id,
+                        Coupon.code == code_str,
+                        Coupon.is_deleted.is_(False),
+                    )
+                    .first()
+                )
+                if coupon:
+                    today = dt_cls.utcnow().date()
+                    if not coupon.is_active:
+                        raise AppException(f"Coupon '{code_str}' is inactive")
+                    if coupon.start_date and today < coupon.start_date:
+                        raise AppException(f"Coupon '{code_str}' is not yet valid")
+                    if coupon.end_date and today > coupon.end_date:
+                        raise AppException(f"Coupon '{code_str}' has expired")
+                    if coupon.usage_limit and coupon.used_count >= coupon.usage_limit:
+                        raise AppException(f"Coupon '{code_str}' usage limit reached")
+                    if coupon.minimum_order_amount and subtotal < coupon.minimum_order_amount:
+                        raise AppException(
+                            f"Minimum cart amount for coupon '{code_str}' is {coupon.minimum_order_amount}"
+                        )
+                elif discount_type == "coupon":
+                    raise NotFoundException(f"Coupon '{code_str}' not found")
+            cart["coupon_code"] = coupon_code.strip() if coupon_code else None
+        else:
             cart["coupon_code"] = None
 
         self._build_summary(cart)
@@ -854,3 +890,118 @@ class CartService:
             tenant_id,
             user_id,
         )
+
+    def scan_barcode(
+        self,
+        tenant_id: int,
+        user_id: int,
+        store_id: int,
+        barcode: str,
+        quantity: Decimal = Decimal("1.000"),
+        unit_price: Decimal | None = None,
+        discount: Decimal = ZERO,
+        same_state: bool = True,
+    ) -> dict:
+        if store_id <= 0:
+            raise AppException("Store ID must be greater than zero")
+
+        clean_code = barcode.strip()
+        if not clean_code:
+            raise AppException("Barcode cannot be empty")
+
+        from sqlalchemy import func, or_
+        product = (
+            self.db.query(Product)
+            .filter(
+                Product.tenant_id == tenant_id,
+                or_(
+                    Product.barcode == clean_code,
+                    func.lower(Product.sku) == clean_code.lower(),
+                ),
+            )
+            .first()
+        )
+
+        if not product:
+            raise NotFoundException(f"Product with barcode/SKU '{clean_code}' not found")
+
+        if hasattr(product, "is_active") and not product.is_active:
+            raise AppException(f"Product '{product.name}' is inactive")
+
+        return self.add_item(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            store_id=store_id,
+            product_id=product.id,
+            quantity=quantity,
+            unit_price=unit_price,
+            discount=discount,
+            same_state=same_state,
+        )
+
+    def validate_stock(
+        self,
+        tenant_id: int,
+        user_id: int,
+        store_id: int | None = None,
+    ) -> dict:
+        cart = self._load_cart(tenant_id, user_id)
+        effective_store_id = store_id or cart.get("store_id")
+        if not effective_store_id:
+            raise AppException("store_id is required to validate stock")
+
+        items_validation = []
+        is_all_valid = True
+        insufficient_count = 0
+
+        from app.models.inventory import Inventory
+        from sqlalchemy import func
+
+        for item in cart.get("items", []):
+            prod_id = int(item["product_id"])
+            qty_needed = Decimal(str(item["quantity"]))
+
+            stock_qty = (
+                self.db.query(func.coalesce(func.sum(Inventory.quantity), Decimal("0.0000")))
+                .filter(
+                    Inventory.tenant_id == tenant_id,
+                    Inventory.store_id == effective_store_id,
+                    Inventory.product_id == prod_id,
+                )
+                .scalar()
+            )
+            available = Decimal(str(stock_qty or 0))
+
+            is_sufficient = available >= qty_needed
+            if not is_sufficient:
+                is_all_valid = False
+                insufficient_count += 1
+
+            prod = self._get_product(tenant_id, prod_id)
+
+            items_validation.append({
+                "product_id": prod_id,
+                "product_name": prod.name,
+                "sku": prod.sku or "",
+                "requested_quantity": qty_needed,
+                "available_quantity": available,
+                "is_sufficient": is_sufficient,
+            })
+
+        return {
+            "store_id": effective_store_id,
+            "is_valid": is_all_valid,
+            "items": items_validation,
+            "insufficient_items_count": insufficient_count,
+        }
+
+    def clear_customer(
+        self,
+        tenant_id: int,
+        user_id: int,
+    ) -> dict:
+        cart = self._load_cart(tenant_id, user_id)
+        cart["_tenant_id"] = tenant_id
+        cart["customer_id"] = None
+        self._save_cart(tenant_id, user_id, cart)
+        return self.get_cart(tenant_id, user_id)

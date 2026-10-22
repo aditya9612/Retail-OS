@@ -209,3 +209,4 @@ def downgrade() -> None:
         ]:
             if col in existing_cols:
                 op.drop_column("order_returns", col)
+

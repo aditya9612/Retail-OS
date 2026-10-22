@@ -11,6 +11,7 @@ from app.schemas.order_return import (
     OrderReturnExchangeRequest,
     OrderReturnRejectRequest,
     OrderReturnResponse,
+    OrderReturnSlipMode,
     OrderReturnSlipResponse,
     OrderReturnStatsResponse,
     OrderReturnStatusUpdate,
@@ -268,7 +269,33 @@ def exchange_return(
 
 @router.get(
     "/{return_id}/slip",
-    summary="Printable RMA / Return Slip (JSON or Printable HTML)",
+    summary="Printable RMA / Return Slip (Visual Preview, HTML, or JSON)",
+    description=(
+        "Generate a customer return slip (RMA). "
+        "Supports 'preview' (visual image rendered directly in Swagger UI), "
+        "'view' (inline browser preview with print trigger), "
+        "'download' (HTML file download), "
+        "'html' (raw printable HTML), or 'json' (structured payload)."
+    ),
+    responses={
+        200: {
+            "model": OrderReturnSlipResponse,
+            "description": "Visual RMA slip preview (PNG), HTML render, file download, or JSON payload.",
+            "content": {
+                "image/png": {
+                    "schema": {"type": "string", "format": "binary"},
+                    "description": "Visual RMA Return Slip PNG rendered directly in Swagger UI",
+                },
+                "text/html": {
+                    "schema": {"type": "string"},
+                    "description": "HTML RMA return slip for browser viewing or printing",
+                },
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/OrderReturnSlipResponse"},
+                },
+            },
+        }
+    },
 )
 def get_return_slip(
     return_id: int = Path(
@@ -276,20 +303,35 @@ def get_return_slip(
         gt=0,
         description="Return ID must be a positive integer",
     ),
-    format: Literal["json", "html"] = Query(
-        "json",
-        description="Output format: json or html",
+    mode: OrderReturnSlipMode = Query(
+        default=OrderReturnSlipMode.preview,
+        description="Select output mode from dropdown: 'preview' (renders image directly in Swagger UI), 'view' (inline browser preview), 'download' (HTML download), or 'json' (structured payload)",
     ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    selected_mode = mode.value if hasattr(mode, "value") else str(mode)
+
+    if selected_mode == "preview":
+        image_bytes = OrderReturnService.get_return_slip_image(
+            db=db,
+            return_id=return_id,
+            tenant_id=current_user.tenant_id,
+        )
+        return Response(
+            content=image_bytes,
+            media_type="image/png",
+            headers={"Content-Disposition": "inline"},
+        )
+
     slip = OrderReturnService.get_return_slip(
         db=db,
         return_id=return_id,
         tenant_id=current_user.tenant_id,
     )
 
-    if format == "html":
+    if selected_mode in ("html", "view", "download"):
+        auto_print_script = "<script>window.onload = function() { window.print(); };</script>" if selected_mode == "view" else ""
         rows_html = "".join([
             f"""<tr>
                 <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;">{item.product_name}</td>
@@ -310,11 +352,11 @@ def get_return_slip(
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 40px; color: #1e293b; }}
         .header {{ border-bottom: 2px solid #0f172a; padding-bottom: 16px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; }}
-        .badge {{ background-color: #e2e8f0; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; text-transform: uppercase; }}
+        .badge {{ background-color: #0f172a; color: #ffffff; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; text-transform: uppercase; }}
         .grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 24px; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 16px; }}
         th {{ background: #f8fafc; padding: 10px 8px; border-bottom: 2px solid #cbd5e1; text-align: left; font-size: 13px; }}
-        .total-box {{ margin-top: 24px; text-align: right; }}
+        .total-box {{ margin-top: 24px; text-align: right; background: #f8fafc; padding: 16px; border-radius: 8px; }}
         .btn-print {{ background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }}
         @media print {{ .no-print {{ display: none; }} }}
     </style>
@@ -371,8 +413,14 @@ def get_return_slip(
         <div style="font-size: 16px; margin-bottom: 4px;">Return Value: <strong>₹{slip.total_amount:.2f}</strong></div>
         <div style="font-size: 18px; color: #16a34a;">Refund / Credit Amount: <strong>₹{slip.refund_amount:.2f}</strong></div>
     </div>
+    {auto_print_script}
 </body>
 </html>"""
-        return HTMLResponse(content=html_content)
+        headers = (
+            {"Content-Disposition": f'attachment; filename="return_slip_{slip.return_number}.html"'}
+            if selected_mode == "download"
+            else {"Content-Disposition": "inline"}
+        )
+        return HTMLResponse(content=html_content, headers=headers)
 
     return slip

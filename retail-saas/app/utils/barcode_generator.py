@@ -276,3 +276,154 @@ def generate_thermal_shipping_label_image(
     img.save(out, format="PNG")
     out.seek(0)
     return out.read()
+
+
+def generate_order_return_slip_image(
+    return_number: str = "RMA-000000",
+    order_number: str = "ORD-000000",
+    customer_name: str = "Customer",
+    customer_phone: str = "N/A",
+    store_name: str = "Main Store",
+    return_date: str = "",
+    status: str = "REQUESTED",
+    return_type: str = "REFUND",
+    items: list = None,
+    total_amount: float = 0.0,
+    refund_amount: float = 0.0,
+    reason: str = "Return Request",
+) -> bytes:
+    from PIL import Image, ImageDraw, ImageFont
+
+    width, height = 480, 680
+    img = Image.new("RGB", (width, height), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+
+    # 1. Outer border
+    draw.rectangle([(8, 8), (width - 9, height - 9)], outline=(0, 0, 0), width=3)
+
+    try:
+        font_xl = ImageFont.truetype("arialbd.ttf", 20)
+        font_lg = ImageFont.truetype("arialbd.ttf", 15)
+        font_md = ImageFont.truetype("arialbd.ttf", 13)
+        font_sm = ImageFont.truetype("arial.ttf", 11)
+        font_xs = ImageFont.truetype("arial.ttf", 9)
+    except Exception:
+        font_xl = font_lg = font_md = font_sm = font_xs = ImageFont.load_default()
+
+    # 2. Header
+    draw.text((18, 16), "RETAIL-OS RMA RETURN SLIP", font=font_xl, fill=(0, 0, 0))
+
+    # Badge for Status
+    st_text = (status or "REQUESTED").upper()
+    s_bbox = draw.textbbox((0, 0), st_text, font=font_md)
+    sw = s_bbox[2] - s_bbox[0] + 16
+    sh = 24
+    sx = width - 18 - sw
+    draw.rectangle([(sx, 16), (sx + sw, 16 + sh)], fill=(0, 0, 0))
+    draw.text((sx + 8, 20), st_text, font=font_md, fill=(255, 255, 255))
+
+    draw.line([(8, 48), (width - 9, 48)], fill=(0, 0, 0), width=2)
+
+    # 3. Barcode section for return_number
+    clean_bc = "".join(c for c in return_number if c.isalnum() or c in "-_") or "RMA-000000"
+    try:
+        bc_buf = io.BytesIO()
+        bc = Code128(clean_bc[:24], writer=ImageWriter())
+        bc.write(
+            bc_buf,
+            options={
+                "write_text": False,
+                "module_height": 10.0,
+                "module_width": 0.30,
+                "quiet_zone": 1.0,
+            },
+        )
+        bc_buf.seek(0)
+        bc_img = Image.open(bc_buf)
+        bc_w, bc_h = 320, 45
+        bc_resized = bc_img.resize((bc_w, bc_h), Image.Resampling.LANCZOS)
+        img.paste(bc_resized, ((width - bc_w) // 2, 56))
+    except Exception:
+        draw.rectangle([(40, 56), (width - 40, 101)], fill=(240, 240, 240), outline=(0, 0, 0))
+
+    # RMA Number centered text
+    rma_str = f"RMA: {return_number}"
+    rma_bbox = draw.textbbox((0, 0), rma_str, font=font_md)
+    rma_w = rma_bbox[2] - rma_bbox[0]
+    draw.text(((width - rma_w) // 2, 106), rma_str, font=font_md, fill=(0, 0, 0))
+
+    # Divider line
+    draw.line([(8, 128), (width - 9, 128)], fill=(0, 0, 0), width=1)
+
+    # 4. Meta Details Grid (Order, Customer, Store, Date)
+    draw.text((18, 136), "ORDER #:", font=font_xs, fill=(90, 90, 90))
+    draw.text((18, 148), (order_number or "N/A")[:20], font=font_md, fill=(0, 0, 0))
+
+    draw.text((250, 136), "RETURN DATE:", font=font_xs, fill=(90, 90, 90))
+    draw.text((250, 148), (return_date or "N/A")[:22], font=font_sm, fill=(0, 0, 0))
+
+    draw.text((18, 172), "CUSTOMER:", font=font_xs, fill=(90, 90, 90))
+    draw.text((18, 184), (customer_name or "Retail Customer")[:25], font=font_md, fill=(0, 0, 0))
+
+    draw.text((250, 172), "PHONE / STORE:", font=font_xs, fill=(90, 90, 90))
+    draw.text((250, 184), f"{customer_phone} | {store_name}"[:30], font=font_sm, fill=(0, 0, 0))
+
+    draw.text((18, 208), "RETURN TYPE:", font=font_xs, fill=(90, 90, 90))
+    draw.text((18, 220), (return_type or "REFUND").upper(), font=font_md, fill=(0, 0, 0))
+
+    draw.text((250, 208), "REASON:", font=font_xs, fill=(90, 90, 90))
+    draw.text((250, 220), (reason or "Return")[:32], font=font_sm, fill=(0, 0, 0))
+
+    draw.line([(8, 244), (width - 9, 244)], fill=(0, 0, 0), width=2)
+
+    # 5. Returned Items Table Header
+    draw.rectangle([(8, 244), (width - 9, 270)], fill=(245, 245, 245))
+    draw.text((18, 250), "ITEM DESCRIPTION", font=font_md, fill=(0, 0, 0))
+    draw.text((280, 250), "QTY", font=font_md, fill=(0, 0, 0))
+    draw.text((330, 250), "COND.", font=font_md, fill=(0, 0, 0))
+    draw.text((395, 250), "AMOUNT", font=font_md, fill=(0, 0, 0))
+    draw.line([(8, 270), (width - 9, 270)], fill=(0, 0, 0), width=1)
+
+    # Items rows
+    y = 278
+    items_list = items or []
+    for it in items_list[:8]:
+        p_name = it.get("name") or "Product"
+        if len(p_name) > 28:
+            p_name = p_name[:26] + "..."
+        qty = str(it.get("quantity", 1))
+        cond = (it.get("condition") or "sellable").capitalize()[:8]
+        amt = f"Rs.{float(it.get('total_amount', 0.0)):.2f}"
+
+        draw.text((18, y), p_name, font=font_sm, fill=(0, 0, 0))
+        draw.text((288, y), qty, font=font_sm, fill=(0, 0, 0))
+        draw.text((330, y), cond, font=font_xs, fill=(50, 50, 50))
+        draw.text((395, y), amt, font=font_sm, fill=(0, 0, 0))
+
+        y += 24
+        draw.line([(18, y - 4), (width - 18, y - 4)], fill=(230, 230, 230), width=1)
+
+    if len(items_list) > 8:
+        draw.text((18, y), f"+ {len(items_list) - 8} additional items...", font=font_xs, fill=(100, 100, 100))
+
+    # 6. Footer Totals Section
+    draw.line([(8, 560), (width - 9, 560)], fill=(0, 0, 0), width=2)
+    draw.rectangle([(8, 560), (width - 9, 620)], fill=(250, 250, 250))
+
+    draw.text((18, 570), "TOTAL RETURN VALUE:", font=font_md, fill=(60, 60, 60))
+    draw.text((220, 570), f"Rs. {total_amount:.2f}", font=font_md, fill=(0, 0, 0))
+
+    draw.text((18, 592), "REFUND / CREDIT:", font=font_lg, fill=(0, 120, 0))
+    draw.text((220, 592), f"Rs. {refund_amount:.2f}", font=font_lg, fill=(0, 120, 0))
+
+    # Verification Signatures
+    draw.line([(8, 620), (width - 9, 620)], fill=(0, 0, 0), width=1)
+    draw.text((24, 645), "Customer Signature", font=font_xs, fill=(100, 100, 100))
+    draw.text((300, 645), "Store Manager Sign & Seal", font=font_xs, fill=(100, 100, 100))
+    draw.line([(20, 642), (140, 642)], fill=(120, 120, 120), width=1)
+    draw.line([(290, 642), (440, 642)], fill=(120, 120, 120), width=1)
+
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    out.seek(0)
+    return out.read()

@@ -112,16 +112,26 @@ class PaymentSplit(BaseModel):
         return v
 
 
+class TenderPaymentSplit(BaseModel):
+    mode: str = Field(description="Payment mode like upi, card, wallet")
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+
+
 class TenderChangeRequest(BaseModel):
     payable_amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2, description="Total amount payable")
     tendered_amount: Decimal = Field(ge=0, max_digits=12, decimal_places=2, description="Cash tendered by customer")
+    other_payments: Optional[list[TenderPaymentSplit]] = Field(default=None, description="Other non-cash payments like UPI/Card")
+    calculate_denominations: Optional[bool] = Field(default=False, description="Whether to calculate currency denomination breakdown")
 
 
 class TenderChangeResponse(BaseModel):
     payable_amount: Decimal
     tendered_amount: Decimal
+    other_payments_total: Decimal = Decimal("0.00")
+    net_payable_cash: Decimal = Decimal("0.00")
     change_due: Decimal
     is_exact: bool
+    denominations: Optional[dict[str, int]] = None
     status: str = "success"
 
 

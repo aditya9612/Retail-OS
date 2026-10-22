@@ -509,8 +509,14 @@ def test_order_return_slip_json_and_html():
     )
     return_id = create_res.json()["id"]
 
-    # 1. JSON Slip
-    slip_json = client.get(f"/api/v1/order-returns/{return_id}/slip?format=json", headers=headers)
+    # 1. Visual Preview Mode (PNG Image rendered directly in Swagger UI)
+    slip_prev = client.get(f"/api/v1/order-returns/{return_id}/slip?mode=preview", headers=headers)
+    assert slip_prev.status_code == 200
+    assert "image/png" in slip_prev.headers["content-type"]
+    assert slip_prev.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+    # 2. JSON Slip
+    slip_json = client.get(f"/api/v1/order-returns/{return_id}/slip?mode=json", headers=headers)
     assert slip_json.status_code == 200
     data = slip_json.json()
     assert data["return_id"] == return_id
@@ -518,12 +524,18 @@ def test_order_return_slip_json_and_html():
     assert len(data["items"]) == 1
     assert data["items"][0]["product_name"] == "Wireless Mouse"
 
-    # 2. HTML Slip
-    slip_html = client.get(f"/api/v1/order-returns/{return_id}/slip?format=html", headers=headers)
+    # 3. HTML Slip (View mode with auto-print)
+    slip_html = client.get(f"/api/v1/order-returns/{return_id}/slip?mode=view", headers=headers)
     assert slip_html.status_code == 200
     assert "text/html" in slip_html.headers["content-type"]
     assert "RETURN SLIP / RMA" in slip_html.text
     assert "Wireless Mouse" in slip_html.text
+    assert "window.print()" in slip_html.text
+
+    # 4. Download mode (HTML file attachment)
+    slip_dl = client.get(f"/api/v1/order-returns/{return_id}/slip?mode=download", headers=headers)
+    assert slip_dl.status_code == 200
+    assert "attachment" in slip_dl.headers["content-disposition"]
 
 
 def test_order_return_exchange():

@@ -1,8 +1,17 @@
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
+
+
+class OrderReturnSlipMode(str, Enum):
+    preview = "preview"
+    view = "view"
+    download = "download"
+    html = "html"
+    json = "json"
 
 
 VALID_RETURN_STATUSES = [

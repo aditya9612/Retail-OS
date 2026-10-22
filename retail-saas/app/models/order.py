@@ -58,6 +58,14 @@ class Order(Base, TimestampMixin):
     def __init__(self, **kwargs):
         # Ignore phantom delivery_status kwargs if passed
         self._delivery_status = kwargs.pop("delivery_status", None)
+        kwargs.setdefault("cgst_amount", Decimal("0.00"))
+        kwargs.setdefault("sgst_amount", Decimal("0.00"))
+        kwargs.setdefault("igst_amount", Decimal("0.00"))
+        kwargs.setdefault("tax_amount", Decimal("0.00"))
+        kwargs.setdefault("round_off", Decimal("0.00"))
+        kwargs.setdefault("discount_amount", Decimal("0.00"))
+        kwargs.setdefault("subtotal", Decimal("0.00"))
+        kwargs.setdefault("total_amount", Decimal("0.00"))
         super().__init__(**kwargs)
 
     @property

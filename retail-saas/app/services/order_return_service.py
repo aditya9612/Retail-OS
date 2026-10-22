@@ -73,7 +73,7 @@ class OrderReturnService:
                 detail=f"Customer with ID {data.customer_id} not found",
             )
 
-        if order.customer_id != data.customer_id:
+        if order.customer_id is not None and order.customer_id != data.customer_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Order does not belong to the specified customer",
@@ -716,4 +716,37 @@ class OrderReturnService:
             reason=order_return.reason,
             remarks=order_return.remarks,
             items=slip_items,
+        )
+
+    @staticmethod
+    def get_return_slip_image(
+        db: Session,
+        return_id: int,
+        tenant_id: int,
+    ) -> bytes:
+        from app.utils.barcode_generator import generate_order_return_slip_image
+
+        slip = OrderReturnService.get_return_slip(db, return_id, tenant_id)
+        return generate_order_return_slip_image(
+            return_number=slip.return_number,
+            order_number=slip.order_number or f"ORD-{slip.order_id}",
+            customer_name=slip.customer_name or "Retail Customer",
+            customer_phone=slip.customer_phone or "N/A",
+            store_name=slip.store_name or "Main Store",
+            return_date=slip.created_at.strftime("%d-%b-%Y %H:%M") if slip.created_at else "N/A",
+            status=slip.status.upper(),
+            return_type=slip.return_type.upper(),
+            items=[
+                {
+                    "name": it.product_name,
+                    "sku": it.sku,
+                    "quantity": it.quantity,
+                    "condition": it.condition,
+                    "total_amount": float(it.total_amount),
+                }
+                for it in slip.items
+            ],
+            total_amount=float(slip.total_amount),
+            refund_amount=float(slip.refund_amount),
+            reason=slip.reason,
         )

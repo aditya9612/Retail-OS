@@ -16,6 +16,7 @@ VALID_ORDER_STATUSES = [
     "delivered",
     "cancelled",
     "returned",
+    "partially_returned",
     "refunded",
 ]
 
@@ -167,7 +168,7 @@ class OrderItemResponse(BaseModel):
     product_name: str = ""
     sku: str = ""
     quantity: int
-    unit_price: Decimal
+    unit_price: Decimal = Decimal("0.00")
     discount: Decimal = Decimal("0.00")
     discount_amount: Decimal = Decimal("0.00")
     tax_rate: Decimal = Decimal("0.00")
@@ -185,6 +186,25 @@ class OrderItemResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
+
+    @field_validator(
+        "unit_price",
+        "discount",
+        "discount_amount",
+        "tax_rate",
+        "tax_amount",
+        "total",
+        "total_amount",
+        "cgst_amount",
+        "sgst_amount",
+        "igst_amount",
+        mode="before",
+    )
+    @classmethod
+    def coerce_item_decimals(cls, v):
+        if v is None:
+            return Decimal("0.00")
+        return v
 
 
 class OrderCreate(BaseModel):
@@ -544,19 +564,19 @@ class OrderResponse(BaseModel):
     id: int
     tenant_id: int
     store_id: int
-    customer_id: Optional[int]
+    customer_id: Optional[int] = None
     order_number: str
     order_type: str
     status: str
     coupon_code: Optional[str] = None
-    discount_amount: Decimal
-    subtotal: Decimal
+    discount_amount: Decimal = Decimal("0.00")
+    subtotal: Decimal = Decimal("0.00")
     cgst_amount: Decimal = Decimal("0.00")
     sgst_amount: Decimal = Decimal("0.00")
     igst_amount: Decimal = Decimal("0.00")
-    tax_amount: Decimal
+    tax_amount: Decimal = Decimal("0.00")
     round_off: Decimal = Decimal("0.00")
-    total_amount: Decimal
+    total_amount: Decimal = Decimal("0.00")
     payment_status: Optional[str] = "pending"
     payment_method: Optional[str] = None
     delivery_address: Optional[str] = None
@@ -570,6 +590,23 @@ class OrderResponse(BaseModel):
         "from_attributes": True
     }
 
+    @field_validator(
+        "discount_amount",
+        "subtotal",
+        "cgst_amount",
+        "sgst_amount",
+        "igst_amount",
+        "tax_amount",
+        "round_off",
+        "total_amount",
+        mode="before",
+    )
+    @classmethod
+    def coerce_order_decimals(cls, v):
+        if v is None:
+            return Decimal("0.00")
+        return v
+
 
 class InvoiceResponse(BaseModel):
 
@@ -579,18 +616,33 @@ class InvoiceResponse(BaseModel):
     order_id: int
     invoice_number: str
     status: str
-    subtotal: Decimal
-    discount_amount: Decimal
-    cgst_amount: Decimal
-    sgst_amount: Decimal
-    igst_amount: Decimal
-    total_amount: Decimal
-    pdf_url: Optional[str]
+    subtotal: Decimal = Decimal("0.00")
+    discount_amount: Decimal = Decimal("0.00")
+    cgst_amount: Decimal = Decimal("0.00")
+    sgst_amount: Decimal = Decimal("0.00")
+    igst_amount: Decimal = Decimal("0.00")
+    total_amount: Decimal = Decimal("0.00")
+    pdf_url: Optional[str] = None
     created_at: datetime
 
     model_config = {
         "from_attributes": True
     }
+
+    @field_validator(
+        "subtotal",
+        "discount_amount",
+        "cgst_amount",
+        "sgst_amount",
+        "igst_amount",
+        "total_amount",
+        mode="before",
+    )
+    @classmethod
+    def coerce_invoice_decimals(cls, v):
+        if v is None:
+            return Decimal("0.00")
+        return v
 
 
 class PaymentResponse(BaseModel):
@@ -600,13 +652,20 @@ class PaymentResponse(BaseModel):
     order_id: int
     payment_method: str
     status: str
-    amount: Decimal
-    transaction_id: Optional[str]
+    amount: Decimal = Decimal("0.00")
+    transaction_id: Optional[str] = None
     created_at: datetime
 
     model_config = {
         "from_attributes": True
     }
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def coerce_payment_amount(cls, v):
+        if v is None:
+            return Decimal("0.00")
+        return v
 
 
 class OrderTrackingResponse(BaseModel):
@@ -856,10 +915,23 @@ class OrderStatsResponse(BaseModel):
 class OrderReceiptItemResponse(BaseModel):
     name: str
     quantity: int
-    unit_price: Decimal
-    tax_amount: Decimal
-    discount_amount: Decimal
-    total_amount: Decimal
+    unit_price: Decimal = Decimal("0.00")
+    tax_amount: Decimal = Decimal("0.00")
+    discount_amount: Decimal = Decimal("0.00")
+    total_amount: Decimal = Decimal("0.00")
+
+    @field_validator(
+        "unit_price",
+        "tax_amount",
+        "discount_amount",
+        "total_amount",
+        mode="before",
+    )
+    @classmethod
+    def coerce_receipt_item_decimals(cls, v):
+        if v is None:
+            return Decimal("0.00")
+        return v
 
 
 class OrderReceiptResponse(BaseModel):
@@ -871,14 +943,14 @@ class OrderReceiptResponse(BaseModel):
     customer_name: Optional[str] = None
     customer_phone: Optional[str] = None
     items: List[OrderReceiptItemResponse]
-    subtotal: Decimal
-    discount_amount: Decimal
-    cgst_amount: Decimal
-    sgst_amount: Decimal
-    igst_amount: Decimal
-    tax_amount: Decimal
-    round_off: Decimal
-    total_amount: Decimal
+    subtotal: Decimal = Decimal("0.00")
+    discount_amount: Decimal = Decimal("0.00")
+    cgst_amount: Decimal = Decimal("0.00")
+    sgst_amount: Decimal = Decimal("0.00")
+    igst_amount: Decimal = Decimal("0.00")
+    tax_amount: Decimal = Decimal("0.00")
+    round_off: Decimal = Decimal("0.00")
+    total_amount: Decimal = Decimal("0.00")
     payment_status: str
     payment_method: Optional[str] = None
     created_at: datetime
@@ -887,3 +959,20 @@ class OrderReceiptResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
+
+    @field_validator(
+        "subtotal",
+        "discount_amount",
+        "cgst_amount",
+        "sgst_amount",
+        "igst_amount",
+        "tax_amount",
+        "round_off",
+        "total_amount",
+        mode="before",
+    )
+    @classmethod
+    def coerce_receipt_decimals(cls, v):
+        if v is None:
+            return Decimal("0.00")
+        return v
