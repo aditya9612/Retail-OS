@@ -1,5 +1,6 @@
 from datetime import date
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import Boolean, Date, ForeignKey, Integer, String , Text,DECIMAL, DateTime, Enum ,Column, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -38,6 +39,17 @@ class Customer(Base, TimestampMixin):
     segment: Mapped[str] = mapped_column(String(20), default="new")
     total_spend: Mapped[int] = mapped_column(Integer, default=0)
 
+    credit_limit: Mapped[Decimal] = mapped_column(
+        DECIMAL(12, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    outstanding_balance: Mapped[Decimal] = mapped_column(
+        DECIMAL(12, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+
     orders: Mapped[list["Order"]] = relationship("Order", back_populates="customer")
     feedbacks: Mapped[list["CustomerFeedback"]] = relationship("CustomerFeedback", back_populates="customer")
     loyalty: Mapped[list["LoyaltyPoint"]] = relationship(
@@ -54,6 +66,11 @@ class Customer(Base, TimestampMixin):
     referrals: Mapped[list["CustomerReferral"]] = relationship(
         "CustomerReferral",
         foreign_keys="CustomerReferral.customer_id"
+    )
+    ledger_entries: Mapped[list["CustomerLedgerEntry"]] = relationship(
+        "CustomerLedgerEntry",
+        back_populates="customer",
+        cascade="all, delete-orphan",
     )
 
 class CustomerFeedback(Base, TimestampMixin):
@@ -256,4 +273,20 @@ class CustomerCommunication(Base):
     )
 
     sent_at = Column(DateTime, server_default=func.now())
+
+
+class CustomerLedgerEntry(Base, TimestampMixin):
+    __tablename__ = "customer_ledger_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False, index=True)
+    entry_type: Mapped[str] = mapped_column(String(20), nullable=False)  # "DEBIT" or "CREDIT"
+    amount: Mapped[Decimal] = mapped_column(DECIMAL(12, 2), nullable=False)
+    balance_after: Mapped[Decimal] = mapped_column(DECIMAL(12, 2), nullable=False)
+    reference_no: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    customer: Mapped["Customer"] = relationship("Customer", back_populates="ledger_entries")
+
 

@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from app.models.invoice import Invoice
     from app.models.order_item import OrderItem
     from app.models.payment import Payment
+    from app.models.store import Store
+    from app.models.user import User
 
 
 class Order(Base, TimestampMixin):
@@ -29,9 +31,15 @@ class Order(Base, TimestampMixin):
     order_number: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     order_type: Mapped[str] = mapped_column(String(20), default="pos", nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True, nullable=False)
+    coupon_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    payment_method: Mapped[str | None] = mapped_column(String(30), nullable=True)
     subtotal: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    cgst_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    sgst_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    igst_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     tax_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    round_off: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     payment_status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -39,6 +47,8 @@ class Order(Base, TimestampMixin):
     delivery_pincode: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     customer: Mapped[Optional["Customer"]] = relationship("Customer", back_populates="orders")
+    store: Mapped[Optional["Store"]] = relationship("Store")
+    user: Mapped[Optional["User"]] = relationship("User")
     items: Mapped[list["OrderItem"]] = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     invoice: Mapped[Optional["Invoice"]] = relationship("Invoice", back_populates="order", uselist=False)
     payments: Mapped[list["Payment"]] = relationship("Payment", back_populates="order")
@@ -46,18 +56,9 @@ class Order(Base, TimestampMixin):
     tracking: Mapped[list["OrderTracking"]] = relationship("OrderTracking", back_populates="order", cascade="all, delete-orphan")
 
     def __init__(self, **kwargs):
-        # Ignore phantom coupon_code / delivery_status kwargs if passed
-        self._coupon_code = kwargs.pop("coupon_code", None)
+        # Ignore phantom delivery_status kwargs if passed
         self._delivery_status = kwargs.pop("delivery_status", None)
         super().__init__(**kwargs)
-
-    @property
-    def coupon_code(self) -> Optional[str]:
-        return getattr(self, "_coupon_code", None)
-
-    @coupon_code.setter
-    def coupon_code(self, val: Optional[str]) -> None:
-        self._coupon_code = val
 
     @property
     def delivery_status(self) -> Optional[str]:

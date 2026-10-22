@@ -1,7 +1,7 @@
 from app.models.audit_log import AuditLog
 from app.models.category import Category
 from app.models.credit_note import CreditNote
-from app.models.customer import Customer
+from app.models.customer import Customer, CustomerLedgerEntry
 from app.models.document_sequence import DocumentSequence
 from app.models.document_setting import DocumentSetting
 from app.models.gst_rate import GstRate
@@ -39,7 +39,7 @@ from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.warehouse import Warehouse
 from app.models.grn import GRN, GRNItem
-from app.models.coupon import Coupon
+from app.models.coupon import Coupon, CouponRedemption
 from app.models.sale import Sale, SaleItem
 from app.models.super_admin import SuperAdmin
 from app.models.pos_shift import POSShift
@@ -63,6 +63,7 @@ __all__ = [
     "Category",
     "CreditNote",
     "Customer",
+    "CustomerLedgerEntry",
     "DocumentSequence",
     "DocumentSetting",
     "GstRate",

@@ -244,6 +244,9 @@ class CustomerBase(BaseModel):
         "inactive"
     ] = "new"
 
+    credit_limit: Optional[Decimal] = Field(default=Decimal("0.00"), ge=Decimal("0.00"))
+    outstanding_balance: Optional[Decimal] = Field(default=Decimal("0.00"))
+
     @field_validator("email")
     @classmethod
     def validate_customer_email(cls, v: Optional[EmailStr]) -> Optional[str]:
@@ -388,6 +391,7 @@ class CustomerUpdate(BaseModel):
 
     whatsapp_opt_in: Optional[bool] = None
     sms_opt_in: Optional[bool] = None
+    credit_limit: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"))
 
     @field_validator("name", mode="before")
     @classmethod
@@ -1475,3 +1479,74 @@ class LoyaltyReportListResponse(BaseModel):
     success: bool = True
     message: str
     data: list[LoyaltyReportResponse] = Field(default_factory=list)
+
+
+class CreditLimitUpdateRequest(BaseModel):
+    credit_limit: Decimal = Field(
+        ...,
+        ge=Decimal("0.00"),
+        le=Decimal("99999999.99"),
+        description="Customer credit limit (must be non-negative)",
+    )
+
+
+class CustomerPaymentRequest(BaseModel):
+    amount: Decimal = Field(
+        ...,
+        gt=Decimal("0.00"),
+        le=Decimal("99999999.99"),
+        description="Payment amount to credit against dues",
+    )
+    payment_method: str = Field(
+        default="cash",
+        description="Payment method: cash, upi, card, bank_transfer",
+    )
+    reference_no: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Transaction or payment reference number",
+    )
+    notes: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Payment remarks or invoice reference",
+    )
+
+
+class CustomerLedgerEntryResponse(BaseModel):
+    id: int
+    customer_id: int
+    entry_type: str
+    amount: Decimal
+    balance_after: Decimal
+    reference_no: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CustomerLedgerStatementResponse(BaseModel):
+    success: bool = True
+    customer_id: int
+    customer_name: str
+    credit_limit: Decimal
+    outstanding_balance: Decimal
+    total_debit: Decimal = Decimal("0.00")
+    total_credit: Decimal = Decimal("0.00")
+    entries: list[CustomerLedgerEntryResponse] = Field(default_factory=list)
+
+
+class FeedbackAnalyticsResponse(BaseModel):
+    success: bool = True
+    total_feedbacks: int
+    average_rating: float
+    rating_breakdown: dict[str, int]
+    nps_score: float
+
+
+class CustomerDeleteResponse(BaseModel):
+    success: bool = True
+    message: str
+    customer_id: int
+

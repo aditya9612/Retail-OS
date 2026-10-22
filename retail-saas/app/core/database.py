@@ -324,6 +324,12 @@ def ensure_schema_compatibility() -> None:
                 ("tax_amount", "NUMERIC(12,2) NOT NULL DEFAULT 0.00"),
                 ("delivery_address", "VARCHAR(500) NULL"),
                 ("delivery_pincode", "VARCHAR(20) NULL"),
+                ("coupon_code", "VARCHAR(50) NULL"),
+                ("payment_method", "VARCHAR(30) NULL"),
+                ("cgst_amount", "NUMERIC(12,2) NOT NULL DEFAULT 0.00"),
+                ("sgst_amount", "NUMERIC(12,2) NOT NULL DEFAULT 0.00"),
+                ("igst_amount", "NUMERIC(12,2) NOT NULL DEFAULT 0.00"),
+                ("round_off", "NUMERIC(12,2) NOT NULL DEFAULT 0.00"),
             ]
             for col_name, col_def in order_additions:
                 if col_name not in order_cols:

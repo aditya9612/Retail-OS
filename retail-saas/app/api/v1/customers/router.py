@@ -49,12 +49,19 @@ from app.schemas.customer import (
     TopCustomerListResponse,
     LifetimeValueListResponse,
     LoyaltyReportListResponse,
+    CreditLimitUpdateRequest,
+    CustomerPaymentRequest,
+    CustomerLedgerEntryResponse,
+    CustomerLedgerStatementResponse,
+    FeedbackAnalyticsResponse,
+    CustomerDeleteResponse,
 )
 from app.services.customer_service import (
     fetch_customers,
     fetch_customer_stats,
+    CustomerService,
 )
-from app.services.order_service import CustomerService, OrderService
+from app.services.order_service import OrderService
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 
@@ -182,6 +189,17 @@ def get_feedback(
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_feedback(user.tenant_id, customer_id)
+
+
+@router.get(
+    "/feedback/analytics",
+    response_model=FeedbackAnalyticsResponse,
+)
+def get_feedback_analytics(
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).get_feedback_analytics(user.tenant_id)
 
 
 @router.get(
@@ -448,6 +466,18 @@ def update_customer(
     return CustomerService(db).update_customer(user.tenant_id, customer_id, data)
 
 
+@router.delete(
+    "/{customer_id}",
+    response_model=CustomerDeleteResponse,
+)
+def delete_customer(
+    customer_id: int = Path(..., gt=0),
+    user: User = Depends(require_permission("customers:write")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).delete_customer(user.tenant_id, customer_id)
+
+
 @router.get(
     "/{customer_id}/orders",
     response_model=CustomerOrdersResponse,
@@ -544,6 +574,60 @@ def update_customer_status(
         user.tenant_id,
         customer_id,
         data.status
+    )
+
+
+@router.patch(
+    "/{customer_id}/credit-limit",
+    response_model=CustomerResponse,
+)
+def update_credit_limit(
+    customer_id: int = Path(..., gt=0),
+    data: CreditLimitUpdateRequest = ...,
+    user: User = Depends(require_permission("customers:write")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).update_credit_limit(
+        user.tenant_id,
+        customer_id,
+        data.credit_limit,
+    )
+
+
+@router.get(
+    "/{customer_id}/ledger",
+    response_model=CustomerLedgerStatementResponse,
+)
+def get_customer_ledger(
+    customer_id: int = Path(..., gt=0),
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).get_customer_ledger(
+        user.tenant_id,
+        customer_id,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+
+@router.post(
+    "/{customer_id}/ledger/payment",
+    response_model=CustomerLedgerEntryResponse,
+    status_code=201,
+)
+def record_customer_payment(
+    customer_id: int = Path(..., gt=0),
+    data: CustomerPaymentRequest = ...,
+    user: User = Depends(require_permission("customers:write")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).record_customer_payment(
+        user.tenant_id,
+        customer_id,
+        data,
     )
 
 

@@ -360,13 +360,13 @@ class OrderCreate(BaseModel):
         if not v:
             raise ValueError("Order must contain at least one item")
 
-        product_ids = [
-            item.product_id
+        item_keys = [
+            (item.product_id, getattr(item, "variant_id", None))
             for item in v
         ]
 
-        if len(product_ids) != len(set(product_ids)):
-            raise ValueError("Order cannot contain duplicate products")
+        if len(item_keys) != len(set(item_keys)):
+            raise ValueError("Order cannot contain duplicate products or variants")
 
         return v
 
@@ -413,6 +413,11 @@ class OrderUpdate(BaseModel):
         default=None,
         min_length=1,
         max_length=30,
+    )
+
+    items: Optional[List[OrderItemCreate]] = Field(
+        default=None,
+        description="Optional replacement items for draft order",
     )
 
     @field_validator("coupon_code")
@@ -546,9 +551,14 @@ class OrderResponse(BaseModel):
     coupon_code: Optional[str] = None
     discount_amount: Decimal
     subtotal: Decimal
+    cgst_amount: Decimal = Decimal("0.00")
+    sgst_amount: Decimal = Decimal("0.00")
+    igst_amount: Decimal = Decimal("0.00")
     tax_amount: Decimal
+    round_off: Decimal = Decimal("0.00")
     total_amount: Decimal
     payment_status: Optional[str] = "pending"
+    payment_method: Optional[str] = None
     delivery_address: Optional[str] = None
     delivery_pincode: Optional[str] = None
     delivery_status: Optional[str] = None
@@ -680,3 +690,200 @@ class OrderStatusUpdateRequest(BaseModel):
             )
 
         return v
+
+
+class OrderAddItemsRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    items: List[OrderItemCreate] = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Items to add to the draft order",
+    )
+
+
+class POSPaymentData(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    payment_method: str = Field(
+        default="cash",
+        description="Payment method: cash, upi, card, credit_card, debit_card, wallet",
+    )
+
+    amount: Optional[Decimal] = Field(
+        default=None,
+        gt=0,
+        description="Amount tendered by customer. If None, exactly order total is used.",
+    )
+
+    transaction_id: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Optional external transaction reference or UTR",
+    )
+
+    notes: Optional[str] = Field(
+        default=None,
+        max_length=255,
+    )
+
+    @field_validator("payment_method")
+    @classmethod
+    def validate_pos_payment_method(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v:
+            raise ValueError("Payment method cannot be empty")
+        if v in INVALID_STRING_VALUES:
+            raise ValueError("Invalid payment method")
+        return v
+
+
+class POSCheckoutRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    store_id: int = Field(
+        ...,
+        gt=0,
+        description="Store ID where POS transaction is occurring",
+    )
+
+    customer_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Optional customer ID for loyalty and purchase history",
+    )
+
+    coupon_code: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=50,
+    )
+
+    discount_amount: Decimal = Field(
+        default=Decimal("0.00"),
+        ge=0,
+        le=Decimal("100"),
+        description="Overall discount percentage (0 to 100)",
+    )
+
+    notes: Optional[str] = Field(
+        default=None,
+        max_length=1000,
+    )
+
+    same_state: bool = Field(
+        default=True,
+        description="True for intra-state (CGST+SGST), False for inter-state (IGST)",
+    )
+
+    items: List[OrderItemCreate] = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+    )
+
+    payment: POSPaymentData = Field(
+        default_factory=POSPaymentData,
+        description="Payment details for instant settlement",
+    )
+
+    generate_invoice: bool = Field(
+        default=True,
+        description="Whether to generate an official tax invoice immediately",
+    )
+
+    @field_validator("coupon_code")
+    @classmethod
+    def validate_pos_coupon_code(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            raise ValueError("Coupon code cannot be empty")
+        if v.lower() in INVALID_STRING_VALUES:
+            raise ValueError("Invalid coupon code")
+        return v.upper()
+
+    @field_validator("items")
+    @classmethod
+    def validate_pos_items(cls, v: List[OrderItemCreate]) -> List[OrderItemCreate]:
+        if not v:
+            raise ValueError("Order must contain at least one item")
+        item_keys = [
+            (item.product_id, getattr(item, "variant_id", None))
+            for item in v
+        ]
+        if len(item_keys) != len(set(item_keys)):
+            raise ValueError("Order cannot contain duplicate products or variants")
+        return v
+
+
+class POSCheckoutResponse(BaseModel):
+    order: OrderResponse
+    payment: Optional[PaymentResponse] = None
+    invoice: Optional[InvoiceResponse] = None
+    change_due: Decimal = Decimal("0.00")
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+class OrderStatsResponse(BaseModel):
+    total_orders: int
+    total_revenue: Decimal
+    draft_orders: int
+    confirmed_orders: int
+    completed_orders: int
+    cancelled_orders: int
+    average_order_value: Decimal
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+class OrderReceiptItemResponse(BaseModel):
+    name: str
+    quantity: int
+    unit_price: Decimal
+    tax_amount: Decimal
+    discount_amount: Decimal
+    total_amount: Decimal
+
+
+class OrderReceiptResponse(BaseModel):
+    order_id: int
+    order_number: str
+    store_name: str
+    store_code: Optional[str] = None
+    store_address: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    items: List[OrderReceiptItemResponse]
+    subtotal: Decimal
+    discount_amount: Decimal
+    cgst_amount: Decimal
+    sgst_amount: Decimal
+    igst_amount: Decimal
+    tax_amount: Decimal
+    round_off: Decimal
+    total_amount: Decimal
+    payment_status: str
+    payment_method: Optional[str] = None
+    created_at: datetime
+    formatted_receipt: str
+
+    model_config = {
+        "from_attributes": True
+    }

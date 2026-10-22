@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
 
@@ -41,7 +41,7 @@ from app.models.delivery import Delivery
 from app.repositories.order_repo import OrderRepository
 from app.repositories.order_item_batch_allocation_repo import OrderItemBatchAllocationRepository
 from app.repositories.customer_repo import get_customers_for_export
-from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate, OrderResponse
+from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate, OrderResponse, POSCheckoutRequest, POSPaymentData
 from app.services.inventory_service import InventoryService
 from app.services.batch_allocation_service import BatchAllocationService, InsufficientStockException
 from app.utils.constants import OrderStatus, StockMovementType
@@ -366,10 +366,43 @@ class OrderService:
                 "than order subtotal"
             )
 
+        cgst_amount = sum(
+            (
+                getattr(item, "cgst_amount", Decimal("0.00")) or Decimal("0.00")
+                for item in order.items
+            ),
+            Decimal("0.00"),
+        ).quantize(
+            Decimal("0.01")
+        )
+
+        sgst_amount = sum(
+            (
+                getattr(item, "sgst_amount", Decimal("0.00")) or Decimal("0.00")
+                for item in order.items
+            ),
+            Decimal("0.00"),
+        ).quantize(
+            Decimal("0.01")
+        )
+
+        igst_amount = sum(
+            (
+                getattr(item, "igst_amount", Decimal("0.00")) or Decimal("0.00")
+                for item in order.items
+            ),
+            Decimal("0.00"),
+        ).quantize(
+            Decimal("0.01")
+        )
+
         order.subtotal = subtotal
         order.tax_amount = tax_amount
+        order.cgst_amount = cgst_amount
+        order.sgst_amount = sgst_amount
+        order.igst_amount = igst_amount
 
-        order.total_amount = (
+        raw_total = (
             subtotal
             + tax_amount
             - order.discount_amount
@@ -377,8 +410,11 @@ class OrderService:
             Decimal("0.01")
         )
 
-        if order.total_amount < 0:
-            order.total_amount = Decimal("0.00")
+        if raw_total < 0:
+            raw_total = Decimal("0.00")
+
+        order.total_amount = raw_total
+        order.round_off = (round(raw_total) - raw_total).quantize(Decimal("0.01"))
 
     def create_order(
         self,
@@ -522,6 +558,19 @@ class OrderService:
         if data.coupon_code:
 
             coupon.used_count += 1
+            try:
+                from app.models.coupon import CouponRedemption
+                redemption = CouponRedemption(
+                    tenant_id=tenant_id,
+                    coupon_id=coupon.id,
+                    order_id=created_order.id,
+                    customer_id=created_order.customer_id,
+                    discount_amount=getattr(order, 'discount_amount', Decimal('0.00')) or Decimal('0.00'),
+                    order_amount=getattr(order, 'total_amount', Decimal('0.00')) or Decimal('0.00'),
+                )
+                self.db.add(redemption)
+            except Exception:
+                pass
             if commit:
                 self.db.commit()
                 self.db.refresh(created_order)
@@ -552,6 +601,12 @@ class OrderService:
         self,
         tenant_id: int,
         store_id: int | None = None,
+        status: str | None = None,
+        customer_id: int | None = None,
+        order_type: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        search: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ):
@@ -577,10 +632,16 @@ class OrderService:
         ) * page_size
 
         return self.repo.list_orders(
-            tenant_id,
-            store_id,
-            skip,
-            page_size,
+            tenant_id=tenant_id,
+            store_id=store_id,
+            status=status,
+            customer_id=customer_id,
+            order_type=order_type,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
+            skip=skip,
+            limit=page_size,
         )
 
     def update_order(
@@ -617,6 +678,39 @@ class OrderService:
                 "Order status must be updated "
                 "using the order status endpoint"
             )
+
+        if "items" in update_data and update_data["items"] is not None:
+            if order.status != OrderStatus.DRAFT.value:
+                raise AppException("Line items can only be modified for draft orders")
+            order.items.clear()
+            same_state = True
+            for item_data in data.items:
+                product = (
+                    self.db.query(Product)
+                    .filter(
+                        Product.id == item_data.product_id,
+                        Product.tenant_id == tenant_id,
+                    )
+                    .first()
+                )
+                if not product:
+                    raise NotFoundException(f"Product {item_data.product_id} not found")
+                variant_id = getattr(item_data, "variant_id", None)
+                if variant_id is not None:
+                    variant = (
+                        self.db.query(ProductVariant)
+                        .filter(
+                            ProductVariant.id == variant_id,
+                            ProductVariant.tenant_id == tenant_id,
+                        )
+                        .first()
+                    )
+                    if not variant or variant.product_id != product.id:
+                        raise AppException(f"ProductVariant {variant_id} does not belong to product {product.id}")
+                order.items.append(
+                    self._calculate_item_totals(product, item_data, same_state=same_state)
+                )
+            del update_data["items"]
 
         if "customer_id" in update_data:
 
@@ -786,12 +880,20 @@ class OrderService:
 
                 order.status = OrderStatus.CONFIRMED.value
 
-                delivery = Delivery(
-                    tenant_id=tenant_id,
-                    order_id=order.id,
-                    status="pending",
-                )
-                self.db.add(delivery)
+                if order.order_type == "ecommerce" or order.delivery_address:
+                    delivery = Delivery(
+                        tenant_id=tenant_id,
+                        order_id=order.id,
+                        status="pending",
+                    )
+                    self.db.add(delivery)
+
+                    delivery_tracking = OrderTracking(
+                        order_id=order.id,
+                        status="pending",
+                        remarks="Delivery created with status 'pending'",
+                    )
+                    self.db.add(delivery_tracking)
 
                 tracking = OrderTracking(
                     order_id=order.id,
@@ -799,13 +901,6 @@ class OrderService:
                     remarks="Order confirmed",
                 )
                 self.db.add(tracking)
-
-                delivery_tracking = OrderTracking(
-                    order_id=order.id,
-                    status="pending",
-                    remarks="Delivery created with status 'pending'",
-                )
-                self.db.add(delivery_tracking)
 
                 if order.customer_id is not None:
                     customer = self._get_customer(
@@ -834,6 +929,7 @@ class OrderService:
         self,
         tenant_id: int,
         order_id: int,
+        restore_stock: bool = False,
     ) -> Order:
 
         order = self.get_order(
@@ -850,12 +946,71 @@ class OrderService:
                 "Order cannot be cancelled in current status"
             )
 
+        previous_status = order.status
         order.status = OrderStatus.CANCELLED.value
+
+        if restore_stock and previous_status in (
+            OrderStatus.CONFIRMED.value,
+            OrderStatus.PROCESSING.value,
+        ):
+            from app.schemas.inventory import StockInRequest
+            from app.models.product_batch import ProductBatch
+            for item in order.items:
+                product = (
+                    self.db.query(Product)
+                    .filter(
+                        Product.id == item.product_id,
+                        Product.tenant_id == tenant_id,
+                    )
+                    .first()
+                )
+                if not product:
+                    continue
+
+                variant_id = getattr(item, "variant_id", None)
+                if self._is_batch_managed(product, order.store_id, variant_id=variant_id):
+                    allocations = (
+                        self.db.query(OrderItemBatchAllocation)
+                        .filter(OrderItemBatchAllocation.order_item_id == item.id)
+                        .all()
+                    )
+                    if allocations:
+                        for alloc in allocations:
+                            b = (
+                                self.db.query(ProductBatch)
+                                .filter(
+                                    ProductBatch.id == alloc.batch_id,
+                                    ProductBatch.tenant_id == tenant_id,
+                                )
+                                .first()
+                            )
+                            if b:
+                                b.remaining_quantity += alloc.quantity
+                    else:
+                        self.inventory_service.stock_in(
+                            tenant_id,
+                            StockInRequest(
+                                store_id=order.store_id,
+                                product_id=item.product_id,
+                                quantity=item.quantity,
+                            ),
+                            commit=False,
+                        )
+                else:
+                    self.inventory_service.stock_in(
+                        tenant_id,
+                        StockInRequest(
+                            store_id=order.store_id,
+                            product_id=item.product_id,
+                            quantity=item.quantity,
+                        ),
+                        commit=False,
+                    )
 
         tracking = OrderTracking(
             order_id=order.id,
             status=OrderStatus.CANCELLED.value,
-            remarks="Order cancelled",
+            remarks="Order cancelled" + (" (stock restored)" if restore_stock else ""),
         )
 
         self.db.add(tracking)
@@ -994,1416 +1149,524 @@ class OrderService:
         }
 
 
-class CustomerService:
-
-    def __init__(self, db: Session):
-        self.db = db
-
-    def create_customer(
+    def add_order_items(
         self,
         tenant_id: int,
-        data,
-    ) -> Customer:
+        order_id: int,
+        items: list[OrderItemCreate],
+    ) -> Order:
+        order = self.get_order(tenant_id, order_id)
+        if order.status != OrderStatus.DRAFT.value:
+            raise AppException("Line items can only be added to draft orders")
 
-        if data.email:
+        existing_keys = {
+            (item.product_id, getattr(item, "variant_id", None))
+            for item in order.items
+        }
 
-            email_val = (
-                str(data.email)
-                .strip()
-                .lower()
-            )
+        for item_data in items:
+            key = (item_data.product_id, getattr(item_data, "variant_id", None))
+            if key in existing_keys:
+                raise AppException(f"Product {item_data.product_id} already exists in order")
+            existing_keys.add(key)
 
-            existing_email = (
-                self.db.query(Customer)
+            product = (
+                self.db.query(Product)
                 .filter(
-                    Customer.email == email_val,
-                    Customer.tenant_id == tenant_id,
+                    Product.id == item_data.product_id,
+                    Product.tenant_id == tenant_id,
                 )
                 .first()
             )
-
-            if existing_email:
-                raise ConflictException(
-                    "Customer with this email already exists"
-                )
-
-        existing_phone = (
-            self.db.query(Customer)
-            .filter(
-                Customer.phone == data.phone,
-                Customer.tenant_id == tenant_id,
-            )
-            .first()
-        )
-
-        if existing_phone:
-            raise ConflictException(
-                "Customer with this phone number already exists"
-            )
-
-        if data.gstin:
-
-            existing_gstin = (
-                self.db.query(Customer)
-                .filter(
-                    Customer.gstin == data.gstin,
-                    Customer.tenant_id == tenant_id,
-                )
-                .first()
-            )
-
-            if existing_gstin:
-                raise ConflictException(
-                    "GSTIN already exists"
-                )
-
-        customer_data = data.model_dump()
-
-        if customer_data.get("email"):
-            customer_data["email"] = (
-                str(customer_data["email"])
-                .strip()
-                .lower()
-            )
-
-        customer = Customer(
-            tenant_id=tenant_id,
-            total_spend=0,
-            loyalty_points=0,
-            **customer_data,
-        )
-
-        try:
-            self.db.add(customer)
-            self.db.commit()
-            self.db.refresh(customer)
-        except IntegrityError as exc:
-            self.db.rollback()
-            err_msg = str(exc).lower()
-            if "ix_customers_phone" in err_msg or "customers.phone" in err_msg or "uq_customer_tenant_phone" in err_msg or "phone" in err_msg:
-                raise ConflictException(
-                    "Customer with this phone number already exists"
-                )
-            if "ix_customers_email" in err_msg or "customers.email" in err_msg or "uq_customer_tenant_email" in err_msg or "email" in err_msg:
-                raise ConflictException(
-                    "Customer with this email already exists"
-                )
-            if "gstin" in err_msg:
-                raise ConflictException(
-                    "GSTIN already exists"
-                )
-            raise
-
-        return customer
-
-    def get_customer(
-        self,
-        tenant_id: int,
-        customer_id: int,
-    ) -> Customer:
-
-        customer = (
-            self.db.query(Customer)
-            .filter(
-                Customer.id == customer_id,
-                Customer.tenant_id == tenant_id,
-            )
-            .first()
-        )
-
-        if not customer:
-            raise NotFoundException(
-                "Customer not found"
-            )
-
-        return customer
-
-    def list_customers(
-        self,
-        tenant_id: int,
-    ) -> list[Customer]:
-
-        return (
-            self.db.query(Customer)
-            .filter(
-                Customer.tenant_id == tenant_id
-            )
-            .all()
-        )
-
-    def update_customer(
-        self,
-        tenant_id: int,
-        customer_id: int,
-        data,
-    ) -> Customer:
-
-        customer = self.get_customer(
-            tenant_id,
-            customer_id,
-        )
-
-        dump_data = data.model_dump(
-            exclude_unset=True
-        )
-
-        if "email" in dump_data and dump_data["email"]:
-
-            email_val = (
-                str(dump_data["email"])
-                .strip()
-                .lower()
-            )
-
-            existing_email = (
-                self.db.query(Customer)
-                .filter(
-                    Customer.email == email_val,
-                    Customer.tenant_id == tenant_id,
-                    Customer.id != customer_id,
-                )
-                .first()
-            )
-
-            if existing_email:
-                raise ConflictException(
-                    "Customer with this email already exists"
-                )
-
-            dump_data["email"] = email_val
-
-        if "phone" in dump_data and dump_data["phone"]:
-
-            existing_phone = (
-                self.db.query(Customer)
-                .filter(
-                    Customer.phone == dump_data["phone"],
-                    Customer.tenant_id == tenant_id,
-                    Customer.id != customer_id,
-                )
-                .first()
-            )
-
-            if existing_phone:
-                raise ConflictException(
-                    "Customer with this phone number already exists"
-                )
-
-        if "gstin" in dump_data and dump_data["gstin"]:
-
-            existing_gstin = (
-                self.db.query(Customer)
-                .filter(
-                    Customer.gstin == dump_data["gstin"],
-                    Customer.tenant_id == tenant_id,
-                    Customer.id != customer_id,
-                )
-                .first()
-            )
-
-            if existing_gstin:
-                raise ConflictException(
-                    "GSTIN already exists"
-                )
-
-        for key, value in dump_data.items():
-            setattr(
-                customer,
-                key,
-                value,
-            )
-
-        try:
-            self.db.commit()
-            self.db.refresh(customer)
-        except IntegrityError as exc:
-            self.db.rollback()
-            err_msg = str(exc).lower()
-            if "ix_customers_phone" in err_msg or "customers.phone" in err_msg or "uq_customer_tenant_phone" in err_msg or "phone" in err_msg:
-                raise ConflictException(
-                    "Customer with this phone number already exists"
-                )
-            if "ix_customers_email" in err_msg or "customers.email" in err_msg or "uq_customer_tenant_email" in err_msg or "email" in err_msg:
-                raise ConflictException(
-                    "Customer with this email already exists"
-                )
-            if "gstin" in err_msg:
-                raise ConflictException(
-                    "GSTIN already exists"
-                )
-            raise
-
-        return customer
-
-    def update_customer_status(
-        self,
-        tenant_id: int,
-        customer_id: int,
-        status: str,
-    ):
-
-        customer = self.get_customer(
-            tenant_id,
-            customer_id,
-        )
-
-        customer.status = status
-
-        self.db.commit()
-        self.db.refresh(customer)
-
-        return customer
-
-    def add_loyalty_points(
-        self,
-        tenant_id: int,
-        customer_id: int,
-        points: int,
-    ):
-
-        customer = self.get_customer(
-            tenant_id,
-            customer_id,
-        )
-
-        current_points = (
-            customer.loyalty_points or 0
-        )
-
-        new_balance = (
-            current_points + points
-        )
-
-        customer.loyalty_points = new_balance
-
-        loyalty = LoyaltyPoint(
-            customer_id=customer_id,
-            points_earned=points,
-            points_redeemed=0,
-            balance_points=new_balance,
-        )
-
-        self.db.add(loyalty)
-        self.db.commit()
-        self.db.refresh(loyalty)
-
-        return loyalty
-
-    def get_birthday_customers(
-        self,
-        tenant_id: int,
-        month: int,
-        day: int,
-    ):
-
-        customers = (
-            self.db.query(Customer)
-            .filter(
-                Customer.tenant_id == tenant_id,
-                Customer.birthday.isnot(None),
-                func.extract(
-                    "month",
-                    Customer.birthday,
-                ) == month,
-                func.extract(
-                    "day",
-                    Customer.birthday,
-                ) == day,
-            )
-            .all()
-        )
-        if not customers:
-            return {
-                "success": True,
-                "message": "No customers with birthdays found",
-                "data": [],
-            }
-        return customers
-
-    def create_feedback(
-        self,
-        tenant_id: int,
-        data,
-    ):
-
-        self.get_customer(
-            tenant_id,
-            data.customer_id,
-        )
-
-        if data.invoice_id is not None:
-
-            invoice = (
-                self.db.query(Invoice)
-                .filter(
-                    Invoice.id == data.invoice_id,
-                    Invoice.tenant_id == tenant_id,
-                )
-                .first()
-            )
-
-            if not invoice:
-                raise NotFoundException(
-                    "Invoice not found"
-                )
-
-        feedback = CustomerFeedback(
-            customer_id=data.customer_id,
-            invoice_id=data.invoice_id,
-            rating=data.rating,
-            comments=data.comments,
-            suggestions=data.suggestions,
-        )
-
-        try:
-            self.db.add(feedback)
-            self.db.commit()
-            self.db.refresh(feedback)
-        except IntegrityError:
-            self.db.rollback()
-            raise
-
-        return feedback
-
-    def get_feedback(
-        self,
-        tenant_id: int,
-        customer_id: int | None = None,
-    ):
-
-        if customer_id is not None:
-            self.get_customer(
-                tenant_id,
-                customer_id,
-            )
-
-        query = (
-            self.db.query(CustomerFeedback)
-            .join(
-                Customer,
-                Customer.id
-                == CustomerFeedback.customer_id,
-            )
-            .filter(
-                Customer.tenant_id == tenant_id
-            )
-        )
-
-        if customer_id is not None:
-
-            query = query.filter(
-                CustomerFeedback.customer_id
-                == customer_id
-            )
-
-        feedbacks = (
-            query
-            .order_by(
-                CustomerFeedback.created_at.desc()
-            )
-            .all()
-        )
-
-        if customer_id is not None and not feedbacks:
-            return {
-                "success": True,
-                "message": "No feedback found for this customer",
-                "data": [],
-            }
-
-        return feedbacks
-
-    def get_wallet(
-        self,
-        tenant_id: int,
-        customer_id: int,
-    ):
-
-        customer = self.get_customer(
-            tenant_id,
-            customer_id,
-        )
-
-        wallet = (
-            self.db.query(CustomerWallet)
-            .filter(
-                CustomerWallet.customer_id
-                == customer.id
-            )
-            .first()
-        )
-
-        if not wallet:
-
-            wallet = CustomerWallet(
-                customer_id=customer.id,
-                current_balance=Decimal("0.00"),
-            )
-
-            try:
-                self.db.add(wallet)
-                self.db.commit()
-                self.db.refresh(wallet)
-            except IntegrityError:
-                self.db.rollback()
-                wallet = (
-                    self.db.query(CustomerWallet)
+            if not product:
+                raise NotFoundException(f"Product {item_data.product_id} not found")
+
+            variant_id = getattr(item_data, "variant_id", None)
+            if variant_id is not None:
+                variant = (
+                    self.db.query(ProductVariant)
                     .filter(
-                        CustomerWallet.customer_id
-                        == customer.id
+                        ProductVariant.id == variant_id,
+                        ProductVariant.tenant_id == tenant_id,
                     )
                     .first()
                 )
+                if not variant or variant.product_id != product.id:
+                    raise AppException(f"ProductVariant {variant_id} does not belong to product {product.id}")
 
-        return wallet
+            order.items.append(
+                self._calculate_item_totals(product, item_data, same_state=True)
+            )
 
-    def credit_wallet(
+        self._recalculate_order(order)
+        tracking = OrderTracking(
+            order_id=order.id,
+            status=OrderStatus.DRAFT.value,
+            remarks=f"Added {len(items)} line item(s)",
+        )
+        self.db.add(tracking)
+        return self.repo.update(order)
+
+    def pos_checkout(
         self,
         tenant_id: int,
-        data,
-    ):
-
-        wallet = self.get_wallet(
-            tenant_id,
-            data.customer_id,
-        )
-
-        existing_tx = (
-            self.db.query(WalletTransaction)
-            .join(
-                CustomerWallet,
-                CustomerWallet.id
-                == WalletTransaction.wallet_id,
-            )
-            .join(
-                Customer,
-                Customer.id
-                == CustomerWallet.customer_id,
-            )
+        user_id: int,
+        data: POSCheckoutRequest,
+    ) -> dict:
+        user = (
+            self.db.query(User)
             .filter(
-                Customer.tenant_id == tenant_id,
-                WalletTransaction.reference_no
-                == data.reference_no,
+                User.id == user_id,
+                User.tenant_id == tenant_id,
             )
             .first()
         )
+        if not user:
+            raise ForbiddenException("Access denied: user context required")
 
-        if existing_tx:
-            raise ConflictException(
-                "Reference number already exists"
-            )
+        if user.store_id is not None and data.store_id != user.store_id:
+            raise ForbiddenException("Access denied: cannot create order for another store")
 
-        current_balance = (
-            Decimal(
-                str(
-                    wallet.current_balance or 0
-                )
-            )
-            + Decimal(
-                str(data.amount)
-            )
-        )
+        if user.store_id is None and not is_tenant_wide_authorized(user, self.db):
+            raise ForbiddenException("Access denied: user has no assigned store")
 
-        wallet.current_balance = current_balance
-
-        transaction = WalletTransaction(
-            wallet_id=wallet.id,
-            transaction_type="CREDIT",
-            amount=data.amount,
-            reference_no=data.reference_no,
-            remarks=data.remarks,
-        )
+        store = self._get_store(tenant_id, data.store_id)
+        if data.customer_id is not None:
+            self._get_customer(tenant_id, data.customer_id)
 
         try:
-            self.db.add(transaction)
-            self.db.commit()
-            self.db.refresh(wallet)
-            self.db.refresh(transaction)
-        except IntegrityError as exc:
-            self.db.rollback()
-            err_msg = str(exc).lower()
-            if "reference_no" in err_msg or "unique" in err_msg:
-                raise ConflictException(
-                    "Reference number already exists"
+            with self.db.begin_nested():
+                order = Order(
+                    tenant_id=tenant_id,
+                    store_id=data.store_id,
+                    customer_id=data.customer_id,
+                    user_id=user_id,
+                    order_number=self._generate_order_number(
+                        tenant_id=tenant_id, store_id=data.store_id
+                    ),
+                    order_type="pos",
+                    status=OrderStatus.CONFIRMED.value,
+                    coupon_code=data.coupon_code,
+                    payment_method=data.payment.payment_method,
+                    payment_status="paid",
+                    discount_amount=Decimal("0.00"),
+                    notes=data.notes,
                 )
-            raise
 
-        return {
-            "id": transaction.id,
-            "customer_id": data.customer_id,
-            "amount": float(data.amount),
-            "reference_no": data.reference_no,
-            "remarks": data.remarks,
-            "balance": float(
-                wallet.current_balance
-            ),
-            "current_balance": float(
-                wallet.current_balance
-            ),
-        }
+                same_state = data.same_state
+                for item_data in data.items:
+                    product = (
+                        self.db.query(Product)
+                        .filter(
+                            Product.id == item_data.product_id,
+                            Product.tenant_id == tenant_id,
+                        )
+                        .first()
+                    )
+                    if not product:
+                        raise NotFoundException(f"Product {item_data.product_id} not found")
 
-    def debit_wallet(
-        self,
-        tenant_id: int,
-        data,
-    ):
+                    variant_id = getattr(item_data, "variant_id", None)
+                    if variant_id is not None:
+                        variant = (
+                            self.db.query(ProductVariant)
+                            .filter(
+                                ProductVariant.id == variant_id,
+                                ProductVariant.tenant_id == tenant_id,
+                            )
+                            .first()
+                        )
+                        if not variant or variant.product_id != product.id:
+                            raise AppException(f"ProductVariant {variant_id} does not belong to product {product.id}")
 
-        wallet = self.get_wallet(
-            tenant_id,
-            data.customer_id,
-        )
+                    order.items.append(
+                        self._calculate_item_totals(product, item_data, same_state=same_state)
+                    )
 
-        existing_tx = (
-            self.db.query(WalletTransaction)
-            .join(
-                CustomerWallet,
-                CustomerWallet.id
-                == WalletTransaction.wallet_id,
-            )
-            .join(
-                Customer,
-                Customer.id
-                == CustomerWallet.customer_id,
-            )
-            .filter(
-                Customer.tenant_id == tenant_id,
-                WalletTransaction.reference_no
-                == data.reference_no,
-            )
-            .first()
-        )
+                subtotal = sum(
+                    (item.unit_price * item.quantity - item.discount for item in order.items),
+                    Decimal("0.00")
+                ).quantize(Decimal("0.01"))
 
-        if existing_tx:
-            raise ConflictException(
-                "Reference number already exists"
-            )
+                coupon = None
+                if data.coupon_code:
+                    coupon = self._validate_coupon(
+                        tenant_id=tenant_id,
+                        coupon_code=data.coupon_code,
+                        order_amount=subtotal,
+                    )
+                    coupon_discount = self._calculate_coupon_discount(coupon, subtotal)
+                    order.coupon_code = coupon.code
+                    order.discount_amount = coupon_discount
+                else:
+                    order.discount_amount = self._calculate_order_discount(subtotal, data.discount_amount)
 
-        current_balance = Decimal(
-            str(
-                wallet.current_balance or 0
-            )
-        )
+                self._recalculate_order(order)
+                self.db.add(order)
+                self.db.flush()
 
-        debit_amount = Decimal(
-            str(data.amount)
-        )
+                # Deduct inventory immediately
+                from app.schemas.inventory import StockOutRequest
+                for item in order.items:
+                    product = (
+                        self.db.query(Product)
+                        .filter(Product.id == item.product_id, Product.tenant_id == tenant_id)
+                        .first()
+                    )
+                    variant_id = getattr(item, "variant_id", None)
+                    if self._is_batch_managed(product, order.store_id, variant_id=variant_id):
+                        alloc_result = self.batch_allocation_service.allocate(
+                            tenant_id=tenant_id,
+                            store_id=order.store_id,
+                            product_id=item.product_id,
+                            requested_quantity=Decimal(str(item.quantity)),
+                            variant_id=variant_id,
+                            strategy="AUTO",
+                            reference_id=order.id,
+                            reference_type="ORDER",
+                            notes=f"POS Order {order.order_number}",
+                            commit=False,
+                        )
+                        for alloc in alloc_result.allocations:
+                            allocation_row = OrderItemBatchAllocation(
+                                order_item_id=item.id,
+                                batch_id=alloc.batch_id,
+                                quantity=alloc.allocated_quantity,
+                                unit_cost=alloc.unit_cost,
+                            )
+                            self.db.add(allocation_row)
+                    else:
+                        self.inventory_service.stock_out(
+                            tenant_id,
+                            StockOutRequest(
+                                store_id=order.store_id,
+                                product_id=item.product_id,
+                                quantity=item.quantity,
+                            ),
+                            commit=False,
+                        )
 
-        if current_balance < debit_amount:
-            raise AppException(
-                "Insufficient wallet balance"
-            )
+                # Coupon redemption increment
+                if coupon:
+                    coupon.used_count += 1
+                    try:
+                        from app.models.coupon import CouponRedemption
+                        redemption = CouponRedemption(
+                            tenant_id=tenant_id,
+                            coupon_id=coupon.id,
+                            order_id=order.id,
+                            customer_id=order.customer_id,
+                            discount_amount=order.discount_amount,
+                            order_amount=order.total_amount,
+                        )
+                        self.db.add(redemption)
+                    except Exception:
+                        pass
 
-        wallet.current_balance = (
-            current_balance
-            - debit_amount
-        )
+                # Customer spend increment
+                if order.customer_id is not None:
+                    customer = self._get_customer(tenant_id, order.customer_id)
+                    customer.total_spend = int((customer.total_spend or 0) + round(order.total_amount))
 
-        transaction = WalletTransaction(
-            wallet_id=wallet.id,
-            transaction_type="DEBIT",
-            amount=data.amount,
-            reference_no=data.reference_no,
-            remarks=data.remarks,
-        )
+                # Payments
+                tendered_amount = data.payment.amount if data.payment.amount is not None else order.total_amount
+                if tendered_amount < order.total_amount:
+                    raise AppException(f"Tendered amount ({tendered_amount}) is less than total amount ({order.total_amount})")
+                change_due = (tendered_amount - order.total_amount).quantize(Decimal("0.01"))
 
-        try:
-            self.db.add(transaction)
-            self.db.commit()
-            self.db.refresh(wallet)
-            self.db.refresh(transaction)
-        except IntegrityError as exc:
-            self.db.rollback()
-            err_msg = str(exc).lower()
-            if "reference_no" in err_msg or "unique" in err_msg:
-                raise ConflictException(
-                    "Reference number already exists"
+                from app.models.payment import Payment
+                payment = Payment(
+                    tenant_id=tenant_id,
+                    order_id=order.id,
+                    customer_id=order.customer_id,
+                    payment_method=data.payment.payment_method,
+                    status="completed",
+                    amount=order.total_amount,
+                    amount_tendered=tendered_amount,
+                    change_due=change_due,
+                    transaction_id=data.payment.transaction_id or f"TXN-{uuid.uuid4().hex[:10].upper()}",
+                    paid_at=datetime.utcnow(),
                 )
-            raise
-        self.db.refresh(transaction)
+                self.db.add(payment)
+                self.db.flush()
 
-        return {
-            "id": transaction.id,
-            "customer_id": data.customer_id,
-            "amount": float(data.amount),
-            "reference_no": data.reference_no,
-            "remarks": data.remarks,
-            "balance": float(
-                wallet.current_balance
-            ),
-            "current_balance": float(
-                wallet.current_balance
-            ),
-        }
+                # Invoice generation
+                invoice = None
+                if data.generate_invoice:
+                    from app.models.invoice_item import InvoiceItem
+                    invoice_number = f"INV-{order.order_number}"
+                    invoice = Invoice(
+                        tenant_id=tenant_id,
+                        store_id=order.store_id,
+                        order_id=order.id,
+                        invoice_number=invoice_number,
+                        status="issued",
+                        subtotal=order.subtotal,
+                        discount_amount=order.discount_amount,
+                        tax_amount=order.tax_amount,
+                        cgst_amount=order.cgst_amount,
+                        sgst_amount=order.sgst_amount,
+                        igst_amount=order.igst_amount,
+                        total_amount=order.total_amount,
+                    )
+                    self.db.add(invoice)
+                    self.db.flush()
 
-    def get_wallet_transactions(
-        self,
-        tenant_id: int,
-        customer_id: int,
-    ):
+                    for item in order.items:
+                        inv_item = InvoiceItem(
+                            invoice_id=invoice.id,
+                            product_id=item.product_id,
+                            quantity=Decimal(str(item.quantity)),
+                            unit_price=item.unit_price,
+                            discount_amount=item.discount_amount,
+                            gst_rate=Decimal("18.00"),
+                            gst_amount=item.tax_amount,
+                            total_amount=item.total_amount,
+                        )
+                        self.db.add(inv_item)
 
-        wallet = self.get_wallet(
-            tenant_id,
-            customer_id,
-        )
+                    payment.invoice_id = invoice.id
 
-        transactions = (
-            self.db.query(WalletTransaction)
-            .filter(
-                WalletTransaction.wallet_id
-                == wallet.id
-            )
-            .order_by(
-                WalletTransaction.created_at.desc()
-            )
-            .all()
-        )
-        if not transactions:
+                # Tracking
+                tracking = OrderTracking(
+                    order_id=order.id,
+                    status=OrderStatus.CONFIRMED.value,
+                    remarks="Instant POS checkout and payment settlement completed",
+                )
+                self.db.add(tracking)
+
+            self.db.commit()
+            self.db.refresh(order)
+            if invoice:
+                self.db.refresh(invoice)
+            if payment:
+                self.db.refresh(payment)
+
             return {
-                "success": True,
-                "message": "No wallet transactions found for this customer",
-                "data": [],
+                "order": order,
+                "payment": payment,
+                "invoice": invoice,
+                "change_due": change_due,
             }
-        return transactions
-
-    def earn_loyalty_points(
-        self,
-        tenant_id: int,
-        data,
-    ):
-
-        customer = self.get_customer(
-            tenant_id,
-            data.customer_id,
-        )
-
-        if data.invoice_id is not None:
-
-            invoice = (
-                self.db.query(Invoice)
-                .join(Order, Order.id == Invoice.order_id)
-                .filter(
-                    Invoice.id == data.invoice_id,
-                    Invoice.tenant_id == tenant_id,
-                )
-                .first()
-            )
-
-            if not invoice:
-                raise NotFoundException(
-                    "Invoice not found"
-                )
-
-            if invoice.order and invoice.order.customer_id is not None and invoice.order.customer_id != data.customer_id:
-                raise AppException(
-                    "Invoice belongs to a different customer",
-                    status_code=422,
-                )
-
-        current_points = (
-            customer.loyalty_points or 0
-        )
-
-        new_balance = (
-            current_points + data.points
-        )
-
-        customer.loyalty_points = new_balance
-
-        loyalty = LoyaltyPoint(
-            customer_id=data.customer_id,
-            invoice_id=data.invoice_id,
-            points_earned=data.points,
-            points_redeemed=0,
-            balance_points=new_balance,
-        )
-
-        try:
-            self.db.add(loyalty)
-            self.db.commit()
-            self.db.refresh(loyalty)
-        except IntegrityError:
+        except Exception:
             self.db.rollback()
             raise
 
-        return loyalty
-
-    def redeem_loyalty_points(
+    def get_order_stats(
         self,
         tenant_id: int,
-        data,
-    ):
+        store_id: Optional[int] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+    ) -> dict:
+        query = self.db.query(Order).filter(Order.tenant_id == tenant_id)
+        if store_id is not None:
+            query = query.filter(Order.store_id == store_id)
+        if date_from is not None:
+            query = query.filter(Order.created_at >= date_from)
+        if date_to is not None:
+            query = query.filter(Order.created_at <= date_to)
 
-        customer = self.get_customer(
-            tenant_id,
-            data.customer_id,
+        orders = query.all()
+        total_orders = len(orders)
+        draft_orders = sum(1 for o in orders if o.status == OrderStatus.DRAFT.value)
+        confirmed_orders = sum(1 for o in orders if o.status == OrderStatus.CONFIRMED.value)
+        completed_orders = sum(1 for o in orders if o.status in (OrderStatus.DELIVERED.value, "completed"))
+        cancelled_orders = sum(1 for o in orders if o.status == OrderStatus.CANCELLED.value)
+
+        revenue_orders = [o for o in orders if o.status not in (OrderStatus.CANCELLED.value, OrderStatus.DRAFT.value)]
+        total_revenue = sum((o.total_amount for o in revenue_orders), Decimal("0.00")).quantize(Decimal("0.01"))
+        avg_order_value = (
+            (total_revenue / Decimal(len(revenue_orders))).quantize(Decimal("0.01"))
+            if revenue_orders
+            else Decimal("0.00")
         )
-
-        current_points = (
-            customer.loyalty_points or 0
-        )
-
-        if current_points < data.points:
-            raise AppException(
-                "Insufficient loyalty points"
-            )
-
-        new_balance = (
-            current_points - data.points
-        )
-
-        customer.loyalty_points = new_balance
-
-        loyalty = LoyaltyPoint(
-            customer_id=data.customer_id,
-            points_earned=0,
-            points_redeemed=data.points,
-            balance_points=new_balance,
-        )
-
-        try:
-            self.db.add(loyalty)
-            self.db.commit()
-            self.db.refresh(loyalty)
-        except IntegrityError:
-            self.db.rollback()
-            raise
-
-        return loyalty
-
-    def get_loyalty(
-        self,
-        tenant_id: int,
-        customer_id: int,
-    ):
-
-        self.get_customer(
-            tenant_id,
-            customer_id,
-        )
-
-        loyalty = (
-            self.db.query(LoyaltyPoint)
-            .filter(
-                LoyaltyPoint.customer_id
-                == customer_id
-            )
-            .order_by(
-                LoyaltyPoint.created_at.desc()
-            )
-            .first()
-        )
-
-        if loyalty is None:
-            raise NotFoundException(
-                "No loyalty record found"
-            )
-
-        return loyalty
-
-    def get_loyalty_history(
-        self,
-        tenant_id: int,
-        customer_id: int,
-    ):
-
-        self.get_customer(
-            tenant_id,
-            customer_id,
-        )
-
-        history = (
-            self.db.query(LoyaltyPoint)
-            .filter(
-                LoyaltyPoint.customer_id
-                == customer_id
-            )
-            .order_by(
-                LoyaltyPoint.created_at.desc()
-            )
-            .all()
-        )
-
-        if not history:
-            return {
-                "success": True,
-                "message": "No loyalty history found for this customer",
-                "data": [],
-            }
-
-        return history
-
-    def send_communication(
-        self,
-        tenant_id: int,
-        data,
-    ):
-
-        self.get_customer(
-            tenant_id,
-            data.customer_id,
-        )
-
-        comm_type = (
-            data.communication_type
-            .strip()
-            .upper()
-        )
-
-        communication = CustomerCommunication(
-            customer_id=data.customer_id,
-            communication_type=comm_type,
-            message=data.message.strip(),
-            delivery_status="SENT",
-        )
-
-        try:
-            self.db.add(communication)
-            self.db.commit()
-            self.db.refresh(communication)
-        except IntegrityError:
-            self.db.rollback()
-            raise
-
-        return communication
-
-    def get_communications(
-        self,
-        tenant_id: int,
-    ):
-
-        return (
-            self.db.query(CustomerCommunication)
-            .join(
-                Customer,
-                Customer.id
-                == CustomerCommunication.customer_id,
-            )
-            .filter(
-                Customer.tenant_id == tenant_id
-            )
-            .order_by(
-                CustomerCommunication.sent_at.desc()
-            )
-            .all()
-        )
-
-    def get_communications_by_type(
-        self,
-        tenant_id: int,
-        communication_type: str,
-    ):
-
-        return (
-            self.db.query(CustomerCommunication)
-            .join(
-                Customer,
-                Customer.id
-                == CustomerCommunication.customer_id,
-            )
-            .filter(
-                Customer.tenant_id == tenant_id,
-                CustomerCommunication.communication_type
-                == communication_type.strip().upper(),
-            )
-            .order_by(
-                CustomerCommunication.sent_at.desc()
-            )
-            .all()
-        )
-
-    def create_referral(
-        self,
-        tenant_id: int,
-        data,
-    ):
-
-        self.get_customer(
-            tenant_id,
-            data.customer_id,
-        )
-
-        if data.referred_customer_id:
-
-            if (
-                data.referred_customer_id
-                == data.customer_id
-            ):
-                raise AppException(
-                    "Customer cannot refer themselves",
-                    status_code=422,
-                )
-
-            self.get_customer(
-                tenant_id,
-                data.referred_customer_id,
-            )
-
-            existing = (
-                self.db.query(CustomerReferral)
-                .filter(
-                    CustomerReferral.customer_id
-                    == data.customer_id,
-                    CustomerReferral.referred_customer_id
-                    == data.referred_customer_id,
-                )
-                .first()
-            )
-
-            if existing:
-                raise ConflictException(
-                    "Referral already exists for this customer"
-                )
-
-        code = (
-            f"REF-{uuid.uuid4().hex[:8].upper()}"
-        )
-
-        for _ in range(5):
-
-            existing_code = (
-                self.db.query(CustomerReferral)
-                .filter(
-                    CustomerReferral.referral_code
-                    == code
-                )
-                .first()
-            )
-
-            if not existing_code:
-                break
-
-            code = (
-                f"REF-{uuid.uuid4().hex[:8].upper()}"
-            )
-
-        referral = CustomerReferral(
-            customer_id=data.customer_id,
-            referred_customer_id=data.referred_customer_id,
-            referral_code=code,
-            reward_amount=(
-                100
-                if data.referred_customer_id
-                else 0
-            ),
-        )
-
-        try:
-            self.db.add(referral)
-            self.db.commit()
-            self.db.refresh(referral)
-        except IntegrityError as exc:
-            self.db.rollback()
-            err_msg = str(exc).lower()
-            if "referral_code" in err_msg or "unique" in err_msg:
-                raise ConflictException(
-                    "Referral already exists for this customer"
-                )
-            raise
-
-        return referral
-
-    def get_referrals(
-        self,
-        tenant_id: int,
-    ):
-
-        return (
-            self.db.query(CustomerReferral)
-            .join(
-                Customer,
-                Customer.id
-                == CustomerReferral.customer_id,
-            )
-            .filter(
-                Customer.tenant_id == tenant_id
-            )
-            .all()
-        )
-
-    def create_note(
-        self,
-        tenant_id: int,
-        data,
-        user_id: int | None = None,
-    ):
-
-        self.get_customer(
-            tenant_id,
-            data.customer_id,
-        )
-
-        note = CustomerNote(
-            customer_id=data.customer_id,
-            note=data.note.strip(),
-            created_by=user_id,
-        )
-
-        try:
-            self.db.add(note)
-            self.db.commit()
-            self.db.refresh(note)
-        except IntegrityError:
-            self.db.rollback()
-            raise
-
-        return note
-
-    def get_notes(
-        self,
-        tenant_id: int,
-        customer_id: int | None = None,
-    ):
-
-        if customer_id is not None:
-            self.get_customer(
-                tenant_id,
-                customer_id,
-            )
-
-        query = (
-            self.db.query(CustomerNote)
-            .join(
-                Customer,
-                Customer.id
-                == CustomerNote.customer_id,
-            )
-            .filter(
-                Customer.tenant_id == tenant_id
-            )
-        )
-
-        if customer_id is not None:
-            query = query.filter(
-                CustomerNote.customer_id
-                == customer_id
-            )
-
-        notes = (
-            query
-            .order_by(
-                CustomerNote.created_at.desc()
-            )
-            .all()
-        )
-
-        if customer_id is not None and not notes:
-            return {
-                "success": True,
-                "message": "No notes found for this customer",
-                "data": [],
-            }
-
-        return notes
-
-    def send_campaign(
-        self,
-        tenant_id: int,
-        data,
-    ):
-
-        if not data.customer_ids:
-            raise AppException(
-                "customer_ids cannot be empty"
-            )
-
-        comm_type = (
-            data.communication_type
-            .strip()
-            .upper()
-        )
-
-        if comm_type not in (
-            "SMS",
-            "WHATSAPP",
-            "EMAIL",
-        ):
-            raise AppException(
-                "Invalid communication type"
-            )
-
-        for customer_id in data.customer_ids:
-            self.get_customer(
-                tenant_id,
-                customer_id,
-            )
-
-        sent_count = 0
-        failed_count = 0
-
-        for customer_id in data.customer_ids:
-
-            communication = CustomerCommunication(
-                customer_id=customer_id,
-                communication_type=comm_type,
-                message=data.message.strip(),
-                delivery_status="SENT",
-            )
-
-            self.db.add(communication)
-            sent_count += 1
-
-        self.db.commit()
 
         return {
-            "campaign_id": data.campaign_id,
-            "sent_count": sent_count,
-            "failed_count": failed_count,
-            "message": "Campaign sent successfully",
-            "total_customers": len(
-                data.customer_ids
-            ),
+            "total_orders": total_orders,
+            "total_revenue": total_revenue,
+            "draft_orders": draft_orders,
+            "confirmed_orders": confirmed_orders,
+            "completed_orders": completed_orders,
+            "cancelled_orders": cancelled_orders,
+            "average_order_value": avg_order_value,
         }
 
-    def get_top_customers(
+    def get_order_receipt(
         self,
         tenant_id: int,
-    ):
+        order_id: int,
+    ) -> dict:
+        order = self.get_order(tenant_id, order_id)
+        store = self.db.query(Store).filter(Store.id == order.store_id, Store.tenant_id == tenant_id).first()
+        store_name = store.name if store else "Retail Store"
+        store_code = store.code if store else None
+        store_address = f"{store.city or ''}, {store.state or ''} {store.pincode or ''}".strip(", ") if store else None
 
-        return (
-            self.db.query(Customer)
-            .filter(
-                Customer.tenant_id == tenant_id
-            )
-            .order_by(
-                Customer.total_spend.desc()
-            )
-            .limit(10)
-            .all()
-        )
+        customer_name = None
+        customer_phone = None
+        if order.customer:
+            customer_name = order.customer.name
+            customer_phone = order.customer.phone
 
-    def get_retention_report(
-        self,
-        tenant_id: int,
-    ):
-
-        total = (
-            self.db.query(Customer)
-            .filter(
-                Customer.tenant_id == tenant_id
-            )
-            .count()
-        )
-
-        active = (
-            self.db.query(Customer)
-            .filter(
-                Customer.tenant_id == tenant_id,
-                Customer.status == "active",
-            )
-            .count()
-        )
-
-        inactive = (
-            self.db.query(Customer)
-            .filter(
-                Customer.tenant_id == tenant_id,
-                Customer.status == "inactive",
-            )
-            .count()
-        )
-
-        retention_rate = 0
-
-        if total > 0:
-            retention_rate = round(
-                (active / total) * 100,
-                2,
-            )
-
-        return {
-            "total_customers": total,
-            "active_customers": active,
-            "inactive_customers": inactive,
-            "retention_rate": retention_rate,
-        }
-
-    def get_lifetime_value(
-        self,
-        tenant_id: int,
-    ):
-
-        customers = (
-            self.db.query(Customer)
-            .filter(
-                Customer.tenant_id == tenant_id
-            )
-            .order_by(
-                Customer.total_spend.desc()
-            )
-            .all()
-        )
-
-        result = []
-
-        for customer in customers:
-
-            result.append({
-                "customer_id": customer.id,
-                "customer_name": customer.name,
-                "total_spend": customer.total_spend,
-                "loyalty_points": (
-                    customer.loyalty_points
-                ),
+        items_receipt = []
+        for it in order.items:
+            p_name = it.product_name or (it.product.name if it.product else f"Product #{it.product_id}")
+            items_receipt.append({
+                "name": p_name,
+                "quantity": it.quantity,
+                "unit_price": it.unit_price,
+                "tax_amount": it.tax_amount,
+                "discount_amount": it.discount_amount,
+                "total_amount": it.total_amount,
             })
 
-        return result
+        lines = []
+        lines.append("=" * 40)
+        lines.append(store_name.center(40))
+        if store_code:
+            lines.append(f"Store Code: {store_code}".center(40))
+        if store_address:
+            lines.append(store_address.center(40))
+        lines.append("-" * 40)
+        lines.append(f"Order #: {order.order_number}")
+        created_str = order.created_at.strftime("%Y-%m-%d %H:%M:%S") if order.created_at else ""
+        lines.append(f"Date:    {created_str}")
+        if customer_name:
+            lines.append(f"Cust:    {customer_name} ({customer_phone or 'N/A'})")
+        lines.append("-" * 40)
+        lines.append(f"{'Item':<18} {'Qty':>3} {'Price':>8} {'Total':>8}")
+        lines.append("-" * 40)
+        for it in items_receipt:
+            name_cut = it["name"][:18]
+            lines.append(f"{name_cut:<18} {it['quantity']:>3} {it['unit_price']:>8.2f} {it['total_amount']:>8.2f}")
+        lines.append("-" * 40)
+        lines.append(f"{'Subtotal:':<24} {order.subtotal:>15.2f}")
+        if order.discount_amount > 0:
+            lines.append(f"{'Discount:':<24} -{order.discount_amount:>14.2f}")
+        if order.cgst_amount > 0:
+            lines.append(f"{'CGST:':<24} {order.cgst_amount:>15.2f}")
+        if order.sgst_amount > 0:
+            lines.append(f"{'SGST:':<24} {order.sgst_amount:>15.2f}")
+        if order.igst_amount > 0:
+            lines.append(f"{'IGST:':<24} {order.igst_amount:>15.2f}")
+        if order.round_off != 0:
+            lines.append(f"{'Round Off:':<24} {order.round_off:>15.2f}")
+        lines.append("-" * 40)
+        lines.append(f"{'TOTAL AMOUNT:':<20} INR {order.total_amount:>15.2f}")
+        lines.append(f"Payment Status: {order.payment_status.upper()}")
+        if order.payment_method:
+            lines.append(f"Payment Method: {order.payment_method.upper()}")
+        lines.append("=" * 40)
+        lines.append("Thank you for shopping with us!".center(40))
+        lines.append("=" * 40)
 
-    def get_loyalty_report(
+        formatted_receipt = "\n".join(lines)
+
+        return {
+            "order_id": order.id,
+            "order_number": order.order_number,
+            "store_name": store_name,
+            "store_code": store_code,
+            "store_address": store_address,
+            "customer_name": customer_name,
+            "customer_phone": customer_phone,
+            "items": items_receipt,
+            "subtotal": order.subtotal,
+            "discount_amount": order.discount_amount,
+            "cgst_amount": order.cgst_amount,
+            "sgst_amount": order.sgst_amount,
+            "igst_amount": order.igst_amount,
+            "tax_amount": order.tax_amount,
+            "round_off": order.round_off,
+            "total_amount": order.total_amount,
+            "payment_status": order.payment_status,
+            "payment_method": order.payment_method,
+            "created_at": order.created_at,
+            "formatted_receipt": formatted_receipt,
+        }
+
+    def export_orders(
         self,
         tenant_id: int,
-    ):
-
-        loyalty = (
-            self.db.query(LoyaltyPoint)
-            .join(
-                Customer,
-                Customer.id
-                == LoyaltyPoint.customer_id,
-            )
-            .filter(
-                Customer.tenant_id == tenant_id
-            )
-            .all()
+        format: str = "excel",
+        store_id: Optional[int] = None,
+        status: Optional[str] = None,
+        order_type: Optional[str] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+    ) -> tuple[BytesIO, str, str]:
+        orders = self.repo.list_orders(
+            tenant_id=tenant_id,
+            store_id=store_id,
+            status=status,
+            order_type=order_type,
+            date_from=date_from,
+            date_to=date_to,
+            skip=0,
+            limit=10000,
         )
 
-        result = []
+        headers = [
+            "Order ID",
+            "Order Number",
+            "Store ID",
+            "Order Type",
+            "Status",
+            "Payment Status",
+            "Payment Method",
+            "Items Count",
+            "Subtotal",
+            "Discount Amount",
+            "Tax Amount",
+            "Total Amount",
+            "Created At",
+        ]
 
-        for item in loyalty:
-
-            result.append({
-                "customer_id": item.customer_id,
-                "customer_name": item.customer.name,
-                "points_earned": item.points_earned,
-                "points_redeemed": item.points_redeemed,
-                "balance_points": item.balance_points,
-            })
-
-        return result
-
-    def export_directory(
-        self,
-        tenant_id: int,
-        status="all",
-        format="excel",
-    ):
-
-        customers = get_customers_for_export(
-            self.db,
-            tenant_id,
-            status,
-        )
+        rows = []
+        for o in orders:
+            rows.append([
+                o.id,
+                o.order_number,
+                o.store_id,
+                o.order_type,
+                o.status,
+                o.payment_status,
+                o.payment_method or "",
+                len(o.items),
+                float(o.subtotal),
+                float(o.discount_amount),
+                float(o.tax_amount),
+                float(o.total_amount),
+                o.created_at.strftime("%Y-%m-%d %H:%M:%S") if o.created_at else "",
+            ])
 
         if format == "excel":
-            return self._create_excel(
-                customers
+            output = ExcelExportService().export_to_stream(
+                sheet_title="Orders",
+                headers=headers,
+                rows=rows,
             )
-
-        elif format == "pdf":
-            return self._create_pdf(
-                customers
+            return (
+                output,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "orders.xlsx",
             )
+        elif format == "csv":
+            import csv
+            from io import StringIO
+            str_output = StringIO()
+            writer = csv.writer(str_output)
+            writer.writerow(headers)
+            writer.writerows(rows)
+            bytes_output = BytesIO(str_output.getvalue().encode("utf-8"))
+            bytes_output.seek(0)
+            return (
+                bytes_output,
+                "text/csv",
+                "orders.csv",
+            )
+        else:
+            raise AppException("Unsupported export format", status_code=400)
 
-        raise ValueError(
-            "Invalid format"
-        )
-
-    def _create_excel(
-        self,
-        customers,
-    ):
-        headers = [
-            "ID",
-            "Name",
-            "Email",
-            "Phone",
-            "Status",
-            "Loyalty Points",
-        ]
-        rows = [
-            [
-                customer.id,
-                customer.name,
-                customer.email or "",
-                customer.phone or "",
-                customer.status,
-                customer.loyalty_points or 0,
-            ]
-            for customer in customers
-        ]
-        return ExcelExportService().export_to_stream(
-            sheet_title="Customer Directory",
-            headers=headers,
-            rows=rows,
-        )
-
-    def _create_pdf(
-        self,
-        customers,
-    ):
-
-        output = BytesIO()
-
-        document = SimpleDocTemplate(
-            output,
-            pagesize=A4,
-        )
-
-        data = [
-            [
-                "ID",
-                "Name",
-                "Email",
-                "Phone",
-                "Status",
-                "Points",
-            ]
-        ]
-
-        for customer in customers:
-
-            data.append([
-                customer.id,
-                customer.name,
-                customer.email or "",
-                customer.phone or "",
-                customer.status,
-                customer.loyalty_points or 0,
-            ])
-
-        table = Table(data)
-
-        table.setStyle(
-            TableStyle([
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (-1, 0),
-                    colors.grey,
-                ),
-                (
-                    "TEXTCOLOR",
-                    (0, 0),
-                    (-1, 0),
-                    colors.white,
-                ),
-                (
-                    "GRID",
-                    (0, 0),
-                    (-1, -1),
-                    1,
-                    colors.black,
-                ),
-                (
-                    "PADDING",
-                    (0, 0),
-                    (-1, -1),
-                    5,
-                ),
-            ])
-        )
-
-        document.build([table])
-
-        output.seek(0)
-
-        return output
+from app.services.customer_service import CustomerService
