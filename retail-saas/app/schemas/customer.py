@@ -1550,3 +1550,14 @@ class CustomerDeleteResponse(BaseModel):
     message: str
     customer_id: int
 
+
+class SendLedgerPdfResponse(BaseModel):
+    success: bool = True
+    message: str
+    customer_id: int
+    customer_name: str
+    phone: Optional[str] = None
+    outstanding_balance: Decimal
+    communication_id: int
+
+

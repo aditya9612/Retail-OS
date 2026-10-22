@@ -55,6 +55,7 @@ from app.schemas.customer import (
     CustomerLedgerStatementResponse,
     FeedbackAnalyticsResponse,
     CustomerDeleteResponse,
+    SendLedgerPdfResponse,
 )
 from app.services.customer_service import (
     fetch_customers,
@@ -628,6 +629,48 @@ def record_customer_payment(
         user.tenant_id,
         customer_id,
         data,
+    )
+
+
+@router.get(
+    "/{customer_id}/ledger/pdf",
+)
+def export_customer_ledger_pdf(
+    customer_id: int = Path(..., gt=0),
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    pdf_stream = CustomerService(db).export_ledger_pdf(
+        user.tenant_id,
+        customer_id,
+        from_date=from_date,
+        to_date=to_date,
+    )
+    return StreamingResponse(
+        pdf_stream,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=customer_{customer_id}_ledger.pdf"
+        },
+    )
+
+
+@router.post(
+    "/{customer_id}/send-ledger-pdf",
+    response_model=SendLedgerPdfResponse,
+)
+def send_customer_ledger_pdf(
+    customer_id: int = Path(..., gt=0),
+    channel: str = Query("WHATSAPP", pattern="^(WHATSAPP|SMS|EMAIL)$"),
+    user: User = Depends(require_permission("customers:write")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).send_ledger_pdf(
+        user.tenant_id,
+        customer_id,
+        channel=channel,
     )
 
 

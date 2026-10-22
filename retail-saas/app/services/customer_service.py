@@ -1,16 +1,13 @@
 from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
+from importlib import import_module
 from typing import Optional, Union
 import uuid
 
 from sqlalchemy import extract, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-
 from app.core.exceptions import (
     AppException,
     ConflictException,
@@ -33,12 +30,16 @@ from app.repositories.customer_repo import (
     get_filtered_customers,
     get_customer_stats,
     get_customers_for_export,
+    delete_customer as repo_delete_customer,
 )
 from app.schemas.customer import (
     CustomerLedgerStatementResponse,
     FeedbackAnalyticsResponse,
 )
 from app.services.excel_export_service import ExcelExportService
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
 
 def fetch_customers(
@@ -1168,11 +1169,118 @@ class CustomerService:
         tenant_id: int,
         customer_id: int,
     ) -> dict:
-        customer = self.get_customer(tenant_id, customer_id)
-        customer.status = "inactive"
-        self.db.commit()
+        customer = repo_delete_customer(self.db, tenant_id, customer_id)
         return {
             "success": True,
             "message": "Customer deactivated successfully",
             "customer_id": customer.id,
+        }
+
+    def export_ledger_pdf(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
+    ) -> BytesIO:
+        colors = import_module("reportlab.lib.colors")
+        A4 = import_module("reportlab.lib.pagesizes").A4
+        platypus = import_module("reportlab.platypus")
+        SimpleDocTemplate = platypus.SimpleDocTemplate
+        Table = platypus.Table
+        TableStyle = platypus.TableStyle
+
+        statement = self.get_customer_ledger(tenant_id, customer_id, from_date, to_date)
+        customer = self.get_customer(tenant_id, customer_id)
+
+        output = BytesIO()
+        document = SimpleDocTemplate(
+            output,
+            pagesize=A4,
+            leftMargin=30,
+            rightMargin=30,
+            topMargin=30,
+            bottomMargin=30,
+        )
+
+        data = [
+            ["CUSTOMER KHATA / ACCOUNT LEDGER", "", "", "", ""],
+            [f"Customer: {customer.name}", "", f"Phone: {customer.phone or 'N/A'}", "", ""],
+            [f"Credit Limit: Rs. {statement.credit_limit:,.2f}", "", f"Outstanding Balance: Rs. {statement.outstanding_balance:,.2f}", "", ""],
+            [f"Total Debit: Rs. {statement.total_debit:,.2f}", "", f"Total Credit: Rs. {statement.total_credit:,.2f}", "", ""],
+            ["", "", "", "", ""],
+            ["Date", "Type", "Reference", "Amount (Rs.)", "Balance After (Rs.)"],
+        ]
+
+        if statement.entries:
+            for entry in statement.entries:
+                created_str = (
+                    entry.created_at.strftime("%Y-%m-%d %H:%M")
+                    if hasattr(entry.created_at, "strftime")
+                    else str(entry.created_at)[:16]
+                )
+                data.append([
+                    created_str,
+                    entry.entry_type,
+                    entry.reference_no or "-",
+                    f"{entry.amount:,.2f}",
+                    f"{entry.balance_after:,.2f}",
+                ])
+        else:
+            data.append(["No ledger transactions found", "", "", "", ""])
+
+        table = Table(data, colWidths=[110, 65, 120, 110, 130])
+        table.setStyle(
+            TableStyle([
+                ("SPAN", (0, 0), (-1, 0)),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e293b")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, 0), 14),
+                ("BACKGROUND", (0, 5), (-1, 5), colors.HexColor("#e2e8f0")),
+                ("FONTNAME", (0, 5), (-1, 5), "Helvetica-Bold"),
+                ("GRID", (0, 5), (-1, -1), 0.5, colors.HexColor("#94a3b8")),
+                ("PADDING", (0, 0), (-1, -1), 6),
+            ])
+        )
+        document.build([table])
+        output.seek(0)
+        return output
+
+    def send_ledger_pdf(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        channel: str = "WHATSAPP",
+    ) -> dict:
+        customer = self.get_customer(tenant_id, customer_id)
+        # Generate the PDF to ensure it builds correctly
+        self.export_ledger_pdf(tenant_id, customer_id)
+
+        comm_type = channel.strip().upper() if channel else "WHATSAPP"
+        message_body = (
+            f"Dear {customer.name}, your account khata statement has been generated. "
+            f"Current Outstanding Dues: Rs. {customer.outstanding_balance:,.2f}. "
+            f"Official Ledger PDF has been sent to your {comm_type}."
+        )
+
+        communication = CustomerCommunication(
+            customer_id=customer.id,
+            communication_type=comm_type,
+            message=message_body,
+            delivery_status="SENT",
+        )
+        self.db.add(communication)
+        self.db.commit()
+        self.db.refresh(communication)
+
+        return {
+            "success": True,
+            "message": f"Ledger PDF statement sent successfully via {comm_type}",
+            "customer_id": customer.id,
+            "customer_name": customer.name,
+            "phone": customer.phone,
+            "outstanding_balance": customer.outstanding_balance,
+            "communication_id": communication.id,
         }

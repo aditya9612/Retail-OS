@@ -330,3 +330,72 @@ def test_cross_tenant_isolation_on_ledger_and_delete(tenant_a, tenant_b):
         headers=headers_b,
     )
     assert del_b.status_code == 404
+
+
+def test_customer_ledger_pdf_export_and_send(tenant_a, tenant_b):
+    headers_a, _ = tenant_a
+    headers_b, _ = tenant_b
+
+    # 1. Create Customer
+    c_res = client.post(
+        "/api/v1/customers",
+        headers=headers_a,
+        json={
+            "name": "Vikas Shinde",
+            "phone": random_phone(),
+            "email": random_email("vikas"),
+            "credit_limit": 15000.00,
+        },
+    )
+    assert c_res.status_code == 201
+    customer_id = c_res.json()["id"]
+
+    # 2. Add Payment to ledger
+    pay_res = client.post(
+        f"/api/v1/customers/{customer_id}/ledger/payment",
+        headers=headers_a,
+        json={
+            "amount": 2500.00,
+            "payment_method": "upi",
+            "reference_no": "UPI-KHATA-001",
+            "notes": "Advance payment for account",
+        },
+    )
+    assert pay_res.status_code == 201
+
+    # 3. Export Ledger PDF
+    pdf_res = client.get(
+        f"/api/v1/customers/{customer_id}/ledger/pdf",
+        headers=headers_a,
+    )
+    assert pdf_res.status_code == 200
+    assert "application/pdf" in pdf_res.headers.get("content-type", "")
+    assert pdf_res.content.startswith(b"%PDF")
+
+    # 4. Send Ledger PDF via WhatsApp
+    send_res = client.post(
+        f"/api/v1/customers/{customer_id}/send-ledger-pdf?channel=WHATSAPP",
+        headers=headers_a,
+    )
+    assert send_res.status_code == 200
+    send_data = send_res.json()
+    assert send_data["success"] is True
+    assert send_data["customer_id"] == customer_id
+    assert send_data["communication_id"] > 0
+    assert "WHATSAPP" in send_data["message"]
+
+    # 5. Verify communication history recorded
+    wa_history = client.get(
+        "/api/v1/customers/notifications/whatsapp",
+        headers=headers_a,
+    )
+    assert wa_history.status_code == 200
+    wa_list = wa_history.json()["data"]
+    assert len(wa_list) >= 1
+    matched = any("Ledger PDF" in m.get("message", "") for m in wa_list)
+    assert matched is True
+
+    # 6. Tenant B cannot access PDF or send PDF for Tenant A's customer
+    assert client.get(f"/api/v1/customers/{customer_id}/ledger/pdf", headers=headers_b).status_code == 404
+    assert client.post(f"/api/v1/customers/{customer_id}/send-ledger-pdf", headers=headers_b).status_code == 404
+

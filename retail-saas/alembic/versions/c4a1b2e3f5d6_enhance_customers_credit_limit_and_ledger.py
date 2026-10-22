@@ -75,3 +75,4 @@ def downgrade() -> None:
         op.drop_column("customers", "outstanding_balance")
     if "credit_limit" in existing_cols:
         op.drop_column("customers", "credit_limit")
+
