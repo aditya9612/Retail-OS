@@ -1,4 +1,5 @@
-from typing import Optional, Literal
+
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
@@ -76,13 +77,15 @@ def credit_note_pdf(
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
-    credit_note = BillingService(db).get_credit_note(
+    billing_service = BillingService(db)
+
+    credit_note = billing_service.get_credit_note(
         user.tenant_id,
         credit_note_id,
         user=user,
     )
 
-    pdf_bytes = BillingService(db).generate_credit_note_pdf(
+    pdf_bytes = billing_service.generate_credit_note_pdf(
         user.tenant_id,
         credit_note_id,
         user=user,
@@ -94,6 +97,8 @@ def credit_note_pdf(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"{disposition}; filename=CN-{credit_note.credit_note_no}.pdf"
+            "Content-Disposition": (
+                f"{disposition}; filename=CN-{credit_note.credit_note_no}.pdf"
+            )
         },
     )

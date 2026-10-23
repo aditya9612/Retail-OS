@@ -1,3 +1,4 @@
+
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
@@ -39,6 +40,21 @@ class RefundCreate(BaseModel):
             )
         return v
 
+    @field_validator("reason", mode="before")
+    @classmethod
+    def validate_reason(cls, v):
+        if v is None:
+            return v
+        if isinstance(v, str):
+            v = v.strip()
+            if len(v) < 3:
+                raise ValueError(
+                    "Reason must contain at least 3 non-whitespace characters"
+                )
+            if len(v) > 500:
+                raise ValueError("Reason cannot exceed 500 characters")
+        return v
+
 
 class RefundResponse(BaseModel):
     id: int
@@ -64,6 +80,7 @@ class CreditNoteResponse(BaseModel):
     cgst_amount: Decimal
     sgst_amount: Decimal
     igst_amount: Decimal
+    reason: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -77,6 +94,21 @@ class CreditNoteCreate(BaseModel):
         description="Refund amount must be greater than 0",
     )
     reason: Optional[str] = Field(default=None, min_length=3, max_length=500)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def validate_reason(cls, v):
+        if v is None:
+            return v
+        if isinstance(v, str):
+            v = v.strip()
+            if len(v) < 3:
+                raise ValueError(
+                    "Reason must contain at least 3 non-whitespace characters"
+                )
+            if len(v) > 500:
+                raise ValueError("Reason cannot exceed 500 characters")
+        return v
 
 
 class PaymentSplit(BaseModel):
@@ -113,8 +145,18 @@ class PaymentSplit(BaseModel):
 
 
 class TenderChangeRequest(BaseModel):
-    payable_amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2, description="Total amount payable")
-    tendered_amount: Decimal = Field(ge=0, max_digits=12, decimal_places=2, description="Cash tendered by customer")
+    payable_amount: Decimal = Field(
+        gt=0,
+        max_digits=12,
+        decimal_places=2,
+        description="Total amount payable",
+    )
+    tendered_amount: Decimal = Field(
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="Cash tendered by customer",
+    )
 
 
 class TenderChangeResponse(BaseModel):
@@ -146,7 +188,10 @@ class InvoiceCreate(BaseModel):
     same_state: bool = True
     items: Optional[list[InvoiceItemCreate]] = Field(
         default=None,
-        description="Optional direct line items. If omitted, items from user's active cart will be used.",
+        description=(
+            "Optional direct line items. If omitted, items from user's "
+            "active cart will be used."
+        ),
     )
     payments: list["PaymentSplit"] = Field(
         default_factory=list,
@@ -163,10 +208,23 @@ class ReturnItemRequest(BaseModel):
         description="Return quantity must be greater than 0",
     )
     reason: Optional[str] = Field(default=None, min_length=3, max_length=500)
-    condition: str = Field(default="sellable", description="Item condition: sellable, damaged, expired")
-    idempotency_key: Optional[str] = Field(default=None, max_length=100, description="Optional idempotency key")
-    issue_credit_note: bool = Field(default=False, description="Whether to atomically issue credit note")
-    refund_method: str = Field(default="cash", description="Refund method if issuing credit note")
+    condition: str = Field(
+        default="sellable",
+        description="Item condition: sellable, damaged, expired",
+    )
+    idempotency_key: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Optional idempotency key",
+    )
+    issue_credit_note: bool = Field(
+        default=False,
+        description="Whether to atomically issue credit note",
+    )
+    refund_method: str = Field(
+        default="cash",
+        description="Refund method if issuing credit note",
+    )
 
 
 class ThermalPrintResponse(BaseModel):
