@@ -33,6 +33,12 @@ class Refund(Base, TimestampMixin):
         index=True,
     )
 
+    shift_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pos_shifts.id"),
+        nullable=True,
+        index=True,
+    )
+
     refund_amount: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
         nullable=False,

@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, JSON, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -19,19 +19,24 @@ class POSShift(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_pos_shifts_tenant_store_status", "tenant_id", "store_id", "status"),
         Index("ix_pos_shifts_cashier_status", "tenant_id", "cashier_id", "status"),
+        Index("ix_pos_shifts_store_register_status", "tenant_id", "store_id", "register_id", "status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
     cashier_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    register_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
 
     opened_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    closed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open", index=True)
 
     opening_cash_float: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    opening_denominations: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     closing_cash_counted: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    closing_denominations: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     expected_cash: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     cash_variance: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -40,9 +45,9 @@ class POSShift(Base, TimestampMixin):
     tenant: Mapped["Tenant"] = relationship("Tenant")
     store: Mapped["Store"] = relationship("Store")
     cashier: Mapped["User"] = relationship("User", foreign_keys=[cashier_id])
+    closer: Mapped[Optional["User"]] = relationship("User", foreign_keys=[closed_by])
     movements: Mapped[list["POSCashMovement"]] = relationship(
         "POSCashMovement",
         back_populates="shift",
         cascade="all, delete-orphan",
     )
-

@@ -38,6 +38,12 @@ class Payment(Base, TimestampMixin):
         index=True,
     )
 
+    shift_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pos_shifts.id"),
+        nullable=True,
+        index=True,
+    )
+
     customer_id: Mapped[int | None] = mapped_column(
         ForeignKey("customers.id"),
         nullable=True,
