@@ -449,7 +449,7 @@ class DocumentRenderer:
         margin = 40
         y = height - margin
 
-        primary_color = colors.HexColor("#1F497D")       # Corporate Navy Blue
+        primary_color = colors.HexColor(getattr(branding, "primary_color", None) or "#1F497D")       # Corporate Theme Color
         box_bg = colors.HexColor("#F0F4F8")              # Light blue-gray fill
         border_color = colors.HexColor("#CBD5E1")        # Slate border
         text_dark = colors.HexColor("#1E293B")           # Deep slate text
@@ -728,10 +728,11 @@ class DocumentRenderer:
                 y -= 16
 
         # 10. Terms and Signature
-        if branding.footer_text:
+        terms_display = getattr(branding, "terms_and_conditions", None) or branding.footer_text
+        if terms_display:
             c.setFont(self.default_font, 8)
             c.setFillColor(text_muted)
-            c.drawString(margin, y, f"Terms: {branding.footer_text[:90]}")
+            c.drawString(margin, y, f"Terms: {terms_display[:90]}")
 
         if branding.show_signature:
             c.setFont(self.bold_font, 9)
@@ -748,7 +749,7 @@ class DocumentRenderer:
         margin = 40
         y = height - margin
 
-        primary_green = colors.HexColor("#1B5E20")       # Dark Emerald Green
+        primary_green = colors.HexColor(getattr(branding, "secondary_color", None) or "#1B5E20")       # Accent/POS Theme
         accent_green = colors.HexColor("#2E7D32")        # Emerald Accent
         fill_light_green = colors.HexColor("#E8F5E9")    # Light Green fill
         border_green = colors.HexColor("#A5D6A7")        # Soft green border

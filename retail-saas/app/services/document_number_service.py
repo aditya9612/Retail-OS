@@ -111,6 +111,7 @@ class DocumentNumberService:
         when configured, or defaulting to enterprise store-POS series.
         """
         prefix = None
+        padding_length = 6
         try:
             from app.services.document_settings_service import DocumentSettingsService
             branding = DocumentSettingsService(self.db).resolve_branding(
@@ -120,6 +121,8 @@ class DocumentNumberService:
                 cand = str(branding.invoice_prefix).strip()
                 if cand:
                     prefix = cand.rstrip("-")
+            if branding and getattr(branding, "padding_length", None):
+                padding_length = int(branding.padding_length)
         except Exception:
             pass
 
@@ -133,7 +136,7 @@ class DocumentNumberService:
             series_key = f"inv_{prefix.lower()}"[:64]
             while True:
                 seq = self._next_sequence(tenant_id, series_key, period_key)
-                inv_number = f"{prefix}-{period_key}-{seq:06d}"
+                inv_number = f"{prefix}-{period_key}-{seq:0{padding_length}d}"
                 collision = (
                     self.db.query(Invoice)
                     .filter(
@@ -149,7 +152,7 @@ class DocumentNumberService:
             series_key = f"inv_{store_code.lower()}_{pos_code.lower()}"[:64]
             while True:
                 seq = self._next_sequence(tenant_id, series_key, period_key)
-                inv_number = f"{store_code}-{pos_code}-{date_str}-{seq:06d}"
+                inv_number = f"{store_code}-{pos_code}-{date_str}-{seq:0{padding_length}d}"
                 collision = (
                     self.db.query(Invoice)
                     .filter(
