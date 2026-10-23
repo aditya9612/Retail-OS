@@ -29,8 +29,25 @@ class GstRateCreate(BaseModel):
 
 
 class GstRateUpdate(BaseModel):
+    hsn_code: Optional[str] = Field(
+        default=None,
+        min_length=4,
+        max_length=8,
+        description="HSN code must be 4 to 8 digits",
+    )
     gst_rate: Optional[Decimal] = Field(default=None, ge=0, le=100, description="GST rate must be 0, 5, 12, 18 or 28")
     status: Optional[bool] = None
+
+    @field_validator("hsn_code")
+    @classmethod
+    def validate_hsn_code(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if not value.isdigit():
+            raise ValueError("HSN code must contain digits only")
+        if not value.strip("0"):
+            raise ValueError("HSN code cannot consist only of zeroes")
+        return value
 
     @field_validator("gst_rate")
     @classmethod

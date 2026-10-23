@@ -8,7 +8,9 @@ from app.schemas.billing import (
     PaymentSplit,
     ReturnItemRequest,
 )
-from app.schemas.gst_rate import GstRateCreate
+from app.schemas.customer import CustomerNoteCreate
+from app.schemas.gst_rate import GstRateCreate, GstRateUpdate
+from app.schemas.user import UserUpdate
 from app.utils.validators import validate_aadhaar_number
 
 
@@ -16,6 +18,31 @@ def test_gst_rate_rejects_all_zero_hsn_code():
     with pytest.raises(ValidationError, match="HSN code cannot consist only of zeroes"):
         GstRateCreate(hsn_code="0000", gst_rate=Decimal("18"))
 
+    with pytest.raises(ValidationError, match="HSN code cannot consist only of zeroes"):
+        GstRateUpdate(hsn_code="0000")
+
+
+def test_customer_notes_reject_numeric_only_but_allow_normal_text():
+    for note in ("123456789", "12.34", "." * 20, "x" * 5001):
+        with pytest.raises(ValidationError):
+            CustomerNoteCreate(note=note)
+
+    assert CustomerNoteCreate(note="Follow up with the customer tomorrow.").note == (
+        "Follow up with the customer tomorrow."
+    )
+
+
+def test_user_update_validates_profile_photo_values():
+    for value in ("00", "photo.txt", "javascript:alert(1)", "//example.com/photo.jpg"):
+        with pytest.raises(ValidationError):
+            UserUpdate(profile_photo=value)
+
+    assert UserUpdate(profile_photo="/uploads/users/photo_123.jpg").profile_photo == (
+        "/uploads/users/photo_123.jpg"
+    )
+    assert UserUpdate(profile_photo="https://example.com/photo.webp").profile_photo == (
+        "https://example.com/photo.webp"
+    )
 
 def test_aadhaar_checksum_is_validated():
     assert validate_aadhaar_number("200000000009") == "200000000009"

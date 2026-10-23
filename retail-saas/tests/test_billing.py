@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from app.core.database import SessionLocal
 from app.main import app
 from app.models.invoice import Invoice
+from app.models.product import Product
 
 client = TestClient(app)
 
@@ -68,6 +69,10 @@ def test_cart_add_and_gst_totals(billing_setup):
     assert add_resp.status_code == 200
     cart = add_resp.json()
     assert len(cart["items"]) == 1
+    assert cart["items"][0]["product_name"] == product["name"]
+    assert Decimal(str(cart["items"][0]["quantity"])) == Decimal("2")
+    assert cart["items"][0]["unit_price"] == "200.00"
+    assert cart["items"][0]["total_amount"] == "472.00"
     assert cart["subtotal"] == "400.00"
     assert cart["gst_amount"] == "72.00"
     assert cart["grand_total"] == "472.00"
@@ -75,6 +80,43 @@ def test_cart_add_and_gst_totals(billing_setup):
     get_resp = client.get("/api/v1/billing/cart", headers=headers)
     assert get_resp.status_code == 200
     assert get_resp.json()["grand_total"] == "472.00"
+
+
+def test_cart_price_override_cannot_be_below_product_cost(billing_setup):
+    headers, store, product = billing_setup
+    db = SessionLocal()
+    try:
+        db.query(Product).filter(Product.id == product["id"]).update(
+            {Product.cost_price: Decimal("100.00")}
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    below_cost = client.post(
+        "/api/v1/billing/cart/add-item",
+        params={"store_id": store["id"]},
+        json={
+            "product_id": product["id"],
+            "quantity": "1",
+            "unit_price": "99.99",
+        },
+        headers=headers,
+    )
+    assert below_cost.status_code == 400
+    assert "cannot be lower than product cost price" in below_cost.text
+
+    at_cost = client.post(
+        "/api/v1/billing/cart/add-item",
+        params={"store_id": store["id"]},
+        json={
+            "product_id": product["id"],
+            "quantity": "1",
+            "unit_price": "100.00",
+        },
+        headers=headers,
+    )
+    assert at_cost.status_code == 200, at_cost.text
 
 
 def test_cart_apply_discount(billing_setup):
@@ -237,6 +279,7 @@ def test_checkout_split_payment_and_search(billing_setup):
     assert invoice_resp.status_code == 201
     invoice = invoice_resp.json()
     assert invoice["invoice_number"].startswith("INV-")
+    assert "--" not in invoice["invoice_number"]
     assert invoice["total_amount"] == "236.00"
 
     search_resp = client.get(

@@ -59,6 +59,36 @@ def test_users_module_enhancements_flow():
     cashier_id = cashier_user["id"]
     assert cashier_user["role"]["name"] == "cashier"
 
+    owner_identifiers = client.put(
+        f"/api/v1/users/{owner_id}",
+        headers=owner_headers,
+        json={"pan_number": "ABCDE1234F", "addhar_number": "200000000009"},
+    )
+    assert owner_identifiers.status_code == 200, owner_identifiers.text
+
+    duplicate_pan = client.put(
+        f"/api/v1/users/{cashier_id}",
+        headers=owner_headers,
+        json={"pan_number": "ABCDE1234F"},
+    )
+    assert duplicate_pan.status_code == 409
+    assert "PAN number is already in use" in duplicate_pan.text
+
+    duplicate_aadhaar = client.put(
+        f"/api/v1/users/{cashier_id}",
+        headers=owner_headers,
+        json={"addhar_number": "200000000009"},
+    )
+    assert duplicate_aadhaar.status_code == 409
+    assert "Aadhaar number is already in use" in duplicate_aadhaar.text
+
+    invalid_profile_photo = client.put(
+        f"/api/v1/users/{cashier_id}",
+        headers=owner_headers,
+        json={"profile_photo": "00"},
+    )
+    assert invalid_profile_photo.status_code == 422
+
     # 4. Login as Cashier (who does NOT have users:read or users:write)
     cashier_login_res = client.post(
         "/api/v1/auth/login",
@@ -111,4 +141,3 @@ def test_users_module_enhancements_flow():
     )
     assert delete_owner_res.status_code == 409
     assert "cannot delete" in delete_owner_res.text.lower() or "owner" in delete_owner_res.text.lower()
-

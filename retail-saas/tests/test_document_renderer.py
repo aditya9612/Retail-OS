@@ -97,6 +97,8 @@ def test_renderer_generates_valid_pdf(sample_branding, sample_invoice_data):
     assert "Test MegaMart" in parsed["text"]
     assert "Product Alpha" in parsed["text"]
     assert "354.00" in parsed["text"]
+    assert "INV-1001" in parsed["text"]
+    assert "--" not in parsed["text"]
 
 
 # 2. Template name compatibility (.html suffix)

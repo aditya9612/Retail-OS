@@ -13,7 +13,7 @@ class DocumentNumberService:
     """
     Enterprise-grade Document Numbering Engine for Retail-OS.
     Generates structured, atomic, concurrency-safe serial numbers for:
-    - Invoices:       {STORE}-{POS}-{YYYYMMDD}-{SEQUENCE}  (e.g. STR01-POS01-20261013-000001)
+    - Invoices:       INV-{STORE}-{POS}-{YYYYMMDD}-{SEQUENCE}  (e.g. INV-STR01-POS01-20261013-000001)
     - Credit Notes:   CN-{STORE}-{YYYYMMDD}-{SEQUENCE}    (e.g. CN-STR01-20261013-000001)
     - Orders:         ORD-{STORE}-{POS}-{YYYYMMDD}-{SEQ}  (e.g. ORD-STR01-POS01-20261013-000001)
     - Purchase Orders:PO-{STORE}-{YYYYMMDD}-{SEQUENCE}    (e.g. PO-STR01-20261013-000001)
@@ -106,7 +106,7 @@ class DocumentNumberService:
     ) -> str:
         """
         Generate invoice number in standard enterprise format:
-        STR01-POS01-YYYYMMDD-000001
+        INV-STR01-POS01-YYYYMMDD-000001
         """
         store_code = self._resolve_store_code(tenant_id, store_id)
         pos_code = self._resolve_pos_code(pos_id)
@@ -117,7 +117,7 @@ class DocumentNumberService:
 
         while True:
             seq = self._next_sequence(tenant_id, series_key, period_key)
-            inv_number = f"{store_code}-{pos_code}-{date_str}-{seq:06d}"
+            inv_number = f"INV-{store_code}-{pos_code}-{date_str}-{seq:06d}"
             # Ensure uniqueness against Invoice table
             collision = (
                 self.db.query(Invoice)
