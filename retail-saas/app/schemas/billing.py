@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -16,8 +17,90 @@ VALID_PAYMENT_MODES = [
 ]
 
 
+class InvoiceThermalMode(str, Enum):
+    preview = "preview"
+    view = "view"
+    download = "download"
+    pdf = "pdf"
+    html = "html"
+    json = "json"
+    text = "text"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        return None
+
+
+class RefundThermalMode(str, Enum):
+    preview = "preview"
+    view = "view"
+    download = "download"
+    pdf = "pdf"
+    html = "html"
+    json = "json"
+    text = "text"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        return None
+
+
+class RefundReceiptPdfMode(str, Enum):
+    download = "download"
+    preview = "preview"
+    view = "view"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        return None
+
+
+class InvoiceThermalResponse(BaseModel):
+    success: bool = True
+    message: str = "Invoice thermal receipt generated successfully"
+    invoice_id: int
+    invoice_number: str
+    store_name: str
+    grand_total: Decimal
+    is_reprint: bool = False
+    text_payload: str
+    html: str
+
+
 class InvoiceReprintRequest(BaseModel):
     printer_type: str = Field(default="generic", min_length=1, max_length=50)
+    mode: Optional[InvoiceThermalMode] = Field(
+        default=None,
+        description="Optional thermal output mode: preview, view, download, pdf, html, json, text",
+    )
+
+
+class InvoiceVoidRequest(BaseModel):
+    reason: Optional[str] = Field(
+        default="Customer cancelled at counter",
+        min_length=3,
+        max_length=500,
+        description="Reason for voiding the invoice",
+    )
+
+
+class InvoicePdfStatusResponse(BaseModel):
+    invoice_id: int
+    invoice_number: str
+    status: str
+    pdf_url: Optional[str] = None
 
 
 class RefundCreate(BaseModel):
@@ -40,6 +123,10 @@ class RefundCreate(BaseModel):
         return v
 
 
+class RefundRejectRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=500, description="Reason for rejecting the refund request")
+
+
 class RefundResponse(BaseModel):
     id: int
     tenant_id: int
@@ -47,11 +134,42 @@ class RefundResponse(BaseModel):
     refund_amount: Decimal
     refund_method: str
     status: str
-    reason: Optional[str]
-    approved_by: Optional[int]
+    reason: Optional[str] = None
+    approved_by: Optional[int] = None
     created_at: datetime
+    invoice_number: Optional[str] = None
+    credit_note_id: Optional[int] = None
+    credit_note_no: Optional[str] = None
+    store_id: Optional[int] = None
+    customer_id: Optional[int] = None
+    customer_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+
+class RefundThermalResponse(BaseModel):
+    success: bool = True
+    message: str = "Refund receipt voucher generated successfully"
+    refund_id: int
+    invoice_id: int
+    invoice_number: str
+    credit_note_no: Optional[str] = None
+    refund_amount: Decimal
+    refund_method: str
+    status: str
+    reason: Optional[str] = None
+    customer_name: str
+    customer_phone: str
+    store_name: str
+    approved_by_name: str
+    created_at: datetime
+    thermal_text: str
+    html: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+RefundReceiptResponse = RefundThermalResponse
 
 
 class CreditNoteResponse(BaseModel):
@@ -161,6 +279,16 @@ class InvoiceCreate(BaseModel):
     payments: list["PaymentSplit"] = Field(
         default_factory=list,
         max_length=5,
+    )
+    shift_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Optional active POS Shift ID to link invoice and payments",
+    )
+    idempotency_key: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Optional idempotency key to prevent duplicate checkouts",
     )
 
 

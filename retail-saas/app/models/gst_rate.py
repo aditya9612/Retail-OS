@@ -13,6 +13,8 @@ class GstRate(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)
     hsn_code: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    code_type: Mapped[str] = mapped_column(String(10), default="HSN", nullable=False)
     gst_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
     cgst: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
     sgst: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)

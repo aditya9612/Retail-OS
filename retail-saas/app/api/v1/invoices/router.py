@@ -8,10 +8,17 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.exceptions import ForbiddenException, NotFoundException
-from app.core.security import is_tenant_wide_authorized, require_permission
+from app.core.security import is_tenant_wide_authorized, require_operational_write, require_permission
 from app.models.store import Store
 from app.models.user import User
-from app.schemas.billing import InvoiceCreate, InvoiceReprintRequest
+from app.schemas.billing import (
+    InvoiceCreate,
+    InvoicePdfStatusResponse,
+    InvoiceReprintRequest,
+    InvoiceThermalMode,
+    InvoiceThermalResponse,
+    InvoiceVoidRequest,
+)
 from app.schemas.order import InvoiceResponse
 from app.services.billing_service import BillingService
 from app.tasks.invoice_tasks import generate_invoice_pdf_task
@@ -82,6 +89,8 @@ def search_invoices(
     date_from: Optional[datetime] = Query(default=None),
     date_to: Optional[datetime] = Query(default=None),
     store_id: Optional[int] = Query(default=None),
+    page: int = Query(default=1, ge=1, description="Page number"),
+    page_size: int = Query(default=50, ge=1, le=500, description="Items per page"),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
@@ -178,6 +187,8 @@ def search_invoices(
         date_to,
         effective_store_id,
         user=user,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -242,30 +253,120 @@ def invoice_pdf(
     )
 
 
-@router.post("/{invoice_id}/reprint")
-def reprint_invoice(
+@router.get(
+    "/{invoice_id}/thermal",
+    summary="Export Invoice / POS Thermal Receipt Slip (80mm ESC/POS)",
+    description=(
+        "Generates an 80mm ESC/POS thermal receipt slip for an issued sales invoice. "
+        "Supports 'preview' (visual receipt PNG image displayed directly in Swagger UI), "
+        "'view' (inline browser view with auto-print dialog), "
+        "'download' (raw ESC/POS text file attachment), "
+        "'pdf' (80mm formatted PDF receipt download), "
+        "'html' (styled HTML receipt layout), "
+        "'json' (structured JSON response), or "
+        "'text' (raw ESC/POS printer stream)."
+    ),
+    responses={
+        200: {
+            "model": InvoiceThermalResponse,
+            "description": "Thermal receipt preview (PNG), HTML render, PDF/Text download, or JSON payload.",
+            "content": {
+                "image/png": {
+                    "schema": {"type": "string", "format": "binary"},
+                    "description": "Visual 80mm thermal receipt PNG rendered directly in Swagger UI",
+                },
+                "text/html": {
+                    "schema": {"type": "string"},
+                    "description": "Styled 80mm thermal receipt HTML for browser preview or print",
+                },
+                "application/pdf": {
+                    "schema": {"type": "string", "format": "binary"},
+                    "description": "80mm thermal receipt PDF document",
+                },
+                "text/plain": {
+                    "schema": {"type": "string"},
+                    "description": "Raw 80mm ESC/POS thermal printer text stream",
+                },
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/InvoiceThermalResponse"},
+                    "description": "Structured JSON receipt payload",
+                },
+            },
+        }
+    },
+)
+def export_invoice_thermal(
     invoice_id: int,
-    data: InvoiceReprintRequest = None,
+    mode: InvoiceThermalMode = Query(
+        default=InvoiceThermalMode.preview,
+        description="Thermal receipt output mode: preview (visual image in Swagger UI), view (browser preview with print), download (ESC/POS text file), pdf (80mm PDF), html (raw HTML), json (structured JSON), text (raw ESC/POS text)",
+    ),
+    printer_type: Literal["generic", "epson", "tvs"] = Query(
+        default="generic",
+        description="Target thermal printer type",
+    ),
+    is_reprint: bool = Query(
+        default=False,
+        description="Whether to include DUPLICATE/REPRINT watermark on receipt",
+    ),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
-    printer_type = data.printer_type if data else "generic"
+    return BillingService(db).export_invoice_thermal(
+        user=user,
+        invoice_id=invoice_id,
+        mode=mode,
+        printer_type=printer_type,
+        is_reprint=is_reprint,
+    )
+
+
+@router.post(
+    "/{invoice_id}/reprint",
+    summary="Reprint Invoice Thermal Receipt",
+    description="Reprint an invoice thermal slip with '*** DUPLICATE / REPRINT ***' header. Supports optional 'mode' query parameter (preview, view, download, pdf, html, json, text).",
+)
+def reprint_invoice(
+    invoice_id: int,
+    data: Optional[InvoiceReprintRequest] = None,
+    mode: Optional[InvoiceThermalMode] = Query(
+        default=None,
+        description="Optional thermal output mode: preview, view, download, pdf, html, json, text. Defaults to structured JSON reprint response if omitted.",
+    ),
+    user: User = Depends(require_permission("billing:read")),
+    db: Session = Depends(get_db),
+):
+    printer_type = data.printer_type if data and data.printer_type else "generic"
+    selected_mode = mode or (data.mode if data else None)
+
+    if selected_mode and selected_mode != InvoiceThermalMode.json:
+        return BillingService(db).export_invoice_thermal(
+            user=user,
+            invoice_id=invoice_id,
+            mode=selected_mode,
+            printer_type=printer_type,
+            is_reprint=True,
+        )
+
     result = BillingService(db).reprint_invoice(
         user.tenant_id,
         invoice_id,
+        printer_type=printer_type,
         user=user,
     )
 
-    thermal = BillingService(db).get_thermal_payload(
-        user.tenant_id,
-        invoice_id,
-        printer_type,
-        user=user,
-    )
+    if selected_mode == InvoiceThermalMode.json:
+        return BillingService(db).export_invoice_thermal(
+            user=user,
+            invoice_id=invoice_id,
+            mode=InvoiceThermalMode.json,
+            printer_type=printer_type,
+            is_reprint=True,
+        )
 
     return {
         "invoice": InvoiceResponse.model_validate(result["invoice"]),
-        "print_payload": thermal,
+        "print_payload": result["print_payload"],
     }
 
 
@@ -302,3 +403,66 @@ def generate_invoice_async(
         "task_id": task.id,
         "invoice_id": invoice_id,
     }
+
+@router.get(
+    "/by-number/{invoice_number}",
+    response_model=InvoiceResponse,
+    summary="Lookup Invoice by Invoice Number",
+    description="Retrieves a tax invoice directly by its official invoice number (useful for barcode scanning).",
+)
+def get_invoice_by_number(
+    invoice_number: str,
+    user: User = Depends(require_permission("billing:read")),
+    db: Session = Depends(get_db),
+):
+    return BillingService(db).get_invoice_by_number(
+        user.tenant_id,
+        invoice_number,
+        user=user,
+    )
+
+
+@router.get(
+    "/{invoice_id}/pdf-status",
+    response_model=InvoicePdfStatusResponse,
+    summary="Check Invoice PDF Readiness Status",
+    description="Returns the PDF generation status and URL for an invoice.",
+)
+def get_invoice_pdf_status(
+    invoice_id: int,
+    user: User = Depends(require_permission("billing:read")),
+    db: Session = Depends(get_db),
+):
+    invoice = BillingService(db).get_invoice(
+        user.tenant_id,
+        invoice_id,
+        user=user,
+    )
+    pdf_url = invoice.pdf_url or f"/api/v1/invoices/{invoice.id}/pdf"
+    return InvoicePdfStatusResponse(
+        invoice_id=invoice.id,
+        invoice_number=invoice.invoice_number,
+        status="ready",
+        pdf_url=pdf_url,
+    )
+
+
+@router.post(
+    "/{invoice_id}/void",
+    response_model=InvoiceResponse,
+    dependencies=[Depends(require_operational_write)],
+    summary="Void or Cancel an Issued Tax Invoice",
+    description="Voids an unpaid or counter-cancelled invoice, restores stock, and cancels payments.",
+)
+def void_invoice(
+    invoice_id: int,
+    payload: InvoiceVoidRequest = InvoiceVoidRequest(),
+    user: User = Depends(require_permission("billing:write")),
+    db: Session = Depends(get_db),
+):
+    return BillingService(db).void_invoice(
+        user.tenant_id,
+        invoice_id,
+        reason=payload.reason,
+        user=user,
+    )
