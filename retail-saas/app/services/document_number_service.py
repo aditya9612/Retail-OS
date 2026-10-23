@@ -183,7 +183,6 @@ class DocumentNumberService:
             collision = (
                 self.db.query(CreditNote)
                 .filter(
-                    CreditNote.tenant_id == tenant_id,
                     CreditNote.credit_note_no == cn_number,
                 )
                 .first()

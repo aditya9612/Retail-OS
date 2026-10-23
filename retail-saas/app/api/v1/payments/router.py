@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from datetime import date
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -37,7 +38,7 @@ def get_payment_service(
     return PaymentService(db, user.tenant_id)
 
 
-@router.post("", response_model=PaymentResponse, dependencies=[Depends(require_operational_write)])
+@router.post("", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_operational_write)])
 def create_payment(
     data: PaymentCreate,
     service: PaymentService = Depends(get_payment_service),
@@ -97,7 +98,7 @@ def process_webhook(
     return service.webhook_handler(data)
 
 
-@router.post("/webhooks", response_model=PaymentWebhookLogResponse)
+@router.post("/webhooks", response_model=PaymentWebhookLogResponse, status_code=status.HTTP_201_CREATED)
 def create_webhook_log(
     data: PaymentWebhookLogCreate,
     service: PaymentService = Depends(get_payment_service),
@@ -107,9 +108,20 @@ def create_webhook_log(
 
 @router.get("/webhooks", response_model=list[PaymentWebhookLogResponse])
 def list_webhook_logs(
+    status: str | None = Query(default=None),
+    event_type: str | None = Query(default=None),
+    transaction_id: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
     service: PaymentService = Depends(get_payment_service),
 ):
-    return service.list_webhook_logs()
+    return service.list_webhook_logs(
+        status=status,
+        event_type=event_type,
+        transaction_id=transaction_id,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/webhooks/{log_id}", response_model=PaymentWebhookLogResponse)
@@ -131,6 +143,7 @@ def get_webhook_log(
 @router.post(
     "/payment-gateways",
     response_model=PaymentGatewayResponse,
+    status_code=status.HTTP_201_CREATED,
 )
 def create_payment_gateway(
     data: PaymentGatewayCreate,
@@ -196,6 +209,7 @@ def delete_payment_gateway(
 @router.post(
     "/payment-splits",
     response_model=PaymentSplitResponse,
+    status_code=status.HTTP_201_CREATED,
 )
 def create_payment_split(
     data: PaymentSplitCreate,
@@ -239,6 +253,7 @@ def get_payment_split(
 @router.post(
     "/settlements",
     response_model=SettlementResponse,
+    status_code=status.HTTP_201_CREATED,
 )
 def create_settlement(
     data: SettlementCreate,
@@ -252,9 +267,22 @@ def create_settlement(
     response_model=list[SettlementResponse],
 )
 def list_settlements(
+    gateway_id: int | None = Query(default=None, gt=0),
+    status: str | None = Query(default=None),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
     service: PaymentService = Depends(get_payment_service),
 ):
-    return service.list_settlements()
+    return service.list_settlements(
+        gateway_id=gateway_id,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get(

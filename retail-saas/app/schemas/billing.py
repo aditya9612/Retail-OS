@@ -179,6 +179,16 @@ class CreditNoteResponse(BaseModel):
     invoice_id: int
     refund_id: int
     refund_amount: Decimal
+    balance_amount: Optional[Decimal] = Decimal("0.00")
+    status: Optional[str] = "issued"
+    customer_id: Optional[int] = None
+    customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    invoice_number: Optional[str] = None
+    store_id: Optional[int] = None
+    valid_until: Optional[datetime] = None
+    is_expired: Optional[bool] = False
+    notes: Optional[str] = None
     cgst_amount: Decimal
     sgst_amount: Decimal
     igst_amount: Decimal
@@ -195,6 +205,70 @@ class CreditNoteCreate(BaseModel):
         description="Refund amount must be greater than 0",
     )
     reason: Optional[str] = Field(default=None, min_length=3, max_length=500)
+    refund_method: Optional[str] = Field(default=None, description="Refund method: store_credit, cash, upi, bank_transfer")
+    valid_days: Optional[int] = Field(default=90, ge=1, le=365, description="Validity period in days (default: 90)")
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+
+class CreditNoteValidateRequest(BaseModel):
+    credit_note_no: str = Field(min_length=1, max_length=50, description="Credit note number (e.g. CN-2026-000001)")
+    bill_amount: Optional[Decimal] = Field(default=None, gt=0, description="Current bill total to compute applicable deduction")
+
+
+class CreditNoteValidateResponse(BaseModel):
+    valid: bool
+    credit_note_id: int
+    credit_note_no: str
+    status: str
+    total_amount: Decimal
+    balance_amount: Decimal
+    applicable_amount: Decimal
+    customer_id: Optional[int] = None
+    customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    valid_until: Optional[datetime] = None
+    is_expired: bool = False
+    message: str
+
+
+class CreditNoteRedeemRequest(BaseModel):
+    credit_note_no: str = Field(min_length=1, max_length=50, description="Credit note number to redeem")
+    amount_to_redeem: Decimal = Field(gt=0, le=Decimal("999999.99"), description="Amount to deduct from credit note balance")
+    invoice_id: Optional[int] = Field(default=None, gt=0, description="Invoice ID where credit note is being applied")
+    order_id: Optional[int] = Field(default=None, gt=0, description="Order ID where credit note is being applied")
+    notes: Optional[str] = Field(default=None, max_length=255, description="Optional redemption notes")
+
+
+class CreditNoteRedeemResponse(BaseModel):
+    success: bool
+    credit_note_id: int
+    credit_note_no: str
+    amount_redeemed: Decimal
+    remaining_balance: Decimal
+    status: str
+    redemption_id: int
+    message: str
+
+
+class CreditNoteThermalResponse(BaseModel):
+    success: bool = True
+    message: str = "Credit note thermal receipt generated successfully"
+    credit_note_id: int
+    credit_note_no: str
+    invoice_id: int
+    invoice_number: str
+    refund_amount: Decimal
+    balance_amount: Decimal
+    status: str
+    customer_name: str
+    customer_phone: str
+    store_name: str
+    valid_until: Optional[str] = None
+    created_at: datetime
+    thermal_text: str
+    html: Optional[str] = None
+
+    model_config = {"from_attributes": True}
 
 
 class PaymentSplit(BaseModel):

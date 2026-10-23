@@ -2214,6 +2214,10 @@ class BillingService:
             refund.refund_amount,
         )
 
+        from datetime import timedelta
+        order = self.db.query(Order).filter(Order.id == invoice.order_id).first() if invoice.order_id else None
+        customer_id = order.customer_id if order else None
+
         credit_note = CreditNote(
             tenant_id=tenant_id,
             credit_note_no=self._generate_credit_note_number(
@@ -2222,6 +2226,10 @@ class BillingService:
             invoice_id=refund.invoice_id,
             refund_id=refund.id,
             refund_amount=refund.refund_amount,
+            balance_amount=refund.refund_amount,
+            status="issued",
+            customer_id=customer_id,
+            valid_until=datetime.utcnow() + timedelta(days=90),
             cgst_amount=gst["cgst_amount"],
             sgst_amount=gst["sgst_amount"],
             igst_amount=gst["igst_amount"],
@@ -2335,13 +2343,18 @@ class BillingService:
         refund_amount: Decimal,
         reason: str | None,
         approved_by_user_id: int,
+        refund_method: str = "store_credit",
+        valid_days: int = 90,
+        notes: Optional[str] = None,
         user: Optional[User] = None,
     ) -> CreditNote:
+        from datetime import timedelta
+
         refund = self.create_refund(
             tenant_id,
             invoice_id,
             refund_amount,
-            "cash",
+            refund_method,
             reason,
             user=user,
         )
@@ -2366,6 +2379,13 @@ class BillingService:
             raise NotFoundException(
                 "Credit note not created"
             )
+
+        if notes:
+            credit_note.notes = notes
+        if valid_days:
+            credit_note.valid_until = datetime.utcnow() + timedelta(days=valid_days)
+        self.db.commit()
+        self.db.refresh(credit_note)
 
         return credit_note
 
@@ -2955,6 +2975,13 @@ class BillingService:
         tenant_id: int,
         invoice_id: int | None = None,
         store_id: int | None = None,
+        credit_note_no: Optional[str] = None,
+        status: Optional[str] = None,
+        customer_id: Optional[int] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
         user: Optional[User] = None,
         system_context: bool = False,
     ) -> list[CreditNote]:
@@ -2979,12 +3006,29 @@ class BillingService:
             elif not is_tenant_wide_authorized(user, self.db):
                 raise ForbiddenException("Access denied: user has no assigned store")
 
-        return (
-            query.order_by(
-                CreditNote.created_at.desc()
-            )
-            .all()
+        if credit_note_no:
+            query = query.filter(CreditNote.credit_note_no.ilike(f"%{credit_note_no.strip()}%"))
+
+        if status:
+            query = query.filter(func.lower(CreditNote.status) == status.strip().lower())
+
+        if customer_id is not None:
+            query = query.filter(CreditNote.customer_id == customer_id)
+
+        if date_from:
+            query = query.filter(CreditNote.created_at >= date_from)
+
+        if date_to:
+            query = query.filter(CreditNote.created_at <= date_to)
+
+        query = query.order_by(
+            CreditNote.created_at.desc()
         )
+
+        if page is not None and page_size is not None and page > 0 and page_size > 0:
+            query = query.offset((page - 1) * page_size).limit(page_size)
+
+        return query.all()
 
     def get_credit_note(
         self,
@@ -3010,6 +3054,250 @@ class BillingService:
         self.get_invoice(tenant_id, credit_note.invoice_id, user=user, system_context=system_context)
 
         return credit_note
+
+    def get_credit_note_by_number(
+        self,
+        tenant_id: int,
+        credit_note_no: str,
+        user: Optional[User] = None,
+        system_context: bool = False,
+    ) -> CreditNote:
+        cn_num = credit_note_no.strip() if credit_note_no else ""
+        if not cn_num:
+            raise NotFoundException("Credit note number cannot be empty")
+
+        credit_note = (
+            self.db.query(CreditNote)
+            .filter(
+                CreditNote.tenant_id == tenant_id,
+                CreditNote.credit_note_no == cn_num,
+            )
+            .first()
+        )
+        if not credit_note:
+            raise NotFoundException(f"Credit note '{cn_num}' not found")
+
+        self.get_invoice(tenant_id, credit_note.invoice_id, user=user, system_context=system_context)
+        return credit_note
+
+    def validate_credit_note(
+        self,
+        tenant_id: int,
+        credit_note_no: str,
+        bill_amount: Optional[Decimal] = None,
+        user: Optional[User] = None,
+    ) -> dict:
+        cn = self.get_credit_note_by_number(tenant_id, credit_note_no, user=user)
+
+        now_ts = datetime.utcnow()
+        is_expired = False
+        if cn.valid_until and cn.valid_until < now_ts:
+            is_expired = True
+
+        balance = cn.balance_amount if cn.balance_amount is not None else cn.refund_amount
+        status = cn.status or "issued"
+
+        is_valid = True
+        msg = "Credit note is valid and available for redemption"
+
+        if status not in ("issued", "partially_redeemed"):
+            is_valid = False
+            msg = f"Credit note cannot be redeemed: current status is '{status}'"
+        elif is_expired:
+            is_valid = False
+            msg = f"Credit note expired on {cn.valid_until.strftime('%Y-%m-%d')}"
+        elif balance <= Decimal("0.00"):
+            is_valid = False
+            msg = "Credit note has zero remaining balance"
+
+        applicable_amt = Decimal("0.00")
+        if is_valid and balance > Decimal("0.00"):
+            if bill_amount is not None and bill_amount > Decimal("0.00"):
+                applicable_amt = min(balance, bill_amount)
+            else:
+                applicable_amt = balance
+
+        invoice = self.db.query(Invoice).filter(Invoice.id == cn.invoice_id).first()
+        order = self.db.query(Order).filter(Order.id == invoice.order_id).first() if invoice and invoice.order_id else None
+        customer = self.db.query(Customer).filter(Customer.id == (cn.customer_id or (order.customer_id if order else None))).first()
+
+        return {
+            "valid": is_valid,
+            "credit_note_id": cn.id,
+            "credit_note_no": cn.credit_note_no,
+            "status": status,
+            "total_amount": cn.refund_amount,
+            "balance_amount": balance,
+            "applicable_amount": applicable_amt,
+            "customer_id": customer.id if customer else None,
+            "customer_name": customer.name if customer else None,
+            "customer_phone": customer.phone if customer else None,
+            "valid_until": cn.valid_until,
+            "is_expired": is_expired,
+            "message": msg,
+        }
+
+    def redeem_credit_note(
+        self,
+        tenant_id: int,
+        credit_note_no: str,
+        amount_to_redeem: Decimal,
+        invoice_id: Optional[int] = None,
+        order_id: Optional[int] = None,
+        notes: Optional[str] = None,
+        user: Optional[User] = None,
+    ) -> dict:
+        from app.models.credit_note_redemption import CreditNoteRedemption
+
+        if amount_to_redeem <= Decimal("0.00"):
+            raise AppException("Redemption amount must be greater than zero")
+
+        cn = (
+            self.db.query(CreditNote)
+            .filter(
+                CreditNote.tenant_id == tenant_id,
+                CreditNote.credit_note_no == credit_note_no.strip(),
+            )
+            .with_for_update()
+            .first()
+        )
+        if not cn:
+            raise NotFoundException(f"Credit note '{credit_note_no}' not found")
+
+        self.get_invoice(tenant_id, cn.invoice_id, user=user)
+
+        now_ts = datetime.utcnow()
+        if cn.valid_until and cn.valid_until < now_ts:
+            raise AppException(f"Cannot redeem: Credit note expired on {cn.valid_until.strftime('%Y-%m-%d')}")
+
+        current_status = cn.status or "issued"
+        if current_status not in ("issued", "partially_redeemed"):
+            raise AppException(f"Cannot redeem credit note with status '{current_status}'")
+
+        current_balance = cn.balance_amount if cn.balance_amount is not None else cn.refund_amount
+        if amount_to_redeem > current_balance:
+            raise AppException(
+                f"Requested redemption amount ({amount_to_redeem}) exceeds available balance ({current_balance})"
+            )
+
+        new_balance = current_balance - amount_to_redeem
+        cn.balance_amount = new_balance
+        if new_balance == Decimal("0.00"):
+            cn.status = "redeemed"
+        else:
+            cn.status = "partially_redeemed"
+
+        redemption = CreditNoteRedemption(
+            tenant_id=tenant_id,
+            credit_note_id=cn.id,
+            invoice_id=invoice_id,
+            order_id=order_id,
+            amount_redeemed=amount_to_redeem,
+            notes=notes,
+            created_by=user.id if user else None,
+        )
+        self.db.add(redemption)
+        self.db.flush()
+
+        AuditService(self.db).log(
+            tenant_id,
+            user.id if user else 0,
+            "credit_note_redeemed",
+            "credit_note",
+            cn.id,
+            {
+                "credit_note_no": cn.credit_note_no,
+                "amount_redeemed": str(amount_to_redeem),
+                "remaining_balance": str(new_balance),
+                "status": cn.status,
+                "invoice_id": invoice_id,
+            },
+        )
+
+        self.db.commit()
+        self.db.refresh(cn)
+
+        return {
+            "success": True,
+            "credit_note_id": cn.id,
+            "credit_note_no": cn.credit_note_no,
+            "amount_redeemed": amount_to_redeem,
+            "remaining_balance": new_balance,
+            "status": cn.status,
+            "redemption_id": redemption.id,
+            "message": f"Successfully redeemed Rs. {amount_to_redeem:.2f} from credit note {cn.credit_note_no}",
+        }
+
+    def get_credit_note_thermal_receipt(
+        self,
+        tenant_id: int,
+        credit_note_id: int,
+        user: Optional[User] = None,
+    ) -> dict:
+        credit_note = self.get_credit_note(tenant_id, credit_note_id, user=user)
+        invoice = self.get_invoice(tenant_id, credit_note.invoice_id, user=user)
+
+        order = self.db.query(Order).filter(Order.id == invoice.order_id).first() if invoice.order_id else None
+        store = self.db.query(Store).filter(Store.id == invoice.store_id).first() if invoice.store_id else None
+        customer = self.db.query(Customer).filter(Customer.id == (credit_note.customer_id or (order.customer_id if order else None))).first()
+
+        store_name = store.name if store else "Retail Store"
+        cust_name = customer.name if customer else "Walk-in Customer"
+        cust_phone = customer.phone if customer else "N/A"
+        valid_until_str = credit_note.valid_until.strftime("%Y-%m-%d") if credit_note.valid_until else "No Expiry"
+        created_str = credit_note.created_at.strftime("%Y-%m-%d %H:%M") if credit_note.created_at else ""
+
+        bal = credit_note.balance_amount if credit_note.balance_amount is not None else credit_note.refund_amount
+        stat = (credit_note.status or "ISSUED").upper()
+
+        sep = "=" * 32
+        dashes = "-" * 32
+
+        thermal_lines = [
+            sep,
+            f"{store_name.center(32)}",
+            "CREDIT NOTE VOUCHER".center(32),
+            sep,
+            f"Credit Note No: {credit_note.credit_note_no}",
+            f"Ref Invoice   : {invoice.invoice_number}",
+            f"Date Issued   : {created_str}",
+            f"Valid Until   : {valid_until_str}",
+            f"Status        : {stat}",
+            dashes,
+            f"Customer      : {cust_name}",
+            f"Phone         : {cust_phone}",
+            dashes,
+            f"CREDIT AMOUNT : Rs. {credit_note.refund_amount:.2f}",
+            f"CGST Amount   : Rs. {credit_note.cgst_amount:.2f}",
+            f"SGST Amount   : Rs. {credit_note.sgst_amount:.2f}",
+            f"IGST Amount   : Rs. {credit_note.igst_amount:.2f}",
+            dashes,
+            f"BALANCE DUE   : Rs. {bal:.2f}",
+            sep,
+            "Use this note for future store".center(32),
+            "purchases before expiry date.".center(32),
+            sep,
+            "Customer Signature: ____________".center(32),
+            "Authorized Signature: __________".center(32),
+            sep,
+        ]
+        thermal_text = "\n".join(thermal_lines)
+
+        return {
+            "credit_note_id": credit_note.id,
+            "credit_note_no": credit_note.credit_note_no,
+            "invoice_id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "refund_amount": credit_note.refund_amount,
+            "balance_amount": bal,
+            "status": credit_note.status or "issued",
+            "customer_name": cust_name,
+            "customer_phone": cust_phone,
+            "store_name": store_name,
+            "valid_until": valid_until_str,
+            "created_at": credit_note.created_at,
+            "thermal_text": thermal_text,
+        }
     def get_invoice_by_number(
         self,
         tenant_id: int,

@@ -1,6 +1,7 @@
 from app.models.audit_log import AuditLog
 from app.models.category import Category
 from app.models.credit_note import CreditNote
+from app.models.credit_note_redemption import CreditNoteRedemption
 from app.models.customer import Customer, CustomerLedgerEntry
 from app.models.document_sequence import DocumentSequence
 from app.models.document_setting import DocumentSetting
@@ -62,6 +63,7 @@ __all__ = [
     "AuditLog",
     "Category",
     "CreditNote",
+    "CreditNoteRedemption",
     "Customer",
     "CustomerLedgerEntry",
     "DocumentSequence",

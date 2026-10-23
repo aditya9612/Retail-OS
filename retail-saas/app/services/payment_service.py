@@ -320,6 +320,17 @@ class PaymentService:
 
         if result.status == "completed":
             result.paid_at = result.paid_at or datetime.utcnow()
+            if result.order_id:
+                order = (
+                    self.db.query(Order)
+                    .filter(
+                        Order.id == result.order_id,
+                        Order.tenant_id == self.tenant_id,
+                    )
+                    .first()
+                )
+                if order and order.status in ("pending", "pending_payment"):
+                    order.status = "confirmed"
             self.db.commit()
             self.db.refresh(result)
 
@@ -458,12 +469,6 @@ class PaymentService:
         self,
         data: SettlementCreate,
     ):
-        if data.settlement_date < date.today():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Settlement date cannot be in the past",
-            )
-
         gateway = get_gateway(
             self.db,
             self.tenant_id,
@@ -526,13 +531,39 @@ class PaymentService:
 
         return settlement
 
-    def list_settlements(self):
-        return (
+    def list_settlements(
+        self,
+        gateway_id: int | None = None,
+        status: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ):
+        query = (
             self.db.query(Settlement)
             .filter(
                 Settlement.tenant_id == self.tenant_id,
             )
-            .order_by(Settlement.id.desc())
+        )
+        if gateway_id is not None:
+            query = query.filter(Settlement.gateway_id == gateway_id)
+        if status is not None:
+            query = query.filter(Settlement.status == status)
+        if date_from is not None:
+            query = query.filter(Settlement.settlement_date >= date_from)
+        if date_to is not None:
+            query = query.filter(Settlement.settlement_date <= date_to)
+
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 500:
+            page_size = 50
+
+        return (
+            query.order_by(Settlement.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
             .all()
         )
 
@@ -622,13 +653,36 @@ class PaymentService:
 
         return webhook
 
-    def list_webhook_logs(self):
-        return (
+    def list_webhook_logs(
+        self,
+        status: str | None = None,
+        event_type: str | None = None,
+        transaction_id: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ):
+        query = (
             self.db.query(PaymentWebhookLog)
             .filter(
                 PaymentWebhookLog.tenant_id == self.tenant_id,
             )
-            .order_by(PaymentWebhookLog.id.desc())
+        )
+        if status is not None:
+            query = query.filter(PaymentWebhookLog.status == status)
+        if event_type is not None:
+            query = query.filter(PaymentWebhookLog.event_type == event_type)
+        if transaction_id is not None:
+            query = query.filter(PaymentWebhookLog.transaction_id == transaction_id)
+
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 500:
+            page_size = 50
+
+        return (
+            query.order_by(PaymentWebhookLog.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
             .all()
         )
 
