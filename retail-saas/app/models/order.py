@@ -37,6 +37,7 @@ class Order(Base, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
     delivery_address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     delivery_pincode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    coupon_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     customer: Mapped[Optional["Customer"]] = relationship("Customer", back_populates="orders")
     items: Mapped[list["OrderItem"]] = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
@@ -46,18 +47,9 @@ class Order(Base, TimestampMixin):
     tracking: Mapped[list["OrderTracking"]] = relationship("OrderTracking", back_populates="order", cascade="all, delete-orphan")
 
     def __init__(self, **kwargs):
-        # Ignore phantom coupon_code / delivery_status kwargs if passed
-        self._coupon_code = kwargs.pop("coupon_code", None)
+        # Ignore phantom delivery_status kwargs if passed
         self._delivery_status = kwargs.pop("delivery_status", None)
         super().__init__(**kwargs)
-
-    @property
-    def coupon_code(self) -> Optional[str]:
-        return getattr(self, "_coupon_code", None)
-
-    @coupon_code.setter
-    def coupon_code(self, val: Optional[str]) -> None:
-        self._coupon_code = val
 
     @property
     def delivery_status(self) -> Optional[str]:

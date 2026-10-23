@@ -70,6 +70,9 @@ class OrderItem(Base, TimestampMixin):
 
     @property
     def total(self) -> Decimal:
+        if self.unit_price is not None and self.quantity is not None:
+            disc = self.discount_amount if self.discount_amount is not None else Decimal("0.00")
+            return (self.unit_price * self.quantity - disc).quantize(Decimal("0.01"))
         return self.total_amount
 
     @total.setter
