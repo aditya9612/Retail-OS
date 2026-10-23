@@ -3,7 +3,15 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 
 VALID_ORDER_TYPES = ["pos", "ecommerce"]
@@ -561,12 +569,52 @@ class OrderResponse(BaseModel):
     }
 
 
+class InvoiceItemResponse(BaseModel):
+    id: int
+    product_id: int
+    quantity: Decimal
+    unit_price: Decimal
+    discount_amount: Decimal
+    gst_rate: Decimal
+    gst_amount: Decimal
+    total_amount: Decimal
+
+    model_config = {"from_attributes": True}
+
+
+class PaymentResponse(BaseModel):
+
+    id: int
+    tenant_id: int
+    order_id: int
+    payment_method: str
+    payment_mode: str = Field(
+        validation_alias=AliasChoices("payment_mode", "payment_method")
+    )
+    status: str
+    amount: Decimal
+    transaction_id: Optional[str]
+    transaction_reference: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("transaction_reference", "transaction_id"),
+    )
+    amount_tendered: Optional[Decimal] = None
+    change_due: Optional[Decimal] = None
+    created_at: datetime
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
 class InvoiceResponse(BaseModel):
 
     id: int
     tenant_id: int
     store_id: Optional[int] = None
     order_id: int
+    customer_id: Optional[int] = None
+    same_state: Optional[bool] = None
     invoice_number: str
     status: str
     subtotal: Decimal
@@ -576,22 +624,8 @@ class InvoiceResponse(BaseModel):
     igst_amount: Decimal
     total_amount: Decimal
     pdf_url: Optional[str]
-    created_at: datetime
-
-    model_config = {
-        "from_attributes": True
-    }
-
-
-class PaymentResponse(BaseModel):
-
-    id: int
-    tenant_id: int
-    order_id: int
-    payment_method: str
-    status: str
-    amount: Decimal
-    transaction_id: Optional[str]
+    items: List[InvoiceItemResponse] = Field(default_factory=list)
+    payments: List[PaymentResponse] = Field(default_factory=list)
     created_at: datetime
 
     model_config = {

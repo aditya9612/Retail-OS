@@ -16,6 +16,8 @@ class GstRateCreate(BaseModel):
     def validate_hsn_code(cls, v: str) -> str:
         if not v.isdigit():
             raise ValueError("HSN code must contain digits only")
+        if not v.strip("0"):
+            raise ValueError("HSN code cannot consist only of zeroes")
         return v
 
     @field_validator("gst_rate")

@@ -8,6 +8,7 @@ from app.core.exceptions import AppException, NotFoundException
 from app.core.redis_client import get_redis
 from app.models.product import Product
 from app.services.audit_service import AuditService
+from app.services.coupon_service import CouponService
 from app.utils.gst_engine import aggregate_taxes, calculate_line_tax, resolve_gst_rate
 
 
@@ -671,7 +672,25 @@ class CartService:
             summary["subtotal"]
         )
 
-        if discount_type == "percentage":
+        normalized_coupon_code = None
+        if discount_type == "coupon":
+            if not coupon_code or not coupon_code.strip():
+                raise AppException("Coupon code is required for coupon discounts")
+
+            coupon_result = CouponService(self.db).apply_coupon(
+                tenant_id,
+                coupon_code,
+                subtotal,
+            )
+            discount_amount = _money(
+                Decimal(str(coupon_result["discount_amount"]))
+            )
+            normalized_coupon_code = coupon_result["coupon_code"]
+        elif coupon_code:
+            raise AppException(
+                "Coupon code can only be used with a coupon discount"
+            )
+        elif discount_type == "percentage":
             if value > Decimal("100"):
                 raise AppException(
                     "Percentage discount cannot exceed 100%"
@@ -694,10 +713,7 @@ class CartService:
             discount_amount
         )
 
-        if coupon_code:
-            cart["coupon_code"] = coupon_code.strip()
-        elif discount_type != "coupon":
-            cart["coupon_code"] = None
+        cart["coupon_code"] = normalized_coupon_code
 
         self._build_summary(cart)
 
@@ -718,7 +734,7 @@ class CartService:
                 "discount_amount": str(
                     discount_amount
                 ),
-                "coupon_code": coupon_code,
+                "coupon_code": normalized_coupon_code,
             },
         )
 

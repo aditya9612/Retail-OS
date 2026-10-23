@@ -1,7 +1,11 @@
+from decimal import Decimal
+
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.database import SessionLocal
 from app.main import app
+from app.models.invoice import Invoice
 
 client = TestClient(app)
 
@@ -91,6 +95,121 @@ def test_cart_apply_discount(billing_setup):
     cart = discount_resp.json()
     assert cart["discount_amount"] == "20.00"
     assert cart["grand_total"] == "216.00"
+
+
+def test_cart_apply_discount_validates_coupon_and_uses_configured_value(
+    billing_setup,
+):
+    from datetime import date, timedelta
+
+    headers, store, product = billing_setup
+    today = date.today()
+    coupon_resp = client.post(
+        "/api/v1/coupons",
+        json={
+            "code": "CART10A",
+            "description": "Cart percentage discount",
+            "discount_type": "percentage",
+            "discount_value": "10",
+            "minimum_order_amount": "1.00",
+            "usage_limit": 10,
+            "start_date": today.isoformat(),
+            "end_date": (today + timedelta(days=30)).isoformat(),
+        },
+        headers=headers,
+    )
+    assert coupon_resp.status_code == 201, coupon_resp.text
+
+    add_resp = client.post(
+        "/api/v1/billing/cart/add-item",
+        params={"store_id": store["id"]},
+        json={"product_id": product["id"], "quantity": "1"},
+        headers=headers,
+    )
+    assert add_resp.status_code == 200, add_resp.text
+
+    invalid_coupon = client.post(
+        "/api/v1/billing/cart/apply-discount",
+        json={
+            "discount_type": "coupon",
+            "value": "0",
+            "coupon_code": "INVALID1",
+        },
+        headers=headers,
+    )
+    assert invalid_coupon.status_code >= 400
+
+    valid_coupon = client.post(
+        "/api/v1/billing/cart/apply-discount",
+        json={
+            "discount_type": "coupon",
+            "value": "0",
+            "coupon_code": "CART10A",
+        },
+        headers=headers,
+    )
+    assert valid_coupon.status_code == 200, valid_coupon.text
+    assert valid_coupon.json()["discount_amount"] == "20.00"
+    assert valid_coupon.json()["coupon_code"] == "CART10A"
+
+
+def test_invoice_response_includes_request_details_and_refund_print_state(
+    billing_setup,
+):
+    headers, store, product = billing_setup
+    add_resp = client.post(
+        "/api/v1/billing/cart/add-item",
+        params={"store_id": store["id"]},
+        json={"product_id": product["id"], "quantity": "1"},
+        headers=headers,
+    )
+    assert add_resp.status_code == 200, add_resp.text
+
+    invoice_resp = client.post(
+        "/api/v1/invoices",
+        json={
+            "store_id": store["id"],
+            "same_state": True,
+            "payments": [
+                {
+                    "payment_mode": "cash",
+                    "amount": "236.00",
+                    "amount_tendered": "240.00",
+                    "change_due": "4.00",
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert invoice_resp.status_code == 201, invoice_resp.text
+    invoice = invoice_resp.json()
+
+    assert invoice["pdf_url"] == f"/api/v1/invoices/{invoice['id']}/pdf"
+    assert invoice["customer_id"] is None
+    assert invoice["same_state"] is True
+    assert invoice["items"][0]["product_id"] == product["id"]
+    assert Decimal(str(invoice["items"][0]["quantity"])) == Decimal("1")
+    assert invoice["items"][0]["unit_price"] == "200.00"
+    payment = invoice["payments"][0]
+    assert payment["payment_mode"] == "cash"
+    assert payment["amount_tendered"] == "240.00"
+    assert payment["change_due"] == "4.00"
+
+    db = SessionLocal()
+    try:
+        saved_invoice = db.get(Invoice, invoice["id"])
+        saved_invoice.status = "refunded"
+        db.commit()
+    finally:
+        db.close()
+
+    reprint_resp = client.post(
+        f"/api/v1/invoices/{invoice['id']}/reprint",
+        json={"printer_type": "generic"},
+        headers=headers,
+    )
+    assert reprint_resp.status_code == 200, reprint_resp.text
+    assert "Paid via: Refunded" in reprint_resp.json()["print_payload"]["payload"]
 
 
 def test_checkout_split_payment_and_search(billing_setup):
@@ -361,5 +480,3 @@ def test_create_invoice_direct_items(billing_setup):
     assert data["subtotal"] == "400.00"
     assert data["cgst_amount"] == "36.00"
     assert data["sgst_amount"] == "36.00"
-
-

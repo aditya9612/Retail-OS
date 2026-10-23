@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 VALID_REFUND_METHODS = ["cash", "upi", "store_credit"]
 VALID_PAYMENT_MODES = [
@@ -19,6 +19,18 @@ VALID_PAYMENT_MODES = [
 
 class InvoiceReprintRequest(BaseModel):
     printer_type: str = Field(default="generic", min_length=1, max_length=50)
+
+    @field_validator("printer_type", mode="before")
+    @classmethod
+    def validate_printer_type(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("printer_type must be a string")
+        value = value.strip().lower()
+        if value not in {"generic", "epson", "tvs"}:
+            raise ValueError(
+                "printer_type must be one of: generic, epson, tvs"
+            )
+        return value
 
 
 class RefundCreate(BaseModel):
@@ -143,6 +155,18 @@ class PaymentSplit(BaseModel):
             )
         return v
 
+    @field_validator("transaction_reference", mode="before")
+    @classmethod
+    def validate_transaction_reference(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("transaction_reference must be a string")
+        value = value.strip()
+        if not value or value.lower() in {"string", "null", "none", "undefined"}:
+            raise ValueError("transaction_reference cannot be empty or a placeholder")
+        return value
+
 
 class TenderChangeRequest(BaseModel):
     payable_amount: Decimal = Field(
@@ -207,13 +231,19 @@ class ReturnItemRequest(BaseModel):
         le=Decimal("10000"),
         description="Return quantity must be greater than 0",
     )
-    reason: Optional[str] = Field(default=None, min_length=3, max_length=500)
+    reason: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=500,
+        validation_alias=AliasChoices("reason", "notes"),
+    )
     condition: str = Field(
         default="sellable",
         description="Item condition: sellable, damaged, expired",
     )
     idempotency_key: Optional[str] = Field(
         default=None,
+        min_length=1,
         max_length=100,
         description="Optional idempotency key",
     )
@@ -225,6 +255,46 @@ class ReturnItemRequest(BaseModel):
         default="cash",
         description="Refund method if issuing credit note",
     )
+
+    @field_validator("condition", mode="before")
+    @classmethod
+    def validate_condition(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("condition must be one of: sellable, damaged, expired")
+        value = value.strip().lower()
+        if value not in {"sellable", "damaged", "expired"}:
+            raise ValueError("condition must be one of: sellable, damaged, expired")
+        return value
+
+    @field_validator("idempotency_key", mode="before")
+    @classmethod
+    def validate_idempotency_key(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("idempotency_key must be a string")
+        value = value.strip()
+        if (
+            not value
+            or value.lower() in {"string", "null", "none", "undefined"}
+            or any(character.isspace() for character in value)
+        ):
+            raise ValueError("idempotency_key must be a non-empty token without spaces")
+        return value
+
+    @field_validator("refund_method", mode="before")
+    @classmethod
+    def validate_return_refund_method(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError(
+                f"refund_method must be one of {VALID_REFUND_METHODS}"
+            )
+        value = value.strip().lower()
+        if value not in VALID_REFUND_METHODS:
+            raise ValueError(
+                f"refund_method must be one of {VALID_REFUND_METHODS}"
+            )
+        return value
 
 
 class ThermalPrintResponse(BaseModel):

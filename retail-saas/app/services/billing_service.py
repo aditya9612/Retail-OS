@@ -262,6 +262,8 @@ class BillingService:
         )
 
         if existing:
+            if not existing.pdf_url:
+                existing.pdf_url = f"/api/v1/invoices/{existing.id}/pdf"
             return existing
 
         from decimal import ROUND_HALF_UP
@@ -302,6 +304,7 @@ class BillingService:
             tax_breakdown=self._gst_dict_serializable(gst),
             **gst,
         )
+        invoice._same_state = same_state
 
         self._create_invoice_items_from_order(
             invoice,
@@ -310,11 +313,12 @@ class BillingService:
         )
 
         self.db.add(invoice)
+        self.db.flush()
+        if not invoice.pdf_url:
+            invoice.pdf_url = f"/api/v1/invoices/{invoice.id}/pdf"
         if commit:
             self.db.commit()
             self.db.refresh(invoice)
-        else:
-            self.db.flush()
 
         return invoice
 
@@ -546,6 +550,9 @@ class BillingService:
         if not invoice:
             raise NotFoundException("Invoice not found")
 
+        if not invoice.pdf_url:
+            invoice.pdf_url = f"/api/v1/invoices/{invoice.id}/pdf"
+
         if not system_context:
             if user is None:
                 raise ForbiddenException("Access denied: user context required")
@@ -764,7 +771,7 @@ class BillingService:
                 or "Item",
                 "quantity": i.quantity,
                 "unit_price": i.unit_price,
-                "total_amount": i.total_amount,
+                "total_amount": i.total_amount - i.gst_amount,
             }
             for i in items
         ]
@@ -775,7 +782,7 @@ class BillingService:
                     "product_name": i.product_name,
                     "quantity": i.quantity,
                     "unit_price": i.unit_price,
-                    "total_amount": i.total,
+                    "total_amount": i.total_amount - i.tax_amount,
                 }
                 for i in order.items
             ]
@@ -794,10 +801,11 @@ class BillingService:
             sgst=invoice.sgst_amount,
             igst=invoice.igst_amount,
             grand_total=invoice.total_amount,
-            payment_modes=[
-                p.payment_method
-                for p in payments
-            ],
+            payment_modes=(
+                ["Refunded"]
+                if invoice.status.lower() == "refunded"
+                else [p.payment_method for p in payments]
+            ),
             customer_name=(
                 customer.name
                 if customer
@@ -1065,9 +1073,27 @@ class BillingService:
         if return_quantity <= Decimal("0"):
             raise AppException("Return quantity must be greater than zero")
 
-        cond = condition.strip().lower() if condition else "sellable"
+        cond = condition.strip().lower() if condition else ""
         if cond not in ("sellable", "damaged", "expired"):
-            cond = "sellable"
+            raise AppException(
+                "Condition must be one of: sellable, damaged, expired"
+            )
+
+        if idempotency_key is not None:
+            idempotency_key = idempotency_key.strip()
+            if (
+                not idempotency_key
+                or any(character.isspace() for character in idempotency_key)
+            ):
+                raise AppException(
+                    "Idempotency key must be a non-empty token without spaces"
+                )
+
+        refund_method = refund_method.strip().lower()
+        if refund_method not in {"cash", "upi", "store_credit"}:
+            raise AppException(
+                "Refund method must be one of: cash, upi, store_credit"
+            )
 
         if idempotency_key:
             existing_return = (
@@ -1084,6 +1110,7 @@ class BillingService:
                     or existing_return.product_id != product_id
                     or existing_return.quantity != return_quantity
                     or existing_return.condition != cond
+                    or bool(existing_return.refund_id) != issue_credit_note
                 ):
                     raise AppException("Idempotency key collision: request payload does not match existing return")
 
@@ -1099,6 +1126,20 @@ class BillingService:
                     if existing_return.credit_note_id
                     else None
                 )
+                existing_refund = (
+                    self.db.query(Refund)
+                    .filter(Refund.id == existing_return.refund_id)
+                    .first()
+                    if existing_return.refund_id
+                    else None
+                )
+                if (
+                    existing_refund
+                    and existing_refund.refund_method != refund_method
+                ):
+                    raise AppException(
+                        "Idempotency key collision: request payload does not match existing return"
+                    )
                 return {
                     "return_id": existing_return.id,
                     "invoice_id": existing_return.invoice_id,
@@ -1112,6 +1153,10 @@ class BillingService:
                     "credit_note_id": cn.id if cn else None,
                     "credit_note_no": cn.credit_note_no if cn else None,
                     "refund_id": existing_return.refund_id,
+                    "refund_method": (
+                        existing_refund.refund_method if existing_refund else None
+                    ),
+                    "issue_credit_note": bool(cn or existing_refund),
                 }
 
         _return_mutex.acquire()
@@ -1169,10 +1214,6 @@ class BillingService:
             store_id = invoice.store_id or (order.store_id if order else None)
             if not store_id:
                 raise AppException("Invoice has no associated store")
-
-            cond = condition.strip().lower() if condition else "sellable"
-            if cond not in ("sellable", "damaged", "expired"):
-                cond = "sellable"
 
             invoice_item.returned_quantity = current_returned + return_quantity
 
@@ -1305,6 +1346,10 @@ class BillingService:
                 "credit_note_id": created_credit_note.id if created_credit_note else None,
                 "credit_note_no": created_credit_note.credit_note_no if created_credit_note else None,
                 "refund_id": created_refund.id if created_refund else None,
+                "refund_method": (
+                    created_refund.refund_method if created_refund else None
+                ),
+                "issue_credit_note": bool(created_credit_note),
             }
         except Exception:
             self.db.rollback()
