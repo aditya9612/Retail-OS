@@ -202,8 +202,10 @@ class TestSuperAdminBootstrap:
         full_name = f"CLI Admin {name_suffix}"
         password = "CliPassword@123!"
 
+        repo_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         env = os.environ.copy()
         env["SUPER_ADMIN_PASSWORD"] = password
+        env["PYTHONPATH"] = repo_dir + (os.pathsep + env["PYTHONPATH"] if "PYTHONPATH" in env else "")
 
         cmd = [
             sys.executable,
@@ -220,6 +222,7 @@ class TestSuperAdminBootstrap:
             capture_output=True,
             text=True,
             env=env,
+            cwd=repo_dir,
         )
 
         assert result.returncode == 0

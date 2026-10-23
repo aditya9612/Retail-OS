@@ -50,6 +50,11 @@ class InventoryResponse(BaseModel):
     low_stock_threshold: int = 10
     batch_number: Optional[str] = None
     expiry_date: Optional[date] = None
+    product_name: Optional[str] = None
+    product_sku: Optional[str] = None
+    store_name: Optional[str] = None
+    cost_price: Optional[Decimal] = None
+    selling_price: Optional[Decimal] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -359,4 +364,123 @@ class InventoryDashboardResponse(BaseModel):
     expired_products: int
     pending_transfers: int
     pending_purchase_orders: int
+
+
+class NearExpiryItem(BaseModel):
+    inventory_id: int
+    store_id: int
+    store_name: Optional[str] = None
+    product_id: int
+    product_name: Optional[str] = None
+    product_sku: Optional[str] = None
+    batch_number: Optional[str] = None
+    expiry_date: date
+    days_until_expiry: int
+    quantity: int
+    min_stock_level: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class NearExpiryResponse(BaseModel):
+    success: bool = True
+    message: str = "Near-expiry inventory retrieved successfully"
+    count: int
+    threshold_days: int
+    data: list[NearExpiryItem] = Field(default_factory=list)
+
+
+class ProductStoreStockItem(BaseModel):
+    store_id: int
+    store_name: str
+    store_code: Optional[str] = None
+    quantity: int
+    min_stock_level: int = 0
+    max_stock_level: int = 0
+    reorder_point: int = 0
+    is_low_stock: bool = False
+
+
+class ProductMultiStoreAvailabilityResponse(BaseModel):
+    success: bool = True
+    message: str = "Product stock availability across stores retrieved successfully"
+    product_id: int
+    product_name: str
+    product_sku: str
+    total_stock: int
+    stores_count: int
+    data: list[ProductStoreStockItem] = Field(default_factory=list)
+
+
+class ValuationStoreBreakdown(BaseModel):
+    store_id: int
+    store_name: str
+    item_count: int
+    total_quantity: int
+    total_cost_value: Decimal
+    total_retail_value: Decimal
+    potential_gross_profit: Decimal
+    potential_margin_percentage: float
+
+
+class ValuationCategoryBreakdown(BaseModel):
+    category_id: Optional[int] = None
+    category_name: str
+    item_count: int
+    total_quantity: int
+    total_cost_value: Decimal
+    total_retail_value: Decimal
+
+
+class ValuationSummary(BaseModel):
+    total_items: int
+    total_quantity: int
+    total_cost_value: Decimal
+    total_retail_value: Decimal
+    potential_gross_profit: Decimal
+    potential_margin_percentage: float
+
+
+class InventoryValuationBreakdownResponse(BaseModel):
+    success: bool = True
+    message: str = "Inventory valuation breakdown retrieved successfully"
+    summary: ValuationSummary
+    stores_breakdown: list[ValuationStoreBreakdown] = Field(default_factory=list)
+    categories_breakdown: list[ValuationCategoryBreakdown] = Field(default_factory=list)
+
+
+class BulkAdjustmentItem(BaseModel):
+    product_id: int = Field(gt=0, description="Product ID must be positive")
+    counted_quantity: int = Field(ge=0, le=100000, description="Counted physical stock quantity")
+    reason: Optional[str] = Field(default=None, max_length=255)
+
+
+class BulkInventoryAdjustmentRequest(BaseModel):
+    store_id: int = Field(gt=0, description="Store ID must be positive")
+    items: list[BulkAdjustmentItem] = Field(min_length=1, max_length=100, description="List of items to adjust")
+    audit_reference: Optional[str] = Field(default=None, max_length=100)
+
+
+class BulkAdjustmentProcessedItem(BaseModel):
+    product_id: int
+    product_name: str
+    product_sku: str
+    previous_stock: int
+    counted_stock: int
+    difference: int
+    movement_type: Optional[str] = None
+    movement_reference: Optional[str] = None
+
+
+class BulkInventoryAdjustmentResponse(BaseModel):
+    success: bool = True
+    message: str = "Bulk inventory adjustment completed successfully"
+    store_id: int
+    store_name: str
+    total_items_processed: int
+    adjusted_items_count: int
+    unchanged_items_count: int
+    net_quantity_change: int
+    audit_reference: Optional[str] = None
+    adjustments: list[BulkAdjustmentProcessedItem] = Field(default_factory=list)
 

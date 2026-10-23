@@ -56,6 +56,23 @@ class WarehouseRepository:
             .first()
         )
 
+    def get_by_code(
+        self,
+        tenant_id: int,
+        code: str,
+    ) -> Warehouse | None:
+        if not code:
+            return None
+        return (
+            self.db.query(Warehouse)
+            .filter(
+                Warehouse.tenant_id == tenant_id,
+                Warehouse.code == code.strip().upper(),
+            )
+            .first()
+        )
+
+
     def update(
         self,
         warehouse: Warehouse,

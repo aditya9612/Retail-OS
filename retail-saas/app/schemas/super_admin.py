@@ -146,6 +146,16 @@ class SuperAdminLogin(BaseModel):
                 data["identifier"] = str(ident).strip()
         return data
 
+    @field_validator("identifier")
+    @classmethod
+    def validate_identifier(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Login identifier is required")
+        if "@" in value:
+            return validate_email_address(value, field_name="Super admin email", required=True)
+        return value
+
 
 class SuperAdminUpdate(BaseModel):
     full_name: str | None = Field(

@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -367,9 +367,15 @@ class POSShiftService:
             "cash_refunds": cash_refunds,
         }
 
-    def export_z_report_pdf(self, user: User, shift_id: int) -> StreamingResponse:
-        from app.services.document_settings_service import DocumentSettingsService
-        from app.services.document_renderer_service import DocumentRenderer
+    def export_z_report(
+        self,
+        user: User,
+        shift_id: int,
+        format: str = "pdf",
+        mode: str = "download",
+    ) -> Response:
+        fmt = (format or "pdf").lower().strip()
+        disposition = "inline" if mode == "preview" else "attachment"
 
         zrep = self.get_z_report(user, shift_id)
         title = "POS Shift Z-Report"
@@ -406,86 +412,92 @@ class POSShiftService:
             for method, amt in zrep.payment_method_breakdown.items():
                 rows.append([f"Payment: {method.upper()}", str(amt)])
 
-        branding = None
-        try:
-            branding = DocumentSettingsService(self.db).resolve_branding(
-                tenant_id=user.tenant_id,
-                store_id=zrep.store_id,
-            )
-        except Exception:
+        if fmt == "pdf":
+            from app.services.document_settings_service import DocumentSettingsService
+            from app.services.document_renderer_service import DocumentRenderer
+
             branding = None
+            try:
+                branding = DocumentSettingsService(self.db).resolve_branding(
+                    tenant_id=user.tenant_id,
+                    store_id=zrep.store_id,
+                )
+            except Exception:
+                branding = None
 
-        pdf_bytes = DocumentRenderer().render_report_pdf(
-            title=title,
-            metadata=metadata,
-            kpi_summary=kpis,
-            headers=headers,
-            rows=rows,
-            branding=branding,
-            report_type="pos_z_report",
-        )
-        return StreamingResponse(
-            io.BytesIO(pdf_bytes),
-            media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename=z_report_shift_{shift_id}.pdf"},
-        )
-
-    def export_z_report_excel(self, user: User, shift_id: int) -> StreamingResponse:
-        from app.services.document_settings_service import DocumentSettingsService
-        from app.services.excel_export_service import ExcelExportService
-
-        zrep = self.get_z_report(user, shift_id)
-        title = "POS Shift Z-Report"
-        metadata = {
-            "Shift ID": str(zrep.shift_id),
-            "Store": zrep.store_name,
-            "Cashier": zrep.cashier_name,
-            "Status": zrep.status.upper(),
-            "Opened At": zrep.opened_at.strftime("%Y-%m-%d %H:%M:%S") if zrep.opened_at else "N/A",
-            "Closed At": zrep.closed_at.strftime("%Y-%m-%d %H:%M:%S") if zrep.closed_at else "N/A",
-        }
-        kpis = [
-            {"label": "Opening Float", "value": zrep.opening_cash_float},
-            {"label": "Total Sales", "value": zrep.total_sales_amount},
-            {"label": "Expected Cash", "value": zrep.expected_cash},
-            {"label": "Cash Variance", "value": zrep.cash_variance if zrep.cash_variance is not None else "Pending"},
-        ]
-        headers = ["Financial Component", "Amount"]
-        rows: List[List[Any]] = [
-            ["Opening Cash Float", str(zrep.opening_cash_float)],
-            ["Cash Sales", str(zrep.cash_sales)],
-            ["Cash Additions (In)", str(zrep.cash_additions)],
-            ["Cash Drops", str(zrep.cash_drops)],
-            ["Cash Payouts", str(zrep.cash_payouts)],
-            ["Cash Refunds", str(zrep.cash_refunds)],
-            ["Expected Cash", str(zrep.expected_cash)],
-            ["Counted Cash", str(zrep.closing_cash_counted if zrep.closing_cash_counted is not None else "N/A")],
-            ["Variance", str(zrep.cash_variance if zrep.cash_variance is not None else "N/A")],
-            ["Variance Status", zrep.variance_status],
-            ["Total Transactions", zrep.total_transactions],
-            ["Total Sales Amount", str(zrep.total_sales_amount)],
-        ]
-        if zrep.payment_method_breakdown:
-            for method, amt in zrep.payment_method_breakdown.items():
-                rows.append([f"Payment: {method.upper()}", str(amt)])
-
-        branding = None
-        try:
-            branding = DocumentSettingsService(self.db).resolve_branding(
-                tenant_id=user.tenant_id,
-                store_id=zrep.store_id,
+            pdf_bytes = DocumentRenderer().render_report_pdf(
+                title=title,
+                metadata=metadata,
+                kpi_summary=kpis,
+                headers=headers,
+                rows=rows,
+                branding=branding,
+                report_type="pos_z_report",
             )
-        except Exception:
-            branding = None
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"{disposition}; filename=z_report_shift_{shift_id}.pdf"},
+            )
 
-        return ExcelExportService().create_report_streaming_response(
-            sheet_title=title,
-            headers=headers,
-            rows=rows,
-            filename=f"z_report_shift_{shift_id}",
-            metadata=metadata,
-            kpis=kpis,
-            branding=branding,
-            report_type="pos_z_report",
-        )
+        elif fmt == "excel":
+            from app.services.document_settings_service import DocumentSettingsService
+            from app.services.excel_export_service import ExcelExportService
+
+            branding = None
+            try:
+                branding = DocumentSettingsService(self.db).resolve_branding(
+                    tenant_id=user.tenant_id,
+                    store_id=zrep.store_id,
+                )
+            except Exception:
+                branding = None
+
+            return ExcelExportService().create_report_streaming_response(
+                sheet_title=title,
+                headers=headers,
+                rows=rows,
+                filename=f"z_report_shift_{shift_id}",
+                metadata=metadata,
+                kpis=kpis,
+                branding=branding,
+                report_type="pos_z_report",
+            )
+
+        elif fmt == "csv":
+            import csv
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(["POS SHIFT Z-REPORT"])
+            writer.writerow(["Shift ID", str(zrep.shift_id)])
+            writer.writerow(["Store", zrep.store_name])
+            writer.writerow(["Cashier", zrep.cashier_name])
+            writer.writerow(["Status", zrep.status.upper()])
+            writer.writerow(["Opened At", zrep.opened_at.strftime("%Y-%m-%d %H:%M:%S") if zrep.opened_at else "N/A"])
+            writer.writerow(["Closed At", zrep.closed_at.strftime("%Y-%m-%d %H:%M:%S") if zrep.closed_at else "N/A"])
+            writer.writerow([])
+            writer.writerow(["KEY PERFORMANCE INDICATORS"])
+            writer.writerow(["Opening Float", str(zrep.opening_cash_float)])
+            writer.writerow(["Total Sales", str(zrep.total_sales_amount)])
+            writer.writerow(["Expected Cash", str(zrep.expected_cash)])
+            writer.writerow(["Cash Variance", str(zrep.cash_variance if zrep.cash_variance is not None else "Pending")])
+            writer.writerow(["Variance Status", zrep.variance_status])
+            writer.writerow([])
+            writer.writerow(["Financial Component", "Amount"])
+            for row in rows:
+                writer.writerow(row)
+
+            return Response(
+                content=output.getvalue().encode("utf-8"),
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename=z_report_shift_{shift_id}.csv"},
+            )
+        else:
+            raise AppException(f"Unsupported export format '{format}'. Choose from: pdf, excel, csv")
+
+    def export_z_report_pdf(self, user: User, shift_id: int) -> Response:
+        return self.export_z_report(user, shift_id, format="pdf", mode="download")
+
+    def export_z_report_excel(self, user: User, shift_id: int) -> Response:
+        return self.export_z_report(user, shift_id, format="excel", mode="download")
 

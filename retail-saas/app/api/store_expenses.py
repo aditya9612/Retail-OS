@@ -164,9 +164,11 @@ def get_store_expenses_daily_report(
     )
 
 
+
 @router.get(
     "/{expense_id}",
     response_model=StoreExpenseResponse,
+    description="Get details of a specific store expense by ID",
 )
 def get_store_expense(
     expense_id: int,
@@ -186,8 +188,6 @@ def get_store_expense(
         expense_id=expense_id,
         tenant_id=user.tenant_id,
     )
-
-
 @router.put(
     "/{expense_id}",
     response_model=StoreExpenseResponse,

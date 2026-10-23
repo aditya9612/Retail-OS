@@ -348,7 +348,7 @@ def test_daily_sales_store_filter(reports_fixture):
     today = str(reports_fixture["today"])
 
     # Tenant-wide (both stores): order_count = 2 (1062 + 448 = 1510)
-    resp_all = client.get(f"/api/v1/reports/sales/daily?target_date={today}", headers=headers)
+    resp_all = client.get(f"/api/v1/reports/sales?period=daily&target_date={today}", headers=headers)
     assert resp_all.status_code == 200, resp_all.text
     data_all = resp_all.json()
     assert data_all["order_count"] == 2
@@ -360,7 +360,7 @@ def test_daily_sales_store_filter(reports_fixture):
 
     # Store 1 only: order_count = 1 (total_sales = 1062.00)
     resp_s1 = client.get(
-        f"/api/v1/reports/sales/daily?target_date={today}&store_id={s1_id}",
+        f"/api/v1/reports/sales?period=daily&target_date={today}&store_id={s1_id}",
         headers=headers,
     )
     assert resp_s1.status_code == 200
@@ -377,7 +377,7 @@ def test_daily_sales_aov_calculation(reports_fixture):
     headers = reports_fixture["owner_headers"]
     today = str(reports_fixture["today"])
 
-    resp = client.get(f"/api/v1/reports/sales/daily?target_date={today}", headers=headers)
+    resp = client.get(f"/api/v1/reports/sales?period=daily&target_date={today}", headers=headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["order_count"] == 2
@@ -390,7 +390,7 @@ def test_daily_sales_zero_data(reports_fixture):
     headers = reports_fixture["owner_headers"]
     past_date = str(date.today() - timedelta(days=30))
 
-    resp = client.get(f"/api/v1/reports/sales/daily?target_date={past_date}", headers=headers)
+    resp = client.get(f"/api/v1/reports/sales?period=daily&target_date={past_date}", headers=headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["order_count"] == 0
@@ -400,11 +400,26 @@ def test_daily_sales_zero_data(reports_fixture):
     assert data["payment_methods"] == {}
 
 
+def test_monthly_sales_breakdown(reports_fixture):
+    headers = reports_fixture["owner_headers"]
+    today = reports_fixture["today"]
+
+    resp = client.get(
+        f"/api/v1/reports/sales?period=monthly&year={today.year}&month={today.month}",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["year"] == today.year
+    assert data["month"] == today.month
+    assert data["order_count"] >= 1
+
+
 def test_yearly_sales_breakdown(reports_fixture):
     headers = reports_fixture["owner_headers"]
     year = reports_fixture["today"].year
 
-    resp = client.get(f"/api/v1/reports/sales/yearly?year={year}", headers=headers)
+    resp = client.get(f"/api/v1/reports/sales?period=yearly&year={year}", headers=headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["year"] == year
@@ -794,7 +809,7 @@ def test_tenant_isolation(reports_fixture):
     today = str(reports_fixture["today"])
 
     # Tenant B queries daily sales: should see 0 orders, no leakage from Tenant A
-    resp = client.get(f"/api/v1/reports/sales/daily?target_date={today}", headers=headers_b)
+    resp = client.get(f"/api/v1/reports/sales?period=daily&target_date={today}", headers=headers_b)
     assert resp.status_code == 200
     assert resp.json()["order_count"] == 0
     assert Decimal(str(resp.json()["total_sales"])) == Decimal("0.00")
@@ -809,14 +824,14 @@ def test_store_manager_isolation(reports_fixture):
 
     # 1. Store Manager requests Store 2 (foreign to assigned Store 1) => 403 Forbidden
     resp_foreign = client.get(
-        f"/api/v1/reports/sales/daily?target_date={today}&store_id={s2_id}",
+        f"/api/v1/reports/sales?period=daily&target_date={today}&store_id={s2_id}",
         headers=manager_headers,
     )
     assert resp_foreign.status_code == 403
 
     # 2. Store Manager omits store_id => forced to Store 1
     resp_omitted = client.get(
-        f"/api/v1/reports/sales/daily?target_date={today}",
+        f"/api/v1/reports/sales?period=daily&target_date={today}",
         headers=manager_headers,
     )
     assert resp_omitted.status_code == 200
@@ -829,7 +844,7 @@ def test_tenant_owner_invalid_store_404(reports_fixture):
     today = str(reports_fixture["today"])
 
     resp = client.get(
-        f"/api/v1/reports/sales/daily?target_date={today}&store_id=999999",
+        f"/api/v1/reports/sales?period=daily&target_date={today}&store_id=999999",
         headers=headers,
     )
     assert resp.status_code == 404

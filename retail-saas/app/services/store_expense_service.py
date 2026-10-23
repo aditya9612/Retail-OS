@@ -373,7 +373,6 @@ class StoreExpenseService:
                 "percentage": round(pct, 2),
                 "count": category_counts[cat],
             })
-
         payment_methods_breakdown = []
         for pm, amt in sorted(payment_totals.items(), key=lambda x: x[1], reverse=True):
             pct = float((amt / total_amount) * 100) if total_amount > 0 else 0.0

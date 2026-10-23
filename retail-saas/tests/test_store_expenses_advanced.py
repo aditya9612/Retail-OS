@@ -346,4 +346,3 @@ def test_daily_report_endpoint(setup_data):
         headers=tenant["headers"],
     )
     assert resp_404.status_code == 404
-

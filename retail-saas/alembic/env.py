@@ -29,10 +29,13 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    connect_args = {}
+    if "mysql" in settings.DATABASE_URL:
+        connect_args["charset"] = "utf8mb4"
     connectable = create_engine(
         settings.DATABASE_URL,
         poolclass=pool.NullPool,
-        connect_args={"charset": "utf8mb4"},
+        connect_args=connect_args,
     )
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)

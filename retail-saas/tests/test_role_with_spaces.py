@@ -114,4 +114,3 @@ def test_create_user_with_role_having_spaces():
     user2 = res2.json()
     assert user2["role"]["name"] == "store area manager"
     assert user2["role_id"] == role_id
-

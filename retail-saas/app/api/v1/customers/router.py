@@ -372,7 +372,6 @@ def get_notes_by_customer_id(
 
 @router.get(
     "/export-directory",
-    tags=["Customer Exports"],
     summary="Export Complete Customer Directory",
     description=(
         "Exports the tenant customer directory filtered by status ('all', 'active', 'inactive') "

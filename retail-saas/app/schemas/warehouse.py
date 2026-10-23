@@ -1,5 +1,7 @@
 from datetime import datetime
+from decimal import Decimal
 import re
+from typing import Any, Optional
 
 from pydantic import (
     BaseModel,
@@ -193,11 +195,7 @@ class WarehouseUpdate(BaseModel):
         max_length=50,
     )
 
-    address: str | None = Field(
-        default=None,
-        min_length=5,
-        max_length=500,
-    )
+    address: str | None = None
 
     is_active: StrictBool | None = None
 
@@ -233,7 +231,7 @@ class WarehouseUpdate(BaseModel):
     @field_validator("address")
     @classmethod
     def validate_address(cls, value: str | None) -> str | None:
-        return validate_warehouse_address(value, required=True)
+        return validate_warehouse_address(value, required=False)
 
     @field_validator("is_active")
     @classmethod
@@ -246,6 +244,34 @@ class WarehouseUpdate(BaseModel):
         return value
 
 
+class WarehouseStatusUpdateRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    is_active: Optional[StrictBool] = Field(default=None, description="Active status as boolean")
+    status: Optional[str] = Field(default=None, description="Active status as string ('active' or 'inactive')")
+
+    @model_validator(mode="after")
+    def validate_status_input(self):
+        if self.is_active is None and self.status is None:
+            raise ValueError("Either 'is_active' (bool) or 'status' (str) must be provided")
+
+        if self.status is not None:
+            clean_s = self.status.strip().lower()
+            if clean_s in ("active", "true", "enabled", "1"):
+                self.is_active = True
+            elif clean_s in ("inactive", "false", "disabled", "0"):
+                self.is_active = False
+            else:
+                raise ValueError("Status string must be 'active' or 'inactive'")
+
+        return self
+
+
+WarehouseStatusUpdate = WarehouseStatusUpdateRequest
+
+
 class WarehouseResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
@@ -254,6 +280,7 @@ class WarehouseResponse(BaseModel):
     id: int = Field(gt=0)
     tenant_id: int = Field(gt=0)
     store_id: int | None
+    store_name: Optional[str] = None
     name: str
     code: str
     address: str | None
@@ -261,11 +288,78 @@ class WarehouseResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+
 class WarehouseDashboardResponse(BaseModel):
     total_warehouses: int = Field(ge=0)
     active_warehouses: int = Field(ge=0)
     inactive_warehouses: int = Field(ge=0)
+    total_stock_units: Decimal = Field(default=Decimal("0.0000"))
+    total_stock_value: Decimal = Field(default=Decimal("0.00"))
 
 
 class WarehouseDeleteResponse(BaseModel):
+    success: bool = True
     message: str
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class WarehouseStockItem(BaseModel):
+    product_id: int
+    product_name: str
+    sku: str
+    category_name: Optional[str] = None
+    quantity: Decimal
+    cost_price: Optional[Decimal] = None
+    unit_cost: Optional[Decimal] = None
+    total_value: Optional[Decimal] = None
+    stock_value: Optional[Decimal] = None
+    selling_price: Optional[Decimal] = None
+    min_stock_level: int = 0
+    is_low_stock: bool = False
+
+    @model_validator(mode="after")
+    def populate_aliases(self) -> "WarehouseStockItem":
+        if self.cost_price is None and self.unit_cost is not None:
+            self.cost_price = self.unit_cost
+        elif self.unit_cost is None and self.cost_price is not None:
+            self.unit_cost = self.cost_price
+
+        if self.total_value is None and self.stock_value is not None:
+            self.total_value = self.stock_value
+        elif self.stock_value is None and self.total_value is not None:
+            self.stock_value = self.total_value
+
+        return self
+
+
+class WarehouseStockResponse(BaseModel):
+    success: bool = True
+    warehouse_id: int
+    warehouse_name: str
+    store_id: Optional[int] = None
+    store_name: Optional[str] = None
+    total_items: int
+    total_quantity: Decimal
+    total_stock_value: Decimal
+    data: list[WarehouseStockItem] = Field(default_factory=list)
+
+
+class WarehouseTransferItem(BaseModel):
+    transfer_id: int
+    transfer_number: Optional[str] = None
+    transfer_type: str
+    source_store_id: int
+    source_store_name: Optional[str] = None
+    destination_store_id: int
+    destination_store_name: Optional[str] = None
+    status: str
+    item_count: int = 0
+    created_at: datetime
+
+
+class WarehouseTransfersResponse(BaseModel):
+    success: bool = True
+    warehouse_id: int
+    warehouse_name: str
+    total_transfers: int
+    data: list[WarehouseTransferItem] = Field(default_factory=list)

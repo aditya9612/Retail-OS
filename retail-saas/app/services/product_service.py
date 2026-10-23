@@ -260,9 +260,7 @@ class ProductService:
             skip,
             page_size,
         )
-
         return products or []
-
     def list_products(
         self,
         tenant_id: int,
@@ -928,4 +926,4 @@ class ProductService:
             mrp=product.mrp,
             store_name=store_name,
             sku=product.sku,
-        )
+        )

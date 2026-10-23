@@ -1,3 +1,4 @@
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, status
@@ -62,7 +63,6 @@ def list_stores(
         get_store_service
     ),
 ):
-    # Store Owner (store_id=None) sees all their stores; store-assigned staff only sees their assigned store
     return service.list_stores(
         tenant_id=user.tenant_id,
         store_id=user.store_id,
@@ -77,19 +77,20 @@ def list_stores(
     response_model=StoreResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create Store",
-    description="Store Owner creates a new store for their organization under plan limits.",
+    description=(
+        "Store Owner creates a new store for their organization "
+        "under plan limits."
+    ),
 )
 def create_store(
     data: StoreCreate,
-    user: User = Depends(
-        require_permission("stores:write")
-    ),
-    service: StoreService = Depends(
-        get_store_service
-    ),
+    user: User = Depends(require_permission("stores:write")),
+    service: StoreService = Depends(get_store_service),
 ):
     if user.store_id is not None:
-        raise ForbiddenException("Only Store Owner can create new stores")
+        raise ForbiddenException(
+            "Only Store Owner can create new stores"
+        )
 
     return service.create_store(
         user.tenant_id,
@@ -149,12 +150,8 @@ def update_store(
         ),
     ],
     data: StoreUpdate,
-    user: User = Depends(
-        require_permission("stores:write")
-    ),
-    service: StoreService = Depends(
-        get_store_service
-    ),
+    user: User = Depends(require_permission("stores:write")),
+    service: StoreService = Depends(get_store_service),
 ):
     if user.store_id is not None and user.store_id != store_id:
         raise ForbiddenException("Access denied to this store")
@@ -181,15 +178,13 @@ def delete_store(
             description="Store ID must be a positive integer up to 999999",
         ),
     ],
-    user: User = Depends(
-        require_permission("stores:write")
-    ),
-    service: StoreService = Depends(
-        get_store_service
-    ),
+    user: User = Depends(require_permission("stores:write")),
+    service: StoreService = Depends(get_store_service),
 ):
     if user.store_id is not None:
-        raise ForbiddenException("Only Store Owner can delete stores")
+        raise ForbiddenException(
+            "Only Store Owner can delete stores"
+        )
 
     service.delete_store(
         user.tenant_id,
@@ -391,4 +386,3 @@ def get_store_inventory_summary(
         user.tenant_id,
         store_id,
     )
-

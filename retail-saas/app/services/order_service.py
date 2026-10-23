@@ -800,6 +800,13 @@ class OrderService:
                 )
                 self.db.add(tracking)
 
+                delivery_tracking = OrderTracking(
+                    order_id=order.id,
+                    status="pending",
+                    remarks="Delivery created with status 'pending'",
+                )
+                self.db.add(delivery_tracking)
+
                 if order.customer_id is not None:
                     customer = self._get_customer(
                         tenant_id,
@@ -1345,6 +1352,7 @@ class CustomerService:
             invoice_id=data.invoice_id,
             rating=data.rating,
             comments=data.comments,
+            feedback=data.feedback,
             suggestions=data.suggestions,
         )
 

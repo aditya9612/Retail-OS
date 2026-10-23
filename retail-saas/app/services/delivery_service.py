@@ -1,5 +1,6 @@
 import csv
 from datetime import datetime
+from decimal import Decimal
 from io import BytesIO, StringIO
 
 from openpyxl import load_workbook
@@ -46,8 +47,33 @@ class DeliveryService:
         self.db = db
         self.repo = DeliveryRepository(db)
 
-    def list_deliveries(self, tenant_id: int):
-        return self.repo.list_deliveries(tenant_id)
+    def list_deliveries(
+        self,
+        tenant_id: int,
+        page: int | None = None,
+        page_size: int | None = None,
+        status: str | None = None,
+        delivery_person: str | None = None,
+        partner_id: int | None = None,
+        order_id: int | None = None,
+        is_cod: bool | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        search: str | None = None,
+    ) -> tuple[list[Delivery], int]:
+        return self.repo.list_deliveries(
+            tenant_id=tenant_id,
+            page=page,
+            page_size=page_size,
+            status=status,
+            delivery_person=delivery_person,
+            partner_id=partner_id,
+            order_id=order_id,
+            is_cod=is_cod,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
+        )
 
     def get_delivery(self, tenant_id: int, delivery_id: int):
         if not isinstance(delivery_id, int) or delivery_id <= 0:
@@ -99,6 +125,9 @@ class DeliveryService:
         if target_status == "delivered":
             if not delivery.delivered_at:
                 delivery.delivered_at = datetime.utcnow()
+            if delivery.is_cod and not delivery.cod_collected:
+                delivery.cod_collected = True
+                delivery.cod_collected_at = datetime.utcnow()
 
         if delivery.order:
             delivery.order.delivery_status = target_status
@@ -118,6 +147,14 @@ class DeliveryService:
         order_id: int,
         delivery_person: str | None = None,
         tracking_number: str | None = None,
+        partner_id: int | None = None,
+        delivery_method_id: int | None = None,
+        zone_id: int | None = None,
+        is_cod: bool | None = None,
+        cod_amount: Decimal | None = None,
+        delivery_slot: str | None = None,
+        estimated_delivery_time: datetime | None = None,
+        dispatched_at: datetime | None = None,
     ) -> Delivery:
         if not isinstance(order_id, int) or order_id <= 0:
             raise AppException(
@@ -142,6 +179,40 @@ class DeliveryService:
                 f"Cannot create delivery for order in '{order_status}' status"
             )
 
+        partner = None
+        if partner_id is not None:
+            partner = self.get_partner(tenant_id, partner_id)
+            if not partner.is_active:
+                raise ConflictException(f"Delivery partner '{partner.name}' is inactive")
+            if not delivery_person:
+                delivery_person = partner.name
+
+        if delivery_method_id is not None:
+            method = self.get_method(tenant_id, delivery_method_id)
+            if not method.is_active:
+                raise ConflictException(f"Delivery method '{method.name}' is inactive")
+
+        if zone_id is not None:
+            zone = self.get_zone(tenant_id, zone_id)
+            if not zone.is_active:
+                raise ConflictException(f"Delivery zone '{zone.name}' is inactive")
+
+        order_is_cod = False
+        if is_cod is not None:
+            order_is_cod = is_cod
+        elif getattr(order, "payment_status", None) == "pending":
+            order_is_cod = True
+
+        final_cod_amount = Decimal("0.00")
+        if order_is_cod:
+            if cod_amount is not None:
+                final_cod_amount = cod_amount
+            elif getattr(order, "total_amount", None) is not None:
+                final_cod_amount = order.total_amount
+
+        import secrets
+        delivery_otp = f"{secrets.randbelow(900000) + 100000}"
+
         status = "assigned" if delivery_person else "pending"
         delivery = Delivery(
             tenant_id=tenant_id,
@@ -149,6 +220,15 @@ class DeliveryService:
             status=status,
             delivery_person=delivery_person,
             tracking_number=tracking_number,
+            partner_id=partner_id,
+            delivery_method_id=delivery_method_id,
+            zone_id=zone_id,
+            is_cod=order_is_cod,
+            cod_amount=final_cod_amount,
+            delivery_slot=delivery_slot,
+            estimated_delivery_time=estimated_delivery_time,
+            dispatched_at=dispatched_at,
+            delivery_otp=delivery_otp,
         )
         self.repo.create(delivery)
 
@@ -156,7 +236,7 @@ class DeliveryService:
         tracking = OrderTracking(
             order_id=order_id,
             status=status,
-            remarks=f"Delivery created with status '{status}'",
+            remarks=f"Delivery created with status '{status}'" + (f" via {partner.name}" if partner else ""),
         )
         self.db.add(tracking)
         self.db.commit()
@@ -208,8 +288,9 @@ class DeliveryService:
         self,
         tenant_id: int,
         delivery_id: int,
-        delivery_person: str,
+        delivery_person: str | None = None,
         tracking_number: str | None = None,
+        partner_id: int | None = None,
     ) -> Delivery:
         if not isinstance(delivery_id, int) or delivery_id <= 0:
             raise AppException(
@@ -225,7 +306,17 @@ class DeliveryService:
                 f"Cannot assign delivery partner to delivery in '{current_status}' status"
             )
 
-        delivery.delivery_person = delivery_person
+        if partner_id is not None:
+            partner = self.get_partner(tenant_id, partner_id)
+            if not partner.is_active:
+                raise ConflictException(f"Delivery partner '{partner.name}' is inactive")
+            delivery.partner_id = partner.id
+            if not delivery_person:
+                delivery_person = partner.name
+
+        if delivery_person:
+            delivery.delivery_person = delivery_person
+
         if tracking_number:
             delivery.tracking_number = tracking_number
 
@@ -234,7 +325,8 @@ class DeliveryService:
             if delivery.order:
                 delivery.order.delivery_status = "assigned"
 
-        remarks = f"Delivery assigned to {delivery_person}"
+        assigned_name = delivery.delivery_person or "Delivery Partner"
+        remarks = f"Delivery assigned to {assigned_name}"
         if tracking_number:
             remarks += f" (Tracking: {tracking_number})"
         tracking = OrderTracking(
@@ -245,6 +337,312 @@ class DeliveryService:
         self.db.add(tracking)
 
         return self.repo.update(delivery)
+
+    def record_failed_attempt(
+        self,
+        tenant_id: int,
+        delivery_id: int,
+        reason: str,
+        remarks: str | None = None,
+        reschedule_date: datetime | None = None,
+    ) -> Delivery:
+        if not isinstance(delivery_id, int) or delivery_id <= 0:
+            raise AppException(
+                "Delivery ID must be a positive integer",
+                status_code=422,
+            )
+
+        delivery = self.get_delivery(tenant_id, delivery_id)
+        current_status = (delivery.status or "pending").strip().lower()
+
+        if current_status in {"delivered", "cancelled"}:
+            raise ConflictException(
+                f"Cannot record failed delivery attempt for delivery in '{current_status}' status"
+            )
+
+        delivery.attempt_count = (delivery.attempt_count or 0) + 1
+        delivery.failure_reason = reason
+        if reschedule_date:
+            delivery.estimated_delivery_time = reschedule_date
+
+        msg = f"Delivery attempt #{delivery.attempt_count} failed: {reason}"
+        if remarks:
+            msg += f" (Remarks: {remarks})"
+        if reschedule_date:
+            msg += f" [Rescheduled: {reschedule_date.strftime('%Y-%m-%d %H:%M')}]"
+
+        tracking = OrderTracking(
+            order_id=delivery.order_id,
+            status=delivery.status,
+            remarks=msg,
+        )
+        self.db.add(tracking)
+
+        return self.repo.update(delivery)
+
+    def get_thermal_label_html(
+        self,
+        tenant_id: int,
+        delivery_id: int,
+    ) -> str:
+        delivery = self.get_delivery(tenant_id, delivery_id)
+        order = delivery.order
+        if not order:
+            order = (
+                self.db.query(Order)
+                .filter(Order.id == delivery.order_id, Order.tenant_id == tenant_id)
+                .first()
+            )
+        if not order:
+            raise NotFoundException("Associated order not found")
+
+        recipient_name = delivery.recipient_name or "Customer"
+        recipient_phone = delivery.recipient_phone or "N/A"
+        delivery_address = delivery.delivery_address or "No address provided"
+        barcode = generate_barcode(f"{order.order_number}-{delivery.id}")
+        awb_no = delivery.tracking_number or f"TRK-{order.order_number}"
+        carrier_name = delivery.partner_name or delivery.delivery_person or "Standard Fleet"
+        date_str = delivery.created_at.strftime("%d-%b-%Y")
+        cod_badge = f'<div class="badge cod">COD: ₹{delivery.cod_amount:.2f}</div>' if delivery.is_cod else '<div class="badge prepaid">PREPAID</div>'
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Shipping Label - {order.order_number}</title>
+<style>
+  @page {{ size: 4in 6in; margin: 0; }}
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    margin: 0;
+    padding: 10px;
+    background: #fff;
+    color: #111;
+    width: 3.8in;
+    box-sizing: border-box;
+  }}
+  .label-container {{
+    border: 2px solid #000;
+    padding: 8px;
+    height: 5.7in;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }}
+  .header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #000;
+    padding-bottom: 6px;
+  }}
+  .carrier-title {{
+    font-size: 16px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }}
+  .badge {{
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: 800;
+    border: 2px solid #000;
+    border-radius: 4px;
+    text-align: center;
+  }}
+  .badge.cod {{ background: #000; color: #fff; }}
+  .badge.prepaid {{ background: #fff; color: #000; }}
+  .barcode-section {{
+    text-align: center;
+    padding: 8px 0;
+    border-bottom: 1px dashed #666;
+  }}
+  .barcode-img {{
+    max-width: 90%;
+    height: 50px;
+  }}
+  .awb-text {{
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: bold;
+    margin-top: 3px;
+    letter-spacing: 1px;
+  }}
+  .address-section {{
+    border-bottom: 1px solid #000;
+    padding: 6px 0;
+  }}
+  .sec-title {{
+    font-size: 9px;
+    text-transform: uppercase;
+    color: #555;
+    font-weight: bold;
+    margin-bottom: 2px;
+  }}
+  .recipient-name {{
+    font-size: 14px;
+    font-weight: bold;
+  }}
+  .address-text {{
+    font-size: 11px;
+    line-height: 1.3;
+    margin: 3px 0;
+  }}
+  .phone-text {{
+    font-size: 11px;
+    font-weight: bold;
+  }}
+  .footer-grid {{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding-top: 6px;
+    border-top: 2px solid #000;
+    font-size: 10px;
+  }}
+  .footer-cell {{
+    display: flex;
+    flex-direction: column;
+  }}
+</style>
+</head>
+<body onload="window.print()">
+  <div class="label-container">
+    <div class="header">
+      <div class="carrier-title">{carrier_name}</div>
+      {cod_badge}
+    </div>
+
+    <div class="barcode-section">
+      <img class="barcode-img" src="data:image/png;base64,{barcode}" alt="AWB Barcode" />
+      <div class="awb-text">{awb_no}</div>
+    </div>
+
+    <div class="address-section">
+      <div class="sec-title">SHIP TO / DELIVER TO:</div>
+      <div class="recipient-name">{recipient_name}</div>
+      <div class="address-text">{delivery_address}</div>
+      <div class="phone-text">Contact: {recipient_phone}</div>
+    </div>
+
+    <div class="footer-grid">
+      <div class="footer-cell">
+        <span class="sec-title">ORDER #</span>
+        <strong>{order.order_number}</strong>
+      </div>
+      <div class="footer-cell">
+        <span class="sec-title">DISPATCH DATE</span>
+        <span>{date_str}</span>
+      </div>
+      <div class="footer-cell">
+        <span class="sec-title">DELIVERY ID</span>
+        <span>#{delivery.id}</span>
+      </div>
+      <div class="footer-cell">
+        <span class="sec-title">STATUS</span>
+        <span>{delivery.status.upper()}</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>"""
+        return html
+
+    def get_thermal_label_image(
+        self,
+        tenant_id: int,
+        delivery_id: int,
+    ) -> bytes:
+        from app.utils.barcode_generator import generate_thermal_shipping_label_image
+
+        delivery = self.get_delivery(tenant_id, delivery_id)
+        order = delivery.order
+        if not order:
+            order = (
+                self.db.query(Order)
+                .filter(Order.id == delivery.order_id, Order.tenant_id == tenant_id)
+                .first()
+            )
+        if not order:
+            raise NotFoundException("Associated order not found")
+
+        recipient_name = delivery.recipient_name or "Retail Customer"
+        recipient_phone = delivery.recipient_phone or "N/A"
+        delivery_address = delivery.delivery_address or "No address provided"
+        barcode_val = generate_barcode(f"{order.order_number}-{delivery.id}")
+        awb_no = delivery.tracking_number or f"TRK-{order.order_number}"
+        carrier_name = delivery.partner_name or delivery.delivery_person or "Standard Fleet"
+        date_str = (
+            delivery.dispatched_at.strftime("%d-%b-%Y")
+            if delivery.dispatched_at
+            else (delivery.created_at.strftime("%d-%b-%Y") if delivery.created_at else "N/A")
+        )
+        cod_amount = float(delivery.cod_amount or 0.0)
+
+        return generate_thermal_shipping_label_image(
+            carrier_name=carrier_name,
+            is_cod=bool(delivery.is_cod),
+            cod_amount=cod_amount,
+            awb_number=awb_no,
+            barcode_data=barcode_val,
+            recipient_name=recipient_name,
+            address=delivery_address,
+            phone=recipient_phone,
+            order_number=order.order_number,
+            dispatch_date=date_str,
+            delivery_id=delivery.id,
+            status=delivery.status or "PENDING",
+        )
+
+    def collect_cod(
+        self,
+        tenant_id: int,
+        delivery_id: int,
+        amount_collected: Decimal | None = None,
+    ) -> Delivery:
+        if not isinstance(delivery_id, int) or delivery_id <= 0:
+            raise AppException(
+                "Delivery ID must be a positive integer",
+                status_code=422,
+            )
+
+        delivery = self.get_delivery(tenant_id, delivery_id)
+        if not delivery.is_cod:
+            raise ConflictException("Delivery is not marked as Cash On Delivery (COD)")
+
+        if delivery.cod_collected:
+            raise ConflictException("COD cash has already been collected for this delivery")
+
+        delivery.cod_collected = True
+        delivery.cod_collected_at = datetime.utcnow()
+        if amount_collected is not None:
+            delivery.cod_amount = amount_collected
+
+        tracking = OrderTracking(
+            order_id=delivery.order_id,
+            status=delivery.status,
+            remarks=f"COD payment collected: ₹{delivery.cod_amount:.2f}",
+        )
+        self.db.add(tracking)
+        return self.repo.update(delivery)
+
+    def get_cod_reconciliation(
+        self,
+        tenant_id: int,
+        delivery_person: str | None = None,
+        partner_id: int | None = None,
+        status: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> dict:
+        return self.repo.get_cod_reconciliation(
+            tenant_id=tenant_id,
+            delivery_person=delivery_person,
+            partner_id=partner_id,
+            status=status,
+            date_from=date_from,
+            date_to=date_to,
+        )
 
     def update_address(
         self,
@@ -381,7 +779,28 @@ class DeliveryService:
             )
 
         delivery = self.get_delivery(tenant_id, delivery_id)
-        return self.repo.get_tracking_history(delivery.order_id)
+        raw_history = self.repo.get_tracking_history(delivery.order_id)
+        valid_delivery_statuses = set(DELIVERY_STATUS_TRANSITIONS.keys())
+        delivery_history = [
+            h for h in raw_history
+            if (h.status or "").strip().lower() in valid_delivery_statuses
+        ]
+
+        # If order tracking only contains order lifecycle events (e.g. "confirmed")
+        # and no delivery status was logged, return matching delivery.status in-memory without database mutation
+        if not delivery_history and raw_history:
+            current_status = (delivery.status or "pending").strip().lower()
+            return [
+                OrderTracking(
+                    id=raw_history[0].id,
+                    order_id=delivery.order_id,
+                    status=current_status,
+                    remarks=f"Delivery created with status '{current_status}'",
+                    created_at=delivery.created_at or datetime.utcnow(),
+                )
+            ]
+
+        return delivery_history
 
     def get_stats(self, tenant_id: int) -> DeliveryStatsResponse:
         stats_dict = self.repo.get_stats(tenant_id)
@@ -464,6 +883,67 @@ class DeliveryService:
                 bytes_output,
                 "text/csv",
                 "deliveries.csv",
+            )
+
+        elif format == "pdf":
+            from app.services.document_settings_service import DocumentSettingsService
+            from app.services.document_renderer_service import DocumentRenderer
+
+            branding = None
+            try:
+                branding = DocumentSettingsService(self.db).resolve_branding(
+                    tenant_id=tenant_id,
+                )
+            except Exception:
+                branding = None
+
+            headers = [
+                "ID",
+                "Order Number",
+                "Status",
+                "Delivery Person",
+                "Tracking Number",
+                "Delivery Address",
+                "Delivered At",
+                "Created At",
+            ]
+            rows = []
+            for d in deliveries:
+                rows.append([
+                    d.id,
+                    d.order.order_number if d.order else "",
+                    d.status,
+                    d.delivery_person or "",
+                    d.tracking_number or "",
+                    (d.order.delivery_address or "") if d.order else "",
+                    d.delivered_at.strftime("%Y-%m-%d %H:%M:%S") if d.delivered_at else "",
+                    d.created_at.strftime("%Y-%m-%d %H:%M:%S") if d.created_at else "",
+                ])
+
+            metadata = {
+                "Tenant ID": str(tenant_id),
+                "Status Filter": (status.capitalize() if status else "All"),
+                "Total Records": str(len(deliveries)),
+                "Exported At": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            }
+
+            notes = "No delivery records found." if not rows else None
+
+            pdf_bytes = DocumentRenderer().render_report_pdf(
+                report_title="Deliveries Export",
+                metadata=metadata,
+                headers=headers,
+                rows=rows,
+                branding=branding,
+                notes=notes,
+                report_type="deliveries_export",
+            )
+            bytes_output = BytesIO(pdf_bytes)
+            bytes_output.seek(0)
+            return (
+                bytes_output,
+                "application/pdf",
+                "deliveries.pdf",
             )
 
         raise AppException(f"Unsupported format: '{format}'", status_code=422)
@@ -626,6 +1106,27 @@ class DeliveryService:
                     f"Delivery zone with code '{data.code}' already exists"
                 )
             zone.code = data.code
+        effective_state = data.state if data.state is not None else zone.state
+        effective_pincodes = data.pincodes if data.pincodes is not None else zone.pincodes
+        effective_city = data.city if data.city is not None else zone.city
+
+        from app.utils.validators import validate_zone_pincodes_match_state, MAJOR_INDIAN_CITIES_STATE_MAP
+        if (effective_state or effective_city) and effective_pincodes:
+            try:
+                validate_zone_pincodes_match_state(effective_pincodes, state=effective_state, city=effective_city)
+            except ValueError as e:
+                raise AppException(str(e), status_code=422)
+
+        if effective_city and effective_state:
+            c_low = effective_city.strip().lower()
+            s_low = effective_state.strip().lower()
+            if c_low in MAJOR_INDIAN_CITIES_STATE_MAP:
+                exp_st = MAJOR_INDIAN_CITIES_STATE_MAP[c_low]
+                if exp_st.lower() != s_low:
+                    raise AppException(
+                        f"City '{effective_city}' belongs to state '{exp_st}', not '{effective_state}'",
+                        status_code=422,
+                    )
 
         if data.name is not None:
             zone.name = data.name

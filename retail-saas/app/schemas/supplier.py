@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 import re
 from typing import Any, Optional, Union
 
@@ -428,9 +429,62 @@ class SupplierPurchaseHistoryResponse(BaseModel):
     supplier_id: int
     supplier_name: str
     total_purchases: int
+    total_amount_spent: Decimal = Decimal("0.00")
     purchase_history: list[PurchaseOrderResponse]
     message: str
 
     model_config = {
         "from_attributes": True
     }
+
+
+class SupplierProductItem(BaseModel):
+    product_id: int
+    product_name: str
+    sku: str
+    total_quantity_purchased: int
+    last_purchase_price: Decimal
+    last_purchased_at: Optional[datetime] = None
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+class SupplierProductsResponse(BaseModel):
+    success: bool = True
+    supplier_id: int
+    supplier_name: str
+    total_products: int
+    data: list[SupplierProductItem] = Field(default_factory=list)
+
+
+class TopSupplierItem(BaseModel):
+    supplier_id: int
+    supplier_name: str
+    total_orders: int
+    total_spend: Decimal
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+class SupplierSummaryResponse(BaseModel):
+    success: bool = True
+    total_suppliers: int
+    active_suppliers: int
+    inactive_suppliers: int
+    total_spend: Decimal
+    pending_orders_count: int
+    top_suppliers: list[TopSupplierItem] = Field(default_factory=list)
+
+
+class SupplierDeleteData(BaseModel):
+    id: int
+
+
+class SupplierDeleteResponse(BaseModel):
+    success: bool = True
+    message: str = "Supplier deleted successfully"
+    data: SupplierDeleteData

@@ -678,4 +678,3 @@ def test_supplier_list_and_search_empty_responses():
     assert client.get("/api/v1/suppliers/search?search=", headers=headers).status_code == 422
     assert client.get("/api/v1/suppliers/search?search=   ", headers=headers).status_code == 422
     assert client.get("/api/v1/suppliers/search", headers=headers).status_code == 422
-

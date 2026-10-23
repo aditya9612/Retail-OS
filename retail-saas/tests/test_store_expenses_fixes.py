@@ -225,7 +225,7 @@ def test_create_store_expense_success(tenant, stores):
     )
     assert resp.status_code == 201, resp.text
     data = resp.json()
-    assert data["amount"] == "1250.50"
+    assert data["amount"] == 1250.50
     assert data["category"] == "Rent"
     assert data["reference_number"] == ref_num
     assert data["store_id"] == s1.id
@@ -357,7 +357,7 @@ def test_update_store_expense_reassign_store_rejected(tenant, stores):
         headers=tenant["headers"],
     )
     assert put_ok.status_code == 200, put_ok.text
-    assert put_ok.json()["amount"] == "850.00"
+    assert put_ok.json()["amount"] == 850.00
     assert put_ok.json()["store_id"] == s1.id
 
 
@@ -537,7 +537,7 @@ def test_expense_crud_flow_existing_id(tenant, stores):
         headers=tenant["headers"],
     )
     assert put_resp.status_code == 200
-    assert put_resp.json()["amount"] == "300.00"
+    assert put_resp.json()["amount"] == 300.00
     assert put_resp.json()["description"] == "Updated assistant salary"
 
     # 4. DELETE

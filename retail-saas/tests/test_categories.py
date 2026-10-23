@@ -852,5 +852,3 @@ def test_create_category_invalid_json_specifies_expected_value(tenant_fixture):
     data = resp.json()
     assert "parent_id" in str(data)
     assert "Expected an integer" in str(data)
-
-

@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import and_, func, or_
+
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.models.store import Store
@@ -67,21 +68,31 @@ class StoreTargetRepository:
         )
 
         if store_id is not None:
-            query = query.filter(StoreTarget.store_id == store_id)
+            query = query.filter(
+                StoreTarget.store_id == store_id
+            )
 
         if status is not None:
-            query = query.filter(StoreTarget.status == status)
+            query = query.filter(
+                StoreTarget.status == status
+            )
 
         if period is not None:
-            query = query.filter(StoreTarget.period == period)
+            query = query.filter(
+                StoreTarget.period == period
+            )
 
         if target_type is not None:
-            query = query.filter(func.lower(StoreTarget.target_type) == target_type.strip().lower())
+            query = query.filter(
+                func.lower(StoreTarget.target_type)
+                == target_type.strip().lower()
+            )
 
         query = query.order_by(StoreTarget.id.desc())
 
         if skip is not None:
             query = query.offset(skip)
+
         if limit is not None:
             query = query.limit(limit)
 
@@ -111,23 +122,26 @@ class StoreTargetRepository:
         tenant_id: int,
         store_id: int,
         target_type: str,
+        period: str,
         start_date: datetime,
         end_date: datetime,
         exclude_target_id: Optional[int] = None,
     ) -> StoreTarget | None:
         """
-        Check if an active target with the same target_type already overlaps
-        the proposed date range for this store.
+        Check whether an active target with the same target type
+        and period overlaps the proposed date range for this store.
         """
+
         query = (
             db.query(StoreTarget)
             .join(Store, Store.id == StoreTarget.store_id)
             .filter(
                 Store.tenant_id == tenant_id,
                 StoreTarget.store_id == store_id,
-                func.lower(StoreTarget.target_type) == target_type.strip().lower(),
+                func.lower(StoreTarget.target_type)
+                == target_type.strip().lower(),
+                StoreTarget.period == period,
                 StoreTarget.status == "active",
-                # Overlap condition: existing.start < new.end AND existing.end > new.start
                 and_(
                     StoreTarget.start_date < end_date,
                     StoreTarget.end_date > start_date,
@@ -136,8 +150,8 @@ class StoreTargetRepository:
         )
 
         if exclude_target_id is not None:
-            query = query.filter(StoreTarget.id != exclude_target_id)
+            query = query.filter(
+                StoreTarget.id != exclude_target_id
+            )
 
         return query.first()
-
-

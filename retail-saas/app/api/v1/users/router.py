@@ -160,7 +160,7 @@ async def _save_user_file(
     if len(content) > max_size:
         max_mb = max_size // (1024 * 1024)
         raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"{prefix.replace('_', ' ').title()} file exceeds maximum allowed size of {max_mb}MB",
         )
 
@@ -180,7 +180,7 @@ async def _save_user_file(
 
     if allowed_exts and ext not in allowed_exts:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid file type '{ext}' for {prefix.replace('_', ' ')}. Allowed: {', '.join(sorted(allowed_exts))}",
         )
 

@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -31,6 +31,12 @@ class PurchaseOrder(Base, TimestampMixin):
         index=True,
     )
 
+    warehouse_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("warehouses.id"),
+        nullable=True,
+        index=True,
+    )
+
     order_number: Mapped[str] = mapped_column(
         String(100),
         unique=True,
@@ -41,6 +47,30 @@ class PurchaseOrder(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(
         String(50),
         default="draft",
+        nullable=False,
+    )
+
+    subtotal: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+
+    discount_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+
+    shipping_charges: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        default=Decimal("0.00"),
         nullable=False,
     )
 
@@ -66,14 +96,49 @@ class PurchaseOrder(Base, TimestampMixin):
         index=True,
     )
 
-    supplier = relationship("Supplier")
-    store = relationship("Store")
+    created_by_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+
+    approved_by_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+
+    approved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    cancellation_reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    supplier = relationship("Supplier", foreign_keys=[supplier_id], lazy="joined")
+    store = relationship("Store", foreign_keys=[store_id], lazy="joined")
+    warehouse = relationship("Warehouse", foreign_keys=[warehouse_id], lazy="joined")
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="joined")
+    approved_by = relationship("User", foreign_keys=[approved_by_id], lazy="joined")
 
     items = relationship(
         "PurchaseOrderItem",
         back_populates="purchase_order",
         foreign_keys="PurchaseOrderItem.po_id",
         cascade="all, delete-orphan",
+        lazy="joined",
     )
 
     def __init__(self, **kwargs):
@@ -109,6 +174,53 @@ class PurchaseOrder(Base, TimestampMixin):
     def invoice_id(self, value: Optional[str]) -> None:
         self.invoice_number = value
 
+    @property
+    def supplier_name(self) -> Optional[str]:
+        return self.supplier.name if getattr(self, "supplier", None) else None
+
+    @property
+    def supplier_email(self) -> Optional[str]:
+        return self.supplier.email if getattr(self, "supplier", None) else None
+
+    @property
+    def supplier_phone(self) -> Optional[str]:
+        return self.supplier.phone if getattr(self, "supplier", None) else None
+
+    @property
+    def supplier_gstin(self) -> Optional[str]:
+        return getattr(self.supplier, "gstin", None) if getattr(self, "supplier", None) else None
+
+    @property
+    def store_name(self) -> Optional[str]:
+        return self.store.name if getattr(self, "store", None) else None
+
+    @property
+    def warehouse_name(self) -> Optional[str]:
+        return self.warehouse.name if getattr(self, "warehouse", None) else None
+
+    @property
+    def created_by_name(self) -> Optional[str]:
+        if getattr(self, "created_by", None):
+            return getattr(self.created_by, "full_name", None) or getattr(self.created_by, "name", None)
+        return None
+
+    @property
+    def approved_by_name(self) -> Optional[str]:
+        if getattr(self, "approved_by", None):
+            return getattr(self.approved_by, "full_name", None) or getattr(self.approved_by, "name", None)
+        return None
+
+    @property
+    def total_quantity(self) -> int:
+        return sum(item.quantity for item in self.items) if self.items else 0
+
+    @property
+    def total_received_quantity(self) -> int:
+        return sum(item.received_quantity or 0 for item in self.items) if self.items else 0
+
+    @property
+    def remaining_quantity(self) -> int:
+        return max(0, self.total_quantity - self.total_received_quantity)
 
 
 class PurchaseOrderItem(Base):
@@ -146,6 +258,29 @@ class PurchaseOrderItem(Base):
         nullable=False,
     )
 
+    tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+
+    hsn_code: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    unit_of_measure: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        default="pcs",
+        nullable=True,
+    )
+
     received_quantity: Mapped[int] = mapped_column(
         Integer,
         default=0,
@@ -164,7 +299,7 @@ class PurchaseOrderItem(Base):
         foreign_keys=[po_id],
     )
 
-    product = relationship("Product")
+    product = relationship("Product", foreign_keys=[product_id], lazy="joined")
 
     def __init__(self, **kwargs):
         if "purchase_order_id" in kwargs and "po_id" not in kwargs:
@@ -198,3 +333,15 @@ class PurchaseOrderItem(Base):
     @total.setter
     def total(self, val: Decimal) -> None:
         self.total_cost = val
+
+    @property
+    def product_name(self) -> Optional[str]:
+        return self.product.name if getattr(self, "product", None) else None
+
+    @property
+    def product_sku(self) -> Optional[str]:
+        return self.product.sku if getattr(self, "product", None) else None
+
+    @property
+    def remaining_quantity(self) -> int:
+        return max(0, self.quantity - (self.received_quantity or 0))

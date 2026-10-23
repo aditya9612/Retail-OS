@@ -597,4 +597,4 @@ class CouponStatsResponse(BaseModel):
     expired_coupons: int
     inactive_coupons: int
     scheduled_coupons: int
-    total_used: int
+    total_used: int

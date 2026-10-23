@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 import json
-from pathlib import Path
+import pathlib
 from typing import Any, Dict, List, Optional, Union
 import uuid
 
@@ -11,6 +11,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Path,
     Query,
     Request,
     UploadFile,
@@ -276,7 +277,7 @@ async def _save_product_image(
             detail=f"Image file exceeds maximum allowed size of {max_mb}MB",
         )
 
-    ext = Path(filename).suffix.lower()
+    ext = pathlib.Path(filename).suffix.lower()
     if not ext:
         content_type = getattr(file, "content_type", "")
         if "png" in content_type:
@@ -296,7 +297,7 @@ async def _save_product_image(
         )
 
     unique_filename = f"prod_{uuid.uuid4().hex[:12]}{ext}"
-    product_upload_dir = Path("uploads") / "products"
+    product_upload_dir = pathlib.Path("uploads") / "products"
     product_upload_dir.mkdir(parents=True, exist_ok=True)
     file_path = product_upload_dir / unique_filename
     with open(file_path, "wb") as f:
@@ -1763,3 +1764,6 @@ def delete_product_image(
                 os.remove(rel_path)
         except Exception:
             pass
+
+
+

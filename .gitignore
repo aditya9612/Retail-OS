@@ -73,3 +73,6 @@ Desktop.ini
 *.pfx
 *.jks
 
+# ---- Uploads ----
+uploads/
+

@@ -25,10 +25,11 @@ class ProductVariantBase(BaseModel):
     variant_name: str = Field(min_length=1, max_length=255)
     sku: str = Field(min_length=2, max_length=100)
     barcode: Optional[str] = Field(default=None, max_length=100)
-    size: str = Field(min_length=1, max_length=50)
-    color: str = Field(min_length=1, max_length=50)
-    attributes: Dict[str, Any] = Field(
-        description="Non-empty key-value attributes for this variant"
+    size: Optional[str] = Field(default=None, max_length=50)
+    color: Optional[str] = Field(default=None, max_length=50)
+    attributes: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional key-value attributes for this variant",
     )
     selling_price: Optional[Decimal] = Field(
         default=None,
@@ -38,11 +39,15 @@ class ProductVariantBase(BaseModel):
     )
     cost_price: Optional[Decimal] = Field(
         default=None,
-        gt=0,
+        ge=0,
         le=PRICE_MAX,
         description="Optional variant cost-price override",
     )
     is_active: bool = True
+    auto_generate_barcode: bool = Field(
+        default=False,
+        description="Auto-generate unique EAN-13 barcode if barcode is not provided",
+    )
 
     @field_validator("variant_name")
     @classmethod
@@ -99,11 +104,14 @@ class ProductVariantBase(BaseModel):
 
     @field_validator("size", "color")
     @classmethod
-    def validate_required_text(
+    def validate_optional_text(
         cls,
-        value: str,
+        value: Optional[str],
         info,
-    ) -> str:
+    ) -> Optional[str]:
+        if value is None:
+            return None
+
         value = value.strip()
 
         if not value:
@@ -117,12 +125,16 @@ class ProductVariantBase(BaseModel):
     @classmethod
     def validate_attributes(
         cls,
-        value: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        value: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        if value is None:
+            return None
+
         if not isinstance(value, dict) or not value:
             raise ValueError(
                 "attributes must be a non-empty object"
             )
+
 
         if len(value) > 50:
             raise ValueError(
@@ -408,6 +420,7 @@ class ProductVariantResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    product_name: Optional[str] = None
 
     @field_serializer(
         "selling_price",
@@ -433,3 +446,55 @@ class ProductVariantListResponse(BaseModel):
     page: int
     page_size: int
     items: List[ProductVariantResponse]
+
+
+class VariantMatrixGenerateRequest(BaseModel):
+    product_id: int = Field(gt=0, description="Parent product ID to generate variants for")
+    sizes: List[str] = Field(default=[], description="List of sizes (e.g. ['S', 'M', 'L'])")
+    colors: List[str] = Field(default=[], description="List of colors (e.g. ['Black', 'White', 'Blue'])")
+    attributes: Optional[Dict[str, Any]] = Field(default=None, description="Common attributes for all variants")
+    selling_price: Optional[Decimal] = Field(default=None, gt=0, le=Decimal("999999.99"))
+    cost_price: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("999999.99"))
+    sku_prefix: Optional[str] = Field(default=None, max_length=50, description="Optional custom SKU prefix")
+    auto_generate_barcode: bool = Field(
+        default=True,
+        description="Automatically generate unique EAN-13 barcodes for all matrix variants",
+    )
+
+    @field_validator("sizes", "colors")
+    @classmethod
+    def clean_lists(cls, v: List[str]) -> List[str]:
+        if v:
+            return [item.strip() for item in v if item and item.strip()]
+        return []
+
+    @field_validator("sku_prefix")
+    @classmethod
+    def clean_prefix(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = v.strip().upper()
+            return v if v else None
+        return None
+
+
+class VariantMatrixGenerateResponse(BaseModel):
+    product_id: int
+    product_name: str
+    generated_count: int
+    variants: List[ProductVariantResponse]
+
+
+class VariantBarcodeGenerateResponse(BaseModel):
+    success: bool = True
+    message: str
+    variant_id: int
+    sku: str
+    barcode: str
+
+
+class VariantMissingBarcodesResponse(BaseModel):
+    success: bool = True
+    message: str
+    updated_count: int
+    variants: List[Dict[str, Any]]
+

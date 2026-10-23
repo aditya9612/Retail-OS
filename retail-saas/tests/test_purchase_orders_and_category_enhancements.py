@@ -229,7 +229,8 @@ def test_purchase_order_create_with_invoice_number_and_list(tenant_fixture):
     po_data = create_resp.json()
     po_id = po_data["id"]
     assert po_data["invoice_number"] == invoice_no
-    assert po_data["invoice_id"] == invoice_no
+    assert "invoice_id" not in po_data
+    assert "remarks" not in po_data
     assert po_data["store_id"] == store_id
     assert po_data["status"] == "draft"
 
@@ -241,12 +242,13 @@ def test_purchase_order_create_with_invoice_number_and_list(tenant_fixture):
     matching = [o for o in orders if o["id"] == po_id]
     assert len(matching) == 1
     assert matching[0]["invoice_number"] == invoice_no
-    assert matching[0]["invoice_id"] == invoice_no
+    assert "invoice_id" not in matching[0]
 
     # 3. GET /api/v1/purchase-orders/{id}
     single_resp = client.get(f"/api/v1/purchase-orders/{po_id}", headers=headers)
     assert single_resp.status_code == 200
     assert single_resp.json()["invoice_number"] == invoice_no
+    assert "invoice_id" not in single_resp.json()
 
     # 4. PATCH /api/v1/purchase-orders/{id} -> update invoice_number
     updated_inv = f"INV-UPD-{uuid.uuid4().hex[:6].upper()}"
@@ -257,7 +259,66 @@ def test_purchase_order_create_with_invoice_number_and_list(tenant_fixture):
     )
     assert patch_resp.status_code == 200, patch_resp.text
     assert patch_resp.json()["invoice_number"] == updated_inv
-    assert patch_resp.json()["invoice_id"] == updated_inv
+    assert "invoice_id" not in patch_resp.json()
+
+
+def test_purchase_order_create_with_invoice_number_and_empty_validation(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    store_id = tenant_fixture["store_id"]
+    supplier_id = tenant_fixture["supplier_id"]
+    product_id = tenant_fixture["product_id"]
+
+    custom_inv_id = f"INV-CUSTOM-{uuid.uuid4().hex[:6].upper()}"
+
+    # 1. Valid custom invoice_number
+    payload_valid = {
+        "supplier_id": supplier_id,
+        "store_id": store_id,
+        "invoice_number": custom_inv_id,
+        "items": [
+            {
+                "product_id": product_id,
+                "quantity": 5,
+                "unit_cost": 50.00,
+            }
+        ],
+    }
+    resp1 = client.post("/api/v1/purchase-orders", json=payload_valid, headers=headers)
+    assert resp1.status_code == 201, resp1.text
+    data1 = resp1.json()
+    assert data1["invoice_number"] == custom_inv_id
+    assert "invoice_id" not in data1
+    assert "remarks" not in data1
+
+    # 2. Empty string invoice_number must be rejected with 422
+    bad_payload_empty_id = {
+        "supplier_id": supplier_id,
+        "store_id": store_id,
+        "invoice_number": "",
+        "items": [{"product_id": product_id, "quantity": 1, "unit_cost": 10.00}],
+    }
+    resp_empty_id = client.post("/api/v1/purchase-orders", json=bad_payload_empty_id, headers=headers)
+    assert resp_empty_id.status_code == 422, f"Expected 422 for empty invoice_number, got {resp_empty_id.status_code}"
+
+    # 3. Whitespace only invoice_number must be rejected with 422
+    bad_payload_ws = {
+        "supplier_id": supplier_id,
+        "store_id": store_id,
+        "invoice_number": "   ",
+        "items": [{"product_id": product_id, "quantity": 1, "unit_cost": 10.00}],
+    }
+    resp_ws = client.post("/api/v1/purchase-orders", json=bad_payload_ws, headers=headers)
+    assert resp_ws.status_code == 422, f"Expected 422 for whitespace invoice_number, got {resp_ws.status_code}"
+
+    # 4. Placeholder 'string' must be rejected with 422
+    bad_payload_placeholder = {
+        "supplier_id": supplier_id,
+        "store_id": store_id,
+        "invoice_number": "string",
+        "items": [{"product_id": product_id, "quantity": 1, "unit_cost": 10.00}],
+    }
+    resp_ph = client.post("/api/v1/purchase-orders", json=bad_payload_placeholder, headers=headers)
+    assert resp_ph.status_code == 422, f"Expected 422 for placeholder invoice_number, got {resp_ph.status_code}"
 
 
 def test_purchase_order_delete_draft_order(tenant_fixture):
@@ -327,11 +388,18 @@ def test_purchase_order_delete_received_order_blocked(tenant_fixture):
     # 2. Receive the PO (adds stock to inventory)
     rec_resp = client.post(
         f"/api/v1/purchase-orders/{po_id}/receive",
-        json={"remarks": "Goods received in full"},
+        json={
+            "notes": "Verified all items before approval",
+        },
         headers=headers,
     )
     assert rec_resp.status_code == 200
-    assert rec_resp.json()["status"] == "received"
+    rec_data = rec_resp.json()
+    assert rec_data["status"] == "received"
+    # Verify received_quantity is updated to match quantity
+    assert rec_data["items"][0]["received_quantity"] == 3
+    # Verify notes is preserved
+    assert rec_data["notes"] == "Verified all items before approval"
 
     # 3. Attempting to DELETE received PO MUST return 409 Conflict
     del_resp = client.delete(f"/api/v1/purchase-orders/{po_id}", headers=headers)
@@ -339,4 +407,112 @@ def test_purchase_order_delete_received_order_blocked(tenant_fixture):
     body = del_resp.json()
     assert body["success"] is False
     assert "received" in body["message"].lower() or "inventory" in body["message"].lower()
+
+
+def test_purchase_order_invalid_random_values_rejected(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    store_id = tenant_fixture["store_id"]
+    supplier_id = tenant_fixture["supplier_id"]
+    product_id = tenant_fixture["product_id"]
+
+    base_items = [{"product_id": product_id, "quantity": 2, "unit_cost": 25.00}]
+
+    # 1. Past delivery date rejected
+    resp_past = client.post(
+        "/api/v1/purchase-orders",
+        json={
+            "supplier_id": supplier_id,
+            "store_id": store_id,
+            "expected_delivery_date": "2020-01-01T00:00:00",
+            "items": base_items,
+        },
+        headers=headers,
+    )
+    assert resp_past.status_code == 422, f"Expected 422 for past delivery date, got {resp_past.status_code}"
+
+    # 2. Random invalid notes/remarks that must be rejected
+    invalid_notes = [
+        "",                  # empty
+        "   ",               # whitespace
+        "pppp",              # repeating chars
+        "098877",            # numeric only
+        "@#$$%",             # special chars only
+        "____",              # underscores only
+        "----",              # dashes only
+        "++++",              # pluses only
+        "[[]]",              # brackets
+        "{{}}",              # braces
+        "(())",              # parentheses only
+        "///",               # slashes only
+        "<<>>",              # angles
+        "::::;",             # colons only
+        "?????",             # question marks only
+        "na",                # placeholder
+        "null",              # placeholder
+        "dummy",             # placeholder
+    ]
+
+    for bad_note in invalid_notes:
+        resp = client.post(
+            "/api/v1/purchase-orders",
+            json={
+                "supplier_id": supplier_id,
+                "store_id": store_id,
+                "notes": bad_note,
+                "items": base_items,
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 422, f"Expected 422 for invalid note '{bad_note}', got {resp.status_code}: {resp.text}"
+
+    # 3. Random invalid invoice IDs that must be rejected
+    invalid_invoices = [
+        "",
+        "   ",
+        "pppp",
+        "0000",
+        "@#$$%",
+        "____",
+        "----",
+        "++++",
+        "[[]]",
+        "{{}}",
+        "(())",
+        "///",
+        "null",
+        "dummy",
+        "string",
+    ]
+
+    for bad_inv in invalid_invoices:
+        resp = client.post(
+            "/api/v1/purchase-orders",
+            json={
+                "supplier_id": supplier_id,
+                "store_id": store_id,
+                "invoice_number": bad_inv,
+                "items": base_items,
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 422, f"Expected 422 for invalid invoice_number '{bad_inv}', got {resp.status_code}: {resp.text}"
+
+    # 4. Verify invoice_id and remarks are completely removed from response
+    resp_clean = client.post(
+        "/api/v1/purchase-orders",
+        json={
+            "supplier_id": supplier_id,
+            "store_id": store_id,
+            "invoice_number": "INV-PUNE-2026-025",
+            "notes": "Purchase order for electronics inventory replenishment",
+            "items": base_items,
+        },
+        headers=headers,
+    )
+    assert resp_clean.status_code == 201
+    created_data = resp_clean.json()
+    assert "invoice_id" not in created_data
+    assert "remarks" not in created_data
+    assert created_data["invoice_number"] == "INV-PUNE-2026-025"
+    assert created_data["notes"] == "Purchase order for electronics inventory replenishment"
 

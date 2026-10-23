@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 import re
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -187,7 +188,63 @@ class CategoryDetailWrapperResponse(BaseModel):
 class CategoryListResponse(BaseModel):
     success: bool = True
     message: str
+    total: Optional[int] = None
+    page: Optional[int] = None
+    page_size: Optional[int] = None
     data: list[CategoryResponse] = Field(default_factory=list)
+
+
+class CategoryTreeNode(BaseModel):
+    id: int
+    tenant_id: int
+    parent_id: Optional[int] = None
+    name: str
+    is_active: bool = True
+    description: Optional[str] = None
+    product_count: int = 0
+    children: list["CategoryTreeNode"] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CategoryTreeResponse(BaseModel):
+    success: bool = True
+    message: str = "Category tree retrieved successfully"
+    data: list[CategoryTreeNode] = Field(default_factory=list)
+
+
+class CategorySubcategoryListResponse(BaseModel):
+    success: bool = True
+    message: str = "Subcategories retrieved successfully"
+    data: list[CategoryDetailResponse] = Field(default_factory=list)
+
+
+class CategoryProductItem(BaseModel):
+    id: int
+    name: str
+    sku: str
+    barcode: Optional[str] = None
+    price: Optional[Decimal] = None
+    selling_price: Optional[Decimal] = None
+    cost_price: Optional[Decimal] = None
+    is_active: bool = True
+    stock_status: Optional[str] = None
+    brand: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CategoryProductsResponse(BaseModel):
+    success: bool = True
+    message: str = "Category products retrieved successfully"
+    total: int = 0
+    page: int = 1
+    page_size: int = 50
+    category_id: int
+    category_name: str
+    data: list[CategoryProductItem] = Field(default_factory=list)
 
 
 class CategoryDeleteData(BaseModel):

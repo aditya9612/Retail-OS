@@ -34,11 +34,12 @@ def test_openapi_tags_metadata_registered():
     tag_names = [t["name"] for t in schema.get("tags", [])]
 
     expected_tags = [
-        "Invoice Documents",
-        "Bill / Receipt",
+        "invoices",
         "Credit Notes",
         "Purchase Orders",
-        "POS Z-Reports",
+        "pos-shifts",
+        "customers",
+        "delivery",
         "Report Exports",
         "Sales Reports",
         "Inventory Reports",
@@ -47,8 +48,6 @@ def test_openapi_tags_metadata_registered():
         "Payment Reports",
         "Profitability Reports",
         "Multi-Store Reports",
-        "Customer Exports",
-        "Delivery Exports",
         "Document Settings",
     ]
 
@@ -57,14 +56,16 @@ def test_openapi_tags_metadata_registered():
 
 
 def test_invoice_and_bill_export_discoverability():
-    """Verify Invoice and POS Bill PDF route discoverability and tagging."""
+    """Verify Invoice and POS Bill PDF route discoverability, single clean tag, and no duplicate tags."""
     response = client.get("/openapi.json")
     paths = response.json().get("paths", {})
     route = paths.get("/api/v1/invoices/{invoice_id}/pdf", {}).get("get")
 
     assert route is not None, "Route /api/v1/invoices/{invoice_id}/pdf not found in OpenAPI"
-    assert "Invoice Documents" in route.get("tags", [])
-    assert "Bill / Receipt" in route.get("tags", [])
+    assert "invoices" in route.get("tags", [])
+    # Duplicate tags are removed so the API appears only once in Swagger UI
+    assert "Invoice Documents" not in route.get("tags", [])
+    assert "Bill / Receipt" not in route.get("tags", [])
     assert "application/pdf" in route.get("responses", {}).get("200", {}).get("content", {})
 
 
@@ -80,52 +81,59 @@ def test_credit_note_export_discoverability():
 
 
 def test_purchase_order_export_discoverability():
-    """Verify Purchase Order PDF route discoverability and tagging."""
+    """Verify Purchase Order export route discoverability and multi-format support."""
     response = client.get("/openapi.json")
     paths = response.json().get("paths", {})
     route = paths.get("/api/v1/purchase-orders/{purchase_order_id}/pdf", {}).get("get")
 
     assert route is not None, "Route /api/v1/purchase-orders/{purchase_order_id}/pdf not found in OpenAPI"
     assert "Purchase Orders" in route.get("tags", [])
-    assert "application/pdf" in route.get("responses", {}).get("200", {}).get("content", {})
+    content = route.get("responses", {}).get("200", {}).get("content", {})
+    assert "application/pdf" in content
+    assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in content
+    assert "text/csv" in content
 
 
 def test_pos_z_report_export_discoverability():
-    """Verify POS Z-Report JSON, PDF, and Excel export route discoverability and tagging."""
+    """Verify POS Z-Report JSON and unified multi-format export route discoverability."""
     response = client.get("/openapi.json")
     paths = response.json().get("paths", {})
 
-    # JSON preview
+    # JSON preview belongs to pos-shifts
     json_route = paths.get("/api/v1/pos/shifts/{shift_id}/z-report", {}).get("get")
     assert json_route is not None, "Route /api/v1/pos/shifts/{shift_id}/z-report not found"
-    assert "POS Z-Reports" in json_route.get("tags", [])
+    assert "pos-shifts" in json_route.get("tags", [])
+    assert "POS Z-Reports" not in json_route.get("tags", [])
 
-    # PDF export
-    pdf_route = paths.get("/api/v1/pos/shifts/{shift_id}/z-report/pdf", {}).get("get")
-    assert pdf_route is not None, "Route /api/v1/pos/shifts/{shift_id}/z-report/pdf not found"
-    assert "POS Z-Reports" in pdf_route.get("tags", [])
-    assert "application/pdf" in pdf_route.get("responses", {}).get("200", {}).get("content", {})
-
-    # Excel export
-    excel_route = paths.get("/api/v1/pos/shifts/{shift_id}/z-report/excel", {}).get("get")
-    assert excel_route is not None, "Route /api/v1/pos/shifts/{shift_id}/z-report/excel not found"
-    assert "POS Z-Reports" in excel_route.get("tags", [])
-    content = excel_route.get("responses", {}).get("200", {}).get("content", {})
+    # Unified Multi-Format Export (PDF, Excel, CSV) belongs to pos-shifts
+    export_route = paths.get("/api/v1/pos/shifts/{shift_id}/z-report/pdf", {}).get("get")
+    assert export_route is not None, "Route /api/v1/pos/shifts/{shift_id}/z-report/pdf not found"
+    assert "pos-shifts" in export_route.get("tags", [])
+    assert "POS Z-Reports" not in export_route.get("tags", [])
+    content = export_route.get("responses", {}).get("200", {}).get("content", {})
+    assert "application/pdf" in content
     assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in content
+    assert "text/csv" in content
+
+    # Duplicate /excel route is confirmed deleted
+    duplicate_excel_route = paths.get("/api/v1/pos/shifts/{shift_id}/z-report/excel")
+    assert duplicate_excel_route is None, "Duplicate route /api/v1/pos/shifts/{shift_id}/z-report/excel was not removed"
 
 
 def test_customer_and_delivery_export_discoverability():
-    """Verify Customer and Delivery directory export routes."""
+    """Verify Customer and Delivery directory export routes belong cleanly to parent routers."""
     response = client.get("/openapi.json")
     paths = response.json().get("paths", {})
 
     customer_export = paths.get("/api/v1/customers/export-directory", {}).get("get")
     assert customer_export is not None, "Route /api/v1/customers/export-directory not found"
-    assert "Customer Exports" in customer_export.get("tags", [])
+    assert "customers" in customer_export.get("tags", [])
+    assert "Customer Exports" not in customer_export.get("tags", [])
 
     delivery_export = paths.get("/api/v1/delivery/export", {}).get("get")
     assert delivery_export is not None, "Route /api/v1/delivery/export not found"
-    assert "Delivery Exports" in delivery_export.get("tags", [])
+    assert "delivery" in delivery_export.get("tags", [])
+    assert "Delivery Exports" not in delivery_export.get("tags", [])
 
 
 def test_reports_export_unified_endpoints():
@@ -190,10 +198,12 @@ def test_analytical_report_endpoints_tagged():
     response = client.get("/openapi.json")
     paths = response.json().get("paths", {})
 
-    # Sales Reports
-    assert "Sales Reports" in paths.get("/api/v1/reports/sales/daily", {}).get("get", {}).get("tags", [])
-    assert "Sales Reports" in paths.get("/api/v1/reports/sales/monthly", {}).get("get", {}).get("tags", [])
-    assert "Sales Reports" in paths.get("/api/v1/reports/sales/yearly", {}).get("get", {}).get("tags", [])
+    # Sales Reports (Unified Endpoint)
+    sales_route = paths.get("/api/v1/reports/sales", {}).get("get", {})
+    assert "Sales Reports" in sales_route.get("tags", [])
+    assert paths.get("/api/v1/reports/sales/daily") is None
+    assert paths.get("/api/v1/reports/sales/monthly") is None
+    assert paths.get("/api/v1/reports/sales/yearly") is None
 
     # GST Reports
     assert "GST Reports" in paths.get("/api/v1/reports/gst/sales", {}).get("get", {}).get("tags", [])

@@ -1,5 +1,5 @@
-from typing import Union
-from fastapi import APIRouter, Depends, Query, Path, HTTPException
+from typing import Optional, Union
+from fastapi import APIRouter, Depends, Query, Path, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -8,12 +8,14 @@ from app.models.user import User
 
 from app.schemas.supplier import (
     SupplierCreate,
+    SupplierDeleteResponse,
     SupplierEmptyResponse,
-    SupplierResponse,
-    SupplierStatsResponse,
-    SupplierStatusUpdate,
-    SupplierUpdate,
+    SupplierProductsResponse,
     SupplierPurchaseHistoryResponse,
+    SupplierResponse,
+    SupplierStatusUpdate,
+    SupplierSummaryResponse,
+    SupplierUpdate,
 )
 
 from app.services.supplier_service import SupplierService
@@ -24,10 +26,11 @@ router = APIRouter(
     tags=["suppliers"],
 )
 
+
 @router.post(
     "",
     response_model=SupplierResponse,
-    status_code=201,
+    status_code=status.HTTP_201_CREATED,
 )
 def create_supplier(
     data: SupplierCreate,
@@ -41,18 +44,27 @@ def create_supplier(
         data,
     )
 
+
 @router.get(
     "",
     response_model=Union[list[SupplierResponse], SupplierEmptyResponse],
 )
 def list_suppliers(
+    search: Optional[str] = Query(None, description="Search by name, phone, contact person, or GSTIN"),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
+    page_size: Optional[int] = Query(None, ge=1, le=100, description="Items per page"),
     user: User = Depends(
         require_permission("suppliers:read")
     ),
     db: Session = Depends(get_db),
 ):
     return SupplierService(db).list_suppliers(
-        user.tenant_id
+        tenant_id=user.tenant_id,
+        search=search,
+        is_active=is_active,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -65,7 +77,7 @@ def search_suppliers(
         ...,
         min_length=1,
         max_length=255,
-        description="Search supplier by name",
+        description="Search supplier by name, phone, contact person, or GSTIN",
     ),
     user: User = Depends(
         require_permission("suppliers:read")
@@ -84,17 +96,19 @@ def search_suppliers(
     )
 
 
+
+
 @router.get(
-    "/stats",
-    response_model=SupplierStatsResponse,
+    "/summary",
+    response_model=SupplierSummaryResponse,
 )
-def supplier_stats(
+def suppliers_summary(
     user: User = Depends(
         require_permission("suppliers:read")
     ),
     db: Session = Depends(get_db),
 ):
-    return SupplierService(db).supplier_stats(
+    return SupplierService(db).get_suppliers_summary(
         user.tenant_id
     )
 
@@ -109,12 +123,39 @@ def get_supplier_purchase_history(
         gt=0,
         description="Supplier ID must be greater than zero",
     ),
+    status: Optional[str] = Query(None, description="Filter by purchase order status"),
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
+    page_size: Optional[int] = Query(None, ge=1, le=100, description="Items per page"),
     user: User = Depends(
         require_permission("suppliers:read")
     ),
     db: Session = Depends(get_db),
 ):
     return SupplierService(db).get_purchase_history(
+        user.tenant_id,
+        supplier_id,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
+    "/{supplier_id}/products",
+    response_model=SupplierProductsResponse,
+)
+def get_supplier_products(
+    supplier_id: int = Path(
+        ...,
+        gt=0,
+        description="Supplier ID must be greater than zero",
+    ),
+    user: User = Depends(
+        require_permission("suppliers:read")
+    ),
+    db: Session = Depends(get_db),
+):
+    return SupplierService(db).get_supplier_products(
         user.tenant_id,
         supplier_id,
     )
@@ -184,4 +225,25 @@ def update_supplier_status(
         user.tenant_id,
         supplier_id,
         data.is_active,
+    )
+
+
+@router.delete(
+    "/{supplier_id}",
+    response_model=SupplierDeleteResponse,
+)
+def delete_supplier(
+    supplier_id: int = Path(
+        ...,
+        gt=0,
+        description="Supplier ID must be greater than zero",
+    ),
+    user: User = Depends(
+        require_permission("suppliers:write")
+    ),
+    db: Session = Depends(get_db),
+):
+    return SupplierService(db).delete_supplier(
+        user.tenant_id,
+        supplier_id,
     )

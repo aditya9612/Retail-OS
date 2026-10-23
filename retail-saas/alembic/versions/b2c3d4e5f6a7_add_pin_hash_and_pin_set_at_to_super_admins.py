@@ -48,4 +48,3 @@ def downgrade() -> None:
             op.drop_column("super_admins", "pin_set_at")
         if "pin_hash" in cols:
             op.drop_column("super_admins", "pin_hash")
-

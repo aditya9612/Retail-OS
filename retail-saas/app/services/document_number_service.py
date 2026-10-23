@@ -7,6 +7,8 @@ from app.models.document_sequence import DocumentSequence
 from app.models.invoice import Invoice
 from app.models.credit_note import CreditNote
 from app.models.store import Store
+from app.models.purchase_order import PurchaseOrder
+from app.models.grn import GRN
 
 
 class DocumentNumberService:
@@ -108,27 +110,50 @@ class DocumentNumberService:
         Generate invoice number in standard enterprise format:
         INV-STR01-POS01-YYYYMMDD-000001
         """
+        from app.services.document_settings_service import DocumentSettingsService
+
+        branding = DocumentSettingsService(self.db).resolve_branding(
+            tenant_id=tenant_id,
+            store_id=store_id,
+        )
+        prefix = (branding.invoice_prefix or "INV").strip().rstrip("-") or "INV"
         store_code = self._resolve_store_code(tenant_id, store_id)
         pos_code = self._resolve_pos_code(pos_id)
         dt = doc_date or datetime.utcnow()
         date_str = dt.strftime("%Y%m%d")
-        period_key = int(date_str)
-        series_key = f"inv_{store_code.lower()}_{pos_code.lower()}"[:64]
 
-        while True:
-            seq = self._next_sequence(tenant_id, series_key, period_key)
-            inv_number = f"INV-{store_code}-{pos_code}-{date_str}-{seq:06d}"
-            # Ensure uniqueness against Invoice table
-            collision = (
-                self.db.query(Invoice)
-                .filter(
-                    Invoice.tenant_id == tenant_id,
-                    Invoice.invoice_number == inv_number,
+        if prefix.upper() != "INV":
+            period_key = dt.year
+            series_key = f"inv_{prefix.lower()}"[:64]
+            while True:
+                seq = self._next_sequence(tenant_id, series_key, period_key)
+                inv_number = f"{prefix}-{period_key}-{seq:06d}"
+                collision = (
+                    self.db.query(Invoice)
+                    .filter(
+                        Invoice.tenant_id == tenant_id,
+                        Invoice.invoice_number == inv_number,
+                    )
+                    .first()
                 )
-                .first()
-            )
-            if not collision:
-                return inv_number
+                if not collision:
+                    return inv_number
+        else:
+            period_key = int(date_str)
+            series_key = f"inv_{store_code.lower()}_{pos_code.lower()}"[:64]
+            while True:
+                seq = self._next_sequence(tenant_id, series_key, period_key)
+                inv_number = f"INV-{store_code}-{pos_code}-{date_str}-{seq:06d}"
+                collision = (
+                    self.db.query(Invoice)
+                    .filter(
+                        Invoice.tenant_id == tenant_id,
+                        Invoice.invoice_number == inv_number,
+                    )
+                    .first()
+                )
+                if not collision:
+                    return inv_number
 
     def generate_credit_note_number(
         self,
@@ -197,8 +222,16 @@ class DocumentNumberService:
         period_key = int(date_str)
         series_key = f"po_{store_code.lower()}"[:64]
 
-        seq = self._next_sequence(tenant_id, series_key, period_key)
-        return f"PO-{store_code}-{date_str}-{seq:06d}"
+        while True:
+            seq = self._next_sequence(tenant_id, series_key, period_key)
+            po_number = f"PO-{store_code}-{date_str}-{seq:06d}"
+            collision = (
+                self.db.query(PurchaseOrder)
+                .filter(PurchaseOrder.order_number == po_number)
+                .first()
+            )
+            if not collision:
+                return po_number
 
     def generate_grn_number(
         self,
@@ -216,8 +249,19 @@ class DocumentNumberService:
         period_key = int(date_str)
         series_key = f"grn_{store_code.lower()}"[:64]
 
-        seq = self._next_sequence(tenant_id, series_key, period_key)
-        return f"GRN-{store_code}-{date_str}-{seq:06d}"
+        while True:
+            seq = self._next_sequence(tenant_id, series_key, period_key)
+            grn_number = f"GRN-{store_code}-{date_str}-{seq:06d}"
+            collision = (
+                self.db.query(GRN)
+                .filter(
+                    GRN.tenant_id == tenant_id,
+                    GRN.grn_number == grn_number,
+                )
+                .first()
+            )
+            if not collision:
+                return grn_number
 
     def generate_transfer_number(
         self,

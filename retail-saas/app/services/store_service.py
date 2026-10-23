@@ -450,4 +450,4 @@ class StoreService:
             "in_stock_skus": in_stock_count,
             "low_stock_skus": low_stock_count,
             "out_of_stock_skus": out_of_stock_count,
-        }
+        }
