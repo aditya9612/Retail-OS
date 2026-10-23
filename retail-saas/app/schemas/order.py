@@ -233,6 +233,13 @@ class OrderCreate(BaseModel):
         description="Delivery address is optional for POS orders",
     )
 
+    delivery_pincode: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=20,
+        description="Optional delivery pincode / postal code",
+    )
+
     notes: Optional[str] = Field(
         default=None,
         min_length=1,
@@ -330,6 +337,26 @@ class OrderCreate(BaseModel):
 
         return v
 
+    @field_validator("delivery_pincode")
+    @classmethod
+    def validate_delivery_pincode(
+        cls,
+        v: Optional[str],
+    ) -> Optional[str]:
+
+        if v is None:
+            return None
+
+        v = v.strip()
+
+        if not v:
+            return None
+
+        if v.lower() in INVALID_STRING_VALUES:
+            raise ValueError("Invalid delivery pincode")
+
+        return v
+
     @field_validator("notes")
     @classmethod
     def validate_notes(
@@ -401,6 +428,12 @@ class OrderUpdate(BaseModel):
         default=None,
         min_length=3,
         max_length=500,
+    )
+
+    delivery_pincode: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=20,
     )
 
     notes: Optional[str] = Field(
@@ -477,6 +510,26 @@ class OrderUpdate(BaseModel):
 
         if v.isdigit():
             raise ValueError("Delivery address cannot contain only numbers")
+
+        return v
+
+    @field_validator("delivery_pincode")
+    @classmethod
+    def validate_delivery_pincode(
+        cls,
+        v: Optional[str],
+    ) -> Optional[str]:
+
+        if v is None:
+            return None
+
+        v = v.strip()
+
+        if not v:
+            return None
+
+        if v.lower() in INVALID_STRING_VALUES:
+            raise ValueError("Invalid delivery pincode")
 
         return v
 
