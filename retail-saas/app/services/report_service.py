@@ -1971,8 +1971,14 @@ class ReportService:
         }
 
     def daily_billing_closure(
-        self, tenant_id: int, target_date: date | None = None, store_id: Optional[int] = None
+        self,
+        user_or_tenant: Union[User, int],
+        target_date: date | None = None,
+        store_id: Optional[int] = None,
     ) -> dict:
+        tenant_id, resolved_store_id = self._resolve_tenant_and_store(
+            user_or_tenant, store_id
+        )
         target_date = target_date or date.today()
         start = datetime.combine(target_date, datetime.min.time())
         end = start + timedelta(days=1)
@@ -1982,8 +1988,8 @@ class ReportService:
             Invoice.created_at >= start,
             Invoice.created_at < end,
         )
-        if store_id is not None:
-            inv_query = inv_query.filter(Invoice.store_id == store_id)
+        if resolved_store_id is not None:
+            inv_query = inv_query.filter(Invoice.store_id == resolved_store_id)
         invoices = inv_query.all()
         total_sales = sum((i.total_amount for i in invoices), Decimal("0"))
         discount_total = sum((i.discount_amount for i in invoices), Decimal("0"))
@@ -1998,8 +2004,8 @@ class ReportService:
                 Payment.status == PaymentStatus.COMPLETED.value,
             )
         )
-        if store_id is not None:
-            pmt_query = pmt_query.filter(Order.store_id == store_id)
+        if resolved_store_id is not None:
+            pmt_query = pmt_query.filter(Order.store_id == resolved_store_id)
         payments = pmt_query.all()
         cash_sales = sum(
             (p.amount for p in payments if p.payment_method == "cash"),
@@ -2022,7 +2028,7 @@ class ReportService:
             Decimal("0"),
         )
 
-        refunds = (
+        refund_query = (
             self.db.query(Refund)
             .filter(
                 Refund.tenant_id == tenant_id,
@@ -2030,8 +2036,14 @@ class ReportService:
                 Refund.created_at >= start,
                 Refund.created_at < end,
             )
-            .all()
         )
+        if resolved_store_id is not None:
+            refund_query = (
+                refund_query.join(Invoice, Refund.invoice_id == Invoice.id)
+                .join(Order, Invoice.order_id == Order.id)
+                .filter(Order.store_id == resolved_store_id)
+            )
+        refunds = refund_query.all()
         refund_amount = sum((r.refund_amount for r in refunds), Decimal("0"))
         net_collection = total_sales - refund_amount
 
@@ -2046,11 +2058,20 @@ class ReportService:
             "discount_amount": float(discount_total),
             "refund_amount": float(refund_amount),
             "net_collection": float(net_collection),
+            "store_id": resolved_store_id,
         }
 
     def payment_summary(
-        self, tenant_id: int, start_date: date, end_date: date, store_id: Optional[int] = None
+        self,
+        user_or_tenant: Union[User, int],
+        start_date: date,
+        end_date: date,
+        store_id: Optional[int] = None,
     ) -> dict:
+        self._validate_date_range(start_date, end_date)
+        tenant_id, resolved_store_id = self._resolve_tenant_and_store(
+            user_or_tenant, store_id
+        )
         pmt_q = (
             self.db.query(
                 Payment.payment_method, func.sum(Payment.amount), func.count(Payment.id)
@@ -2063,8 +2084,8 @@ class ReportService:
                 Payment.created_at <= datetime.combine(end_date, datetime.max.time()),
             )
         )
-        if store_id is not None:
-            pmt_q = pmt_q.filter(Order.store_id == store_id)
+        if resolved_store_id is not None:
+            pmt_q = pmt_q.filter(Order.store_id == resolved_store_id)
         payments = pmt_q.group_by(Payment.payment_method).all()
         breakdown = {
             row[0]: {"total_amount": float(row[1]), "transaction_count": row[2]}
@@ -2076,6 +2097,7 @@ class ReportService:
             "end_date": str(end_date),
             "payment_breakdown": breakdown,
             "grand_total": grand_total,
+            "store_id": resolved_store_id,
         }
 
     def product_performance(self, tenant_id: int, limit: int = 10, store_id: Optional[int] = None) -> list[dict]:

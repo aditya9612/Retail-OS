@@ -1,8 +1,9 @@
 import uuid
-from typing import Optional
+from typing import Any, Dict, List, Optional, Union
 from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from sqlalchemy import extract, func
 
@@ -41,7 +42,7 @@ from app.models.delivery import Delivery
 from app.repositories.order_repo import OrderRepository
 from app.repositories.order_item_batch_allocation_repo import OrderItemBatchAllocationRepository
 from app.repositories.customer_repo import get_customers_for_export
-from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate, OrderResponse, POSCheckoutRequest, POSPaymentData
+from app.schemas.order import OrderCreate, OrderItemCreate, OrderUpdate, OrderResponse, POSCheckoutRequest, POSPaymentData, OrderReceiptResponse, OrderThermalMode
 from app.services.inventory_service import InventoryService
 from app.services.batch_allocation_service import BatchAllocationService, InsufficientStockException
 from app.utils.constants import OrderStatus, StockMovementType
@@ -1585,6 +1586,382 @@ class OrderService:
             "created_at": order.created_at,
             "formatted_receipt": formatted_receipt,
         }
+
+    def _generate_order_thermal_image(self, ctx: dict) -> bytes:
+        import io
+        from PIL import Image, ImageDraw, ImageFont
+
+        width = 576  # Standard 80mm printable width at 203 DPI
+        items = ctx.get("items", [])
+        est_height = 550 + max(len(items), 1) * 32
+
+        img = Image.new("RGB", (width, est_height), color=(255, 255, 255))
+        draw = ImageDraw.Draw(img)
+
+        try:
+            font_title = ImageFont.truetype("arialbd.ttf", 22)
+            font_head = ImageFont.truetype("arialbd.ttf", 16)
+            font_bold = ImageFont.truetype("arialbd.ttf", 14)
+            font_regular = ImageFont.truetype("arial.ttf", 13)
+            font_small = ImageFont.truetype("arial.ttf", 11)
+            font_big = ImageFont.truetype("arialbd.ttf", 18)
+        except Exception:
+            font_title = font_head = font_bold = font_regular = font_small = font_big = ImageFont.load_default()
+
+        # Outer subtle border
+        draw.rectangle([(6, 6), (width - 7, est_height - 7)], outline=(200, 200, 200), width=1)
+
+        y = 20
+
+        # Store Title centered
+        store_txt = str(ctx.get("store_name", "RETAIL STORE")).upper()
+        bbox = draw.textbbox((0, 0), store_txt, font=font_title)
+        draw.text(((width - (bbox[2] - bbox[0])) // 2, y), store_txt, font=font_title, fill=(0, 0, 0))
+        y += 28
+
+        if ctx.get("store_address"):
+            addr_txt = str(ctx.get("store_address"))[:65]
+            abbox = draw.textbbox((0, 0), addr_txt, font=font_small)
+            draw.text(((width - (abbox[2] - abbox[0])) // 2, y), addr_txt, font=font_small, fill=(100, 100, 100))
+            y += 18
+        if ctx.get("store_code"):
+            sc_txt = f"Store Code: {ctx.get('store_code')}"
+            scbbox = draw.textbbox((0, 0), sc_txt, font=font_small)
+            draw.text(((width - (scbbox[2] - scbbox[0])) // 2, y), sc_txt, font=font_small, fill=(100, 100, 100))
+            y += 18
+
+        # Header centered
+        rep_txt = "SALES ORDER RECEIPT"
+        bbox = draw.textbbox((0, 0), rep_txt, font=font_head)
+        draw.text(((width - (bbox[2] - bbox[0])) // 2, y), rep_txt, font=font_head, fill=(22, 101, 52))
+        y += 24
+
+        def draw_dashed_line(draw_ctx, cur_y, w):
+            for x in range(20, w - 20, 10):
+                draw_ctx.line([(x, cur_y), (x + 5, cur_y)], fill=(120, 120, 120), width=1)
+
+        draw_dashed_line(draw, y, width)
+        y += 12
+
+        def draw_kv(label: str, val: str, font_l=font_regular, font_r=font_bold, fill_l=(70, 70, 70), fill_r=(0, 0, 0)):
+            nonlocal y
+            draw.text((24, y), label, font=font_l, fill=fill_l)
+            r_bbox = draw.textbbox((0, 0), str(val), font=font_r)
+            r_w = r_bbox[2] - r_bbox[0]
+            draw.text((width - 24 - r_w, y), str(val), font=font_r, fill=fill_r)
+            y += 22
+
+        # Order Details
+        draw_kv("Order Number", str(ctx.get("order_number", "")))
+        created_at = ctx.get("created_at")
+        dt_str = created_at.strftime("%Y-%m-%d %H:%M") if isinstance(created_at, datetime) else str(created_at or "")
+        draw_kv("Date & Time", dt_str)
+        if ctx.get("customer_name"):
+            draw_kv("Customer", f"{ctx.get('customer_name')} ({ctx.get('customer_phone') or 'N/A'})")
+
+        y += 4
+        draw_dashed_line(draw, y, width)
+        y += 10
+
+        # Items Header
+        draw.text((24, y), "ITEM", font=font_bold, fill=(50, 50, 50))
+        draw.text((260, y), "QTY", font=font_bold, fill=(50, 50, 50))
+        draw.text((360, y), "PRICE", font=font_bold, fill=(50, 50, 50))
+        tot_hdr = "TOTAL"
+        tot_bbox = draw.textbbox((0, 0), tot_hdr, font=font_bold)
+        draw.text((width - 24 - (tot_bbox[2] - tot_bbox[0]), y), tot_hdr, font=font_bold, fill=(50, 50, 50))
+        y += 20
+        draw_dashed_line(draw, y, width)
+        y += 10
+
+        # Item Rows
+        for it in items:
+            name_txt = str(it.get("name", "Item"))[:22]
+            draw.text((24, y), name_txt, font=font_regular, fill=(20, 20, 20))
+            draw.text((265, y), str(it.get("quantity", 1)), font=font_regular, fill=(20, 20, 20))
+            draw.text((360, y), f"{Decimal(str(it.get('unit_price', 0))):.2f}", font=font_regular, fill=(20, 20, 20))
+            t_str = f"{Decimal(str(it.get('total_amount', 0))):.2f}"
+            t_bbox = draw.textbbox((0, 0), t_str, font=font_bold)
+            draw.text((width - 24 - (t_bbox[2] - t_bbox[0]), y), t_str, font=font_bold, fill=(0, 0, 0))
+            y += 22
+
+        y += 4
+        draw_dashed_line(draw, y, width)
+        y += 12
+
+        # Subtotals & Tax
+        draw_kv("Subtotal", f"Rs. {Decimal(str(ctx.get('subtotal', 0))):.2f}")
+        if ctx.get("discount_amount") and Decimal(str(ctx.get("discount_amount"))) > 0:
+            draw_kv("Discount", f"-Rs. {Decimal(str(ctx.get('discount_amount'))):.2f}", fill_r=(185, 28, 28))
+        if ctx.get("cgst_amount") and Decimal(str(ctx.get("cgst_amount"))) > 0:
+            draw_kv("CGST", f"Rs. {Decimal(str(ctx.get('cgst_amount'))):.2f}")
+        if ctx.get("sgst_amount") and Decimal(str(ctx.get("sgst_amount"))) > 0:
+            draw_kv("SGST", f"Rs. {Decimal(str(ctx.get('sgst_amount'))):.2f}")
+        if ctx.get("igst_amount") and Decimal(str(ctx.get("igst_amount"))) > 0:
+            draw_kv("IGST", f"Rs. {Decimal(str(ctx.get('igst_amount'))):.2f}")
+
+        y += 6
+
+        # Total Box
+        tot_box_top = y
+        draw.rectangle([(20, tot_box_top), (width - 20, tot_box_top + 42)], fill=(240, 253, 244), outline=(34, 197, 94), width=1)
+        draw.text((32, tot_box_top + 10), "TOTAL AMOUNT", font=font_bold, fill=(22, 101, 52))
+        amt_str = f"Rs. {Decimal(str(ctx.get('total_amount', 0))):.2f}"
+        amt_bbox = draw.textbbox((0, 0), amt_str, font=font_big)
+        amt_w = amt_bbox[2] - amt_bbox[0]
+        draw.text((width - 32 - amt_w, tot_box_top + 10), amt_str, font=font_big, fill=(22, 101, 52))
+        y += 54
+
+        draw_kv("Payment Status", str(ctx.get("payment_status", "PAID")).upper(), fill_r=(22, 101, 52))
+        if ctx.get("payment_method"):
+            draw_kv("Payment Method", str(ctx.get("payment_method")).upper())
+
+        y += 4
+        draw_dashed_line(draw, y, width)
+        y += 20
+
+        ty_txt = "Thank you for shopping with us!"
+        ty_bbox = draw.textbbox((0, 0), ty_txt, font=font_small)
+        draw.text(((width - (ty_bbox[2] - ty_bbox[0])) // 2, y), ty_txt, font=font_small, fill=(100, 100, 100))
+        y += 26
+
+        # Final crop to actual height
+        final_height = y + 15
+        final_img = img.crop((0, 0, width, final_height))
+        draw_final = ImageDraw.Draw(final_img)
+        draw_final.rectangle([(6, 6), (width - 7, final_height - 7)], outline=(200, 200, 200), width=1)
+
+        buf = io.BytesIO()
+        final_img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    def _generate_order_thermal_html(self, ctx: dict, auto_print: bool = False) -> str:
+        created_at = ctx.get("created_at")
+        dt_str = created_at.strftime("%Y-%m-%d %H:%M") if isinstance(created_at, datetime) else str(created_at or "")
+        items = ctx.get("items", [])
+        auto_print_script = "<script>window.onload = function() { window.print(); };</script>" if auto_print else ""
+
+        items_rows = ""
+        for it in items:
+            items_rows += f'''
+            <div class="row">
+                <span class="lbl">{it.get("name", "Item")} x{it.get("quantity", 1)}</span>
+                <span class="val">Rs. {Decimal(str(it.get("total_amount", 0))):.2f}</span>
+            </div>'''
+
+        store_addr_html = f'<div class="store-sub">{ctx["store_address"]}</div>' if ctx.get("store_address") else ""
+        store_code_html = f'<div class="store-sub">Store: {ctx["store_code"]}</div>' if ctx.get("store_code") else ""
+
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Order Receipt {ctx.get('order_number')}</title>
+<style>
+  body {{
+    font-family: 'Courier New', Courier, monospace, system-ui;
+    background-color: #f3f4f6;
+    margin: 0;
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+  }}
+  .ticket {{
+    width: 320px;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    padding: 16px 14px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    font-size: 13px;
+    color: #111827;
+    line-height: 1.35;
+  }}
+  .center {{ text-align: center; }}
+  .store-title {{ font-size: 16px; font-weight: bold; text-transform: uppercase; margin-bottom: 2px; }}
+  .store-sub {{ font-size: 11px; color: #4b5563; }}
+  .doc-title {{
+    font-size: 14px;
+    font-weight: bold;
+    color: #15803d;
+    margin: 8px 0 2px 0;
+    letter-spacing: 0.5px;
+  }}
+  .divider {{
+    border-top: 1px dashed #9ca3af;
+    margin: 8px 0;
+  }}
+  .row {{
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 3px;
+  }}
+  .lbl {{ color: #4b5563; }}
+  .val {{ font-weight: 600; text-align: right; }}
+  .highlight-box {{
+    background: #f0fdf4;
+    border: 1px solid #22c55e;
+    padding: 8px 10px;
+    margin: 8px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }}
+  .hl-title {{ font-size: 12px; font-weight: bold; color: #166534; }}
+  .hl-val {{ font-size: 16px; font-weight: bold; color: #166534; }}
+  @media print {{
+    body {{ background: transparent; padding: 0; }}
+    .ticket {{ box-shadow: none; border: none; width: 100%; padding: 0; }}
+  }}
+</style>
+{auto_print_script}
+</head>
+<body>
+<div class="ticket">
+  <div class="center">
+    <div class="store-title">{ctx.get('store_name', 'Retail Store')}</div>
+    {store_addr_html}
+    {store_code_html}
+    <div class="doc-title">SALES ORDER RECEIPT</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="row"><span class="lbl">Order Number</span><span class="val">{ctx.get('order_number')}</span></div>
+  <div class="row"><span class="lbl">Date</span><span class="val">{dt_str}</span></div>
+  {f'<div class="row"><span class="lbl">Customer</span><span class="val">{ctx.get("customer_name")}</span></div>' if ctx.get("customer_name") else ''}
+
+  <div class="divider"></div>
+
+  {items_rows}
+
+  <div class="divider"></div>
+
+  <div class="row"><span class="lbl">Subtotal</span><span class="val">Rs. {Decimal(str(ctx.get('subtotal', 0))):.2f}</span></div>
+  {f'<div class="row"><span class="lbl">Discount</span><span class="val" style="color:#b91c1c">-Rs. {Decimal(str(ctx.get("discount_amount"))):.2f}</span></div>' if ctx.get("discount_amount") and Decimal(str(ctx.get("discount_amount"))) > 0 else ''}
+  {f'<div class="row"><span class="lbl">CGST</span><span class="val">Rs. {Decimal(str(ctx.get("cgst_amount"))):.2f}</span></div>' if ctx.get("cgst_amount") and Decimal(str(ctx.get("cgst_amount"))) > 0 else ''}
+  {f'<div class="row"><span class="lbl">SGST</span><span class="val">Rs. {Decimal(str(ctx.get("sgst_amount"))):.2f}</span></div>' if ctx.get("sgst_amount") and Decimal(str(ctx.get("sgst_amount"))) > 0 else ''}
+  {f'<div class="row"><span class="lbl">IGST</span><span class="val">Rs. {Decimal(str(ctx.get("igst_amount"))):.2f}</span></div>' if ctx.get("igst_amount") and Decimal(str(ctx.get("igst_amount"))) > 0 else ''}
+
+  <div class="highlight-box">
+    <span class="hl-title">TOTAL AMOUNT</span>
+    <span class="hl-val">Rs. {Decimal(str(ctx.get('total_amount', 0))):.2f}</span>
+  </div>
+
+  <div class="row"><span class="lbl">Status</span><span class="val">{str(ctx.get('payment_status', 'PAID')).upper()}</span></div>
+  {f'<div class="row"><span class="lbl">Method</span><span class="val">{str(ctx.get("payment_method")).upper()}</span></div>' if ctx.get("payment_method") else ''}
+
+  <div class="divider"></div>
+
+  <div class="center store-sub" style="margin-top: 10px;">
+    Thank you for shopping with us!
+  </div>
+</div>
+</body>
+</html>"""
+
+    def _generate_order_thermal_pdf(self, ctx: dict) -> bytes:
+        import io
+        from PIL import Image
+        from reportlab.lib.utils import ImageReader
+        from reportlab.pdfgen import canvas
+
+        img_bytes = self._generate_order_thermal_image(ctx)
+        pil_img = Image.open(io.BytesIO(img_bytes))
+        img_w, img_h = pil_img.size
+
+        # 80mm roll in points: 80 / 25.4 * 72 = 226.77 points
+        page_width = 80.0 / 25.4 * 72.0
+        page_height = page_width * (img_h / img_w)
+
+        pdf_buf = io.BytesIO()
+        c = canvas.Canvas(pdf_buf, pagesize=(page_width, page_height))
+        c.drawImage(ImageReader(io.BytesIO(img_bytes)), 0, 0, width=page_width, height=page_height)
+        c.showPage()
+        c.save()
+        return pdf_buf.getvalue()
+
+    def export_order_thermal(
+        self,
+        tenant_id: int,
+        order_id: int,
+        mode: Any = "preview",
+        user: Optional[User] = None,
+    ) -> Response:
+        data = self.get_order_receipt(tenant_id, order_id)
+        mode_val = str(getattr(mode, "value", mode) or "preview").lower().strip()
+        ord_num = data.get("order_number", f"ORD-{order_id}")
+
+        # 1. Preview mode (Default) -> Visual 80mm receipt PNG rendered directly in Swagger UI
+        if mode_val == OrderThermalMode.preview.value:
+            img_bytes = self._generate_order_thermal_image(data)
+            return Response(
+                content=img_bytes,
+                media_type="image/png",
+                headers={
+                    "Content-Disposition": f"inline; filename=order_{ord_num}_thermal.png",
+                    "X-Order-Print-Type": "80mm-PNG-Preview",
+                },
+            )
+
+        # 2. View mode -> Inline styled HTML page with auto-print dialog
+        if mode_val == OrderThermalMode.view.value:
+            html_content = self._generate_order_thermal_html(data, auto_print=True)
+            return HTMLResponse(
+                content=html_content,
+                status_code=200,
+                headers={"Content-Disposition": f"inline; filename=order_{ord_num}_thermal.html"},
+            )
+
+        # 3. Download mode -> ESC/POS text file attachment download
+        if mode_val == OrderThermalMode.download.value:
+            text_payload = data["formatted_receipt"]
+            return Response(
+                content=text_payload.encode("utf-8"),
+                media_type="text/plain; charset=utf-8",
+                headers={
+                    "Content-Disposition": f"attachment; filename=order_{ord_num}_thermal.txt",
+                    "X-Order-Print-Type": "ESC/POS",
+                },
+            )
+
+        # 4. PDF mode -> 80mm Thermal Receipt PDF download
+        if mode_val == OrderThermalMode.pdf.value:
+            pdf_bytes = self._generate_order_thermal_pdf(data)
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f"attachment; filename=order_{ord_num}_thermal.pdf",
+                    "X-Order-Print-Type": "80mm-PDF",
+                },
+            )
+
+        # 5. HTML mode -> Styled raw HTML layout
+        if mode_val == OrderThermalMode.html.value:
+            html_content = self._generate_order_thermal_html(data, auto_print=False)
+            return HTMLResponse(
+                content=html_content,
+                status_code=200,
+                headers={"Content-Disposition": f"inline; filename=order_{ord_num}_thermal.html"},
+            )
+
+        # 6. JSON mode -> Structured JSON payload
+        if mode_val == OrderThermalMode.json.value:
+            return JSONResponse(content=OrderReceiptResponse.model_validate(data).model_dump(mode="json"))
+
+        # 7. Text mode -> Raw ESC/POS text stream
+        if mode_val == OrderThermalMode.text.value:
+            return Response(
+                content=data["formatted_receipt"].encode("utf-8"),
+                media_type="text/plain; charset=utf-8",
+                headers={
+                    "Content-Disposition": f"inline; filename=order_{ord_num}_thermal.txt",
+                    "X-Order-Print-Type": "ESC/POS",
+                },
+            )
+
+        raise AppException(f"Unsupported delivery mode: '{mode_val}'")
 
     def export_orders(
         self,

@@ -399,3 +399,226 @@ def test_customer_ledger_pdf_export_and_send(tenant_a, tenant_b):
     assert client.get(f"/api/v1/customers/{customer_id}/ledger/pdf", headers=headers_b).status_code == 404
     assert client.post(f"/api/v1/customers/{customer_id}/send-ledger-pdf", headers=headers_b).status_code == 404
 
+
+def test_customer_outstanding_balance_deactivation_protection(tenant_a):
+    headers, _ = tenant_a
+
+    # Create customer
+    c_res = client.post(
+        "/api/v1/customers",
+        headers=headers,
+        json={
+            "name": "Dues Protection Cust",
+            "phone": random_phone(),
+            "email": random_email("dues"),
+            "credit_limit": 2000.00,
+        },
+    )
+    assert c_res.status_code == 201
+    customer_id = c_res.json()["id"]
+
+    # Directly set outstanding dues
+    from app.core.database import SessionLocal
+    from app.models.customer import Customer
+    db = SessionLocal()
+    try:
+        cust = db.query(Customer).filter(Customer.id == customer_id).first()
+        cust.outstanding_balance = Decimal("450.00")
+        db.commit()
+    finally:
+        db.close()
+
+    # Attempt deletion -> must fail with 400
+    del_res = client.delete(
+        f"/api/v1/customers/{customer_id}",
+        headers=headers,
+    )
+    assert del_res.status_code == 400
+    assert "Cannot deactivate customer with outstanding dues" in str(del_res.json())
+
+    # Attempt status patch to inactive -> must fail with 400
+    patch_res = client.patch(
+        f"/api/v1/customers/{customer_id}/status",
+        headers=headers,
+        json={"status": "inactive"},
+    )
+    assert patch_res.status_code == 400
+    assert "Cannot deactivate customer with outstanding dues" in str(patch_res.json())
+
+    # Settle dues via customer payment
+    pay_res = client.post(
+        f"/api/v1/customers/{customer_id}/ledger/payment",
+        headers=headers,
+        json={
+            "amount": 450.00,
+            "payment_method": "CASH",
+            "reference_no": "PAY-SETTLE-001",
+        },
+    )
+    assert pay_res.status_code == 201
+    assert Decimal(str(pay_res.json()["balance_after"])) == Decimal("0.00")
+
+    # Now deactivation succeeds
+    del_success = client.delete(
+        f"/api/v1/customers/{customer_id}",
+        headers=headers,
+    )
+    assert del_success.status_code == 200
+    assert del_success.json()["success"] is True
+
+
+def test_dnd_opt_out_compliance(tenant_a):
+    headers, _ = tenant_a
+
+    # Create customer with DND enabled (opt-in = False)
+    c_res = client.post(
+        "/api/v1/customers",
+        headers=headers,
+        json={
+            "name": "DND Compliant User",
+            "phone": random_phone(),
+            "email": random_email("dnd"),
+            "sms_opt_in": False,
+            "whatsapp_opt_in": False,
+        },
+    )
+    assert c_res.status_code == 201
+    customer_id = c_res.json()["id"]
+
+    # 1. Direct SMS should be blocked
+    sms_res = client.post(
+        "/api/v1/customers/notifications/sms",
+        headers=headers,
+        json={
+            "customer_id": customer_id,
+            "communication_type": "SMS",
+            "message": "Special Promo Offer",
+        },
+    )
+    assert sms_res.status_code == 400
+    assert "Customer has opted out of SMS communications" in str(sms_res.json())
+
+    # 2. Direct WhatsApp should be blocked
+    wa_res = client.post(
+        "/api/v1/customers/notifications/whatsapp",
+        headers=headers,
+        json={
+            "customer_id": customer_id,
+            "communication_type": "WHATSAPP",
+            "message": "Order tracking update",
+        },
+    )
+    assert wa_res.status_code == 400
+    assert "Customer has opted out of WhatsApp communications" in str(wa_res.json())
+
+    # 3. Campaign should exclude opted-out customers into failed_count
+    # Create another customer with opt-in True
+    c_optin_res = client.post(
+        "/api/v1/customers",
+        headers=headers,
+        json={
+            "name": "Opted In User",
+            "phone": random_phone(),
+            "email": random_email("optin"),
+            "sms_opt_in": True,
+        },
+    )
+    assert c_optin_res.status_code == 201
+    optin_id = c_optin_res.json()["id"]
+
+    camp_res = client.post(
+        "/api/v1/customers/campaigns/send",
+        headers=headers,
+        json={
+            "customer_ids": [customer_id, optin_id],
+            "communication_type": "SMS",
+            "message": "Diwali mega sale!",
+        },
+    )
+    assert camp_res.status_code == 200
+    camp_data = camp_res.json()
+    assert camp_data["sent_count"] == 1
+    assert camp_data["failed_count"] == 1
+    assert camp_data["total_customers"] == 2
+
+
+def test_referral_code_custom_and_auto_generation(tenant_a):
+    headers, _ = tenant_a
+
+    c1 = client.post(
+        "/api/v1/customers",
+        headers=headers,
+        json={"name": "Referrer One", "phone": random_phone(), "email": random_email("ref1")},
+    ).json()
+
+    c2 = client.post(
+        "/api/v1/customers",
+        headers=headers,
+        json={"name": "Referral Two", "phone": random_phone(), "email": random_email("ref2")},
+    ).json()
+
+    # Auto generation when referral_code omitted
+    ref_auto = client.post(
+        "/api/v1/customers/referrals",
+        headers=headers,
+        json={"customer_id": c1["id"], "referred_customer_id": c2["id"]},
+    )
+    assert ref_auto.status_code == 200
+    auto_code = ref_auto.json()["referral_code"]
+    assert auto_code.startswith("REF-")
+
+    # Custom referral code
+    c3 = client.post(
+        "/api/v1/customers",
+        headers=headers,
+        json={"name": "Referrer Three", "phone": random_phone(), "email": random_email("ref3")},
+    ).json()
+
+    custom_code = f"VIP-{uuid.uuid4().hex[:6].upper()}"
+    ref_custom = client.post(
+        "/api/v1/customers/referrals",
+        headers=headers,
+        json={"customer_id": c3["id"], "referral_code": custom_code},
+    )
+    assert ref_custom.status_code == 200
+    assert ref_custom.json()["referral_code"] == custom_code
+
+
+def test_birthday_and_subresource_pagination_analytics(tenant_a):
+    headers, _ = tenant_a
+
+    # Create customer with specific birthday (e.g. 1995-11-20)
+    c = client.post(
+        "/api/v1/customers",
+        headers=headers,
+        json={
+            "name": "November Baby",
+            "phone": random_phone(),
+            "email": random_email("nov"),
+            "birthday": "1995-11-20",
+        },
+    ).json()
+
+    # Query birthdays with month=11 and day=20
+    b_res = client.get(
+        "/api/v1/customers/birthdays?month=11&day=20",
+        headers=headers,
+    )
+    assert b_res.status_code == 200
+    b_list = b_res.json()
+    assert any(cust["id"] == c["id"] for cust in b_list)
+
+    # Sub-resource pagination check
+    fb_res = client.get(
+        "/api/v1/customers/feedback?page=1&page_size=5",
+        headers=headers,
+    )
+    assert fb_res.status_code == 200
+
+    # Analytics date range check
+    analytics_res = client.get(
+        "/api/v1/customers/feedback/analytics?from_date=2026-01-01&to_date=2026-12-31",
+        headers=headers,
+    )
+    assert analytics_res.status_code == 200
+    assert "average_rating" in analytics_res.json()

@@ -256,6 +256,39 @@ class ProfitLossResponse(BaseModel):
 
 
 # ============================================================================
+# PAYMENT & BILLING REPORTS
+# ============================================================================
+
+class DailyBillingResponse(BaseModel):
+    date: str
+    invoice_count: int
+    total_sales: float
+    cash_sales: float
+    card_sales: float
+    upi_sales: float
+    wallet_sales: float
+    discount_amount: float
+    refund_amount: float
+    net_collection: float
+
+
+class PaymentMethodDetail(BaseModel):
+    total_amount: float
+    transaction_count: int
+
+
+class PaymentSummaryResponse(BaseModel):
+    start_date: str
+    end_date: str
+    payment_breakdown: Dict[str, PaymentMethodDetail] = Field(default_factory=dict)
+    grand_total: float
+
+
+class ReportTaskAsyncResponse(BaseModel):
+    task_id: str
+
+
+# ============================================================================
 # EXPORT REQUEST
 # ============================================================================
 

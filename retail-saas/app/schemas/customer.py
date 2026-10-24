@@ -1176,6 +1176,12 @@ class ReferralCreate(BaseModel):
         gt=0
     )
 
+    referral_code: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        description="Optional custom referral code. If not provided, one is automatically generated."
+    )
+
     @model_validator(mode="after")
     def validate_referral(self):
 

@@ -1113,6 +1113,21 @@ def get_thermal_delivery_label(
             else f"ORD-{delivery.order_id}"
         )
 
+        # Mode 'text': Raw ESC/POS ASCII label text stream
+        if mode == ThermalLabelMode.text:
+            text_payload = service.get_thermal_label_text(
+                tenant_id=user.tenant_id,
+                delivery_id=delivery_id,
+            )
+            return Response(
+                content=text_payload.encode("utf-8"),
+                media_type="text/plain; charset=utf-8",
+                headers={
+                    "Content-Disposition": f'inline; filename="shipping_label_{order_number}.txt"',
+                    "X-Delivery-Print-Type": "ESC/POS",
+                },
+            )
+
         # Mode 'download' or 'pdf': Generates standard 4x6 inch PDF thermal shipping label
         if mode in (ThermalLabelMode.download, ThermalLabelMode.pdf):
             pdf_bytes = service.get_thermal_label_pdf(

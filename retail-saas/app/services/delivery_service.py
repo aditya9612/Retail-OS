@@ -617,6 +617,65 @@ class DeliveryService:
         c.save()
         return pdf_buf.getvalue()
 
+    def get_thermal_label_text(
+        self,
+        tenant_id: int,
+        delivery_id: int,
+    ) -> str:
+        delivery = self.get_delivery(tenant_id, delivery_id)
+        order = delivery.order
+        if not order and delivery.order_id:
+            from app.models.order import Order
+
+            order = (
+                self.db.query(Order)
+                .filter(Order.id == delivery.order_id, Order.tenant_id == tenant_id)
+                .first()
+            )
+        order_number = (
+            order.order_number
+            if order and order.order_number
+            else f"ORD-{delivery.order_id}"
+        )
+        awb_no = delivery.tracking_number or f"TRK-{order_number}"
+        carrier_name = delivery.partner_name or delivery.delivery_person or "Standard Fleet"
+        recipient_name = delivery.recipient_name or "Retail Customer"
+        recipient_phone = delivery.recipient_phone or "N/A"
+        delivery_address = delivery.delivery_address or "No address provided"
+        cod_str = f"COD: Rs. {delivery.cod_amount:.2f}" if delivery.is_cod else "PREPAID"
+        dt_str = (
+            delivery.dispatched_at.strftime("%Y-%m-%d %H:%M")
+            if delivery.dispatched_at
+            else (
+                delivery.created_at.strftime("%Y-%m-%d %H:%M")
+                if delivery.created_at
+                else ""
+            )
+        )
+
+        sep = "=" * 32
+        dashes = "-" * 32
+        lines = [
+            sep,
+            "SHIPPING LABEL (4x6 / 80mm)".center(32),
+            sep,
+            f"CARRIER : {carrier_name}",
+            f"AWB NO  : {awb_no}",
+            f"ORDER NO: {order_number}",
+            f"TYPE    : {cod_str}",
+            dashes,
+            "SHIP TO:",
+            f"  {recipient_name}",
+            f"  Tel: {recipient_phone}",
+            f"  {delivery_address[:60]}",
+            dashes,
+            f"DATE    : {dt_str}",
+            sep,
+            f"BARCODE : *{awb_no}*",
+            sep,
+        ]
+        return "\n".join(lines)
+
     def collect_cod(
         self,
         tenant_id: int,

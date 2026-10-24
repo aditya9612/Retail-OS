@@ -1,3 +1,4 @@
+from enum import Enum
 from datetime import datetime
 import math
 import re
@@ -698,3 +699,20 @@ class SaleResponse(BaseModel):
         from_attributes=True
     )
 
+
+class SaleThermalMode(str, Enum):
+    preview = "preview"
+    view = "view"
+    download = "download"
+    pdf = "pdf"
+    html = "html"
+    json = "json"
+    text = "text"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        return None

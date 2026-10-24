@@ -257,6 +257,8 @@ class CustomerService:
         status: str,
     ):
         customer = self.get_customer(tenant_id, customer_id)
+        if status.lower() == "inactive" and customer.outstanding_balance and customer.outstanding_balance > Decimal("0.00"):
+            raise AppException("Cannot deactivate customer with outstanding dues")
         customer.status = status
         self.db.commit()
         self.db.refresh(customer)
@@ -288,19 +290,22 @@ class CustomerService:
     def get_birthday_customers(
         self,
         tenant_id: int,
-        month: int,
-        day: int,
+        month: Optional[int] = None,
+        day: Optional[int] = None,
     ):
-        customers = (
+        query = (
             self.db.query(Customer)
             .filter(
                 Customer.tenant_id == tenant_id,
                 Customer.birthday.isnot(None),
-                func.extract("month", Customer.birthday) == month,
-                func.extract("day", Customer.birthday) == day,
             )
-            .all()
         )
+        if month is not None:
+            query = query.filter(func.extract("month", Customer.birthday) == month)
+        if day is not None:
+            query = query.filter(func.extract("day", Customer.birthday) == day)
+
+        customers = query.all()
         if not customers:
             return {
                 "success": True,
@@ -328,6 +333,17 @@ class CustomerService:
             if not invoice:
                 raise NotFoundException("Invoice not found")
 
+            order = (
+                self.db.query(Order)
+                .filter(
+                    Order.id == invoice.order_id,
+                    Order.tenant_id == tenant_id,
+                )
+                .first()
+            )
+            if order and order.customer_id is not None and order.customer_id != data.customer_id:
+                raise AppException("Invoice does not belong to this customer")
+
         feedback = CustomerFeedback(
             customer_id=data.customer_id,
             invoice_id=data.invoice_id,
@@ -350,6 +366,8 @@ class CustomerService:
         self,
         tenant_id: int,
         customer_id: int | None = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
     ):
         if customer_id is not None:
             self.get_customer(tenant_id, customer_id)
@@ -363,7 +381,14 @@ class CustomerService:
         if customer_id is not None:
             query = query.filter(CustomerFeedback.customer_id == customer_id)
 
-        feedbacks = query.order_by(CustomerFeedback.created_at.desc()).all()
+        query = query.order_by(CustomerFeedback.created_at.desc())
+
+        if page is not None and page_size is not None:
+            query = query.offset((page - 1) * page_size).limit(page_size)
+        elif page_size is not None:
+            query = query.limit(page_size)
+
+        feedbacks = query.all()
 
         if customer_id is not None and not feedbacks:
             return {
@@ -528,14 +553,21 @@ class CustomerService:
         self,
         tenant_id: int,
         customer_id: int,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
     ):
         wallet = self.get_wallet(tenant_id, customer_id)
-        transactions = (
+        query = (
             self.db.query(WalletTransaction)
             .filter(WalletTransaction.wallet_id == wallet.id)
             .order_by(WalletTransaction.created_at.desc())
-            .all()
         )
+        if page is not None and page_size is not None:
+            query = query.offset((page - 1) * page_size).limit(page_size)
+        elif page_size is not None:
+            query = query.limit(page_size)
+
+        transactions = query.all()
         if not transactions:
             return {
                 "success": True,
@@ -641,14 +673,21 @@ class CustomerService:
         self,
         tenant_id: int,
         customer_id: int,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
     ):
         self.get_customer(tenant_id, customer_id)
-        history = (
+        query = (
             self.db.query(LoyaltyPoint)
             .filter(LoyaltyPoint.customer_id == customer_id)
             .order_by(LoyaltyPoint.created_at.desc())
-            .all()
         )
+        if page is not None and page_size is not None:
+            query = query.offset((page - 1) * page_size).limit(page_size)
+        elif page_size is not None:
+            query = query.limit(page_size)
+
+        history = query.all()
         if not history:
             return {
                 "success": True,
@@ -662,8 +701,13 @@ class CustomerService:
         tenant_id: int,
         data,
     ):
-        self.get_customer(tenant_id, data.customer_id)
+        customer = self.get_customer(tenant_id, data.customer_id)
         comm_type = data.communication_type.strip().upper()
+
+        if comm_type == "SMS" and customer.sms_opt_in is False:
+            raise AppException("Customer has opted out of SMS communications")
+        if comm_type == "WHATSAPP" and customer.whatsapp_opt_in is False:
+            raise AppException("Customer has opted out of WhatsApp communications")
 
         communication = CustomerCommunication(
             customer_id=data.customer_id,
@@ -685,21 +729,29 @@ class CustomerService:
     def get_communications(
         self,
         tenant_id: int,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
     ):
-        return (
+        query = (
             self.db.query(CustomerCommunication)
             .join(Customer, Customer.id == CustomerCommunication.customer_id)
             .filter(Customer.tenant_id == tenant_id)
             .order_by(CustomerCommunication.sent_at.desc())
-            .all()
         )
+        if page is not None and page_size is not None:
+            query = query.offset((page - 1) * page_size).limit(page_size)
+        elif page_size is not None:
+            query = query.limit(page_size)
+        return query.all()
 
     def get_communications_by_type(
         self,
         tenant_id: int,
         communication_type: str,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
     ):
-        return (
+        query = (
             self.db.query(CustomerCommunication)
             .join(Customer, Customer.id == CustomerCommunication.customer_id)
             .filter(
@@ -707,8 +759,12 @@ class CustomerService:
                 CustomerCommunication.communication_type == communication_type.strip().upper(),
             )
             .order_by(CustomerCommunication.sent_at.desc())
-            .all()
         )
+        if page is not None and page_size is not None:
+            query = query.offset((page - 1) * page_size).limit(page_size)
+        elif page_size is not None:
+            query = query.limit(page_size)
+        return query.all()
 
     def create_referral(
         self,
@@ -733,16 +789,27 @@ class CustomerService:
             if existing:
                 raise ConflictException("Referral already exists for this customer")
 
-        code = f"REF-{uuid.uuid4().hex[:8].upper()}"
-        for _ in range(5):
+        custom_code = getattr(data, "referral_code", None)
+        if custom_code and str(custom_code).strip():
+            code = str(custom_code).strip().upper()
             existing_code = (
                 self.db.query(CustomerReferral)
                 .filter(CustomerReferral.referral_code == code)
                 .first()
             )
-            if not existing_code:
-                break
+            if existing_code:
+                raise ConflictException("Referral code already exists")
+        else:
             code = f"REF-{uuid.uuid4().hex[:8].upper()}"
+            for _ in range(5):
+                existing_code = (
+                    self.db.query(CustomerReferral)
+                    .filter(CustomerReferral.referral_code == code)
+                    .first()
+                )
+                if not existing_code:
+                    break
+                code = f"REF-{uuid.uuid4().hex[:8].upper()}"
 
         referral = CustomerReferral(
             customer_id=data.customer_id,
@@ -767,13 +834,20 @@ class CustomerService:
     def get_referrals(
         self,
         tenant_id: int,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
     ):
-        return (
+        query = (
             self.db.query(CustomerReferral)
             .join(Customer, Customer.id == CustomerReferral.customer_id)
             .filter(Customer.tenant_id == tenant_id)
-            .all()
+            .order_by(CustomerReferral.created_at.desc())
         )
+        if page is not None and page_size is not None:
+            query = query.offset((page - 1) * page_size).limit(page_size)
+        elif page_size is not None:
+            query = query.limit(page_size)
+        return query.all()
 
     def create_note(
         self,
@@ -803,6 +877,8 @@ class CustomerService:
         self,
         tenant_id: int,
         customer_id: int | None = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
     ):
         if customer_id is not None:
             self.get_customer(tenant_id, customer_id)
@@ -816,7 +892,13 @@ class CustomerService:
         if customer_id is not None:
             query = query.filter(CustomerNote.customer_id == customer_id)
 
-        notes = query.order_by(CustomerNote.created_at.desc()).all()
+        query = query.order_by(CustomerNote.created_at.desc())
+        if page is not None and page_size is not None:
+            query = query.offset((page - 1) * page_size).limit(page_size)
+        elif page_size is not None:
+            query = query.limit(page_size)
+
+        notes = query.all()
 
         if customer_id is not None and not notes:
             return {
@@ -839,13 +921,18 @@ class CustomerService:
         if comm_type not in ("SMS", "WHATSAPP", "EMAIL"):
             raise AppException("Invalid communication type")
 
-        for customer_id in data.customer_ids:
-            self.get_customer(tenant_id, customer_id)
-
         sent_count = 0
         failed_count = 0
 
         for customer_id in data.customer_ids:
+            customer = self.get_customer(tenant_id, customer_id)
+            if comm_type == "SMS" and customer.sms_opt_in is False:
+                failed_count += 1
+                continue
+            if comm_type == "WHATSAPP" and customer.whatsapp_opt_in is False:
+                failed_count += 1
+                continue
+
             communication = CustomerCommunication(
                 customer_id=customer_id,
                 communication_type=comm_type,
@@ -868,40 +955,80 @@ class CustomerService:
     def get_top_customers(
         self,
         tenant_id: int,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
+        limit: int = 10,
     ):
+        if from_date or to_date:
+            order_query = (
+                self.db.query(
+                    Order.customer_id,
+                    func.sum(Order.total_amount).label("period_spend"),
+                    func.count(Order.id).label("period_orders"),
+                )
+                .filter(
+                    Order.tenant_id == tenant_id,
+                    Order.customer_id.isnot(None),
+                    Order.status.in_(["completed", "paid"]),
+                )
+            )
+            if from_date:
+                order_query = order_query.filter(Order.created_at >= datetime.combine(from_date, datetime.min.time()))
+            if to_date:
+                order_query = order_query.filter(Order.created_at <= datetime.combine(to_date, datetime.max.time()))
+
+            order_query = order_query.group_by(Order.customer_id).order_by(func.sum(Order.total_amount).desc()).limit(limit)
+            results = order_query.all()
+            if results:
+                customer_ids = [r[0] for r in results]
+                customers_map = {
+                    c.id: c
+                    for c in self.db.query(Customer)
+                    .filter(Customer.id.in_(customer_ids), Customer.tenant_id == tenant_id)
+                    .all()
+                }
+                top_list = []
+                for cid, spend, count in results:
+                    c = customers_map.get(cid)
+                    if c:
+                        top_list.append({
+                            "id": c.id,
+                            "name": c.name,
+                            "email": c.email,
+                            "phone": c.phone,
+                            "customer_id": c.id,
+                            "customer_name": c.name,
+                            "total_spend": float(spend) if spend else 0.0,
+                            "loyalty_points": c.loyalty_points,
+                            "status": c.status,
+                            "order_count": count,
+                        })
+                return top_list
+            return []
+
         return (
             self.db.query(Customer)
             .filter(Customer.tenant_id == tenant_id)
             .order_by(Customer.total_spend.desc())
-            .limit(10)
+            .limit(limit)
             .all()
         )
 
     def get_retention_report(
         self,
         tenant_id: int,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
     ):
-        total = (
-            self.db.query(Customer)
-            .filter(Customer.tenant_id == tenant_id)
-            .count()
-        )
-        active = (
-            self.db.query(Customer)
-            .filter(
-                Customer.tenant_id == tenant_id,
-                Customer.status == "active",
-            )
-            .count()
-        )
-        inactive = (
-            self.db.query(Customer)
-            .filter(
-                Customer.tenant_id == tenant_id,
-                Customer.status == "inactive",
-            )
-            .count()
-        )
+        query = self.db.query(Customer).filter(Customer.tenant_id == tenant_id)
+        if from_date:
+            query = query.filter(Customer.created_at >= datetime.combine(from_date, datetime.min.time()))
+        if to_date:
+            query = query.filter(Customer.created_at <= datetime.combine(to_date, datetime.max.time()))
+
+        total = query.count()
+        active = query.filter(Customer.status == "active").count()
+        inactive = query.filter(Customer.status == "inactive").count()
 
         retention_rate = 0.0
         if total > 0:
@@ -917,13 +1044,16 @@ class CustomerService:
     def get_lifetime_value(
         self,
         tenant_id: int,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
     ):
-        customers = (
-            self.db.query(Customer)
-            .filter(Customer.tenant_id == tenant_id)
-            .order_by(Customer.total_spend.desc())
-            .all()
-        )
+        query = self.db.query(Customer).filter(Customer.tenant_id == tenant_id)
+        if from_date:
+            query = query.filter(Customer.created_at >= datetime.combine(from_date, datetime.min.time()))
+        if to_date:
+            query = query.filter(Customer.created_at <= datetime.combine(to_date, datetime.max.time()))
+
+        customers = query.order_by(Customer.total_spend.desc()).all()
         result = []
         for customer in customers:
             result.append({
@@ -937,13 +1067,20 @@ class CustomerService:
     def get_loyalty_report(
         self,
         tenant_id: int,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
     ):
-        loyalty = (
+        query = (
             self.db.query(LoyaltyPoint)
             .join(Customer, Customer.id == LoyaltyPoint.customer_id)
             .filter(Customer.tenant_id == tenant_id)
-            .all()
         )
+        if from_date:
+            query = query.filter(LoyaltyPoint.created_at >= datetime.combine(from_date, datetime.min.time()))
+        if to_date:
+            query = query.filter(LoyaltyPoint.created_at <= datetime.combine(to_date, datetime.max.time()))
+
+        loyalty = query.all()
         result = []
         for item in loyalty:
             result.append({
@@ -1086,6 +1223,43 @@ class CustomerService:
         self.db.refresh(ledger_entry)
         return ledger_entry
 
+
+    def record_credit_purchase(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        amount: Decimal,
+        invoice_number: str,
+        commit: bool = True,
+    ) -> CustomerLedgerEntry:
+        customer = self.get_customer(tenant_id, customer_id)
+        current_balance = Decimal(str(customer.outstanding_balance or Decimal("0.00")))
+        debit_amount = Decimal(str(amount))
+
+        credit_limit = Decimal(str(customer.credit_limit or Decimal("0.00")))
+        new_balance = current_balance + debit_amount
+        if credit_limit > Decimal("0.00") and new_balance > credit_limit:
+            raise AppException(f"Credit limit exceeded: maximum allowed is {credit_limit}, new balance would be {new_balance}")
+
+        customer.outstanding_balance = new_balance
+        ledger_entry = CustomerLedgerEntry(
+            tenant_id=tenant_id,
+            customer_id=customer.id,
+            entry_type="DEBIT",
+            amount=debit_amount,
+            balance_after=new_balance,
+            reference_no=invoice_number,
+            notes=f"Credit purchase for Invoice #{invoice_number}",
+        )
+        self.db.add(ledger_entry)
+        if commit:
+            self.db.commit()
+            self.db.refresh(customer)
+            self.db.refresh(ledger_entry)
+        else:
+            self.db.flush()
+        return ledger_entry
+
     def get_customer_ledger(
         self,
         tenant_id: int,
@@ -1125,13 +1299,20 @@ class CustomerService:
     def get_feedback_analytics(
         self,
         tenant_id: int,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
     ) -> FeedbackAnalyticsResponse:
-        feedbacks = (
+        query = (
             self.db.query(CustomerFeedback)
             .join(Customer, Customer.id == CustomerFeedback.customer_id)
             .filter(Customer.tenant_id == tenant_id)
-            .all()
         )
+        if from_date:
+            query = query.filter(CustomerFeedback.created_at >= datetime.combine(from_date, datetime.min.time()))
+        if to_date:
+            query = query.filter(CustomerFeedback.created_at <= datetime.combine(to_date, datetime.max.time()))
+
+        feedbacks = query.all()
         total = len(feedbacks)
         if total == 0:
             return FeedbackAnalyticsResponse(
@@ -1169,7 +1350,22 @@ class CustomerService:
         tenant_id: int,
         customer_id: int,
     ) -> dict:
-        customer = repo_delete_customer(self.db, tenant_id, customer_id)
+        customer = (
+            self.db.query(Customer)
+            .filter(
+                Customer.id == customer_id,
+                Customer.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if not customer:
+            raise NotFoundException("Customer not found")
+        if customer.outstanding_balance and customer.outstanding_balance > Decimal("0.00"):
+            raise AppException("Cannot deactivate customer with outstanding dues")
+
+        customer.status = "inactive"
+        self.db.commit()
+        self.db.refresh(customer)
         return {
             "success": True,
             "message": "Customer deactivated successfully",

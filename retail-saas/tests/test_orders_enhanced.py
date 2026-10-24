@@ -312,6 +312,53 @@ def test_order_receipt_endpoint(setup_pos_env):
     assert "TOTAL AMOUNT" in receipt["formatted_receipt"]
     assert store["name"] in receipt["formatted_receipt"]
 
+    # Verify all 7 modes on /api/v1/orders/{order_id}/thermal
+    # 1. Preview mode (Default & explicit) -> 80mm PNG
+    prev_resp = client.get(f"/api/v1/orders/{order['id']}/thermal", headers=headers)
+    assert prev_resp.status_code == 200
+    assert "image/png" in prev_resp.headers["content-type"]
+    assert prev_resp.content.startswith(b"\x89PNG")
+
+    prev_expl = client.get(f"/api/v1/orders/{order['id']}/thermal?mode=preview", headers=headers)
+    assert prev_expl.status_code == 200
+    assert "image/png" in prev_expl.headers["content-type"]
+    assert prev_expl.content.startswith(b"\x89PNG")
+
+    # 2. View mode -> HTML with auto-print
+    view_resp = client.get(f"/api/v1/orders/{order['id']}/thermal?mode=view", headers=headers)
+    assert view_resp.status_code == 200
+    assert "text/html" in view_resp.headers["content-type"]
+    assert "window.print()" in view_resp.text
+
+    # 3. Download mode -> ESC/POS text attachment
+    dl_resp = client.get(f"/api/v1/orders/{order['id']}/thermal?mode=download", headers=headers)
+    assert dl_resp.status_code == 200
+    assert "text/plain" in dl_resp.headers["content-type"]
+    assert "attachment" in dl_resp.headers["content-disposition"]
+    assert "TOTAL AMOUNT" in dl_resp.text
+
+    # 4. PDF mode -> 80mm roll PDF
+    pdf_resp = client.get(f"/api/v1/orders/{order['id']}/thermal?mode=pdf", headers=headers)
+    assert pdf_resp.status_code == 200
+    assert "application/pdf" in pdf_resp.headers["content-type"]
+    assert pdf_resp.content.startswith(b"%PDF")
+
+    # 5. HTML mode -> styled raw HTML
+    html_resp = client.get(f"/api/v1/orders/{order['id']}/thermal?mode=html", headers=headers)
+    assert html_resp.status_code == 200
+    assert "text/html" in html_resp.headers["content-type"]
+
+    # 6. JSON mode -> structured payload
+    json_resp = client.get(f"/api/v1/orders/{order['id']}/thermal?mode=json", headers=headers)
+    assert json_resp.status_code == 200
+    assert json_resp.json()["order_id"] == order["id"]
+
+    # 7. Text mode -> raw ESC/POS text stream
+    text_resp = client.get(f"/api/v1/orders/{order['id']}/thermal?mode=text", headers=headers)
+    assert text_resp.status_code == 200
+    assert "text/plain" in text_resp.headers["content-type"]
+    assert "TOTAL AMOUNT" in text_resp.text
+
 
 def test_orders_export_endpoint(setup_pos_env):
     """GET /api/v1/orders/export provides streaming Excel and CSV downloads."""

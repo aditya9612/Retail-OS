@@ -53,6 +53,24 @@ class RefundThermalMode(str, Enum):
         return None
 
 
+class CreditNoteThermalMode(str, Enum):
+    preview = "preview"
+    view = "view"
+    download = "download"
+    pdf = "pdf"
+    html = "html"
+    json = "json"
+    text = "text"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        return None
+
+
 class RefundReceiptPdfMode(str, Enum):
     download = "download"
     preview = "preview"

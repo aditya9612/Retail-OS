@@ -353,6 +353,7 @@ class ThermalLabelMode(str, Enum):
     pdf = "pdf"
     html = "html"
     json = "json"
+    text = "text"
 
     @classmethod
     def _missing_(cls, value):

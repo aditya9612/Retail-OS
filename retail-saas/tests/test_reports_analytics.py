@@ -706,12 +706,8 @@ def test_profit_loss_historical_cogs_uses_current_cost(reports_fixture):
 
 def test_export_csv(reports_fixture):
     headers = reports_fixture["owner_headers"]
-    body = {
-        "report_type": "sales_daily",
-        "format": "csv",
-        "target_date": str(reports_fixture["today"]),
-    }
-    resp = client.post("/api/v1/reports/export", json=body, headers=headers)
+    today = reports_fixture["today"]
+    resp = client.get(f"/api/v1/reports/export?report_type=sales_daily&format=csv&target_date={today}", headers=headers)
     assert resp.status_code == 200
     assert "text/csv" in resp.headers["content-type"]
     assert "attachment" in resp.headers["content-disposition"]
@@ -720,13 +716,8 @@ def test_export_csv(reports_fixture):
 
 def test_export_excel(reports_fixture):
     headers = reports_fixture["owner_headers"]
-    body = {
-        "report_type": "profit_loss",
-        "format": "excel",
-        "start_date": str(reports_fixture["today"]),
-        "end_date": str(reports_fixture["today"]),
-    }
-    resp = client.post("/api/v1/reports/export", json=body, headers=headers)
+    today = reports_fixture["today"]
+    resp = client.get(f"/api/v1/reports/export?report_type=profit_loss&format=excel&start_date={today}&end_date={today}", headers=headers)
     assert resp.status_code == 200
     assert "spreadsheetml.sheet" in resp.headers["content-type"]
     assert "attachment" in resp.headers["content-disposition"]
@@ -735,13 +726,8 @@ def test_export_excel(reports_fixture):
 
 def test_export_pdf(reports_fixture):
     headers = reports_fixture["owner_headers"]
-    body = {
-        "report_type": "gst_sales",
-        "format": "pdf",
-        "start_date": str(reports_fixture["today"]),
-        "end_date": str(reports_fixture["today"]),
-    }
-    resp = client.post("/api/v1/reports/export", json=body, headers=headers)
+    today = reports_fixture["today"]
+    resp = client.get(f"/api/v1/reports/export?report_type=gst_sales&format=pdf&start_date={today}&end_date={today}", headers=headers)
     assert resp.status_code == 200
     assert "application/pdf" in resp.headers["content-type"]
     assert "attachment" in resp.headers["content-disposition"]
@@ -751,12 +737,7 @@ def test_export_pdf(reports_fixture):
 def test_export_sales_yearly_pdf(reports_fixture):
     headers = reports_fixture["owner_headers"]
     year = reports_fixture["today"].year
-    body = {
-        "report_type": "sales_yearly",
-        "format": "pdf",
-        "year": year,
-    }
-    resp = client.post("/api/v1/reports/export", json=body, headers=headers)
+    resp = client.get(f"/api/v1/reports/export?report_type=sales_yearly&format=pdf&year={year}", headers=headers)
     assert resp.status_code == 200
     assert "application/pdf" in resp.headers["content-type"]
     assert "attachment" in resp.headers["content-disposition"]
@@ -886,3 +867,68 @@ def test_legacy_route_delegates(reports_fixture):
     r_gst = client.get(f"/api/v1/reports/gst?start_date={today}&end_date={today}", headers=headers)
     assert r_gst.status_code == 200
     assert r_gst.json()["invoice_count"] == 2
+
+
+def test_reports_module_improvements_and_validations(reports_fixture):
+    owner_headers = reports_fixture["owner_headers"]
+    manager_headers = reports_fixture["manager_headers"]
+    store1 = reports_fixture["store1"]
+    store2 = reports_fixture["store2"]
+    today = str(reports_fixture["today"])
+    year = reports_fixture["today"].year
+
+    # 1. Month validation on legacy_monthly_sales: month > 12 or < 1 returns 422
+    r_invalid_month = client.get(f"/api/v1/reports/monthly-sales?year={year}&month=13", headers=owner_headers)
+    assert r_invalid_month.status_code == 422
+
+    r_invalid_month_zero = client.get(f"/api/v1/reports/monthly-sales?year={year}&month=0", headers=owner_headers)
+    assert r_invalid_month_zero.status_code == 422
+
+    # 2. Date range validation on payment-summary: start_date > end_date returns 400
+    r_invalid_date = client.get(
+        "/api/v1/reports/payment-summary?start_date=2026-12-31&end_date=2026-01-01",
+        headers=owner_headers,
+    )
+    assert r_invalid_date.status_code == 400
+    assert "start_date must be before or equal to end_date" in r_invalid_date.json()["detail"]
+
+    # 3. Store manager isolation on daily-billing: requesting store2 returns 403 Forbidden
+    r_mgr_forbidden = client.get(
+        f"/api/v1/reports/daily-billing?store_id={store2.id}",
+        headers=manager_headers,
+    )
+    assert r_mgr_forbidden.status_code == 403
+    assert "Access denied" in r_mgr_forbidden.json()["detail"]
+
+    # 4. Store manager isolation on payment-summary: requesting store2 returns 403 Forbidden
+    r_pmt_forbidden = client.get(
+        f"/api/v1/reports/payment-summary?start_date={today}&end_date={today}&store_id={store2.id}",
+        headers=manager_headers,
+    )
+    assert r_pmt_forbidden.status_code == 403
+    assert "Access denied" in r_pmt_forbidden.json()["detail"]
+
+    # 5. Non-existent store by owner returns 404
+    r_not_found = client.get(
+        f"/api/v1/reports/daily-billing?store_id=999999",
+        headers=owner_headers,
+    )
+    assert r_not_found.status_code == 404
+
+    # 6. Valid daily-billing conforms to DailyBillingResponse schema
+    r_dbc = client.get(f"/api/v1/reports/daily-billing?store_id={store1.id}", headers=owner_headers)
+    assert r_dbc.status_code == 200
+    dbc_json = r_dbc.json()
+    assert "invoice_count" in dbc_json
+    assert "total_sales" in dbc_json
+    assert "net_collection" in dbc_json
+
+    # 7. Valid payment-summary conforms to PaymentSummaryResponse schema
+    r_ps = client.get(
+        f"/api/v1/reports/payment-summary?start_date={today}&end_date={today}&store_id={store1.id}",
+        headers=owner_headers,
+    )
+    assert r_ps.status_code == 200
+    ps_json = r_ps.json()
+    assert "payment_breakdown" in ps_json
+    assert "grand_total" in ps_json

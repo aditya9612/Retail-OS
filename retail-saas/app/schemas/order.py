@@ -1,4 +1,5 @@
 
+from enum import Enum
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
@@ -932,6 +933,24 @@ class OrderReceiptItemResponse(BaseModel):
         if v is None:
             return Decimal("0.00")
         return v
+
+
+class OrderThermalMode(str, Enum):
+    preview = "preview"
+    view = "view"
+    download = "download"
+    pdf = "pdf"
+    html = "html"
+    json = "json"
+    text = "text"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        return None
 
 
 class OrderReceiptResponse(BaseModel):

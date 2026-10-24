@@ -337,6 +337,13 @@ def test_thermal_delivery_label_html_and_json(t_session_a):
     assert json_data["order_number"] == order_num
     assert "html" in json_data
 
+    # 7. Mode 'text' (Raw ESC/POS ASCII label text stream)
+    text_resp = client.get(f"/api/v1/delivery/{delivery_id}/label/thermal?mode=text", headers=headers)
+    assert text_resp.status_code == 200
+    assert "text/plain" in text_resp.headers["content-type"]
+    assert "SHIPPING LABEL" in text_resp.text
+    assert order_num in text_resp.text
+
 
 # ============================================================================
 # 5. POST /api/v1/delivery/{id}/failed-attempt (NDR - Non Delivery Report)

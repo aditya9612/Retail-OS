@@ -32,6 +32,8 @@ from app.models.store import Store
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.schemas.billing import (
+    CreditNoteThermalMode,
+    CreditNoteThermalResponse,
     InvoiceCreate,
     InvoiceThermalMode,
     InvoiceThermalResponse,
@@ -544,6 +546,17 @@ class BillingService:
                 for p_rec in payment_records:
                     p_rec.invoice_id = invoice.id
                     self.db.add(p_rec)
+                    if p_rec.payment_method and p_rec.payment_method.lower() in ("credit", "khata", "customer_credit"):
+                        if not order.customer_id:
+                            raise AppException("Customer must be selected for credit purchases")
+                        from app.services.customer_service import CustomerService
+                        CustomerService(self.db).record_credit_purchase(
+                            tenant_id=tenant_id,
+                            customer_id=order.customer_id,
+                            amount=p_rec.amount,
+                            invoice_number=invoice.invoice_number,
+                            commit=False,
+                        )
                 self.db.flush()
 
             # Step 6: Audit log
@@ -3283,6 +3296,11 @@ class BillingService:
         ]
         thermal_text = "\n".join(thermal_lines)
 
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        store_address = store.address if store and store.address else (tenant.address if tenant else None)
+        store_phone = store.phone if store and store.phone else (tenant.phone if tenant else None)
+        gstin = store.gstin if store and store.gstin else (tenant.gstin if hasattr(tenant, "gstin") else None)
+
         return {
             "credit_note_id": credit_note.id,
             "credit_note_no": credit_note.credit_note_no,
@@ -3290,14 +3308,432 @@ class BillingService:
             "invoice_number": invoice.invoice_number,
             "refund_amount": credit_note.refund_amount,
             "balance_amount": bal,
+            "cgst_amount": credit_note.cgst_amount or Decimal("0.00"),
+            "sgst_amount": credit_note.sgst_amount or Decimal("0.00"),
+            "igst_amount": credit_note.igst_amount or Decimal("0.00"),
             "status": credit_note.status or "issued",
             "customer_name": cust_name,
             "customer_phone": cust_phone,
             "store_name": store_name,
+            "store_address": store_address,
+            "store_phone": store_phone,
+            "gstin": gstin,
             "valid_until": valid_until_str,
             "created_at": credit_note.created_at,
             "thermal_text": thermal_text,
         }
+
+    def _generate_credit_note_thermal_image(self, ctx: Dict[str, Any]) -> bytes:
+        import io
+        from PIL import Image, ImageDraw, ImageFont
+
+        width = 576  # Standard 80mm printable width at 203 DPI
+        est_height = 680
+
+        img = Image.new("RGB", (width, est_height), color=(255, 255, 255))
+        draw = ImageDraw.Draw(img)
+
+        try:
+            font_title = ImageFont.truetype("arialbd.ttf", 22)
+            font_head = ImageFont.truetype("arialbd.ttf", 16)
+            font_bold = ImageFont.truetype("arialbd.ttf", 14)
+            font_regular = ImageFont.truetype("arial.ttf", 13)
+            font_small = ImageFont.truetype("arial.ttf", 11)
+            font_big = ImageFont.truetype("arialbd.ttf", 18)
+        except Exception:
+            font_title = font_head = font_bold = font_regular = font_small = font_big = ImageFont.load_default()
+
+        # Outer subtle border
+        draw.rectangle([(6, 6), (width - 7, est_height - 7)], outline=(200, 200, 200), width=1)
+
+        y = 20
+
+        # Store Title centered
+        store_txt = str(ctx.get("store_name", "RETAIL STORE")).upper()
+        bbox = draw.textbbox((0, 0), store_txt, font=font_title)
+        draw.text(((width - (bbox[2] - bbox[0])) // 2, y), store_txt, font=font_title, fill=(0, 0, 0))
+        y += 28
+
+        if ctx.get("store_address"):
+            addr_txt = str(ctx.get("store_address"))[:65]
+            abbox = draw.textbbox((0, 0), addr_txt, font=font_small)
+            draw.text(((width - (abbox[2] - abbox[0])) // 2, y), addr_txt, font=font_small, fill=(100, 100, 100))
+            y += 18
+        if ctx.get("store_phone"):
+            p_txt = f"Tel: {ctx.get('store_phone')}"
+            pbbox = draw.textbbox((0, 0), p_txt, font=font_small)
+            draw.text(((width - (pbbox[2] - pbbox[0])) // 2, y), p_txt, font=font_small, fill=(100, 100, 100))
+            y += 18
+        if ctx.get("gstin"):
+            g_txt = f"GSTIN: {ctx.get('gstin')}"
+            gbbox = draw.textbbox((0, 0), g_txt, font=font_small)
+            draw.text(((width - (gbbox[2] - gbbox[0])) // 2, y), g_txt, font=font_small, fill=(50, 50, 50))
+            y += 18
+
+        # Header centered
+        rep_txt = "CREDIT NOTE VOUCHER"
+        bbox = draw.textbbox((0, 0), rep_txt, font=font_head)
+        draw.text(((width - (bbox[2] - bbox[0])) // 2, y), rep_txt, font=font_head, fill=(30, 64, 175))
+        y += 24
+
+        sub_txt = "OFFICIAL STORE CREDIT SLIP"
+        bbox = draw.textbbox((0, 0), sub_txt, font=font_small)
+        draw.text(((width - (bbox[2] - bbox[0])) // 2, y), sub_txt, font=font_small, fill=(100, 100, 100))
+        y += 22
+
+        def draw_dashed_line(draw_ctx, cur_y, w):
+            for x in range(20, w - 20, 10):
+                draw_ctx.line([(x, cur_y), (x + 5, cur_y)], fill=(120, 120, 120), width=1)
+
+        draw_dashed_line(draw, y, width)
+        y += 12
+
+        def draw_kv(label: str, val: str, font_l=font_regular, font_r=font_bold, fill_l=(70, 70, 70), fill_r=(0, 0, 0)):
+            nonlocal y
+            draw.text((24, y), label, font=font_l, fill=fill_l)
+            r_bbox = draw.textbbox((0, 0), str(val), font=font_r)
+            r_w = r_bbox[2] - r_bbox[0]
+            draw.text((width - 24 - r_w, y), str(val), font=font_r, fill=fill_r)
+            y += 22
+
+        # Voucher Details
+        draw_kv("Credit Note No", str(ctx.get("credit_note_no", "")))
+        draw_kv("Ref Invoice No", str(ctx.get("invoice_number", "")))
+        created_at = ctx.get("created_at")
+        dt_str = created_at.strftime("%Y-%m-%d %H:%M") if isinstance(created_at, datetime) else str(created_at or "")
+        draw_kv("Date Issued", dt_str)
+        draw_kv("Valid Until", str(ctx.get("valid_until", "No Expiry")))
+        status_val = str(ctx.get("status", "ISSUED")).upper()
+        draw_kv("Status", status_val, fill_r=(22, 101, 52) if status_val in ("ISSUED", "ACTIVE") else (185, 28, 28))
+
+        y += 4
+        draw_dashed_line(draw, y, width)
+        y += 12
+
+        # Customer Details
+        draw_kv("Customer", str(ctx.get("customer_name", "Walk-in Customer")))
+        draw_kv("Phone", str(ctx.get("customer_phone", "N/A")))
+
+        y += 4
+        draw_dashed_line(draw, y, width)
+        y += 12
+
+        # Credit Amount Highlight Box
+        tot_box_top = y
+        draw.rectangle([(20, tot_box_top), (width - 20, tot_box_top + 42)], fill=(239, 246, 255), outline=(59, 130, 246), width=1)
+        draw.text((32, tot_box_top + 10), "CREDIT AMOUNT", font=font_bold, fill=(30, 64, 175))
+        amt_str = f"Rs. {Decimal(str(ctx.get('refund_amount', 0))):.2f}"
+        amt_bbox = draw.textbbox((0, 0), amt_str, font=font_big)
+        amt_w = amt_bbox[2] - amt_bbox[0]
+        draw.text((width - 32 - amt_w, tot_box_top + 10), amt_str, font=font_big, fill=(30, 64, 175))
+        y += 54
+
+        bal_str = f"Rs. {Decimal(str(ctx.get('balance_amount', ctx.get('refund_amount', 0)))):.2f}"
+        draw_kv("BALANCE DUE", bal_str, font_l=font_bold, font_r=font_bold, fill_l=(0, 0, 0), fill_r=(22, 101, 52))
+
+        y += 4
+        draw_dashed_line(draw, y, width)
+        y += 14
+
+        # Notice & Signatures
+        note_txt1 = "Use this note for future store"
+        n1_bbox = draw.textbbox((0, 0), note_txt1, font=font_small)
+        draw.text(((width - (n1_bbox[2] - n1_bbox[0])) // 2, y), note_txt1, font=font_small, fill=(90, 90, 90))
+        y += 18
+        note_txt2 = "purchases before expiry date."
+        n2_bbox = draw.textbbox((0, 0), note_txt2, font=font_small)
+        draw.text(((width - (n2_bbox[2] - n2_bbox[0])) // 2, y), note_txt2, font=font_small, fill=(90, 90, 90))
+        y += 24
+
+        draw.text((24, y), "Customer Signature: ____________", font=font_small, fill=(60, 60, 60))
+        y += 22
+        draw.text((24, y), "Authorized Signature: __________", font=font_small, fill=(60, 60, 60))
+        y += 28
+
+        ty_txt = "Thank You! Please visit again."
+        ty_bbox = draw.textbbox((0, 0), ty_txt, font=font_small)
+        draw.text(((width - (ty_bbox[2] - ty_bbox[0])) // 2, y), ty_txt, font=font_small, fill=(100, 100, 100))
+        y += 26
+
+        # Final crop to actual height
+        final_height = y + 15
+        final_img = img.crop((0, 0, width, final_height))
+        draw_final = ImageDraw.Draw(final_img)
+        draw_final.rectangle([(6, 6), (width - 7, final_height - 7)], outline=(200, 200, 200), width=1)
+
+        buf = io.BytesIO()
+        final_img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    def _generate_credit_note_thermal_html(self, ctx: Dict[str, Any], auto_print: bool = False) -> str:
+        created_at = ctx.get("created_at")
+        dt_str = created_at.strftime("%Y-%m-%d %H:%M") if isinstance(created_at, datetime) else str(created_at or "")
+        status_str = str(ctx.get("status", "ISSUED")).upper()
+        amt_str = f"{Decimal(str(ctx.get('refund_amount', 0))):.2f}"
+        bal_str = f"{Decimal(str(ctx.get('balance_amount', ctx.get('refund_amount', 0)))):.2f}"
+        auto_print_script = "<script>window.onload = function() { window.print(); };</script>" if auto_print else ""
+
+        store_addr_html = f'<div class="store-sub">{ctx["store_address"]}</div>' if ctx.get("store_address") else ""
+        store_phone_html = f'<div class="store-sub">Tel: {ctx["store_phone"]}</div>' if ctx.get("store_phone") else ""
+        gstin_html = f'<div class="store-sub">GSTIN: {ctx["gstin"]}</div>' if ctx.get("gstin") else ""
+
+        status_color = '#166534' if status_str in ('ISSUED', 'ACTIVE') else '#b91c1c'
+
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Credit Note Voucher {ctx.get('credit_note_no')}</title>
+<style>
+  body {{
+    font-family: 'Courier New', Courier, monospace, system-ui;
+    background-color: #f3f4f6;
+    margin: 0;
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+  }}
+  .ticket {{
+    width: 320px;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    padding: 16px 14px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    font-size: 13px;
+    color: #111827;
+    line-height: 1.35;
+  }}
+  .center {{ text-align: center; }}
+  .store-title {{ font-size: 16px; font-weight: bold; text-transform: uppercase; margin-bottom: 2px; }}
+  .store-sub {{ font-size: 11px; color: #4b5563; }}
+  .doc-title {{
+    font-size: 14px;
+    font-weight: bold;
+    color: #1e40af;
+    margin: 8px 0 2px 0;
+    letter-spacing: 0.5px;
+  }}
+  .divider {{
+    border-top: 1px dashed #9ca3af;
+    margin: 8px 0;
+  }}
+  .row {{
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 3px;
+  }}
+  .lbl {{ color: #4b5563; }}
+  .val {{ font-weight: 600; text-align: right; }}
+  .val-status {{
+    color: {status_color};
+    font-weight: bold;
+  }}
+  .highlight-box {{
+    background: #eff6ff;
+    border: 1px solid #3b82f6;
+    padding: 8px 10px;
+    margin: 8px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }}
+  .hl-title {{ font-size: 12px; font-weight: bold; color: #1e40af; }}
+  .hl-val {{ font-size: 16px; font-weight: bold; color: #1e40af; }}
+  .notice {{
+    font-size: 11px;
+    color: #6b7280;
+    text-align: center;
+    margin: 8px 0;
+  }}
+  .sig {{
+    font-size: 11px;
+    color: #4b5563;
+    margin: 10px 0 4px 0;
+  }}
+  @media print {{
+    body {{ background: transparent; padding: 0; }}
+    .ticket {{ box-shadow: none; border: none; width: 100%; padding: 0; }}
+  }}
+</style>
+{auto_print_script}
+</head>
+<body>
+<div class="ticket">
+  <div class="center">
+    <div class="store-title">{ctx.get('store_name', 'Retail Store')}</div>
+    {store_addr_html}
+    {store_phone_html}
+    {gstin_html}
+    <div class="doc-title">CREDIT NOTE VOUCHER</div>
+    <div class="store-sub">OFFICIAL STORE CREDIT SLIP</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="row"><span class="lbl">Credit Note No</span><span class="val">{ctx.get('credit_note_no')}</span></div>
+  <div class="row"><span class="lbl">Ref Invoice</span><span class="val">{ctx.get('invoice_number')}</span></div>
+  <div class="row"><span class="lbl">Date Issued</span><span class="val">{dt_str}</span></div>
+  <div class="row"><span class="lbl">Valid Until</span><span class="val">{ctx.get('valid_until', 'No Expiry')}</span></div>
+  <div class="row"><span class="lbl">Status</span><span class="val val-status">{status_str}</span></div>
+
+  <div class="divider"></div>
+
+  <div class="row"><span class="lbl">Customer</span><span class="val">{ctx.get('customer_name', 'Walk-in Customer')}</span></div>
+  <div class="row"><span class="lbl">Phone</span><span class="val">{ctx.get('customer_phone', 'N/A')}</span></div>
+
+  <div class="divider"></div>
+
+  <div class="highlight-box">
+    <span class="hl-title">CREDIT AMOUNT</span>
+    <span class="hl-val">Rs. {amt_str}</span>
+  </div>
+
+  <div class="row"><span class="lbl" style="font-weight: bold; color: #111;">BALANCE DUE</span><span class="val" style="color: #166534; font-size: 14px;">Rs. {bal_str}</span></div>
+
+  <div class="divider"></div>
+
+  <div class="notice">
+    Use this note for future store<br>purchases before expiry date.
+  </div>
+
+  <div class="sig">Customer Signature: __________________</div>
+  <div class="sig">Authorized Signature: ________________</div>
+
+  <div class="center store-sub" style="margin-top: 12px;">
+    Thank You! Please visit again.
+  </div>
+</div>
+</body>
+</html>"""
+
+    def _generate_credit_note_thermal_pdf(self, ctx: Dict[str, Any]) -> bytes:
+        import io
+        from PIL import Image
+        from reportlab.lib.utils import ImageReader
+        from reportlab.pdfgen import canvas
+
+        img_bytes = self._generate_credit_note_thermal_image(ctx)
+        pil_img = Image.open(io.BytesIO(img_bytes))
+        img_w, img_h = pil_img.size
+
+        # 80mm roll in points: 80 / 25.4 * 72 = 226.77 points
+        page_width = 80.0 / 25.4 * 72.0
+        page_height = page_width * (img_h / img_w)
+
+        pdf_buf = io.BytesIO()
+        c = canvas.Canvas(pdf_buf, pagesize=(page_width, page_height))
+        c.drawImage(ImageReader(io.BytesIO(img_bytes)), 0, 0, width=page_width, height=page_height)
+        c.showPage()
+        c.save()
+        return pdf_buf.getvalue()
+
+    def export_credit_note_thermal(
+        self,
+        user: User,
+        credit_note_id: int,
+        mode: Any = "preview",
+        request: Optional[Any] = None,
+    ) -> Response:
+        data = self.get_credit_note_thermal_receipt(user.tenant_id, credit_note_id, user=user)
+        mode_val = str(getattr(mode, "value", mode) or "preview").lower().strip()
+
+        # Check if caller wants JSON (e.g. Accept: application/json without explicit query param)
+        if request is not None and hasattr(request, "query_params") and hasattr(request, "headers"):
+            if "mode" not in request.query_params and "application/json" in request.headers.get("accept", ""):
+                mode_val = "json"
+
+        cn_no = data.get("credit_note_no", f"CN-{credit_note_id}")
+
+        # 1. Preview mode (Default) -> Visual 80mm receipt PNG rendered directly in Swagger UI
+        if mode_val == CreditNoteThermalMode.preview.value:
+            img_bytes = self._generate_credit_note_thermal_image(data)
+            return Response(
+                content=img_bytes,
+                media_type="image/png",
+                headers={
+                    "Content-Disposition": f"inline; filename=credit_note_{cn_no}_thermal.png",
+                    "X-CreditNote-Print-Type": "80mm-PNG-Preview",
+                },
+            )
+
+        # 2. View mode -> Inline styled HTML page with auto-print dialog
+        if mode_val == CreditNoteThermalMode.view.value:
+            html_content = self._generate_credit_note_thermal_html(data, auto_print=True)
+            return HTMLResponse(
+                content=html_content,
+                status_code=200,
+                headers={"Content-Disposition": f"inline; filename=credit_note_{cn_no}_thermal.html"},
+            )
+
+        # 3. Download mode -> ESC/POS text file attachment download
+        if mode_val == CreditNoteThermalMode.download.value:
+            text_payload = data["thermal_text"]
+            return Response(
+                content=text_payload.encode("utf-8"),
+                media_type="text/plain; charset=utf-8",
+                headers={
+                    "Content-Disposition": f"attachment; filename=credit_note_{cn_no}_thermal.txt",
+                    "X-CreditNote-Print-Type": "ESC/POS",
+                },
+            )
+
+        # 4. PDF mode -> 80mm Thermal Receipt PDF download
+        if mode_val == CreditNoteThermalMode.pdf.value:
+            pdf_bytes = self._generate_credit_note_thermal_pdf(data)
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f"attachment; filename=credit_note_{cn_no}_thermal.pdf",
+                    "X-CreditNote-Print-Type": "80mm-PDF",
+                },
+            )
+
+        # 5. HTML mode -> Styled raw HTML layout
+        if mode_val == CreditNoteThermalMode.html.value:
+            html_content = self._generate_credit_note_thermal_html(data, auto_print=False)
+            return HTMLResponse(
+                content=html_content,
+                status_code=200,
+                headers={"Content-Disposition": f"inline; filename=credit_note_{cn_no}_thermal.html"},
+            )
+
+        # 6. JSON mode -> Structured JSON payload
+        if mode_val == CreditNoteThermalMode.json.value:
+            html_content = self._generate_credit_note_thermal_html(data, auto_print=False)
+            resp = CreditNoteThermalResponse(
+                success=True,
+                message="Credit note thermal voucher generated successfully",
+                credit_note_id=data["credit_note_id"],
+                credit_note_no=data["credit_note_no"],
+                invoice_id=data["invoice_id"],
+                invoice_number=data["invoice_number"],
+                refund_amount=data["refund_amount"],
+                balance_amount=data["balance_amount"],
+                status=data["status"],
+                customer_name=data["customer_name"],
+                customer_phone=data["customer_phone"],
+                store_name=data["store_name"],
+                valid_until=data["valid_until"],
+                created_at=data["created_at"],
+                thermal_text=data["thermal_text"],
+                html=html_content,
+            )
+            return JSONResponse(content=resp.model_dump(mode="json"))
+
+        # 7. Text mode -> Raw ESC/POS text stream
+        if mode_val == CreditNoteThermalMode.text.value:
+            return Response(
+                content=data["thermal_text"].encode("utf-8"),
+                media_type="text/plain; charset=utf-8",
+                headers={
+                    "Content-Disposition": f"inline; filename=credit_note_{cn_no}_thermal.txt",
+                    "X-CreditNote-Print-Type": "ESC/POS",
+                },
+            )
+
+        raise AppException(f"Unsupported delivery mode: '{mode_val}'")
     def get_invoice_by_number(
         self,
         tenant_id: int,

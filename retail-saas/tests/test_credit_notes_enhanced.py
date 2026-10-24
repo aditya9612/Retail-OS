@@ -260,3 +260,63 @@ def test_credit_note_thermal_voucher_json_and_text(credit_note_setup):
     assert "text/plain" in res_text.headers["content-type"]
     assert "CREDIT NOTE VOUCHER" in res_text.text
     assert "BALANCE DUE" in res_text.text
+
+    # 3. Thermal preview mode (explicit & default) -> 80mm PNG
+    res_preview = client.get(
+        f"/api/v1/credit-notes/{cn_id}/thermal",
+        params={"mode": "preview"},
+        headers=headers,
+    )
+    assert res_preview.status_code == 200
+    assert "image/png" in res_preview.headers["content-type"]
+    assert res_preview.content.startswith(b"\x89PNG")
+
+    res_default = client.get(
+        f"/api/v1/credit-notes/{cn_id}/thermal",
+        headers=headers,
+    )
+    assert res_default.status_code == 200
+    assert "image/png" in res_default.headers["content-type"]
+    assert res_default.content.startswith(b"\x89PNG")
+
+    # 4. Thermal view mode -> HTML with auto-print
+    res_view = client.get(
+        f"/api/v1/credit-notes/{cn_id}/thermal",
+        params={"mode": "view"},
+        headers=headers,
+    )
+    assert res_view.status_code == 200
+    assert "text/html" in res_view.headers["content-type"]
+    assert "window.print()" in res_view.text
+    assert "CREDIT NOTE VOUCHER" in res_view.text
+
+    # 5. Thermal download mode -> ESC/POS text attachment
+    res_download = client.get(
+        f"/api/v1/credit-notes/{cn_id}/thermal",
+        params={"mode": "download"},
+        headers=headers,
+    )
+    assert res_download.status_code == 200
+    assert "text/plain" in res_download.headers["content-type"]
+    assert "attachment" in res_download.headers["content-disposition"]
+    assert "CREDIT NOTE VOUCHER" in res_download.text
+
+    # 6. Thermal PDF mode -> 80mm roll PDF
+    res_pdf = client.get(
+        f"/api/v1/credit-notes/{cn_id}/thermal",
+        params={"mode": "pdf"},
+        headers=headers,
+    )
+    assert res_pdf.status_code == 200
+    assert "application/pdf" in res_pdf.headers["content-type"]
+    assert res_pdf.content.startswith(b"%PDF")
+
+    # 7. Thermal HTML mode -> Styled raw HTML
+    res_html = client.get(
+        f"/api/v1/credit-notes/{cn_id}/thermal",
+        params={"mode": "html"},
+        headers=headers,
+    )
+    assert res_html.status_code == 200
+    assert "text/html" in res_html.headers["content-type"]
+    assert "CREDIT NOTE VOUCHER" in res_html.text

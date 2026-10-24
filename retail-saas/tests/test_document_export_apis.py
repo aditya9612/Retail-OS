@@ -259,13 +259,8 @@ def test_reports_export_excel_and_pdf(export_test_setup):
     headers = export_test_setup["headers"]
 
     # 1. Reports Excel export
-    res_excel = client.post(
-        "/api/v1/reports/export",
-        json={
-            "report_type": "sales_daily",
-            "format": "excel",
-            "target_date": str(date.today()),
-        },
+    res_excel = client.get(
+        f"/api/v1/reports/export?report_type=sales_daily&format=excel&target_date={date.today()}",
         headers=headers,
     )
     assert res_excel.status_code == 200
@@ -277,13 +272,8 @@ def test_reports_export_excel_and_pdf(export_test_setup):
     assert wb.active.cell(row=1, column=1).value == "Metric"
 
     # 2. Reports PDF export
-    res_pdf = client.post(
-        "/api/v1/reports/export",
-        json={
-            "report_type": "sales_daily",
-            "format": "pdf",
-            "target_date": str(date.today()),
-        },
+    res_pdf = client.get(
+        f"/api/v1/reports/export?report_type=sales_daily&format=pdf&target_date={date.today()}",
         headers=headers,
     )
     assert res_pdf.status_code == 200
@@ -400,9 +390,8 @@ def test_expanded_report_types_export(export_test_setup):
 
     for rtype in report_types_to_test:
         # Test PDF export
-        res_pdf = client.post(
-            "/api/v1/reports/export",
-            json={"report_type": rtype, "format": "pdf"},
+        res_pdf = client.get(
+            f"/api/v1/reports/export?report_type={rtype}&format=pdf",
             headers=headers,
         )
         assert res_pdf.status_code == 200, f"PDF failed for {rtype}: {res_pdf.text}"
@@ -410,9 +399,8 @@ def test_expanded_report_types_export(export_test_setup):
         assert res_pdf.content.startswith(b"%PDF-")
 
         # Test Excel export
-        res_excel = client.post(
-            "/api/v1/reports/export",
-            json={"report_type": rtype, "format": "excel"},
+        res_excel = client.get(
+            f"/api/v1/reports/export?report_type={rtype}&format=excel",
             headers=headers,
         )
         assert res_excel.status_code == 200, f"Excel failed for {rtype}: {res_excel.text}"

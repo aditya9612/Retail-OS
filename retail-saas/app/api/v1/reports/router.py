@@ -12,6 +12,9 @@ from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.report import (
     CurrentStockResponse,
+    DailyBillingResponse,
+    PaymentSummaryResponse,
+    ReportTaskAsyncResponse,
     CustomerLifetimeValueResponse,
     CustomerOverviewResponse,
     CustomerRetentionResponse,
@@ -379,32 +382,6 @@ def get_profit_loss(
 # CORE EXPORT ROUTE (BRD Section 11)
 # ============================================================================
 
-@router.post(
-    "/export",
-    tags=["Report Exports"],
-    summary="Export Any Report (POST)",
-    description="Generate and export any business report in CSV, Excel (.xlsx), or PDF format with granular filters and parameters.",
-    responses={
-        200: {
-            "description": "Report file stream (CSV, Excel spreadsheet, or PDF document)",
-            "content": {
-                "text/csv": {"schema": {"type": "string", "format": "binary"}},
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
-                    "schema": {"type": "string", "format": "binary"}
-                },
-                "application/pdf": {"schema": {"type": "string", "format": "binary"}},
-            },
-        }
-    },
-)
-def export_report(
-    data: ReportExportRequest,
-    user: User = Depends(require_permission("reports:read")),
-    db: Session = Depends(get_db),
-):
-    return ReportService(db).export_report(user=user, data=data)
-
-
 @router.get(
     "/export",
     tags=["Report Exports"],
@@ -475,14 +452,15 @@ def legacy_daily_sales(
 
 @router.get(
     "/monthly-sales",
+    response_model=MonthlySalesResponse,
     tags=["Sales Reports"],
     summary="Monthly Sales Report (Legacy)",
     description="Legacy endpoint returning monthly sales analytics.",
 )
 def legacy_monthly_sales(
-    year: int = Query(...),
-    month: int = Query(...),
-    store_id: Optional[int] = None,
+    year: int = Query(..., ge=2000, le=2100, description="Target year (e.g. 2026)"),
+    month: int = Query(..., ge=1, le=12, description="Target month (1-12)"),
+    store_id: Optional[int] = Query(None, description="Optional store filter"),
     user: User = Depends(require_permission("reports:read")),
     db: Session = Depends(get_db),
 ):
@@ -493,6 +471,7 @@ def legacy_monthly_sales(
 
 @router.get(
     "/gst",
+    response_model=GSTSalesResponse,
     tags=["GST Reports"],
     summary="GST Sales Report (Legacy)",
     description="Legacy endpoint returning GST sales report.",
@@ -514,6 +493,7 @@ def legacy_gst_report(
 
 @router.get(
     "/daily-billing",
+    response_model=DailyBillingResponse,
     tags=["Payment Reports"],
     summary="Daily Billing Closure Report",
     description="Daily billing closure report detailing cashier shifts, invoices, cash/UPI collections, and discrepancies.",
@@ -524,11 +504,12 @@ def daily_billing_closure(
     user: User = Depends(require_permission("reports:read")),
     db: Session = Depends(get_db),
 ):
-    return ReportService(db).daily_billing_closure(user.tenant_id, target_date, store_id=store_id)
+    return ReportService(db).daily_billing_closure(user, target_date, store_id=store_id)
 
 
 @router.get(
     "/payment-summary",
+    response_model=PaymentSummaryResponse,
     tags=["Payment Reports"],
     summary="Payment Method Summary Report",
     description="Aggregated payment summary across all payment modes (Cash, UPI, Card, Net Banking).",
@@ -540,11 +521,12 @@ def payment_summary(
     user: User = Depends(require_permission("reports:read")),
     db: Session = Depends(get_db),
 ):
-    return ReportService(db).payment_summary(user.tenant_id, start_date, end_date, store_id=store_id)
+    return ReportService(db).payment_summary(user, start_date, end_date, store_id=store_id)
 
 
 @router.post(
     "/monthly/async",
+    response_model=ReportTaskAsyncResponse,
     tags=["Sales Reports"],
     summary="Generate Monthly Sales Report Asynchronously",
     description="Enqueues background task for generating comprehensive monthly sales report.",
@@ -559,6 +541,7 @@ def monthly_report_async(
 
 @router.post(
     "/gst/async",
+    response_model=ReportTaskAsyncResponse,
     tags=["GST Reports"],
     summary="Generate GST Report Asynchronously",
     description="Enqueues background task for generating comprehensive GST sales register.",

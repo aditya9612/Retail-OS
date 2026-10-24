@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, Literal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from app.schemas.billing import (
     CreditNoteValidateResponse,
     CreditNoteRedeemRequest,
     CreditNoteRedeemResponse,
+    CreditNoteThermalMode,
     CreditNoteThermalResponse,
     InvoiceThermalMode,
 )
@@ -197,88 +198,59 @@ def credit_note_pdf(
 
 @router.get(
     "/{credit_note_id}/thermal",
-    summary="Get Credit Note Thermal Printer Voucher",
+    summary="Export Credit Note Thermal Slip (80mm ESC/POS)",
     description=(
-        "Generates an 80mm/58mm thermal receipt voucher for cashier drawer printers. "
-        "Supports 'json' (structured metadata), 'text' (raw ESC/POS ASCII lines), 'preview' (HTML view), "
-        "or 'download' (attachment)."
+        "Generates an 80mm ESC/POS thermal receipt slip for an issued credit note voucher. "
+        "Supports 'preview' (visual receipt PNG image displayed directly in Swagger UI), "
+        "'view' (inline browser view with auto-print dialog), "
+        "'download' (raw ESC/POS text file attachment), "
+        "'pdf' (80mm formatted PDF receipt download), "
+        "'html' (styled HTML receipt layout), "
+        "'json' (structured JSON response), or "
+        "'text' (raw ESC/POS printer stream)."
     ),
     responses={
         200: {
+            "model": CreditNoteThermalResponse,
+            "description": "Thermal receipt preview (PNG), HTML render, PDF/Text download, or JSON payload.",
             "content": {
-                "application/json": {},
-                "text/plain": {},
-                "text/html": {},
+                "image/png": {
+                    "schema": {"type": "string", "format": "binary"},
+                    "description": "Visual 80mm thermal receipt PNG rendered directly in Swagger UI",
+                },
+                "text/html": {
+                    "schema": {"type": "string"},
+                    "description": "Styled 80mm thermal receipt HTML for browser preview or print",
+                },
+                "application/pdf": {
+                    "schema": {"type": "string", "format": "binary"},
+                    "description": "80mm thermal receipt PDF document",
+                },
+                "text/plain": {
+                    "schema": {"type": "string"},
+                    "description": "Raw 80mm ESC/POS thermal printer text stream",
+                },
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/CreditNoteThermalResponse"},
+                    "description": "Structured JSON receipt payload",
+                },
             },
-            "description": "Credit Note thermal voucher payload in requested format.",
         }
     },
 )
 def get_credit_note_thermal(
     credit_note_id: int,
-    mode: InvoiceThermalMode = Query(
-        default=InvoiceThermalMode.preview,
-        description="Delivery mode: 'preview' (HTML), 'text' (ESC/POS stream), 'json' (structured payload), or 'download'",
+    request: Request,
+    mode: CreditNoteThermalMode = Query(
+        default=CreditNoteThermalMode.preview,
+        description="Thermal receipt output mode: preview (visual image in Swagger UI), view (browser preview with print), download (ESC/POS text file), pdf (80mm PDF), html (raw HTML), json (structured JSON), text (raw ESC/POS text)",
     ),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
-    data = BillingService(db).get_credit_note_thermal_receipt(
-        user.tenant_id,
-        credit_note_id,
+    return BillingService(db).export_credit_note_thermal(
         user=user,
-    )
-
-    # 1. JSON mode
-    if mode == InvoiceThermalMode.json:
-        resp = CreditNoteThermalResponse(
-            success=True,
-            message="Credit note thermal voucher generated successfully",
-            credit_note_id=data["credit_note_id"],
-            credit_note_no=data["credit_note_no"],
-            invoice_id=data["invoice_id"],
-            invoice_number=data["invoice_number"],
-            refund_amount=data["refund_amount"],
-            balance_amount=data["balance_amount"],
-            status=data["status"],
-            customer_name=data["customer_name"],
-            customer_phone=data["customer_phone"],
-            store_name=data["store_name"],
-            valid_until=data["valid_until"],
-            created_at=data["created_at"],
-            thermal_text=data["thermal_text"],
-        )
-        return JSONResponse(content=resp.model_dump(mode="json"))
-
-    # 2. HTML preview
-    if mode in (InvoiceThermalMode.preview, InvoiceThermalMode.view, InvoiceThermalMode.html):
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8"/>
-            <title>Credit Note - {data['credit_note_no']}</title>
-            <style>
-                body {{ font-family: 'Courier New', monospace; background: #f3f4f6; margin: 0; padding: 20px; }}
-                .receipt-container {{ width: 320px; margin: 0 auto; background: #fff; padding: 15px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border-radius: 4px; }}
-                pre {{ font-size: 13px; line-height: 1.35; white-space: pre-wrap; word-break: break-all; margin: 0; }}
-            </style>
-        </head>
-        <body>
-            <div class="receipt-container">
-                <pre>{data['thermal_text']}</pre>
-            </div>
-        </body>
-        </html>
-        """
-        return Response(content=html_content, media_type="text/html; charset=utf-8")
-
-    # 3. Text mode -> raw ASCII
-    return Response(
-        content=data["thermal_text"].encode("utf-8"),
-        media_type="text/plain; charset=utf-8",
-        headers={
-            "Content-Disposition": f"inline; filename=credit_note_{data['credit_note_no']}_thermal.txt",
-            "X-CreditNote-Print-Type": "ESC/POS",
-        },
+        credit_note_id=credit_note_id,
+        mode=mode,
+        request=request,
     )

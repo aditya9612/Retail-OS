@@ -186,10 +186,17 @@ def create_feedback(
 )
 def get_feedback(
     customer_id: Optional[int] = Query(None, gt=0, deprecated=True, description="Deprecated: Use GET /customers/feedback/{customer_id} instead"),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_feedback(user.tenant_id, customer_id)
+    return CustomerService(db).get_feedback(
+        user.tenant_id,
+        customer_id,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get(
@@ -197,10 +204,16 @@ def get_feedback(
     response_model=FeedbackAnalyticsResponse,
 )
 def get_feedback_analytics(
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_feedback_analytics(user.tenant_id)
+    return CustomerService(db).get_feedback_analytics(
+        user.tenant_id,
+        from_date=from_date,
+        to_date=to_date,
+    )
 
 
 @router.get(
@@ -209,10 +222,17 @@ def get_feedback_analytics(
 )
 def get_feedback_by_customer_id(
     customer_id: int = Path(..., gt=0),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_feedback(user.tenant_id, customer_id)
+    return CustomerService(db).get_feedback(
+        user.tenant_id,
+        customer_id,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get(
@@ -266,12 +286,16 @@ def debit_wallet(
 )
 def wallet_transactions(
     customer_id: int = Path(..., gt=0),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_wallet_transactions(
         user.tenant_id,
         customer_id,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -280,15 +304,23 @@ def wallet_transactions(
     response_model=Union[list[CustomerResponse], SubResourceNoDataResponse],
 )
 def birthday_customers(
+    month: Optional[int] = Query(None, ge=1, le=12),
+    day: Optional[int] = Query(None, ge=1, le=31),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    today = date.today()
+    if month is None and day is None:
+        today = date.today()
+        target_month = today.month
+        target_day = today.day
+    else:
+        target_month = month
+        target_day = day
 
     return CustomerService(db).get_birthday_customers(
         tenant_id=user.tenant_id,
-        month=today.month,
-        day=today.day,
+        month=target_month,
+        day=target_day,
     )
 
 
@@ -312,11 +344,15 @@ def create_referral(
     response_model=CustomerReferralListResponse,
 )
 def get_referrals(
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     referrals = CustomerService(db).get_referrals(
         user.tenant_id,
+        page=page,
+        page_size=page_size,
     )
     return {
         "success": True,
@@ -330,11 +366,15 @@ def get_referrals(
     response_model=CustomerCommunicationListResponse,
 )
 def get_communications(
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     comms = CustomerService(db).get_communications(
         user.tenant_id,
+        page=page,
+        page_size=page_size,
     )
     return {
         "success": True,
@@ -365,12 +405,16 @@ def create_note(
 )
 def get_notes(
     customer_id: Optional[int] = Query(None, gt=0, deprecated=True, description="Deprecated: Use GET /customers/notes/{customer_id} instead"),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_notes(
         user.tenant_id,
         customer_id,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -380,12 +424,16 @@ def get_notes(
 )
 def get_notes_by_customer_id(
     customer_id: int = Path(..., gt=0),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_notes(
         user.tenant_id,
         customer_id,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -552,12 +600,16 @@ def get_loyalty(
 )
 def get_loyalty_history(
     customer_id: int = Path(..., gt=0),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_loyalty_history(
         user.tenant_id,
         customer_id,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -700,12 +752,16 @@ def send_sms(
     response_model=CustomerCommunicationListResponse,
 )
 def get_sms_notifications(
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     sms_list = CustomerService(db).get_communications_by_type(
         user.tenant_id,
         "SMS",
+        page=page,
+        page_size=page_size,
     )
     return {
         "success": True,
@@ -740,12 +796,16 @@ def send_whatsapp(
     response_model=CustomerCommunicationListResponse,
 )
 def get_whatsapp_notifications(
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     wa_list = CustomerService(db).get_communications_by_type(
         user.tenant_id,
         "WHATSAPP",
+        page=page,
+        page_size=page_size,
     )
     return {
         "success": True,
@@ -774,10 +834,18 @@ def send_campaign(
     response_model=list[TopCustomerResponse],
 )
 def top_customers(
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
+    limit: Optional[int] = Query(10, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_top_customers(user.tenant_id)
+    return CustomerService(db).get_top_customers(
+        user.tenant_id,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit or 10,
+    )
 
 
 @router.get(
@@ -785,11 +853,15 @@ def top_customers(
     response_model=RetentionResponse,
 )
 def retention_report(
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_retention_report(
-        user.tenant_id
+        user.tenant_id,
+        from_date=from_date,
+        to_date=to_date,
     )
 
 
@@ -798,11 +870,15 @@ def retention_report(
     response_model=list[LifetimeValueResponse],
 )
 def lifetime_value(
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_lifetime_value(
-        user.tenant_id
+        user.tenant_id,
+        from_date=from_date,
+        to_date=to_date,
     )
 
 
@@ -811,9 +887,13 @@ def lifetime_value(
     response_model=list[LoyaltyReportResponse],
 )
 def loyalty_report(
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_loyalty_report(
-        user.tenant_id
+        user.tenant_id,
+        from_date=from_date,
+        to_date=to_date,
     )

@@ -10,6 +10,7 @@ from app.core.exceptions import ForbiddenException
 from app.core.security import is_tenant_wide_authorized, require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.order import (
+    OrderThermalMode,
     OrderAddItemsRequest,
     OrderCreate,
     OrderItemCreate,
@@ -161,12 +162,87 @@ def add_order_items(
     return OrderService(db).add_order_items(user.tenant_id, order_id, data.items)
 
 
-@router.get("/{order_id}/receipt", response_model=OrderReceiptResponse)
-def get_order_receipt(
+@router.get(
+    "/{order_id}/thermal",
+    summary="Export Order POS Thermal Receipt Slip (80mm ESC/POS)",
+    description=(
+        "Generates an 80mm ESC/POS thermal receipt slip for an order. "
+        "Supports 'preview' (visual receipt PNG image displayed directly in Swagger UI), "
+        "'view' (inline browser view with auto-print dialog), "
+        "'download' (raw ESC/POS text file attachment), "
+        "'pdf' (80mm formatted PDF receipt download), "
+        "'html' (styled HTML receipt layout), "
+        "'json' (structured JSON response), or "
+        "'text' (raw ESC/POS printer stream)."
+    ),
+    responses={
+        200: {
+            "model": OrderReceiptResponse,
+            "description": "Thermal receipt preview (PNG), HTML render, PDF/Text download, or JSON payload.",
+            "content": {
+                "image/png": {
+                    "schema": {"type": "string", "format": "binary"},
+                    "description": "Visual 80mm thermal receipt PNG rendered directly in Swagger UI",
+                },
+                "text/html": {
+                    "schema": {"type": "string"},
+                    "description": "Styled 80mm thermal receipt HTML for browser preview or print",
+                },
+                "application/pdf": {
+                    "schema": {"type": "string", "format": "binary"},
+                    "description": "80mm thermal receipt PDF document",
+                },
+                "text/plain": {
+                    "schema": {"type": "string"},
+                    "description": "Raw 80mm ESC/POS thermal printer text stream",
+                },
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/OrderReceiptResponse"},
+                    "description": "Structured JSON receipt payload",
+                },
+            },
+        }
+    },
+)
+def export_order_thermal(
     order_id: int,
+    mode: OrderThermalMode = Query(
+        default=OrderThermalMode.preview,
+        description="Thermal receipt output mode: preview (visual image in Swagger UI), view (browser preview with print), download (ESC/POS text file), pdf (80mm PDF), html (raw HTML), json (structured JSON), text (raw ESC/POS text)",
+    ),
     user: User = Depends(require_permission("orders:read")),
     db: Session = Depends(get_db),
 ):
+    return OrderService(db).export_order_thermal(
+        tenant_id=user.tenant_id,
+        order_id=order_id,
+        mode=mode,
+        user=user,
+    )
+
+
+@router.get(
+    "/{order_id}/receipt",
+    summary="Get Order Receipt (Structured or 80mm Thermal)",
+    description="Returns order receipt. Supports optional mode query parameter (preview, view, download, pdf, html, json, text). Defaults to structured JSON payload with formatted receipt text.",
+    response_model=OrderReceiptResponse,
+)
+def get_order_receipt(
+    order_id: int,
+    mode: Optional[OrderThermalMode] = Query(
+        default=None,
+        description="Optional thermal output mode: preview, view, download, pdf, html, json, text. Defaults to structured JSON receipt if omitted.",
+    ),
+    user: User = Depends(require_permission("orders:read")),
+    db: Session = Depends(get_db),
+):
+    if mode and mode != OrderThermalMode.json:
+        return OrderService(db).export_order_thermal(
+            tenant_id=user.tenant_id,
+            order_id=order_id,
+            mode=mode,
+            user=user,
+        )
     return OrderService(db).get_order_receipt(user.tenant_id, order_id)
 
 
