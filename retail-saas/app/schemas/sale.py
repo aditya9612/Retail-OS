@@ -257,6 +257,9 @@ class SaleCreate(BaseModel):
     @field_validator("sale_number", mode="before")
     @classmethod
     def validate_sale_number(cls, value):
+        if value is None:
+            return None
+
         if not isinstance(value, str):
             raise ValueError("Sale number must be a valid string.")
 

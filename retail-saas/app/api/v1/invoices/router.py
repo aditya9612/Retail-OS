@@ -7,6 +7,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.pdf_utils import render_pdf_or_preview
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.core.security import is_tenant_wide_authorized, require_operational_write, require_permission
 from app.models.store import Store
@@ -216,8 +217,11 @@ def get_invoice(
     ),
     responses={
         200: {
-            "content": {"application/pdf": {}},
-            "description": "Rendered PDF document stream.",
+            "content": {
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}},
+                "image/png": {"schema": {"type": "string", "format": "binary"}, "description": "Visual document PNG preview for Swagger UI / browser"},
+            },
+            "description": "Rendered PDF document download or visual PNG preview for Swagger UI.",
         }
     },
 )
@@ -241,15 +245,11 @@ def invoice_pdf(
         user=user,
     )
 
-    disposition = "inline" if mode == "preview" else "attachment"
     filename_prefix = "bill_" if document_type == "bill" else ""
-
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f"{disposition}; filename={filename_prefix}{invoice.invoice_number}.pdf"
-        },
+    return render_pdf_or_preview(
+        pdf_content=pdf_bytes,
+        filename_base=f"{filename_prefix}{invoice.invoice_number}",
+        mode=mode,
     )
 
 

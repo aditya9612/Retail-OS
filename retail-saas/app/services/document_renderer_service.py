@@ -25,6 +25,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.graphics.shapes import Drawing, Rect, Circle, Line
+from PIL import Image as PILImage
 
 try:
     import matplotlib
@@ -364,8 +365,6 @@ class DocumentRenderer:
         if not clean_url or clean_url.startswith("http://") or clean_url.startswith("https://"):
             return None
 
-        uploads_root = (Path("uploads")).resolve()
-
         rel_str = clean_url
         if rel_str.startswith("/uploads/"):
             rel_str = rel_str[len("/uploads/"):]
@@ -374,23 +373,30 @@ class DocumentRenderer:
         elif rel_str.startswith("/"):
             rel_str = rel_str.lstrip("/")
 
-        try:
-            resolved_path = (uploads_root / rel_str).resolve()
-        except Exception as e:
-            logger.warning(f"Error resolving logo path: {e}")
-            return None
+        possible_roots = [
+            (Path("uploads")).resolve(),
+            (Path("retail-saas/uploads")).resolve(),
+            (Path(__file__).resolve().parents[2] / "uploads").resolve(),
+            (Path(__file__).resolve().parents[3] / "uploads").resolve(),
+        ]
 
-        # Enforce boundary within uploads directory
-        try:
-            if not resolved_path.is_relative_to(uploads_root):
-                logger.warning(f"Path traversal detected in logo path: {logo_url}")
-                return None
-        except AttributeError:
-            if not str(resolved_path).startswith(str(uploads_root)):
-                return None
+        resolved_path = None
+        for root in possible_roots:
+            try:
+                candidate = (root / rel_str).resolve()
+                is_safe = False
+                try:
+                    is_safe = candidate.is_relative_to(root)
+                except AttributeError:
+                    is_safe = str(candidate).startswith(str(root))
+                if is_safe and candidate.is_file():
+                    resolved_path = candidate
+                    break
+            except Exception:
+                continue
 
-        if not resolved_path.is_file():
-            logger.warning(f"Logo file does not exist at path: {resolved_path}")
+        if not resolved_path:
+            logger.warning(f"Logo file does not exist at path: {clean_url}")
             return None
 
         if resolved_path.suffix.lower() not in [".png", ".jpg", ".jpeg"]:
@@ -398,6 +404,63 @@ class DocumentRenderer:
             return None
 
         return str(resolved_path)
+
+    def _prepare_and_draw_logo(
+        self,
+        c: canvas.Canvas,
+        logo_url: Optional[str],
+        right_x: float,
+        top_y: float,
+        max_w: float = 140.0,
+        max_h: float = 52.0,
+    ) -> float:
+        """
+        Renders a brand logo cleanly with:
+        - RGBA alpha transparency flattened onto pure white (#FFFFFF), eliminating solid black boxes.
+        - Strict aspect ratio preservation (no distortion, stretching, or blur).
+        - High-resolution rendering with anti-aliasing via ReportLab mask='auto'.
+        Returns the rendered width (draw_w) or 0.0 if not rendered.
+        """
+        logo_path = self._validate_logo_path(logo_url)
+        if not logo_path or not Path(logo_path).is_file():
+            return 0.0
+        try:
+            from PIL import Image as PILImage
+            pil_img = PILImage.open(logo_path)
+
+            if pil_img.mode in ("RGBA", "LA") or (pil_img.mode == "P" and "transparency" in pil_img.info):
+                rgba = pil_img.convert("RGBA")
+                bg = PILImage.new("RGBA", rgba.size, (255, 255, 255, 255))
+                flat = PILImage.alpha_composite(bg, rgba).convert("RGB")
+            elif pil_img.mode != "RGB":
+                flat = pil_img.convert("RGB")
+            else:
+                flat = pil_img
+
+            iw, ih = flat.size
+            if iw <= 0 or ih <= 0:
+                return 0.0
+            aspect = iw / float(ih)
+
+            if (max_w / aspect) <= max_h:
+                draw_w = max_w
+                draw_h = max_w / aspect
+            else:
+                draw_h = max_h
+                draw_w = max_h * aspect
+
+            buf = io.BytesIO()
+            flat.save(buf, format="PNG", quality=95)
+            buf.seek(0)
+            img_reader = ImageReader(buf)
+
+            draw_x = right_x - draw_w
+            draw_y = top_y - draw_h
+            c.drawImage(img_reader, draw_x, draw_y, width=draw_w, height=draw_h, mask="auto")
+            return draw_w
+        except Exception as e:
+            logger.warning(f"Failed to prepare and draw logo: {e}")
+            return 0.0
 
     def render(self, template_type: str, data: Dict[str, Any], branding: BrandingContext) -> bytes:
         """
@@ -456,17 +519,7 @@ class DocumentRenderer:
         text_muted = colors.HexColor("#64748B")          # Secondary text
 
         # 1. Top Header: Logo & Seller Details
-        logo_path = self._validate_logo_path(branding.logo_url)
-        if logo_path:
-            try:
-                img = ImageReader(logo_path)
-                img_w, img_h = img.getSize()
-                aspect = img_w / float(img_h)
-                draw_w = min(100, 48 * aspect)
-                draw_h = draw_w / aspect
-                c.drawImage(img, width - margin - draw_w, y - draw_h + 10, width=draw_w, height=draw_h)
-            except Exception as e:
-                logger.warning(f"Failed to draw logo: {e}")
+        self._prepare_and_draw_logo(c, branding.logo_url, width - margin, y + 10, max_w=140.0, max_h=52.0)
 
         # Seller Business Name
         c.setFont(self._get_font(branding.business_name, True), 16)
@@ -527,11 +580,11 @@ class DocumentRenderer:
         date_str = ""
         if created_at_val:
             date_str = created_at_val.strftime("%d-%m-%Y") if hasattr(created_at_val, "strftime") else str(created_at_val)[:10]
-            c.drawString(margin + 200, y - 14, f"Date: {date_str}")
+            c.drawString(margin + 250, y - 14, f"Date: {date_str}")
 
         order_no = data.get("order_number")
         if order_no:
-            c.drawString(margin + 330, y - 14, f"Ref / Order: {order_no}")
+            c.drawString(margin + 370, y - 14, f"Ref / Order: {order_no}")
 
         inv_type = "B2B Tax Invoice" if data.get("is_b2b") else "B2C Retail Invoice"
         c.setFont(self.default_font, 8.5)
@@ -757,17 +810,7 @@ class DocumentRenderer:
         text_muted = colors.HexColor("#64748B")
 
         # 1. POS Retail Header
-        logo_path = self._validate_logo_path(branding.logo_url)
-        if logo_path:
-            try:
-                img = ImageReader(logo_path)
-                img_w, img_h = img.getSize()
-                aspect = img_w / float(img_h)
-                draw_w = min(80, 40 * aspect)
-                draw_h = draw_w / aspect
-                c.drawImage(img, width - margin - draw_w, y - draw_h + 10, width=draw_w, height=draw_h)
-            except Exception as e:
-                logger.warning(f"Failed to draw logo: {e}")
+        self._prepare_and_draw_logo(c, branding.logo_url, width - margin, y + 10, max_w=120.0, max_h=45.0)
 
         c.setFont(self._get_font(branding.business_name, True), 15)
         c.setFillColor(primary_green)
@@ -1806,41 +1849,37 @@ class DocumentRenderer:
         return buffer.getvalue()
 
     def _draw_credit_note(self, c: canvas.Canvas, data: Dict[str, Any], branding: BrandingContext):
-        """Draws a branded GST Credit Note with Coral Red styling (#DC2626)."""
+        """Draws a clean, modern, professional GST Credit Note with sleek slate styling,
+        proper two-column metadata alignment (no overlapping text), and crystal clear logo rendering."""
         width, height = A4
         margin = 40
         y = height - margin
 
-        theme = THEMES["credit_note"]
-        primary_color = theme.primary_color       # #DC2626 Coral Red
-        box_bg = theme.bg_light_color             # #FEF2F2 Soft Red Tint
-        border_color = theme.border_color         # #FECACA
-        text_dark = colors.HexColor("#1E293B")
-        text_muted = colors.HexColor("#64748B")
+        # Clean modern slate/navy color scheme
+        theme_primary = getattr(branding, "primary_color", None)
+        primary_color = colors.HexColor(theme_primary or "#0F172A")
+        border_color = colors.HexColor("#E2E8F0")
+        box_bg = colors.HexColor("#F8FAFC")
+        text_dark = colors.HexColor("#0F172A")
+        text_muted = colors.HexColor("#475569")
+        text_subtle = colors.HexColor("#64748B")
 
         # 1. Top Header: Logo & Issuer Business Details
-        logo_path = self._validate_logo_path(branding.logo_url)
-        if logo_path:
-            try:
-                img = ImageReader(logo_path)
-                img_w, img_h = img.getSize()
-                aspect = img_w / float(img_h)
-                draw_w = min(100, 48 * aspect)
-                draw_h = draw_w / aspect
-                c.drawImage(img, width - margin - draw_w, y - draw_h + 10, width=draw_w, height=draw_h)
-            except Exception as e:
-                logger.warning(f"Failed to draw logo: {e}")
+        logo_drawn_w = self._prepare_and_draw_logo(
+            c, branding.logo_url, width - margin, y + 8, max_w=140.0, max_h=52.0
+        )
 
-        c.setFont(self._get_font(branding.business_name, True), 16)
-        c.setFillColor(primary_color)
-        c.drawString(margin, y, branding.business_name or "Retail Store")
-        y -= 18
+        c.setFont(self._get_font(branding.business_name, True), 15)
+        c.setFillColor(text_dark)
+        biz_name = branding.business_name or "Retail Store"
+        c.drawString(margin, y, biz_name[:60])
+        y -= 17
 
         c.setFont(self._get_font(branding.address, False), 9)
-        c.setFillColor(text_dark)
+        c.setFillColor(text_muted)
         if branding.address:
             c.drawString(margin, y, branding.address[:75])
-            y -= 14
+            y -= 13
 
         contact_info = []
         if branding.phone:
@@ -1851,15 +1890,15 @@ class DocumentRenderer:
             contact_info.append(f"Web: {branding.website}")
         if contact_info:
             c.setFont(self.default_font, 8.5)
-            c.setFillColor(text_muted)
+            c.setFillColor(text_subtle)
             c.drawString(margin, y, " | ".join(contact_info))
-            y -= 14
+            y -= 13
 
         if branding.show_gstin and branding.gstin:
             c.setFont(self.bold_font, 9)
-            c.setFillColor(primary_color)
+            c.setFillColor(text_dark)
             c.drawString(margin, y, f"GSTIN: {branding.gstin}")
-            y -= 16
+            y -= 15
 
         y -= 6
 
@@ -1867,38 +1906,22 @@ class DocumentRenderer:
         banner_height = 22
         c.setFillColor(primary_color)
         c.rect(margin, y - banner_height, width - 2 * margin, banner_height, fill=1, stroke=0)
-        c.setFont(self.bold_font, 12)
+        c.setFont(self.bold_font, 11)
         c.setFillColor(colors.white)
-        c.drawCentredString(width / 2.0, y - banner_height + 6, "CREDIT NOTE")
+        c.drawCentredString(width / 2.0, y - banner_height + 7, "CREDIT NOTE")
         y -= (banner_height + 10)
 
-        # 3. Document Metadata Bar
+        # 3. Document Metadata Bar (Fixed Overlap: 2 cleanly separated columns)
         cn_raw = data.get("credit_note_no") or data.get("credit_note_number", "")
         cn_number = format_document_number(cn_raw, branding.invoice_prefix, "credit_note")
 
-        meta_box_h = 42
+        meta_box_h = 44
         c.setFillColor(box_bg)
         c.setStrokeColor(border_color)
         c.rect(margin, y - meta_box_h, width - 2 * margin, meta_box_h, fill=1, stroke=1)
 
-        c.setFillColor(text_dark)
-        c.setFont(self.bold_font, 9)
-        c.drawString(margin + 10, y - 14, f"Credit Note No: {cn_number}")
-
-        created_at_val = data.get("created_at")
-        date_str = ""
-        if created_at_val:
-            date_str = created_at_val.strftime("%d-%m-%Y") if hasattr(created_at_val, "strftime") else str(created_at_val)[:10]
-            c.drawString(margin + 200, y - 14, f"Date: {date_str}")
-
-        orig_inv = data.get("original_invoice_number") or data.get("invoice_number", "")
-        c.setFont(self.default_font, 8.5)
-        c.drawString(margin + 10, y - 30, f"Against Invoice: {orig_inv or 'N/A'}")
-
-        reason = str(data.get("reason") or "Returned goods / adjustment")
-        c.drawString(margin + 200, y - 30, f"Reason: {reason[:45]}")
-
         # QR Code if enabled
+        has_qr = False
         if branding.show_qr and data.get("qr_data"):
             try:
                 qr = qrcode.QRCode(box_size=3, border=1)
@@ -1909,52 +1932,95 @@ class DocumentRenderer:
                 img.save(qr_buf, format="PNG")
                 qr_buf.seek(0)
                 qr_reader = ImageReader(qr_buf)
-                c.drawImage(qr_reader, width - margin - 40, y - meta_box_h + 3, width=36, height=36)
+                c.drawImage(qr_reader, width - margin - 42, y - meta_box_h + 4, width=36, height=36)
+                has_qr = True
             except Exception as e:
                 logger.warning(f"Failed to draw QR code: {e}")
+
+        right_boundary = (width - margin - 50) if has_qr else (width - margin - 14)
+
+        # Column 1 (Left) - Credit Note No & Against Invoice
+        c.setFont(self.bold_font, 8.5)
+        c.setFillColor(text_muted)
+        c.drawString(margin + 12, y - 15, "Credit Note No:")
+        c.setFont(self.bold_font, 9)
+        c.setFillColor(text_dark)
+        c.drawString(margin + 86, y - 15, str(cn_number))
+
+        orig_inv = data.get("original_invoice_number") or data.get("invoice_number", "")
+        c.setFont(self.default_font, 8.5)
+        c.setFillColor(text_muted)
+        c.drawString(margin + 12, y - 32, "Against Invoice:")
+        c.setFont(self.default_font, 8.5)
+        c.setFillColor(text_dark)
+        c.drawString(margin + 86, y - 32, str(orig_inv or "N/A"))
+
+        # Column 2 (Right) - Date & Reason (Anchored to right boundary, eliminating overlap)
+        created_at_val = data.get("created_at")
+        date_str = ""
+        if created_at_val:
+            date_str = created_at_val.strftime("%d-%m-%Y") if hasattr(created_at_val, "strftime") else str(created_at_val)[:10]
+
+        c.setFont(self.bold_font, 8.5)
+        c.setFillColor(text_muted)
+        c.drawRightString(right_boundary - 65, y - 15, "Date:")
+        c.setFont(self.bold_font, 9)
+        c.setFillColor(text_dark)
+        c.drawRightString(right_boundary, y - 15, date_str or "N/A")
+
+        reason = str(data.get("reason") or "Returned goods / adjustment")
+        c.setFont(self.default_font, 8.5)
+        c.setFillColor(text_muted)
+        c.drawRightString(right_boundary - 170, y - 32, "Reason:")
+        c.setFont(self.default_font, 8.5)
+        c.setFillColor(text_dark)
+        c.drawRightString(right_boundary, y - 32, reason[:40])
 
         y -= (meta_box_h + 12)
 
         # 4. Structured Issuer & Buyer Cards
         card_w = (width - 2 * margin - 15) / 2.0
         card_h = 58
+
         # Issuer Card (Left)
-        c.setFillColor(colors.HexColor("#FAFAFA"))
+        c.setFillColor(colors.white)
         c.setStrokeColor(border_color)
         c.rect(margin, y - card_h, card_w, card_h, fill=1, stroke=1)
-        c.setFillColor(primary_color)
-        c.setFont(self.bold_font, 9)
-        c.drawString(margin + 8, y - 14, "ISSUED BY (SELLER)")
+        c.setFillColor(text_muted)
+        c.setFont(self.bold_font, 8.5)
+        c.drawString(margin + 10, y - 14, "ISSUED BY (SELLER)")
         c.setFillColor(text_dark)
-        c.setFont(self._get_font(branding.business_name, False), 8.5)
-        c.drawString(margin + 8, y - 27, (branding.business_name or "")[:35])
+        c.setFont(self._get_font(branding.business_name, False), 9)
+        c.drawString(margin + 10, y - 27, (branding.business_name or "")[:35])
         c.setFont(self.default_font, 8)
+        c.setFillColor(text_subtle)
         if branding.phone:
-            c.drawString(margin + 8, y - 39, f"Phone: {branding.phone}")
+            c.drawString(margin + 10, y - 39, f"Phone: {branding.phone}")
         if branding.show_gstin and branding.gstin:
-            c.drawString(margin + 8, y - 50, f"GSTIN: {branding.gstin}")
+            c.drawString(margin + 10, y - 50, f"GSTIN: {branding.gstin}")
 
         # Buyer Card (Right)
         customer = data.get("customer") or {}
-        c.setFillColor(colors.HexColor("#FAFAFA"))
+        c.setFillColor(colors.white)
         c.setStrokeColor(border_color)
         c.rect(margin + card_w + 15, y - card_h, card_w, card_h, fill=1, stroke=1)
-        c.setFillColor(primary_color)
-        c.setFont(self.bold_font, 9)
-        c.drawString(margin + card_w + 23, y - 14, "CREDIT ISSUED TO (BUYER)")
+        c.setFillColor(text_muted)
+        c.setFont(self.bold_font, 8.5)
+        c.drawString(margin + card_w + 25, y - 14, "CREDIT ISSUED TO (BUYER)")
         c.setFillColor(text_dark)
         cust_name = customer.get("name") or "Valued Customer"
-        c.setFont(self._get_font(cust_name, False), 8.5)
-        c.drawString(margin + card_w + 23, y - 27, cust_name[:35])
+        c.setFont(self._get_font(cust_name, False), 9)
+        c.drawString(margin + card_w + 25, y - 27, cust_name[:35])
         c.setFont(self.default_font, 8)
+        c.setFillColor(text_subtle)
         cust_phone = customer.get("phone") or ""
         if cust_phone:
-            c.drawString(margin + card_w + 23, y - 39, f"Mobile: {cust_phone}")
+            c.drawString(margin + card_w + 25, y - 39, f"Mobile: {cust_phone}")
         cust_gstin = customer.get("gstin") or ""
         if cust_gstin:
-            c.drawString(margin + card_w + 23, y - 50, f"GSTIN: {cust_gstin}")
+            c.drawString(margin + card_w + 25, y - 50, f"GSTIN: {cust_gstin}")
         elif customer.get("address"):
-            c.drawString(margin + card_w + 23, y - 50, customer.get("address")[:35])
+            c.drawString(margin + card_w + 25, y - 50, customer.get("address")[:35])
 
         y -= (card_h + 14)
 
@@ -1964,20 +2030,18 @@ class DocumentRenderer:
         cgst_val = float(data.get("cgst_amount", 0) or 0)
         sgst_val = float(data.get("sgst_amount", 0) or 0)
         igst_val = float(data.get("igst_amount", 0) or 0)
-        tax_total = cgst_val + sgst_val + igst_val
-        total_credit = refund_amount + tax_total if tax_total > 0 and (refund_amount > 0 and abs(refund_amount - float(data.get("total_amount", refund_amount))) > 0.01) else refund_amount
 
         def _draw_cn_table_header(curr_y: float) -> float:
             c.setFillColor(primary_color)
             c.rect(margin, curr_y - 16, width - 2 * margin, 16, fill=1, stroke=0)
             c.setFillColor(colors.white)
             c.setFont(self.bold_font, 8.5)
-            c.drawString(margin + 5, curr_y - 12, "#")
-            c.drawString(margin + 25, curr_y - 12, "Description / Component")
-            c.drawString(margin + 220, curr_y - 12, "HSN / SAC")
-            c.drawString(margin + 280, curr_y - 12, "Qty / Rate")
-            c.drawString(margin + 360, curr_y - 12, "Tax Adj")
-            c.drawString(margin + 440, curr_y - 12, "Credit (INR)")
+            c.drawString(margin + 8, curr_y - 12, "#")
+            c.drawString(margin + 28, curr_y - 12, "Description / Component")
+            c.drawString(margin + 230, curr_y - 12, "HSN / SAC")
+            c.drawString(margin + 295, curr_y - 12, "Qty / Rate")
+            c.drawRightString(margin + 420, curr_y - 12, "Tax Adj")
+            c.drawRightString(width - margin - 10, curr_y - 12, "Credit (INR)")
             return curr_y - 22
 
         y = _draw_cn_table_header(y)
@@ -1992,30 +2056,29 @@ class DocumentRenderer:
                     y = _draw_cn_table_header(y)
 
                 if idx % 2 == 0:
-                    c.setFillColor(colors.HexColor("#FEF2F2"))
+                    c.setFillColor(box_bg)
                     c.rect(margin, y - 11, width - 2 * margin, 14, fill=1, stroke=0)
 
                 c.setFillColor(text_dark)
                 c.setFont(self.default_font, 8.5)
-                c.drawString(margin + 5, y - 8, str(idx))
+                c.drawString(margin + 8, y - 8, str(idx))
 
                 p_name = str(item.get("product_name") or item.get("description") or "Item")
                 c.setFont(self._get_font(p_name, False), 8.5)
-                c.drawString(margin + 25, y - 8, p_name[:32])
+                c.drawString(margin + 28, y - 8, p_name[:32])
 
                 c.setFont(self.default_font, 8.5)
-                c.drawString(margin + 220, y - 8, str(item.get("hsn_code") or ""))
+                c.drawString(margin + 230, y - 8, str(item.get("hsn_code") or ""))
                 qty = item.get("quantity") or 1
                 price = float(item.get("unit_price") or 0)
-                c.drawString(margin + 280, y - 8, f"{qty} x {price:.2f}")
+                c.drawString(margin + 295, y - 8, f"{qty} x {price:.2f}")
 
                 tax_adj = float(item.get("gst_amount") or item.get("tax") or 0)
                 line_total = float(item.get("total_amount") or item.get("total") or 0)
-                c.drawString(margin + 360, y - 8, f"{tax_adj:.2f}")
-                c.drawString(margin + 440, y - 8, f"{line_total:.2f}")
+                c.drawRightString(margin + 420, y - 8, f"{tax_adj:.2f}")
+                c.drawRightString(width - margin - 10, y - 8, f"{line_total:.2f}")
                 y -= 14
         else:
-            # Standalone credit adjustment breakdown
             row_items = [
                 ("1", "Goods Return / Refund Value", "9983", "1", "-", refund_amount),
             ]
@@ -2028,17 +2091,17 @@ class DocumentRenderer:
 
             for r_idx, (r_num, r_desc, r_hsn, r_rate, r_tax, r_amt) in enumerate(row_items):
                 if r_idx % 2 == 1:
-                    c.setFillColor(colors.HexColor("#FEF2F2"))
+                    c.setFillColor(box_bg)
                     c.rect(margin, y - 11, width - 2 * margin, 14, fill=1, stroke=0)
 
                 c.setFillColor(text_dark)
                 c.setFont(self.default_font, 8.5)
-                c.drawString(margin + 5, y - 8, r_num)
-                c.drawString(margin + 25, y - 8, r_desc)
-                c.drawString(margin + 220, y - 8, r_hsn)
-                c.drawString(margin + 280, y - 8, r_rate)
-                c.drawString(margin + 360, y - 8, r_tax)
-                c.drawString(margin + 440, y - 8, f"{r_amt:.2f}")
+                c.drawString(margin + 8, y - 8, r_num)
+                c.drawString(margin + 28, y - 8, r_desc)
+                c.drawString(margin + 230, y - 8, r_hsn)
+                c.drawString(margin + 295, y - 8, r_rate)
+                c.drawRightString(margin + 420, y - 8, r_tax)
+                c.drawRightString(width - margin - 10, y - 8, f"{r_amt:.2f}")
                 y -= 14
 
         c.setStrokeColor(border_color)
@@ -2046,43 +2109,58 @@ class DocumentRenderer:
         y -= 14
 
         # 7. Financial Summary Box (Right Aligned)
-        totals_x = margin + 310
-        c.setFont(self.bold_font, 9)
-        c.setFillColor(text_dark)
+        totals_x = width - margin - 220
+        c.setFont(self.bold_font, 8.5)
+        c.setFillColor(text_muted)
 
         c.drawString(totals_x, y, "Base Refund Value:")
-        c.drawRightString(width - margin - 5, y, f"{refund_amount:.2f}")
-        y -= 13
+        c.setFont(self.bold_font, 9)
+        c.setFillColor(text_dark)
+        c.drawRightString(width - margin - 10, y, f"{refund_amount:.2f}")
+        y -= 15
 
         if cgst_val > 0:
+            c.setFont(self.bold_font, 8.5)
+            c.setFillColor(text_muted)
             c.drawString(totals_x, y, "CGST Credit:")
-            c.drawRightString(width - margin - 5, y, f"{cgst_val:.2f}")
-            y -= 13
+            c.setFont(self.bold_font, 9)
+            c.setFillColor(text_dark)
+            c.drawRightString(width - margin - 10, y, f"{cgst_val:.2f}")
+            y -= 14
 
         if sgst_val > 0:
+            c.setFont(self.bold_font, 8.5)
+            c.setFillColor(text_muted)
             c.drawString(totals_x, y, "SGST Credit:")
-            c.drawRightString(width - margin - 5, y, f"{sgst_val:.2f}")
-            y -= 13
+            c.setFont(self.bold_font, 9)
+            c.setFillColor(text_dark)
+            c.drawRightString(width - margin - 10, y, f"{sgst_val:.2f}")
+            y -= 14
 
         if igst_val > 0:
+            c.setFont(self.bold_font, 8.5)
+            c.setFillColor(text_muted)
             c.drawString(totals_x, y, "IGST Credit:")
-            c.drawRightString(width - margin - 5, y, f"{igst_val:.2f}")
-            y -= 13
+            c.setFont(self.bold_font, 9)
+            c.setFillColor(text_dark)
+            c.drawRightString(width - margin - 10, y, f"{igst_val:.2f}")
+            y -= 14
 
-        # Prominent Red Grand Total Box
+        # Total Credited Amount Highlight Banner
         c.setFillColor(primary_color)
-        c.rect(totals_x - 5, y - 16, (width - margin) - (totals_x - 5), 18, fill=1, stroke=0)
+        c.rect(totals_x - 8, y - 16, (width - margin) - (totals_x - 8), 20, fill=1, stroke=0)
         c.setFillColor(colors.white)
-        c.setFont(self.bold_font, 10)
+        c.setFont(self.bold_font, 9.5)
         c.drawString(totals_x, y - 12, "Total Credited Amount:")
-        c.drawRightString(width - margin - 5, y - 12, f"{refund_amount:.2f}")
-        y -= 26
+        c.drawRightString(width - margin - 10, y - 12, f"{refund_amount:.2f}")
+        y -= 28
 
         # 8. Amount in Words
-        c.setFillColor(text_dark)
+        c.setFillColor(text_muted)
         words = amount_to_indian_words(Decimal(str(refund_amount)))
         c.setFont(self.bold_font, 8.5)
         c.drawString(margin, y, "Amount in Words:")
+        c.setFillColor(text_dark)
         c.setFont(self.default_font, 8.5)
         c.drawString(margin + 90, y, words)
         y -= 16
@@ -2090,14 +2168,14 @@ class DocumentRenderer:
         # 9. Terms and Signatory
         if branding.footer_text:
             c.setFont(self.default_font, 8)
-            c.setFillColor(text_muted)
+            c.setFillColor(text_subtle)
             c.drawString(margin, y, f"Remarks: {branding.footer_text[:90]}")
 
         if branding.show_signature:
-            c.setFont(self.bold_font, 9)
-            c.setFillColor(primary_color)
+            c.setFont(self.bold_font, 8.5)
+            c.setFillColor(text_dark)
             c.drawRightString(width - margin, y - 10, "Authorized Signatory")
-            c.setStrokeColor(primary_color)
+            c.setStrokeColor(border_color)
             c.line(width - margin - 120, y - 13, width - margin, y - 13)
 
         self._draw_footer(c, branding)
@@ -2125,17 +2203,7 @@ class DocumentRenderer:
         text_muted = colors.HexColor("#64748B")
 
         # 1. Top Header: Logo & Buyer Business Details
-        logo_path = self._validate_logo_path(branding.logo_url)
-        if logo_path:
-            try:
-                img = ImageReader(logo_path)
-                img_w, img_h = img.getSize()
-                aspect = img_w / float(img_h)
-                draw_w = min(100, 48 * aspect)
-                draw_h = draw_w / aspect
-                c.drawImage(img, width - margin - draw_w, y - draw_h + 10, width=draw_w, height=draw_h)
-            except Exception as e:
-                logger.warning(f"Failed to draw logo: {e}")
+        self._prepare_and_draw_logo(c, branding.logo_url, width - margin, y + 10, max_w=140.0, max_h=52.0)
 
         c.setFont(self._get_font(branding.business_name, True), 16)
         c.setFillColor(primary_color)
@@ -2365,17 +2433,7 @@ class DocumentRenderer:
         text_muted = colors.HexColor("#64748B")
 
         # 1. Top Header: Logo & Buyer Details
-        logo_path = self._validate_logo_path(branding.logo_url)
-        if logo_path:
-            try:
-                img = ImageReader(logo_path)
-                img_w, img_h = img.getSize()
-                aspect = img_w / float(img_h)
-                draw_w = min(100, 48 * aspect)
-                draw_h = draw_w / aspect
-                c.drawImage(img, width - margin - draw_w, y - draw_h + 10, width=draw_w, height=draw_h)
-            except Exception as e:
-                logger.warning(f"Failed to draw logo: {e}")
+        self._prepare_and_draw_logo(c, branding.logo_url, width - margin, y + 10, max_w=140.0, max_h=52.0)
 
         c.setFont(self._get_font(branding.business_name, True), 16)
         c.setFillColor(primary_color)

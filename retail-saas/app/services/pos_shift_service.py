@@ -1170,10 +1170,11 @@ class POSShiftService:
                 branding=branding,
                 report_type="pos_z_report",
             )
-            return Response(
-                content=pdf_bytes,
-                media_type="application/pdf",
-                headers={"Content-Disposition": f"{disposition}; filename=z_report_shift_{shift_id}.pdf"},
+            from app.core.pdf_utils import render_pdf_or_preview
+            return render_pdf_or_preview(
+                pdf_content=pdf_bytes,
+                filename_base=f"z_report_shift_{shift_id}",
+                mode=mode,
             )
 
         elif fmt == "excel":

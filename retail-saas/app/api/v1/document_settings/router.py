@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, Up
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.pdf_utils import render_pdf_or_preview
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.core.security import get_current_user
 from app.models.store import Store
@@ -135,6 +136,28 @@ def update_document_setting(
             sf_setting.logo_url = payload.logo_path
         db.commit()
 
+    # Auto-sync branding to the Store model so legacy code (thermal/PDF) picks it up
+    if store_id is not None:
+        store_obj = (
+            db.query(Store)
+            .filter(Store.id == store_id, Store.tenant_id == tenant_id)
+            .first()
+        )
+        if store_obj:
+            if payload.business_name is not None:
+                store_obj.name = payload.business_name
+            if payload.address is not None:
+                store_obj.address = payload.address
+            if payload.phone is not None:
+                store_obj.phone = payload.phone
+            if payload.email is not None:
+                store_obj.email = payload.email
+            if hasattr(payload, "gstin") and payload.gstin is not None:
+                store_obj.gstin = payload.gstin
+            if payload.logo_path is not None:
+                store_obj.logo_url = payload.logo_path
+            db.commit()
+
     return res_setting
 
 
@@ -157,6 +180,7 @@ def delete_document_setting(
 def preview_document(
     store_id: int | None = Query(default=None, gt=0),
     document_type: Literal["invoice", "bill"] = Query(default="invoice"),
+    mode: Literal["download", "preview"] = Query(default="preview", description="Delivery mode: 'preview' (visual PNG preview in Swagger UI / browser) or 'download' (attachment .pdf)"),
     user: User = Depends(require_settings_read),
     db: Session = Depends(get_db),
 ):
@@ -240,10 +264,10 @@ def preview_document(
     }
     renderer = DocumentRenderer()
     pdf_bytes = renderer.render(document_type, mock_data, branding)
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename=preview_{document_type}.pdf"},
+    return render_pdf_or_preview(
+        pdf_content=pdf_bytes,
+        filename_base=f"preview_{document_type}",
+        mode=mode,
     )
 
 
@@ -355,7 +379,7 @@ async def upload_document_logo(
         store_id=store_id,
     )
 
-    # Auto-sync logo to StorefrontSetting
+    # Auto-sync logo to StorefrontSetting and Store model
     from app.models.storefront_setting import StorefrontSetting
     sf_query = db.query(StorefrontSetting).filter(StorefrontSetting.tenant_id == tenant_id)
     if store_id is not None:
@@ -365,6 +389,12 @@ async def upload_document_logo(
     if sf_setting:
         sf_setting.logo_url = rel_logo_url
         db.commit()
+
+    if store_id is not None:
+        store_rec = db.query(Store).filter(Store.id == store_id, Store.tenant_id == tenant_id).first()
+        if store_rec:
+            store_rec.logo_url = rel_logo_url
+            db.commit()
 
     return {
         "message": "Logo uploaded successfully",

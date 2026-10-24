@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.pdf_utils import render_pdf_or_preview
 from app.core.security import require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.purchase_order_return import (
@@ -163,6 +164,17 @@ def get_purchase_order_return(
         "'pdf' (branded A4 document), 'excel' (.xlsx spreadsheet), or 'csv' (comma-separated). "
         "Preview mode is supported for PDF."
     ),
+    responses={
+        200: {
+            "content": {
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}},
+                "image/png": {"schema": {"type": "string", "format": "binary"}, "description": "Visual document PNG preview for Swagger UI / browser"},
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {},
+                "text/csv": {},
+            },
+            "description": "Rendered Debit Note document stream in requested format.",
+        }
+    },
 )
 def get_purchase_order_return_pdf(
     return_id: int,
@@ -194,9 +206,11 @@ def get_purchase_order_return_pdf(
         disposition = "attachment"
     else:
         content_bytes = service.generate_pdf(tenant_id=user.tenant_id, return_id=return_id)
-        media_type = "application/pdf"
-        filename = f"DebitNote-{por.return_number}.pdf"
-        disposition = "inline" if mode == "preview" else "attachment"
+        return render_pdf_or_preview(
+            pdf_content=content_bytes,
+            filename_base=f"DebitNote-{por.return_number}",
+            mode=mode,
+        )
 
     return Response(
         content=content_bytes,

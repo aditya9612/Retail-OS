@@ -1,3 +1,4 @@
+import html
 import io
 from datetime import datetime
 from decimal import Decimal
@@ -892,12 +893,19 @@ class BillingService:
                 for i in order.items
             ]
 
+        # Resolve branding from DocumentSettings hierarchy
+        from app.services.document_settings_service import DocumentSettingsService
+        _store_id = store.id if store else (order.store_id if order else None)
+        branding = DocumentSettingsService(self.db).resolve_branding(
+            tenant_id=tenant_id,
+            store_id=_store_id,
+        )
+
         return generate_thermal_payload(
             invoice_number=invoice.invoice_number,
             store_name=(
-                store.name
-                if store
-                else (tenant.name if tenant else "Store")
+                branding.business_name
+                or (store.name if store else (tenant.name if tenant else "Store"))
             ),
             items=item_payload,
             subtotal=invoice.subtotal,
@@ -921,17 +929,36 @@ class BillingService:
                 else None
             ),
             gstin=(
-                store.gstin
-                if store
-                else (
-                    tenant.gstin
-                    if hasattr(tenant, "gstin")
-                    else None
-                )
+                (branding.gstin if branding.show_gstin else None)
+                or (store.gstin if store else (tenant.gstin if hasattr(tenant, "gstin") else None))
             ),
             printer_type=printer_type,
             is_reprint=is_reprint,
         )
+
+    def _find_logo_file(self, logo_url: Optional[str]):
+        if not logo_url:
+            return None
+        from pathlib import Path as _Path
+        raw = str(logo_url).strip().lstrip("/")
+        if raw.startswith("uploads/"):
+            sub = raw[len("uploads/"):]
+        elif raw.startswith("/uploads/"):
+            sub = raw[len("/uploads/"):]
+        else:
+            sub = raw
+
+        candidates = [
+            _Path(raw).resolve(),
+            (_Path("retail-saas") / raw).resolve(),
+            (_Path(__file__).resolve().parents[2] / "uploads" / sub).resolve(),
+            (_Path(__file__).resolve().parents[3] / "uploads" / sub).resolve(),
+            (_Path(__file__).resolve().parents[1] / "uploads" / sub).resolve(),
+        ]
+        for c in candidates:
+            if c.is_file():
+                return c
+        return None
 
     def _generate_thermal_image(self, ctx: Dict[str, Any]) -> bytes:
         from PIL import Image, ImageDraw, ImageFont
@@ -970,6 +997,34 @@ class BillingService:
         draw.rectangle([(6, 6), (width - 7, est_height - 7)], outline=(200, 200, 200), width=1)
 
         y = 20
+
+        # Logo rendering from DocumentSettings
+        logo_url = ctx.get("logo_url")
+        if logo_url:
+            try:
+                logo_file = self._find_logo_file(logo_url)
+                if logo_file and logo_file.is_file():
+                    raw_logo = Image.open(str(logo_file))
+                    if raw_logo.mode in ("RGBA", "LA") or (raw_logo.mode == "P" and "transparency" in raw_logo.info):
+                        rgba = raw_logo.convert("RGBA")
+                        bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+                        flat = Image.alpha_composite(bg, rgba).convert("RGB")
+                    else:
+                        flat = raw_logo.convert("RGB")
+                    max_w, max_h = 240.0, 60.0
+                    aspect = flat.width / float(flat.height)
+                    if (max_w / aspect) <= max_h:
+                        logo_draw_w = int(max_w)
+                        logo_draw_h = int(max_w / aspect)
+                    else:
+                        logo_draw_h = int(max_h)
+                        logo_draw_w = int(max_h * aspect)
+                    logo_img = flat.resize((logo_draw_w, logo_draw_h), Image.LANCZOS)
+                    logo_x = (width - logo_draw_w) // 2
+                    img.paste(logo_img, (logo_x, y))
+                    y += logo_draw_h + 8
+            except Exception:
+                pass  # Gracefully skip logo on error
 
         # Store Title centered
         store_txt = str(ctx.get("store_name", "RETAIL STORE")).upper()
@@ -1107,21 +1162,24 @@ class BillingService:
         draw_dashed_line(draw, y, width)
         y += 16
 
-        # Footer
-        foot1 = "*** THANK YOU FOR YOUR VISIT ***"
+        # Footer - Dynamic from DocumentSettings or defaults
+        _footer = ctx.get("footer_text") or "*** THANK YOU FOR YOUR VISIT ***"
+        _terms = ctx.get("terms_and_conditions") or "Retain this bill for exchange / returns\nExchange within 7 days in original condition"
+
+        foot1 = _footer
         f1_bbox = draw.textbbox((0, 0), foot1, font=font_bold)
         draw.text(((width - (f1_bbox[2] - f1_bbox[0])) // 2, y), foot1, font=font_bold, fill=(0, 0, 0))
         y += 20
 
-        foot2 = "Retain this bill for exchange / returns"
-        f2_bbox = draw.textbbox((0, 0), foot2, font=font_small)
-        draw.text(((width - (f2_bbox[2] - f2_bbox[0])) // 2, y), foot2, font=font_small, fill=(100, 100, 100))
-        y += 18
+        for _term_line in _terms.split("\n"):
+            _term_line = _term_line.strip()
+            if not _term_line:
+                continue
+            _tl_bbox = draw.textbbox((0, 0), _term_line, font=font_small)
+            draw.text(((width - (_tl_bbox[2] - _tl_bbox[0])) // 2, y), _term_line[:65], font=font_small, fill=(100, 100, 100))
+            y += 18
 
-        foot3 = "Exchange within 7 days in original condition"
-        f3_bbox = draw.textbbox((0, 0), foot3, font=font_small)
-        draw.text(((width - (f3_bbox[2] - f3_bbox[0])) // 2, y), foot3, font=font_small, fill=(120, 120, 120))
-        y += 28
+        y += 10
 
         actual_height = y + 10
         cropped = img.crop((0, 0, width, actual_height))
@@ -1145,6 +1203,27 @@ class BillingService:
         cust_name_html = f'<div class="line-row"><span class="line-label">Customer</span><span class="line-val">{ctx["customer_name"]}</span></div>' if ctx.get("customer_name") else ""
         cust_phone_html = f'<div class="line-row"><span class="line-label">Mobile</span><span class="line-val">{ctx["customer_mobile"]}</span></div>' if ctx.get("customer_mobile") else ""
         cashier_html = f'<div class="line-row"><span class="line-label">Cashier</span><span class="line-val">{ctx["cashier_name"]}</span></div>' if ctx.get("cashier_name") else ""
+
+        logo_html = ""
+        logo_url = ctx.get("logo_url")
+        if logo_url:
+            logo_file = self._find_logo_file(logo_url)
+            if logo_file and logo_file.is_file():
+                try:
+                    import base64
+                    ext = logo_file.suffix.lower().replace(".", "")
+                    mime = "image/png" if ext == "png" else "image/jpeg"
+                    with open(logo_file, "rb") as _f:
+                        b64_data = base64.b64encode(_f.read()).decode("utf-8")
+                    logo_html = f'<div style="text-align: center; margin-bottom: 8px;"><img src="data:{mime};base64,{b64_data}" alt="Logo" style="max-height: 55px; max-width: 200px; object-fit: contain; " /></div>'
+                except Exception:
+                    logo_html = f'<div style="text-align: center; margin-bottom: 8px;"><img src="{logo_url}" alt="Logo" style="max-height: 55px; max-width: 200px; object-fit: contain; " /></div>'
+            else:
+                logo_html = f'<div style="text-align: center; margin-bottom: 8px;"><img src="{logo_url}" alt="Logo" style="max-height: 55px; max-width: 200px; object-fit: contain; " /></div>'
+
+        footer_val = html.escape(str(ctx.get("footer_text") or "*** THANK YOU FOR SHOPPING! ***"))
+        raw_terms = ctx.get("terms_and_conditions") or "Retain this bill for returns / exchange\nExchange within 7 days in original condition"
+        terms_html = "<br>".join([html.escape(t.strip()) for t in str(raw_terms).split("\n") if t.strip()])
 
         items_html = ""
         for itm in ctx.get("items", []):
@@ -1219,6 +1298,7 @@ class BillingService:
 </div>
 <div class="receipt-box">
   <div class="header">
+    {logo_html}
     <div class="store-title">{ctx.get("store_name", "RETAIL STORE")}</div>
     {addr_html}
     {phone_html}
@@ -1259,9 +1339,8 @@ class BillingService:
   <div class="line-row"><span class="line-label">Paid via</span><span class="line-val">{pm_str}</span></div>
 
   <div class="footer">
-    *** THANK YOU FOR SHOPPING! ***<br>
-    Retain this bill for returns / exchange<br>
-    Exchange within 7 days in original condition
+    {footer_val}<br>
+    {terms_html}
   </div>
 </div>
 </body>
@@ -1319,8 +1398,15 @@ class BillingService:
         p_modes = ctx.get("payment_modes", [])
         if p_modes:
             lines.append(f"Paid via: {', '.join([str(p).upper() for p in p_modes])}")
+        _footer = ctx.get("footer_text") or "THANK YOU FOR YOUR VISIT!"
+        _terms = ctx.get("terms_and_conditions")
         lines.append("-" * width)
-        lines.append("THANK YOU FOR YOUR VISIT!".center(width))
+        lines.append(_footer[:width].center(width))
+        if _terms:
+            for _tl in _terms.split("\n"):
+                _tl = _tl.strip()
+                if _tl:
+                    lines.append(_tl[:width].center(width))
         lines.append("=" * width)
         lines.append("\n\n\n\x1b\x69")  # ESC/POS cut paper
         return "\n".join(lines)
@@ -1384,13 +1470,24 @@ class BillingService:
                     "total_amount": itm.total,
                 })
 
+        # Resolve branding from DocumentSettings hierarchy
+        from app.services.document_settings_service import DocumentSettingsService
+        _store_id = store.id if store else getattr(invoice, "store_id", None)
+        branding = DocumentSettingsService(self.db).resolve_branding(
+            tenant_id=user.tenant_id,
+            store_id=_store_id,
+        )
+
         receipt_context = {
             "invoice_id": invoice.id,
             "invoice_number": invoice.invoice_number,
-            "store_name": store.name if store else (tenant.name if tenant else "Retail Store"),
-            "store_address": store.address if store and store.address else (tenant.address if tenant else None),
-            "store_phone": store.phone if store and store.phone else (tenant.phone if tenant else None),
-            "gstin": store.gstin if store and store.gstin else (tenant.gstin if hasattr(tenant, "gstin") else None),
+            "store_name": branding.business_name or (store.name if store else (tenant.name if tenant else "Retail Store")),
+            "store_address": branding.address or (store.address if store and store.address else (tenant.address if tenant else None)),
+            "store_phone": branding.phone or (store.phone if store and store.phone else (tenant.phone if tenant else None)),
+            "gstin": (branding.gstin if branding.show_gstin else None) or (store.gstin if store and store.gstin else (tenant.gstin if hasattr(tenant, "gstin") else None)),
+            "logo_url": branding.logo_url,
+            "footer_text": branding.footer_text,
+            "terms_and_conditions": branding.terms_and_conditions,
             "created_at": invoice.created_at,
             "cashier_name": cashier.full_name if cashier and hasattr(cashier, "full_name") and cashier.full_name else (cashier.username if cashier else "Staff"),
             "customer_name": customer.name if customer else None,
@@ -1589,10 +1686,10 @@ class BillingService:
             "qr_data": qr_data,
             "is_b2b": bool(customer and customer.gstin),
             "cashier": cashier_name,
-            "store_name": store.name if store else (branding.business_name if branding else ""),
-            "store_address": store.address if store else (branding.address if branding else ""),
-            "store_phone": store.phone if store else (branding.phone if branding else ""),
-            "store_gstin": store.gstin if store else (branding.gstin if branding else ""),
+            "store_name": (branding.business_name if branding and branding.business_name else "") or (store.name if store else ""),
+            "store_address": (branding.address if branding and branding.address else "") or (store.address if store else ""),
+            "store_phone": (branding.phone if branding and branding.phone else "") or (store.phone if store else ""),
+            "store_gstin": (branding.gstin if branding and branding.gstin else "") or (store.gstin if store else ""),
             "customer": {
                 "name": customer.name if customer else "Walk-in Customer",
                 "phone": customer.phone if customer else "",
@@ -2491,7 +2588,19 @@ class BillingService:
         credit_note = self.db.query(CreditNote).filter(CreditNote.refund_id == refund.id).first()
         approver = self.db.query(User).filter(User.id == refund.approved_by).first() if refund.approved_by else None
 
-        store_name = store.name if store else "Retail Store"
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+
+        from app.services.document_settings_service import DocumentSettingsService
+        _ref_store_id = store.id if store else (getattr(invoice, "store_id", None) if invoice else None)
+        ref_branding = DocumentSettingsService(self.db).resolve_branding(
+            tenant_id=tenant_id,
+            store_id=_ref_store_id,
+        )
+        store_name = ref_branding.business_name or (store.name if store else "Retail Store")
+        store_address = ref_branding.address or (store.address if store and store.address else (tenant.address if tenant else None))
+        store_phone = ref_branding.phone or (store.phone if store and store.phone else (tenant.phone if tenant else None))
+        gstin = (ref_branding.gstin if ref_branding.show_gstin else None) or (store.gstin if store and store.gstin else (tenant.gstin if hasattr(tenant, "gstin") else None))
+
         cust_name = customer.name if customer else "Walk-in Customer"
         cust_phone = customer.phone if customer else "N/A"
         approver_name = approver.full_name if approver else "System"
@@ -2542,16 +2651,16 @@ class BillingService:
             "customer_name": cust_name,
             "customer_phone": cust_phone,
             "store_name": store_name,
-            "store_address": store.address if store and store.address else None,
-            "store_phone": store.phone if store and store.phone else None,
-            "gstin": store.gstin if store and store.gstin else None,
+            "store_address": store_address,
+            "store_phone": store_phone,
+            "gstin": gstin,
+            "logo_url": ref_branding.logo_url,
             "approved_by_name": approver_name,
             "created_at": refund.created_at,
             "thermal_text": thermal_text,
         }
 
     def _generate_refund_receipt_image(self, ctx: Dict[str, Any]) -> bytes:
-        import io
         from PIL import Image, ImageDraw, ImageFont
 
         width = 576  # Standard 80mm printable width at 203 DPI
@@ -2574,6 +2683,34 @@ class BillingService:
         draw.rectangle([(6, 6), (width - 7, est_height - 7)], outline=(200, 200, 200), width=1)
 
         y = 20
+
+        # Logo rendering from DocumentSettings
+        logo_url = ctx.get("logo_url")
+        if logo_url:
+            try:
+                logo_file = self._find_logo_file(logo_url)
+                if logo_file and logo_file.is_file():
+                    raw_logo = Image.open(str(logo_file))
+                    if raw_logo.mode in ("RGBA", "LA") or (raw_logo.mode == "P" and "transparency" in raw_logo.info):
+                        rgba = raw_logo.convert("RGBA")
+                        bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+                        flat = Image.alpha_composite(bg, rgba).convert("RGB")
+                    else:
+                        flat = raw_logo.convert("RGB")
+                    max_w, max_h = 240.0, 55.0
+                    aspect = flat.width / float(flat.height)
+                    if (max_w / aspect) <= max_h:
+                        logo_draw_w = int(max_w)
+                        logo_draw_h = int(max_w / aspect)
+                    else:
+                        logo_draw_h = int(max_h)
+                        logo_draw_w = int(max_h * aspect)
+                    logo_img = flat.resize((logo_draw_w, logo_draw_h), Image.LANCZOS)
+                    logo_x = (width - logo_draw_w) // 2
+                    img.paste(logo_img, (logo_x, y))
+                    y += logo_draw_h + 8
+            except Exception:
+                pass
 
         # Store Title centered
         store_txt = str(ctx.get("store_name", "RETAIL STORE")).upper()
@@ -2703,6 +2840,23 @@ class BillingService:
         gstin_html = f'<div class="store-sub">GSTIN: {ctx["gstin"]}</div>' if ctx.get("gstin") else ""
         cn_html = f'<div class="row"><span class="lbl">Credit Note</span><span class="val">{ctx["credit_note_no"]}</span></div>' if ctx.get("credit_note_no") else ""
 
+        logo_html = ""
+        logo_url = ctx.get("logo_url")
+        if logo_url:
+            logo_file = self._find_logo_file(logo_url)
+            if logo_file and logo_file.is_file():
+                try:
+                    import base64
+                    ext = logo_file.suffix.lower().replace(".", "")
+                    mime = "image/png" if ext == "png" else "image/jpeg"
+                    with open(logo_file, "rb") as _f:
+                        b64_data = base64.b64encode(_f.read()).decode("utf-8")
+                    logo_html = f'<div style="text-align: center; margin-bottom: 8px;"><img src="data:{mime};base64,{b64_data}" alt="Logo" style="max-height: 50px; max-width: 180px; object-fit: contain; " /></div>'
+                except Exception:
+                    logo_html = f'<div style="text-align: center; margin-bottom: 8px;"><img src="{logo_url}" alt="Logo" style="max-height: 50px; max-width: 180px; object-fit: contain; " /></div>'
+            else:
+                logo_html = f'<div style="text-align: center; margin-bottom: 8px;"><img src="{logo_url}" alt="Logo" style="max-height: 50px; max-width: 180px; object-fit: contain; " /></div>'
+
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2825,6 +2979,7 @@ class BillingService:
 </head>
 <body>
 <div class="ticket">
+  {logo_html}
   <div class="store-name">{ctx.get('store_name', 'Retail Store')}</div>
   {store_addr_html}
   {store_phone_html}
@@ -2858,7 +3013,6 @@ class BillingService:
 </html>"""
 
     def _generate_refund_receipt_pdf(self, ctx: Dict[str, Any]) -> bytes:
-        import io
         from PIL import Image
         from reportlab.lib.utils import ImageReader
         from reportlab.pdfgen import canvas
@@ -3254,7 +3408,20 @@ class BillingService:
         store = self.db.query(Store).filter(Store.id == invoice.store_id).first() if invoice.store_id else None
         customer = self.db.query(Customer).filter(Customer.id == (credit_note.customer_id or (order.customer_id if order else None))).first()
 
-        store_name = store.name if store else "Retail Store"
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+
+        # Resolve branding from DocumentSettings hierarchy
+        from app.services.document_settings_service import DocumentSettingsService
+        _cn_store_id = store.id if store else (getattr(invoice, "store_id", None) if invoice else None)
+        cn_branding = DocumentSettingsService(self.db).resolve_branding(
+            tenant_id=tenant_id,
+            store_id=_cn_store_id,
+        )
+        store_name = cn_branding.business_name or (store.name if store else "Retail Store")
+        store_address = cn_branding.address or (store.address if store and store.address else (tenant.address if tenant else None))
+        store_phone = cn_branding.phone or (store.phone if store and store.phone else (tenant.phone if tenant else None))
+        gstin = (cn_branding.gstin if cn_branding.show_gstin else None) or (store.gstin if store and store.gstin else (tenant.gstin if hasattr(tenant, "gstin") else None))
+
         cust_name = customer.name if customer else "Walk-in Customer"
         cust_phone = customer.phone if customer else "N/A"
         valid_until_str = credit_note.valid_until.strftime("%Y-%m-%d") if credit_note.valid_until else "No Expiry"
@@ -3296,11 +3463,6 @@ class BillingService:
         ]
         thermal_text = "\n".join(thermal_lines)
 
-        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
-        store_address = store.address if store and store.address else (tenant.address if tenant else None)
-        store_phone = store.phone if store and store.phone else (tenant.phone if tenant else None)
-        gstin = store.gstin if store and store.gstin else (tenant.gstin if hasattr(tenant, "gstin") else None)
-
         return {
             "credit_note_id": credit_note.id,
             "credit_note_no": credit_note.credit_note_no,
@@ -3321,10 +3483,10 @@ class BillingService:
             "valid_until": valid_until_str,
             "created_at": credit_note.created_at,
             "thermal_text": thermal_text,
+            "logo_url": cn_branding.logo_url,
         }
 
     def _generate_credit_note_thermal_image(self, ctx: Dict[str, Any]) -> bytes:
-        import io
         from PIL import Image, ImageDraw, ImageFont
 
         width = 576  # Standard 80mm printable width at 203 DPI
@@ -3347,6 +3509,34 @@ class BillingService:
         draw.rectangle([(6, 6), (width - 7, est_height - 7)], outline=(200, 200, 200), width=1)
 
         y = 20
+
+        # Logo rendering from DocumentSettings
+        logo_url = ctx.get("logo_url")
+        if logo_url:
+            try:
+                logo_file = self._find_logo_file(logo_url)
+                if logo_file and logo_file.is_file():
+                    raw_logo = Image.open(str(logo_file))
+                    if raw_logo.mode in ("RGBA", "LA") or (raw_logo.mode == "P" and "transparency" in raw_logo.info):
+                        rgba = raw_logo.convert("RGBA")
+                        bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+                        flat = Image.alpha_composite(bg, rgba).convert("RGB")
+                    else:
+                        flat = raw_logo.convert("RGB")
+                    max_w, max_h = 240.0, 55.0
+                    aspect = flat.width / float(flat.height)
+                    if (max_w / aspect) <= max_h:
+                        logo_draw_w = int(max_w)
+                        logo_draw_h = int(max_w / aspect)
+                    else:
+                        logo_draw_h = int(max_h)
+                        logo_draw_w = int(max_h * aspect)
+                    logo_img = flat.resize((logo_draw_w, logo_draw_h), Image.LANCZOS)
+                    logo_x = (width - logo_draw_w) // 2
+                    img.paste(logo_img, (logo_x, y))
+                    y += logo_draw_h + 8
+            except Exception:
+                pass
 
         # Store Title centered
         store_txt = str(ctx.get("store_name", "RETAIL STORE")).upper()
@@ -3479,6 +3669,23 @@ class BillingService:
 
         status_color = '#166534' if status_str in ('ISSUED', 'ACTIVE') else '#b91c1c'
 
+        logo_html = ""
+        logo_url = ctx.get("logo_url")
+        if logo_url:
+            logo_file = self._find_logo_file(logo_url)
+            if logo_file and logo_file.is_file():
+                try:
+                    import base64
+                    ext = logo_file.suffix.lower().replace(".", "")
+                    mime = "image/png" if ext == "png" else "image/jpeg"
+                    with open(logo_file, "rb") as _f:
+                        b64_data = base64.b64encode(_f.read()).decode("utf-8")
+                    logo_html = f'<div style="text-align: center; margin-bottom: 8px;"><img src="data:{mime};base64,{b64_data}" alt="Logo" style="max-height: 50px; max-width: 180px; object-fit: contain; " /></div>'
+                except Exception:
+                    logo_html = f'<div style="text-align: center; margin-bottom: 8px;"><img src="{logo_url}" alt="Logo" style="max-height: 50px; max-width: 180px; object-fit: contain; " /></div>'
+            else:
+                logo_html = f'<div style="text-align: center; margin-bottom: 8px;"><img src="{logo_url}" alt="Logo" style="max-height: 50px; max-width: 180px; object-fit: contain; " /></div>'
+
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3561,6 +3768,7 @@ class BillingService:
 <body>
 <div class="ticket">
   <div class="center">
+    {logo_html}
     <div class="store-title">{ctx.get('store_name', 'Retail Store')}</div>
     {store_addr_html}
     {store_phone_html}
@@ -3608,7 +3816,6 @@ class BillingService:
 </html>"""
 
     def _generate_credit_note_thermal_pdf(self, ctx: Dict[str, Any]) -> bytes:
-        import io
         from PIL import Image
         from reportlab.lib.utils import ImageReader
         from reportlab.pdfgen import canvas

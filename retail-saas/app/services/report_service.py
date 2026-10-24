@@ -1895,6 +1895,20 @@ class ReportService:
         if fmt == "csv":
             stream = io.StringIO()
             writer = csv.writer(stream)
+            # Add branding metadata header rows
+            if branding:
+                if branding.business_name:
+                    writer.writerow([f"# Business: {branding.business_name}"])
+                _csv_meta = []
+                if branding.address:
+                    _csv_meta.append(f"Address: {branding.address}")
+                if branding.phone:
+                    _csv_meta.append(f"Phone: {branding.phone}")
+                if branding.gstin and branding.show_gstin:
+                    _csv_meta.append(f"GSTIN: {branding.gstin}")
+                if _csv_meta:
+                    writer.writerow([f"# {' | '.join(_csv_meta)}"])
+                writer.writerow([])  # Blank separator
             writer.writerow(headers)
             for r in rows:
                 writer.writerow(r)
@@ -1926,6 +1940,7 @@ class ReportService:
         # -------------------------------------------------------------
         elif fmt == "pdf":
             from app.services.document_renderer_service import DocumentRenderer
+            from app.core.pdf_utils import render_pdf_or_preview
             pdf_bytes = DocumentRenderer().render_report_pdf(
                 title=title,
                 metadata=metadata,
@@ -1936,10 +1951,11 @@ class ReportService:
                 report_type=rtype,
                 presentation=presentation,
             )
-            return StreamingResponse(
-                io.BytesIO(pdf_bytes),
-                media_type="application/pdf",
-                headers={"Content-Disposition": f"attachment; filename={filename}.pdf"},
+            mode_val = getattr(data, "mode", "download") or "download"
+            return render_pdf_or_preview(
+                pdf_content=pdf_bytes,
+                filename_base=filename,
+                mode=mode_val,
             )
 
         else:

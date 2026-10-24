@@ -110,19 +110,20 @@ class Sale(Base):
 
     @property
     def discount(self) -> Decimal:
-        return Decimal("0.00")
+        return getattr(self, "_discount", Decimal("0.00"))
 
     @discount.setter
     def discount(self, val: Any) -> None:
-        pass
+        if val is not None:
+            self._discount = Decimal(str(val))
 
     @property
     def customer_id(self) -> int | None:
-        return None
+        return getattr(self, "_customer_id", None)
 
     @customer_id.setter
     def customer_id(self, val: Any) -> None:
-        pass
+        self._customer_id = val
 
     items = relationship(
         "SaleItem",
@@ -184,11 +185,12 @@ class SaleItem(Base):
 
     @property
     def discount(self) -> Decimal:
-        return Decimal("0.00")
+        return getattr(self, "_discount", Decimal("0.00"))
 
     @discount.setter
     def discount(self, val: Any) -> None:
-        pass
+        if val is not None:
+            self._discount = Decimal(str(val))
 
     @property
     def tax(self) -> Decimal:

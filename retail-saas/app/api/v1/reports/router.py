@@ -396,6 +396,7 @@ def get_profit_loss(
                     "schema": {"type": "string", "format": "binary"}
                 },
                 "application/pdf": {"schema": {"type": "string", "format": "binary"}},
+                "image/png": {"schema": {"type": "string", "format": "binary"}, "description": "Visual document PNG preview for Swagger UI / browser"},
             },
         }
     },
@@ -403,6 +404,7 @@ def get_profit_loss(
 def export_report_get(
     report_type: ReportType = Query(..., description="Report type identifier (23 supported reports)"),
     format: ExportFormat = Query(default=ExportFormat.CSV, description="Export file format: csv, excel, or pdf"),
+    mode: Literal["download", "preview"] = Query(default="download", description="Delivery mode: 'download' (attachment) or 'preview' (visual PNG in Swagger UI / browser)"),
     start_date: Optional[date] = Query(default=None, description="Start date (YYYY-MM-DD) for date-filtered reports"),
     end_date: Optional[date] = Query(default=None, description="End date (YYYY-MM-DD) for date-filtered reports"),
     target_date: Optional[date] = Query(default=None, description="Single target date (YYYY-MM-DD) for daily reports"),
@@ -425,6 +427,7 @@ def export_report_get(
         store_id=store_id,
         threshold=threshold,
         limit=limit,
+        mode=mode,
     )
     return ReportService(db).export_report(user=user, data=req)
 

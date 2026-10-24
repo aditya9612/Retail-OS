@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppException
 from app.core.database import get_db
+from app.core.pdf_utils import render_pdf_or_preview
 from app.core.security import require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.grn import (
@@ -266,14 +267,10 @@ def print_grn(
         grn_id=grn_id,
     )
 
-    disposition = "inline" if mode == "preview" else "attachment"
-
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f"{disposition}; filename={grn.grn_number}.pdf"
-        },
+    return render_pdf_or_preview(
+        pdf_content=pdf_bytes,
+        filename_base=grn.grn_number,
+        mode=mode,
     )
 
 
@@ -306,7 +303,8 @@ def print_grn_slip(
     responses={
         200: {
             "content": {
-                "application/pdf": {},
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}},
+                "image/png": {"schema": {"type": "string", "format": "binary"}, "description": "Visual document PNG preview for Swagger UI / browser"},
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {},
                 "text/csv": {},
             },
@@ -326,8 +324,11 @@ def download_grn_pdf(
 
     if format == "pdf":
         file_bytes = GRNService(db).generate_pdf(tenant_id=user.tenant_id, grn_id=grn_id)
-        media_type = "application/pdf"
-        ext = "pdf"
+        return render_pdf_or_preview(
+            pdf_content=file_bytes,
+            filename_base=grn.grn_number,
+            mode=mode,
+        )
     elif format == "excel":
         file_bytes = GRNService(db).generate_excel(tenant_id=user.tenant_id, grn_id=grn_id)
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

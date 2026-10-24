@@ -1,11 +1,12 @@
 from datetime import date
 import re
-from typing import Optional, Union
+from typing import Optional, Union, Literal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.pdf_utils import render_pdf_or_preview
 from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.customer import (
@@ -465,6 +466,7 @@ def export_directory(
         ...,
         description="Export format (required: 'excel', 'pdf')"
     ),
+    mode: Literal["download", "preview"] = Query(default="download", description="Delivery mode: 'download' (attachment) or 'preview' (visual preview)"),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db)
 ):
@@ -486,13 +488,10 @@ def export_directory(
             }
         )
 
-    return StreamingResponse(
-        file,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition":
-            "attachment; filename=customer_directory.pdf"
-        }
+    return render_pdf_or_preview(
+        pdf_content=file,
+        filename_base="customer_directory",
+        mode=mode,
     )
 
 
@@ -686,11 +685,23 @@ def record_customer_payment(
 
 @router.get(
     "/{customer_id}/ledger/pdf",
+    summary="Download or Preview Customer Ledger PDF",
+    description="Exports or previews customer account statement/ledger. Mode can be 'download' (attachment .pdf) or 'preview' (visual PNG preview in Swagger UI / browser).",
+    responses={
+        200: {
+            "content": {
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}},
+                "image/png": {"schema": {"type": "string", "format": "binary"}, "description": "Visual document PNG preview for Swagger UI / browser"},
+            },
+            "description": "Rendered Ledger PDF download or visual PNG preview for Swagger UI.",
+        }
+    },
 )
 def export_customer_ledger_pdf(
     customer_id: int = Path(..., gt=0),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
+    mode: Literal["download", "preview"] = Query(default="download", description="Delivery mode: 'download' or 'preview'"),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
@@ -700,12 +711,10 @@ def export_customer_ledger_pdf(
         from_date=from_date,
         to_date=to_date,
     )
-    return StreamingResponse(
-        pdf_stream,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f"attachment; filename=customer_{customer_id}_ledger.pdf"
-        },
+    return render_pdf_or_preview(
+        pdf_content=pdf_stream,
+        filename_base=f"customer_{customer_id}_ledger",
+        mode=mode,
     )
 
 

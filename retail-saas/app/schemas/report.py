@@ -346,3 +346,4 @@ class ReportExportRequest(BaseModel):
     store_id: Optional[int] = Field(None, gt=0, description="Optional store filter ID.")
     threshold: Optional[int] = Field(None, ge=0, description="Stock threshold for slow-moving products.")
     limit: Optional[int] = Field(None, gt=0, le=500, description="Maximum number of items/ranking rows to return.")
+    mode: Optional[Literal["download", "preview"]] = Field(default="download", description="Delivery mode: 'download' or 'preview'")

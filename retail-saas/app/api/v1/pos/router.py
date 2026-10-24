@@ -171,7 +171,8 @@ def get_z_report(
     responses={
         200: {
             "content": {
-                "application/pdf": {},
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}},
+                "image/png": {"schema": {"type": "string", "format": "binary"}, "description": "Visual document PNG preview for Swagger UI / browser"},
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {},
                 "text/csv": {},
             },

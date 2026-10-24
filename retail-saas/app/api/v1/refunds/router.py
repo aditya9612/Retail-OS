@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.pdf_utils import render_pdf_or_preview
 from app.core.exceptions import AppException, NotFoundException
 from app.core.security import require_permission
 from app.models.credit_note import CreditNote
@@ -228,11 +229,8 @@ def get_refund_receipt_pdf(
         user=user,
     )
     mode_val = str(getattr(mode, "value", mode) or "download").lower().strip()
-    disposition = "inline" if mode_val in ("preview", "view") else "attachment"
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f"{disposition}; filename=Refund-Receipt-{credit_note.credit_note_no}.pdf"
-        },
+    return render_pdf_or_preview(
+        pdf_content=pdf_bytes,
+        filename_base=f"Refund-Receipt-{credit_note.credit_note_no}",
+        mode=mode_val,
     )

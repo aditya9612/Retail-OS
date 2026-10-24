@@ -44,6 +44,7 @@ class SaleService:
                 raise ValueError(f"Store with id {data.store_id} is not associated with any tenant")
             tenant_id = store_exists.tenant_id
 
+        customer = None
         if data.customer_id is not None:
             from app.models.customer import Customer
             customer = (
@@ -122,16 +123,16 @@ class SaleService:
                 total_discount += item_discount
                 tax_amount += item_tax
 
-                sale_items.append(
-                    SaleItem(
-                        product_id=item.product_id,
-                        quantity=qty,
-                        unit_price=unit_price,
-                        tax_rate=gst_rate,
-                        tax_amount=item_tax,
-                        total_price=item_total
-                    )
+                sale_item = SaleItem(
+                    product_id=item.product_id,
+                    quantity=qty,
+                    unit_price=unit_price,
+                    tax_rate=gst_rate,
+                    tax_amount=item_tax,
+                    total_price=item_total
                 )
+                sale_item.discount = item_discount
+                sale_items.append(sale_item)
 
                 inventory.quantity -= qty
 
@@ -154,8 +155,12 @@ class SaleService:
                 payment_method=data.payment_method,
                 payment_status=getattr(data, "payment_status", "paid") or "paid",
             )
-
+            sale.customer_id = data.customer_id
+            sale.discount = total_discount
             sale.items = sale_items
+
+            if customer:
+                customer.total_spend = (customer.total_spend or 0) + int(subtotal + tax_amount)
 
             return SaleRepository.create(db, sale)
         except Exception:
@@ -315,7 +320,7 @@ class SaleService:
                         tax_amount=item_tax,
                         total_price=item_total
                     )
-
+                    sale_item.discount = item_discount
                     sale.items.append(sale_item)
                     inventory.quantity -= qty
 
