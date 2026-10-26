@@ -1,5 +1,6 @@
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from typing import Literal
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -76,14 +77,75 @@ def payment_history(
     )
 
 
-@router.get("/qr/{order_id}")
+@router.get(
+    "/qr/{order_id}",
+    summary="Generate Payment UPI QR Code",
+    description=(
+        "Generates a dynamic UPI QR code for an order. "
+        "Supports delivery modes: 'preview' (renders visual QR code PNG directly inline in Swagger UI / browser), "
+        "'download' (triggers file download of QR PNG), or 'json' (returns raw UPI payload metadata)."
+    ),
+    responses={
+        200: {
+            "content": {
+                "image/png": {
+                    "schema": {"type": "string", "format": "binary"},
+                    "description": "Visual QR code PNG image for preview or download",
+                },
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "order_id": {"type": "integer"},
+                            "upi_id": {"type": "string"},
+                            "amount": {"type": "number"},
+                            "qr_payload": {"type": "string"},
+                            "qr_code_base64": {"type": "string"},
+                        },
+                    },
+                    "description": "UPI payload and QR data in JSON format",
+                },
+            },
+            "description": "Dynamic QR code in PNG visual format or JSON format.",
+        }
+    },
+)
 def generate_payment_qr(
     order_id: int,
-    upi_id: str = Query(...),
-    amount: float | None = Query(default=None),
+    upi_id: str | None = Query(default=None, description="Payee VPA / UPI ID (defaults to system/store UPI)"),
+    amount: float | None = Query(default=None, description="Optional custom amount (auto-detected from created payment or order total)"),
+    mode: Literal["preview", "download", "json"] = Query(
+        default="preview",
+        description="Delivery mode: 'preview' (renders visual QR code PNG inline in Swagger UI / browser), 'download' (downloads PNG file), or 'json' (returns UPI payload JSON)",
+    ),
     service: PaymentService = Depends(get_payment_service),
 ):
-    return service.generate_qr_payload(order_id=order_id, upi_id=upi_id, amount=amount)
+    qr_data = service.generate_qr_payload(order_id=order_id, upi_id=upi_id, amount=amount)
+
+    if mode == "json":
+        return qr_data
+
+    qr_image_bytes = service.generate_qr_image_bytes(qr_data["qr_payload"])
+    filename = f"order_{order_id}_qr.png"
+
+    if mode == "download":
+        return Response(
+            content=qr_image_bytes,
+            media_type="image/png",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+            },
+        )
+
+    # mode == "preview" (default): inline display in Swagger UI and browser
+    return Response(
+        content=qr_image_bytes,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f"inline; filename={filename}",
+            "X-Document-Preview-Type": "Visual-PNG-Preview",
+        },
+    )
 
 
 @router.post("/webhook")

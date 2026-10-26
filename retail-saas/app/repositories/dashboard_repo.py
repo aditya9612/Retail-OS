@@ -221,7 +221,7 @@ class DashboardRepository:
             self.db.query(
                 func.coalesce(
                     func.sum(
-                        OrderItem.quantity * Product.cost_price
+                        OrderItem.quantity * func.coalesce(Product.cost_price, 0)
                     ),
                     0,
                 )
@@ -318,10 +318,10 @@ class DashboardRepository:
             "transactions": [
                 {
                     "order_id": row.id,
-                    "order_number": row.order_number,
+                    "order_number": row.order_number or f"ORD-{row.id}",
                     "amount": float(row.total_amount or 0),
-                    "order_status": row.status,
-                    "payment_status": row.payment_status,
+                    "order_status": str(row.status or "unknown"),
+                    "payment_status": str(row.payment_status or "pending"),
                     "created_at": row.created_at,
                 }
                 for row in rows
@@ -393,18 +393,42 @@ class DashboardRepository:
             tenant_id, store_id, start_date, end_date
         )
 
+        target_period_key = "year" if period == "this_year" else "month"
         sales_target = self._get_target_value(
-            tenant_id, store_id, "sales", "month",
+            tenant_id, store_id, "sales", target_period_key,
             start_date, end_date,
         )
+        if sales_target <= 0:
+            alt_key = "month" if target_period_key == "year" else "year"
+            alt_val = self._get_target_value(
+                tenant_id, store_id, "sales", alt_key,
+                start_date, end_date,
+            )
+            sales_target = alt_val if target_period_key == "year" else (alt_val / 12 if alt_val > 0 else 0.0)
+
         cost_target = self._get_target_value(
-            tenant_id, store_id, "cost", "month",
+            tenant_id, store_id, "cost", target_period_key,
             start_date, end_date,
         )
+        if cost_target <= 0:
+            alt_key = "month" if target_period_key == "year" else "year"
+            alt_val = self._get_target_value(
+                tenant_id, store_id, "cost", alt_key,
+                start_date, end_date,
+            )
+            cost_target = alt_val if target_period_key == "year" else (alt_val / 12 if alt_val > 0 else 0.0)
+
         products_target = self._get_target_value(
-            tenant_id, store_id, "products", "month",
+            tenant_id, store_id, "products", target_period_key,
             start_date, end_date,
         )
+        if products_target <= 0:
+            alt_key = "month" if target_period_key == "year" else "year"
+            alt_val = self._get_target_value(
+                tenant_id, store_id, "products", alt_key,
+                start_date, end_date,
+            )
+            products_target = alt_val if target_period_key == "year" else (alt_val / 12 if alt_val > 0 else 0.0)
 
         stores_summary = None
 
@@ -686,6 +710,7 @@ class DashboardRepository:
         tenant_id: int,
         store_id: Optional[int] = None,
         limit: int = 10,
+        period: Optional[str] = None,
     ):
         self._validate_store(tenant_id, store_id)
 
@@ -718,6 +743,11 @@ class DashboardRepository:
 
         if store_id is not None:
             query = query.filter(Order.store_id == store_id)
+
+        if period:
+            start_date, end_date = self._period_dates(period)
+            start_dt, end_dt = self._datetime_bounds(start_date, end_date)
+            query = query.filter(Order.created_at >= start_dt, Order.created_at < end_dt)
 
         rows = (
             query.group_by(Product.id, Product.name)

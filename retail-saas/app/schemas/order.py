@@ -702,6 +702,8 @@ class PaymentResponse(BaseModel):
     amount_tendered: Optional[Decimal] = None
     change_due: Optional[Decimal] = None
     created_at: datetime
+    qr_payload: Optional[str] = None
+    qr_code_base64: Optional[str] = None
 
     model_config = {
         "from_attributes": True

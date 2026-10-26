@@ -509,6 +509,22 @@ def test_sub_endpoints_store_filtering(multi_store_data):
     # Top Products staff accessing store 2 -> 403
     assert client.get(f"/api/v1/dashboard/top-products?store_id={store2_id}", headers=staff_headers).status_code == 403
 
+    # 4. Recent Transactions
+    res_rt = client.get(f"/api/v1/dashboard/recent-transactions?store_id={store1_id}", headers=headers)
+    assert res_rt.status_code == 200, res_rt.text
+    assert "transactions" in res_rt.json()
+    assert len(res_rt.json()["transactions"]) >= 1
+    first_tx = res_rt.json()["transactions"][0]
+    assert first_tx["amount"] == pytest.approx(1500.0, 0.01)
+    assert "order_status" in first_tx
+    assert "payment_status" in first_tx
+
+    # Recent Transactions cross-tenant -> 404
+    assert client.get(f"/api/v1/dashboard/recent-transactions?store_id={cross_store_id}", headers=headers).status_code == 404
+
+    # Recent Transactions staff accessing store 2 -> 403
+    assert client.get(f"/api/v1/dashboard/recent-transactions?store_id={store2_id}", headers=staff_headers).status_code == 403
+
 
 def test_dashboard_store_id_validation_errors(multi_store_data):
     """
@@ -525,6 +541,7 @@ def test_dashboard_store_id_validation_errors(multi_store_data):
     assert client.get("/api/v1/dashboard/overview?store_id=0", headers=headers).status_code == 422
     assert client.get("/api/v1/dashboard/revenue-vs-cost?store_id=-1", headers=headers).status_code == 422
     assert client.get("/api/v1/dashboard/top-products?store_id=0", headers=headers).status_code == 422
+    assert client.get("/api/v1/dashboard/recent-transactions?store_id=0", headers=headers).status_code == 422
 
 
 def test_empty_tenant_zero_stores():
@@ -777,6 +794,7 @@ def test_legacy_owner_role_without_dashboard_permission_succeeds():
         assert client.get("/api/v1/dashboard/overview", headers=headers).status_code == 200
         assert client.get("/api/v1/dashboard/revenue-vs-cost", headers=headers).status_code == 200
         assert client.get("/api/v1/dashboard/top-products", headers=headers).status_code == 200
+        assert client.get("/api/v1/dashboard/recent-transactions", headers=headers).status_code == 200
     finally:
         db.close()
 

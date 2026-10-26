@@ -52,11 +52,13 @@ class DashboardService:
         tenant_id: int,
         store_id: Optional[int] = None,
         limit: int = 10,
+        period: Optional[str] = None,
     ):
         return self.repo.get_top_products(
             tenant_id=tenant_id,
             store_id=store_id,
             limit=limit,
+            period=period,
         )
 
     def get_recent_transactions(

@@ -6,7 +6,14 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import require_operational_write, require_permission
 from app.models.user import User
-from app.schemas.sale import SaleCreate, SaleResponse, SaleUpdate, SaleThermalMode
+from app.schemas.sale import (
+    SaleCreate,
+    SaleResponse,
+    SaleSummaryResponse,
+    SaleThermalMode,
+    SaleUpdate,
+    SaleVoidRequest,
+)
 from app.services.sale_service import SaleService
 
 
@@ -104,6 +111,58 @@ def get_sales(
             search=search,
             page=page,
             page_size=page_size,
+            user=user,
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal Server Error: {str(e)}"
+        )
+
+
+@router.get(
+    "/summary",
+    response_model=SaleSummaryResponse,
+    summary="Get Sales Financial & Analytics Summary",
+    description="Aggregates sales count, total revenue, subtotal, tax collected, discounts, and payment methods.",
+)
+@router.get(
+    "/analytics/summary",
+    response_model=SaleSummaryResponse,
+    include_in_schema=False,
+)
+def get_sales_summary(
+    store_id: Optional[int] = Query(
+        default=None,
+        gt=0,
+        description="Optional store ID filter"
+    ),
+    start_date: Optional[date] = Query(
+        default=None,
+        description="Filter sales created on or after this date (YYYY-MM-DD)"
+    ),
+    end_date: Optional[date] = Query(
+        default=None,
+        description="Filter sales created on or before this date (YYYY-MM-DD)"
+    ),
+    user: User = Depends(require_permission("sales:read")),
+    db: Session = Depends(get_db),
+):
+    try:
+        return SaleService.get_summary(
+            db,
+            tenant_id=user.tenant_id,
+            store_id=store_id,
+            start_date=start_date,
+            end_date=end_date,
+            user=user,
         )
     except HTTPException:
         raise
@@ -133,7 +192,7 @@ def get_sale(
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.get_sale(db, sale_id, tenant_id=user.tenant_id)
+        return SaleService.get_sale(db, sale_id, tenant_id=user.tenant_id, user=user)
     except HTTPException:
         raise
     except ValueError as e:
@@ -241,7 +300,51 @@ def update_sale(
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.update_sale(db, sale_id, data, tenant_id=user.tenant_id)
+        return SaleService.update_sale(db, sale_id, data, tenant_id=user.tenant_id, user=user)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(e)
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal Server Error: {str(e)}"
+        )
+
+
+@router.post(
+    "/{sale_id}/void",
+    response_model=SaleResponse,
+    dependencies=[Depends(require_operational_write)],
+    summary="Void or Cancel a Sale",
+    description="Voids a completed or paid sale, restores inventory stock, and logs stock movements.",
+)
+def void_sale(
+    sale_id: int = Path(
+        ...,
+        gt=0,
+        description="Sale ID must be a positive integer",
+    ),
+    payload: SaleVoidRequest = SaleVoidRequest(),
+    user: User = Depends(require_permission("sales:write")),
+    db: Session = Depends(get_db),
+):
+    try:
+        return SaleService.void_sale(
+            db,
+            sale_id=sale_id,
+            tenant_id=user.tenant_id,
+            reason=payload.reason or "Cancelled by cashier",
+            user=user,
+        )
     except HTTPException:
         raise
     except ValueError as e:
@@ -275,7 +378,7 @@ def delete_sale(
     db: Session = Depends(get_db)
 ):
     try:
-        return SaleService.delete_sale(db, sale_id, tenant_id=user.tenant_id)
+        return SaleService.delete_sale(db, sale_id, tenant_id=user.tenant_id, user=user)
     except HTTPException:
         raise
     except ValueError as e:

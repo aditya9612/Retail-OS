@@ -141,6 +141,11 @@ def top_products(
         le=100,
         description="Number of top products to return",
     ),
+    period: Optional[str] = Query(
+        default=None,
+        description="Optional period filter: this_month, last_month, or this_year",
+        pattern="^(this_month|last_month|this_year)$",
+    ),
     store_id: Optional[int] = Query(
         default=None,
         gt=0,
@@ -158,6 +163,7 @@ def top_products(
         tenant_id=user.tenant_id,
         store_id=effective_store_id,
         limit=limit,
+        period=period,
     )
 
 

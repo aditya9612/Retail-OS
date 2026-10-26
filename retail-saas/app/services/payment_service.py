@@ -1,14 +1,20 @@
 from datetime import date, datetime
 from decimal import Decimal
+import base64
+import io
 import json
 import re
 from urllib.parse import urlencode
+
+import qrcode
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models.order import Order
+from app.models.store import Store
 from app.models.payment import (
     Payment,
     PaymentGateway,
@@ -16,6 +22,8 @@ from app.models.payment import (
     PaymentWebhookLog,
     Settlement,
 )
+settings = get_settings()
+
 from app.repositories.payment_repo import (
     create_gateway,
     create_payment_split,
@@ -122,6 +130,26 @@ class PaymentService:
                 detail="Payment could not be created because the transaction already exists",
             )
 
+        if data.payment_method in ("qr", "upi"):
+            effective_upi = getattr(settings, "SAAS_UPI_VPA", "merchant@upi") or "merchant@upi"
+            store_name = "Retail Store"
+            if order.store_id:
+                st = self.db.query(Store).filter(Store.id == order.store_id).first()
+                if st and st.name:
+                    store_name = st.name
+
+            params = {
+                "pa": effective_upi,
+                "pn": store_name,
+                "am": f"{payment.amount:.2f}",
+                "cu": "INR",
+                "tn": payment.transaction_id or f"Order {payment.order_id}",
+            }
+            upi_payload = "upi://pay?" + urlencode(params)
+            qr_bytes = self.generate_qr_image_bytes(upi_payload)
+            payment.qr_payload = upi_payload
+            payment.qr_code_base64 = base64.b64encode(qr_bytes).decode("utf-8")
+
         return payment
 
     def get_payment(self, payment_id: int):
@@ -216,7 +244,7 @@ class PaymentService:
     def generate_qr_payload(
         self,
         order_id,
-        upi_id,
+        upi_id=None,
         amount=None,
     ):
         order = (
@@ -234,22 +262,52 @@ class PaymentService:
                 detail="Order not found",
             )
 
-        upi_id = upi_id.strip()
+        # 1. Determine effective UPI ID
+        effective_upi = (upi_id or "").strip()
+        if not effective_upi:
+            effective_upi = getattr(settings, "SAAS_UPI_VPA", "merchant@upi") or "merchant@upi"
 
         if not re.fullmatch(
             r"^[A-Za-z0-9][A-Za-z0-9._-]{1,100}@[A-Za-z0-9][A-Za-z0-9.-]{1,100}$",
-            upi_id,
+            effective_upi,
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid UPI ID",
             )
 
-        qr_amount = (
-            Decimal(str(amount))
-            if amount is not None
-            else Decimal(str(order.total_amount))
-        )
+        # 2. Auto-detect payment from Create Payment (POST /payments) if amount not explicitly specified
+        matched_payment = None
+        if amount is not None:
+            qr_amount = Decimal(str(amount))
+        else:
+            # Look for payment created for this order
+            # Prioritize 'qr' or 'upi' payment, or the latest payment created for this order
+            matched_payment = (
+                self.db.query(Payment)
+                .filter(
+                    Payment.order_id == order_id,
+                    Payment.tenant_id == self.tenant_id,
+                    Payment.payment_method.in_(["qr", "upi"]),
+                )
+                .order_by(Payment.id.desc())
+                .first()
+            )
+            if not matched_payment:
+                matched_payment = (
+                    self.db.query(Payment)
+                    .filter(
+                        Payment.order_id == order_id,
+                        Payment.tenant_id == self.tenant_id,
+                    )
+                    .order_by(Payment.id.desc())
+                    .first()
+                )
+
+            if matched_payment and matched_payment.amount is not None:
+                qr_amount = Decimal(str(matched_payment.amount))
+            else:
+                qr_amount = Decimal(str(order.total_amount))
 
         if qr_amount < Decimal("1.00"):
             raise HTTPException(
@@ -257,20 +315,61 @@ class PaymentService:
                 detail="QR payment amount must be at least 1.00",
             )
 
+        # 3. Transaction note: use transaction_id from created payment if present
+        txn_note = f"Order {order_id}"
+        if matched_payment and matched_payment.transaction_id:
+            txn_note = f"{matched_payment.transaction_id}"
+
+        # 4. Store name for payee
+        store_name = "Retail Store"
+        if getattr(order, "store_id", None):
+            store = (
+                self.db.query(Store)
+                .filter(Store.id == order.store_id)
+                .first()
+            )
+            if store and store.name:
+                store_name = store.name
+
         params = {
-            "pa": upi_id,
-            "pn": "Retail Store",
+            "pa": effective_upi,
+            "pn": store_name,
             "am": f"{qr_amount:.2f}",
             "cu": "INR",
-            "tn": f"Order {order_id}",
+            "tn": txn_note,
         }
 
-        return {
+        upi_payload = "upi://pay?" + urlencode(params)
+        qr_bytes = self.generate_qr_image_bytes(upi_payload)
+
+        res = {
             "order_id": order_id,
-            "upi_id": upi_id,
+            "upi_id": effective_upi,
             "amount": qr_amount,
-            "qr_payload": "upi://pay?" + urlencode(params),
+            "qr_payload": upi_payload,
+            "qr_code_base64": base64.b64encode(qr_bytes).decode("utf-8"),
         }
+        if matched_payment:
+            res["payment_id"] = matched_payment.id
+            res["payment_method"] = matched_payment.payment_method
+            res["payment_status"] = matched_payment.status
+            res["transaction_id"] = matched_payment.transaction_id
+
+        return res
+
+    def generate_qr_image_bytes(self, upi_payload: str) -> bytes:
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(upi_payload)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
 
     def verify_payment_service(
         self,

@@ -401,3 +401,57 @@ def test_webhook_logs_and_payment_verification(payment_setup):
     )
     assert verify_res.status_code == 200
     assert verify_res.json()["status"] == "completed"
+
+
+def test_payment_qr_code_modes(payment_setup):
+    headers = payment_setup["headers"]
+    order_id = payment_setup["order_id"]
+    upi_id = "testmerchant@upi"
+
+    # 1. Preview mode (default)
+    res_preview = client.get(
+        f"/api/v1/payments/qr/{order_id}",
+        params={"upi_id": upi_id, "mode": "preview"},
+        headers=headers,
+    )
+    assert res_preview.status_code == 200
+    assert "image/png" in res_preview.headers["content-type"]
+    assert "inline" in res_preview.headers.get("content-disposition", "")
+    assert res_preview.content.startswith(b"\x89PNG")
+
+    # 2. Download mode
+    res_download = client.get(
+        f"/api/v1/payments/qr/{order_id}",
+        params={"upi_id": upi_id, "mode": "download"},
+        headers=headers,
+    )
+    assert res_download.status_code == 200
+    assert "image/png" in res_download.headers["content-type"]
+    assert "attachment" in res_download.headers.get("content-disposition", "")
+    assert f"order_{order_id}_qr.png" in res_download.headers.get("content-disposition", "")
+    assert res_download.content.startswith(b"\x89PNG")
+
+    # 3. JSON mode
+    res_json = client.get(
+        f"/api/v1/payments/qr/{order_id}",
+        params={"upi_id": upi_id, "mode": "json"},
+        headers=headers,
+    )
+    assert res_json.status_code == 200
+    data = res_json.json()
+    assert data["order_id"] == order_id
+    assert data["upi_id"] == upi_id
+    assert "upi://pay" in data["qr_payload"]
+    assert "qr_code_base64" in data
+
+    # 4. Auto-detect payment amount and default UPI ID (no params passed)
+    res_auto = client.get(
+        f"/api/v1/payments/qr/{order_id}",
+        params={"mode": "json"},
+        headers=headers,
+    )
+    assert res_auto.status_code == 200
+    auto_data = res_auto.json()
+    assert auto_data["order_id"] == order_id
+    assert auto_data["amount"] > 0
+    assert "upi://pay" in auto_data["qr_payload"]

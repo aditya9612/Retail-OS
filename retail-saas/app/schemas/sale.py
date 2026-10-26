@@ -719,3 +719,30 @@ class SaleThermalMode(str, Enum):
                 if member.value.lower() == value.lower():
                     return member
         return None
+
+# ============================================================
+# SALE VOID REQUEST
+# ============================================================
+
+class SaleVoidRequest(BaseModel):
+    reason: Optional[str] = Field(
+        default="Cancelled by cashier",
+        min_length=3,
+        max_length=500,
+        description="Reason for voiding the sale",
+    )
+
+
+# ============================================================
+# SALE SUMMARY RESPONSE
+# ============================================================
+
+class SaleSummaryResponse(BaseModel):
+    total_sales_count: int = 0
+    total_revenue: float = 0.0
+    total_subtotal: float = 0.0
+    total_tax: float = 0.0
+    total_discount: float = 0.0
+    payment_methods: dict = {}
+    payment_statuses: dict = {}
+

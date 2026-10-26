@@ -113,10 +113,6 @@ def get_store(
             description="Store ID must be a positive integer up to 999999",
         ),
     ],
-    include_inactive: bool = Query(
-        True,
-        description="Include store even if deactivated/inactive (defaults to True)",
-    ),
     user: User = Depends(
         require_permission("stores:read")
     ),
@@ -130,7 +126,7 @@ def get_store(
     return service.get_store(
         user.tenant_id,
         store_id,
-        include_inactive=include_inactive,
+        include_inactive=True,
     )
 
 

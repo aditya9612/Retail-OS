@@ -1,5 +1,6 @@
+from app.core.exceptions import NotFoundException
 import csv
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 import io
 from typing import Any, Dict, List, Optional, Union
@@ -2116,48 +2117,170 @@ class ReportService:
             "store_id": resolved_store_id,
         }
 
-    def product_performance(self, tenant_id: int, limit: int = 10, store_id: Optional[int] = None) -> list[dict]:
+    def product_performance(
+        self,
+        tenant_id: int,
+        limit: int = 10,
+        store_id: Optional[int] = None,
+        period: Optional[str] = None,
+    ) -> list[dict]:
+        if store_id is not None:
+            store = self.db.query(Store).filter(Store.id == store_id, Store.tenant_id == tenant_id).first()
+            if not store:
+                raise NotFoundException("Store not found")
+
         q = (
             self.db.query(
                 OrderItem.product_id,
-                Product.name.label("product_name"),
-                func.sum(OrderItem.quantity).label("qty"),
-                func.sum(OrderItem.total_amount).label("revenue"),
+                func.coalesce(Product.name, "Unknown Product").label("product_name"),
+                func.coalesce(func.sum(OrderItem.quantity), 0).label("qty"),
+                func.coalesce(func.sum(OrderItem.total_amount), 0).label("revenue"),
             )
             .join(Order, Order.id == OrderItem.order_id)
             .join(Product, Product.id == OrderItem.product_id)
             .filter(
                 Order.tenant_id == tenant_id,
-                Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.DELIVERED.value]),
+                Product.tenant_id == tenant_id,
+                func.lower(Order.status).notin_(
+                    ["draft", "cancelled", "canceled", "void", "deleted"]
+                ),
             )
         )
         if store_id is not None:
             q = q.filter(Order.store_id == store_id)
-        rows = q.group_by(OrderItem.product_id, Product.name).order_by(func.sum(OrderItem.total_amount).desc()).limit(limit).all()
+
+        if period:
+            today = date.today()
+            if period == "this_month":
+                start_dt = datetime.combine(today.replace(day=1), time.min)
+                end_dt = datetime.combine(today + timedelta(days=1), time.min)
+            elif period == "last_month":
+                end_d = today.replace(day=1)
+                start_d = (end_d - timedelta(days=1)).replace(day=1)
+                start_dt = datetime.combine(start_d, time.min)
+                end_dt = datetime.combine(end_d, time.min)
+            elif period == "this_year":
+                start_dt = datetime.combine(today.replace(month=1, day=1), time.min)
+                end_dt = datetime.combine(today + timedelta(days=1), time.min)
+            else:
+                start_dt, end_dt = None, None
+
+            if start_dt and end_dt:
+                q = q.filter(Order.created_at >= start_dt, Order.created_at < end_dt)
+
+        rows = (
+            q.group_by(OrderItem.product_id, Product.name)
+            .order_by(func.sum(OrderItem.total_amount).desc())
+            .limit(limit)
+            .all()
+        )
         return [
             {
                 "product_id": r[0],
                 "product_name": r[1],
                 "quantity_sold": int(r[2]),
-                "revenue": float(r[3]),
+                "revenue": float(round(r[3], 2)),
             }
             for r in rows
         ]
 
-    def customer_analytics(self, tenant_id: int) -> dict:
-        total_customers = (
-            self.db.query(func.count(Customer.id))
-            .filter(Customer.tenant_id == tenant_id)
-            .scalar()
-        )
-        repeat = (
-            self.db.query(Order.customer_id)
-            .filter(Order.tenant_id == tenant_id, Order.customer_id.isnot(None))
-            .group_by(Order.customer_id)
-            .having(func.count(Order.id) > 1)
-            .count()
-        )
-        return {"total_customers": total_customers, "repeat_customers": repeat}
+    def customer_analytics(
+        self,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+    ) -> dict:
+        if store_id is not None:
+            store = self.db.query(Store).filter(Store.id == store_id, Store.tenant_id == tenant_id).first()
+            if not store:
+                raise NotFoundException("Store not found")
+
+        excluded_statuses = ["draft", "cancelled", "canceled", "void", "deleted"]
+
+        if store_id is not None:
+            total_customers_query = (
+                self.db.query(func.count(func.distinct(Order.customer_id)))
+                .filter(
+                    Order.tenant_id == tenant_id,
+                    Order.store_id == store_id,
+                    Order.customer_id.isnot(None),
+                    func.lower(Order.status).notin_(excluded_statuses),
+                )
+            )
+            total_customers = int(total_customers_query.scalar() or 0)
+
+            repeat_subquery = (
+                self.db.query(Order.customer_id)
+                .filter(
+                    Order.tenant_id == tenant_id,
+                    Order.store_id == store_id,
+                    Order.customer_id.isnot(None),
+                    func.lower(Order.status).notin_(excluded_statuses),
+                )
+                .group_by(Order.customer_id)
+                .having(func.count(Order.id) > 1)
+                .subquery()
+            )
+            repeat = int(self.db.query(func.count()).select_from(repeat_subquery).scalar() or 0)
+
+            orders_stats = (
+                self.db.query(
+                    func.count(Order.id).label("total_orders"),
+                    func.coalesce(func.sum(Order.total_amount), 0).label("total_revenue"),
+                )
+                .filter(
+                    Order.tenant_id == tenant_id,
+                    Order.store_id == store_id,
+                    func.lower(Order.status).notin_(excluded_statuses),
+                )
+                .first()
+            )
+        else:
+            total_customers = int(
+                self.db.query(func.count(Customer.id))
+                .filter(Customer.tenant_id == tenant_id)
+                .scalar() or 0
+            )
+
+            repeat_subquery = (
+                self.db.query(Order.customer_id)
+                .filter(
+                    Order.tenant_id == tenant_id,
+                    Order.customer_id.isnot(None),
+                    func.lower(Order.status).notin_(excluded_statuses),
+                )
+                .group_by(Order.customer_id)
+                .having(func.count(Order.id) > 1)
+                .subquery()
+            )
+            repeat = int(self.db.query(func.count()).select_from(repeat_subquery).scalar() or 0)
+
+            orders_stats = (
+                self.db.query(
+                    func.count(Order.id).label("total_orders"),
+                    func.coalesce(func.sum(Order.total_amount), 0).label("total_revenue"),
+                )
+                .filter(
+                    Order.tenant_id == tenant_id,
+                    func.lower(Order.status).notin_(excluded_statuses),
+                )
+                .first()
+            )
+
+        tot_orders = int(orders_stats.total_orders or 0) if orders_stats else 0
+        tot_rev = float(orders_stats.total_revenue or 0.0) if orders_stats else 0.0
+        one_time = max(0, total_customers - repeat)
+        repeat_rate = round((repeat / total_customers * 100), 2) if total_customers > 0 else 0.0
+        aov = round((tot_rev / tot_orders), 2) if tot_orders > 0 else 0.0
+
+        return {
+            "total_customers": total_customers,
+            "repeat_customers": repeat,
+            "one_time_customers": one_time,
+            "repeat_rate_percentage": repeat_rate,
+            "total_orders": tot_orders,
+            "total_revenue": round(tot_rev, 2),
+            "average_order_value": aov,
+        }
 
     def log_audit(
         self,

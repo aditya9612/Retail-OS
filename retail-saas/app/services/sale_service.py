@@ -1,18 +1,21 @@
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Union
+from fastapi import HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 import uuid
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.security import is_tenant_wide_authorized
 from app.models.sale import Sale, SaleItem
-from app.models.inventory import Inventory
+from app.models.inventory import Inventory, StockMovement
 from app.models.product import Product
 from app.models.store import Store
 from app.repositories.sale_repo import SaleRepository
-from app.schemas.sale import SaleCreate, SaleUpdate, SaleResponse, SaleThermalMode
+from app.schemas.sale import SaleCreate, SaleUpdate, SaleResponse, SaleThermalMode, SaleSummaryResponse
+from app.utils.constants import StockMovementType
 
 
 class SaleService:
@@ -39,6 +42,14 @@ class SaleService:
             if store_exists.tenant_id != current_user.tenant_id:
                 raise ValueError("Store does not belong to the user's tenant")
             tenant_id = current_user.tenant_id
+
+            # Store scoping for assigned cashier/staff
+            if getattr(current_user, "store_id", None) is not None and data.store_id != current_user.store_id:
+                if not is_tenant_wide_authorized(current_user, db):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Access denied: cannot create sales for another store",
+                    )
         else:
             if not store_exists.tenant_id:
                 raise ValueError(f"Store with id {data.store_id} is not associated with any tenant")
@@ -62,6 +73,7 @@ class SaleService:
         tax_amount = Decimal("0.00")
 
         sale_items = []
+        stock_movements = []
 
         try:
             for item in data.items:
@@ -84,6 +96,7 @@ class SaleService:
                 if not product.is_active:
                     raise ValueError(f"Product {item.product_id} is inactive")
 
+                # Concurrency lock on inventory row
                 inventory = (
                     db.query(Inventory)
                     .filter(
@@ -91,6 +104,7 @@ class SaleService:
                         Inventory.product_id == item.product_id,
                         Inventory.tenant_id == tenant_id
                     )
+                    .with_for_update()
                     .first()
                 )
 
@@ -134,7 +148,25 @@ class SaleService:
                 sale_item.discount = item_discount
                 sale_items.append(sale_item)
 
+                # Track inventory decrement & stock movement audit
+                prev_stock = inventory.quantity
                 inventory.quantity -= qty
+                new_stock = inventory.quantity
+
+                movement = StockMovement(
+                    tenant_id=tenant_id,
+                    store_id=data.store_id,
+                    product_id=item.product_id,
+                    batch_id=inventory.batch_id,
+                    movement_type=StockMovementType.STOCK_OUT.value,
+                    quantity=Decimal(str(qty)),
+                    previous_stock=prev_stock,
+                    new_stock=new_stock,
+                    reference_type="SALE",
+                    notes="Sale line item deducted",
+                    created_by=getattr(current_user, "id", None),
+                )
+                stock_movements.append(movement)
 
             sale_num = getattr(data, "sale_number", None) or getattr(data, "invoice_number", None)
             if sale_num:
@@ -162,7 +194,17 @@ class SaleService:
             if customer:
                 customer.total_spend = (customer.total_spend or 0) + int(subtotal + tax_amount)
 
-            return SaleRepository.create(db, sale)
+            db.add(sale)
+            db.flush()
+
+            for sm in stock_movements:
+                sm.reference_id = sale.id
+                sm.notes = f"Sale created: {sale.sale_number}"
+                db.add(sm)
+
+            db.commit()
+            db.refresh(sale)
+            return sale
         except Exception:
             db.rollback()
             raise
@@ -179,7 +221,17 @@ class SaleService:
         search: Optional[str] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
+        user=None,
     ):
+        if user and getattr(user, "store_id", None) is not None:
+            if not is_tenant_wide_authorized(user, db):
+                if store_id is not None and store_id != user.store_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Access denied: cannot access sales for another store",
+                    )
+                store_id = user.store_id
+
         if store_id is not None:
             store = db.query(Store).filter(Store.id == store_id, Store.tenant_id == tenant_id).first()
             if not store:
@@ -201,11 +253,20 @@ class SaleService:
     def get_sale(
         db: Session,
         sale_id: int,
-        tenant_id: int
+        tenant_id: int,
+        user=None,
     ):
         sale = SaleRepository.get_by_id(db, sale_id=sale_id, tenant_id=tenant_id)
         if not sale:
             raise ValueError(f"Sale with id {sale_id} not found")
+
+        if user and getattr(user, "store_id", None) is not None:
+            if sale.store_id != user.store_id and not is_tenant_wide_authorized(user, db):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: cannot access sales for another store",
+                )
+
         return sale
 
     @staticmethod
@@ -213,11 +274,22 @@ class SaleService:
         db: Session,
         sale_id: int,
         data: Union[SaleCreate, SaleUpdate],
-        tenant_id: int
+        tenant_id: int,
+        user=None,
     ):
         sale = SaleRepository.get_by_id(db, sale_id=sale_id, tenant_id=tenant_id)
         if not sale:
             raise ValueError(f"Sale with id {sale_id} not found")
+
+        if sale.payment_status in ("cancelled", "voided"):
+            raise ValueError(f"Cannot update a {sale.payment_status} sale")
+
+        if user and getattr(user, "store_id", None) is not None:
+            if sale.store_id != user.store_id and not is_tenant_wide_authorized(user, db):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: cannot update sales for another store",
+                )
 
         target_store_id = sale.store_id
         if getattr(data, "store_id", None) is not None:
@@ -226,6 +298,12 @@ class SaleService:
                 raise ValueError(f"Store with id {data.store_id} not found")
             if store_exists.tenant_id != tenant_id:
                 raise ValueError("Store does not belong to the user's tenant")
+            if user and getattr(user, "store_id", None) is not None and data.store_id != user.store_id:
+                if not is_tenant_wide_authorized(user, db):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Access denied: cannot move sale to another store",
+                    )
             target_store_id = data.store_id
 
         if getattr(data, "customer_id", None) is not None:
@@ -241,7 +319,7 @@ class SaleService:
                 if not data.items:
                     raise ValueError("Sale must contain at least one item")
 
-                # Restore previous inventory
+                # Restore previous inventory with concurrency lock
                 for old_item in sale.items:
                     old_inventory = (
                         db.query(Inventory)
@@ -250,10 +328,27 @@ class SaleService:
                             Inventory.product_id == old_item.product_id,
                             Inventory.tenant_id == tenant_id
                         )
+                        .with_for_update()
                         .first()
                     )
                     if old_inventory:
+                        prev_q = old_inventory.quantity
                         old_inventory.quantity += old_item.quantity
+                        sm_restore = StockMovement(
+                            tenant_id=tenant_id,
+                            store_id=sale.store_id,
+                            product_id=old_item.product_id,
+                            batch_id=old_inventory.batch_id,
+                            movement_type=StockMovementType.ADJUSTMENT.value,
+                            quantity=Decimal(str(old_item.quantity)),
+                            previous_stock=prev_q,
+                            new_stock=old_inventory.quantity,
+                            reference_id=sale.id,
+                            reference_type="SALE_UPDATE_RESTORE",
+                            notes=f"Sale updated (restored previous items): {sale.sale_number}",
+                            created_by=getattr(user, "id", None),
+                        )
+                        db.add(sm_restore)
 
                 sale.items.clear()
 
@@ -282,6 +377,7 @@ class SaleService:
                             Inventory.product_id == item.product_id,
                             Inventory.tenant_id == tenant_id
                         )
+                        .with_for_update()
                         .first()
                     )
 
@@ -322,7 +418,24 @@ class SaleService:
                     )
                     sale_item.discount = item_discount
                     sale.items.append(sale_item)
+
+                    prev_q = inventory.quantity
                     inventory.quantity -= qty
+                    sm_deduct = StockMovement(
+                        tenant_id=tenant_id,
+                        store_id=target_store_id,
+                        product_id=item.product_id,
+                        batch_id=inventory.batch_id,
+                        movement_type=StockMovementType.STOCK_OUT.value,
+                        quantity=Decimal(str(qty)),
+                        previous_stock=prev_q,
+                        new_stock=inventory.quantity,
+                        reference_id=sale.id,
+                        reference_type="SALE_UPDATE_DEDUCT",
+                        notes=f"Sale updated (deducted new items): {sale.sale_number}",
+                        created_by=getattr(user, "id", None),
+                    )
+                    db.add(sm_deduct)
 
                 sale.subtotal = subtotal
                 sale.tax_amount = tax_amount
@@ -346,14 +459,26 @@ class SaleService:
             raise
 
     @staticmethod
-    def delete_sale(
+    def void_sale(
         db: Session,
         sale_id: int,
-        tenant_id: int
+        tenant_id: int,
+        reason: str = "Cancelled by cashier",
+        user=None,
     ):
         sale = SaleRepository.get_by_id(db, sale_id=sale_id, tenant_id=tenant_id)
         if not sale:
             raise ValueError(f"Sale with id {sale_id} not found")
+
+        if sale.payment_status in ("cancelled", "voided"):
+            raise ValueError(f"Sale {sale_id} is already cancelled")
+
+        if user and getattr(user, "store_id", None) is not None:
+            if sale.store_id != user.store_id and not is_tenant_wide_authorized(user, db):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: cannot void sales for another store",
+                )
 
         try:
             for item in sale.items:
@@ -364,18 +489,125 @@ class SaleService:
                         Inventory.product_id == item.product_id,
                         Inventory.tenant_id == tenant_id
                     )
+                    .with_for_update()
                     .first()
                 )
                 if inventory:
+                    prev_stock = inventory.quantity
                     inventory.quantity += item.quantity
+                    new_stock = inventory.quantity
                 else:
-                    new_inv = Inventory(
+                    prev_stock = Decimal("0.0000")
+                    inventory = Inventory(
                         tenant_id=tenant_id,
                         store_id=sale.store_id,
                         product_id=item.product_id,
-                        quantity=item.quantity,
+                        quantity=Decimal(str(item.quantity)),
                     )
-                    db.add(new_inv)
+                    new_stock = Decimal(str(item.quantity))
+                    db.add(inventory)
+                    db.flush()
+
+                movement = StockMovement(
+                    tenant_id=tenant_id,
+                    store_id=sale.store_id,
+                    product_id=item.product_id,
+                    batch_id=getattr(inventory, "batch_id", None),
+                    movement_type=StockMovementType.RETURN.value,
+                    quantity=Decimal(str(item.quantity)),
+                    previous_stock=prev_stock,
+                    new_stock=new_stock,
+                    reference_id=sale.id,
+                    reference_type="SALE_VOID",
+                    notes=f"Sale voided: {reason}",
+                    created_by=getattr(user, "id", None),
+                )
+                db.add(movement)
+
+            if getattr(sale, "customer_id", None) is not None:
+                from app.models.customer import Customer
+                customer = db.query(Customer).filter(Customer.id == sale.customer_id).first()
+                if customer and customer.total_spend:
+                    customer.total_spend = max(0, customer.total_spend - int(sale.total_amount))
+
+            sale.payment_status = "cancelled"
+            sale.updated_at = datetime.utcnow()
+
+            db.commit()
+            db.refresh(sale)
+            return sale
+        except Exception:
+            db.rollback()
+            raise
+
+    @staticmethod
+    def delete_sale(
+        db: Session,
+        sale_id: int,
+        tenant_id: int,
+        user=None,
+    ):
+        sale = SaleRepository.get_by_id(db, sale_id=sale_id, tenant_id=tenant_id)
+        if not sale:
+            raise ValueError(f"Sale with id {sale_id} not found")
+
+        if user and getattr(user, "store_id", None) is not None:
+            if sale.store_id != user.store_id and not is_tenant_wide_authorized(user, db):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: cannot delete sales for another store",
+                )
+
+        try:
+            if sale.payment_status not in ("cancelled", "voided"):
+                for item in sale.items:
+                    inventory = (
+                        db.query(Inventory)
+                        .filter(
+                            Inventory.store_id == sale.store_id,
+                            Inventory.product_id == item.product_id,
+                            Inventory.tenant_id == tenant_id
+                        )
+                        .with_for_update()
+                        .first()
+                    )
+                    if inventory:
+                        prev_stock = inventory.quantity
+                        inventory.quantity += item.quantity
+                        new_stock = inventory.quantity
+                    else:
+                        prev_stock = Decimal("0.0000")
+                        inventory = Inventory(
+                            tenant_id=tenant_id,
+                            store_id=sale.store_id,
+                            product_id=item.product_id,
+                            quantity=Decimal(str(item.quantity)),
+                        )
+                        new_stock = Decimal(str(item.quantity))
+                        db.add(inventory)
+                        db.flush()
+
+                    movement = StockMovement(
+                        tenant_id=tenant_id,
+                        store_id=sale.store_id,
+                        product_id=item.product_id,
+                        batch_id=getattr(inventory, "batch_id", None),
+                        movement_type=StockMovementType.RETURN.value,
+                        quantity=Decimal(str(item.quantity)),
+                        previous_stock=prev_stock,
+                        new_stock=new_stock,
+                        reference_id=sale.id,
+                        reference_type="SALE_DELETE",
+                        notes="Sale deleted from system; inventory restored",
+                        created_by=getattr(user, "id", None),
+                    )
+                    db.add(movement)
+
+                if getattr(sale, "customer_id", None) is not None:
+                    from app.models.customer import Customer
+                    customer = db.query(Customer).filter(Customer.id == sale.customer_id).first()
+                    if customer and customer.total_spend:
+                        customer.total_spend = max(0, customer.total_spend - int(sale.total_amount))
 
             SaleRepository.delete(db, sale)
 
@@ -388,8 +620,34 @@ class SaleService:
             raise
 
     @staticmethod
-    def get_sale_receipt_data(db: Session, sale_id: int, tenant_id: int) -> dict:
-        sale = SaleService.get_sale(db, sale_id, tenant_id=tenant_id)
+    def get_summary(
+        db: Session,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        user=None,
+    ):
+        if user and getattr(user, "store_id", None) is not None:
+            if not is_tenant_wide_authorized(user, db):
+                if store_id is not None and store_id != user.store_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Access denied: cannot access sales summary for another store",
+                    )
+                store_id = user.store_id
+
+        return SaleRepository.get_summary(
+            db,
+            tenant_id=tenant_id,
+            store_id=store_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    @staticmethod
+    def get_sale_receipt_data(db: Session, sale_id: int, tenant_id: int, user: Optional[Any] = None) -> dict:
+        sale = SaleService.get_sale(db, sale_id, tenant_id=tenant_id, user=user)
         store = db.query(Store).filter(Store.id == sale.store_id).first()
         store_name = store.name if store else "Retail Store"
         store_address = f"{store.city or ''}, {store.state or ''} {store.pincode or ''}".strip(", ") if store else None
@@ -593,11 +851,11 @@ class SaleService:
 
         items_rows = ""
         for it in items:
-            items_rows += f'''
+            items_rows += f"""
             <div class="row">
                 <span class="lbl">{it.get("name", "Item")} x{it.get("quantity", 1)}</span>
                 <span class="val">Rs. {Decimal(str(it.get("total_amount", 0))):.2f}</span>
-            </div>'''
+            </div>"""
 
         store_addr_html = f'<div class="store-sub">{ctx["store_address"]}</div>' if ctx.get("store_address") else ""
 
@@ -734,7 +992,7 @@ class SaleService:
         mode: Any = "preview",
         user: Optional[Any] = None,
     ) -> Response:
-        data = SaleService.get_sale_receipt_data(db, sale_id, tenant_id=tenant_id)
+        data = SaleService.get_sale_receipt_data(db, sale_id, tenant_id=tenant_id, user=user)
         mode_val = str(getattr(mode, "value", mode) or "preview").lower().strip()
         sale_num = data.get("sale_number", f"SALE-{sale_id}")
 

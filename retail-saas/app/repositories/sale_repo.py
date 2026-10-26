@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -80,6 +81,57 @@ class SaleRepository:
             query = query.limit(page_size)
 
         return query.all()
+
+    @staticmethod
+    def get_summary(
+        db: Session,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ):
+        query = db.query(Sale).filter(Sale.tenant_id == tenant_id)
+
+        if store_id is not None:
+            query = query.filter(Sale.store_id == store_id)
+
+        if start_date is not None:
+            query = query.filter(Sale.created_at >= datetime.combine(start_date, datetime.min.time()))
+
+        if end_date is not None:
+            query = query.filter(Sale.created_at <= datetime.combine(end_date, datetime.max.time()))
+
+        sales = query.all()
+        total_sales_count = len(sales)
+        total_revenue = Decimal("0.00")
+        total_subtotal = Decimal("0.00")
+        total_tax = Decimal("0.00")
+        total_discount = Decimal("0.00")
+        payment_methods = {}
+        payment_statuses = {}
+
+        for s in sales:
+            p_status = (s.payment_status or "paid").lower()
+            payment_statuses[p_status] = payment_statuses.get(p_status, 0) + 1
+
+            p_method = (s.payment_method or "cash").lower()
+
+            if p_status not in ("cancelled", "voided"):
+                total_revenue += Decimal(str(s.total_amount or 0))
+                total_subtotal += Decimal(str(s.subtotal or 0))
+                total_tax += Decimal(str(s.tax_amount or 0))
+                total_discount += Decimal(str(getattr(s, "discount", 0) or 0))
+                payment_methods[p_method] = round(payment_methods.get(p_method, 0.0) + float(s.total_amount or 0), 2)
+
+        return {
+            "total_sales_count": total_sales_count,
+            "total_revenue": float(total_revenue.quantize(Decimal("0.01"))),
+            "total_subtotal": float(total_subtotal.quantize(Decimal("0.01"))),
+            "total_tax": float(total_tax.quantize(Decimal("0.01"))),
+            "total_discount": float(total_discount.quantize(Decimal("0.01"))),
+            "payment_methods": payment_methods,
+            "payment_statuses": payment_statuses,
+        }
 
     @staticmethod
     def update(

@@ -21,8 +21,8 @@ class RecentTransaction(BaseModel):
     order_id: int
     order_number: str
     amount: float
-    order_status: str
-    payment_status: str
+    order_status: Optional[str] = "unknown"
+    payment_status: Optional[str] = "pending"
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -80,7 +80,7 @@ class RevenueVsCostResponse(BaseModel):
 
 
 class TopProduct(BaseModel):
-    product_name: str
+    product_name: Optional[str] = "Unknown Product"
     quantity_sold: int
     revenue: float
 

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.core.database import SessionLocal
 from app.main import app
 from app.models.customer import Customer
-from app.models.inventory import Inventory
+from app.models.inventory import Inventory, StockMovement
 from app.models.product import Product
 from app.models.store import Store
 
@@ -454,3 +454,124 @@ def test_sale_thermal_receipt_all_modes(sales_tenant, sales_fixtures):
     assert text_res.status_code == 200
     assert "text/plain" in text_res.headers["content-type"]
     assert "TOTAL:" in text_res.text
+
+
+def test_void_sale_inventory_restoration_and_audit(sales_tenant, sales_fixtures):
+    """Test POST /api/v1/sales/{sale_id}/void cancels sale, restores stock, and logs stock movements."""
+    headers = sales_tenant["headers"]
+    store_id = sales_fixtures["store_id"]
+    p1 = sales_fixtures["prod1_id"]
+
+    db = SessionLocal()
+    try:
+        inv_before = db.query(Inventory).filter(Inventory.store_id == store_id, Inventory.product_id == p1).first().quantity
+    finally:
+        db.close()
+
+    # Create sale of 3 units
+    create_res = client.post(
+        "/api/v1/sales",
+        headers=headers,
+        json={
+            "store_id": store_id,
+            "payment_method": "upi",
+            "items": [{"product_id": p1, "quantity": 3}],
+        },
+    )
+    assert create_res.status_code in (200, 201)
+    sale_id = create_res.json()["id"]
+
+    # Verify inventory deducted and StockMovement logged
+    db = SessionLocal()
+    try:
+        inv_after = db.query(Inventory).filter(Inventory.store_id == store_id, Inventory.product_id == p1).first().quantity
+        assert inv_after == inv_before - 3
+
+        movement_out = db.query(StockMovement).filter(
+            StockMovement.reference_id == sale_id,
+            StockMovement.reference_type == "SALE"
+        ).first()
+        assert movement_out is not None
+        assert movement_out.movement_type in ("stock_out", "sale", "STOCK_OUT")
+        assert movement_out.quantity == 3
+    finally:
+        db.close()
+
+    # Void the sale
+    void_res = client.post(
+        f"/api/v1/sales/{sale_id}/void",
+        headers=headers,
+        json={"reason": "Customer changed mind at counter"},
+    )
+    assert void_res.status_code == 200
+    void_data = void_res.json()
+    assert void_data["payment_status"] == "cancelled"
+    assert void_data["status"] == "cancelled"
+
+    # Verify inventory is restored and return StockMovement logged
+    db = SessionLocal()
+    try:
+        inv_restored = db.query(Inventory).filter(Inventory.store_id == store_id, Inventory.product_id == p1).first().quantity
+        assert inv_restored == inv_before
+
+        movement_ret = db.query(StockMovement).filter(
+            StockMovement.reference_id == sale_id,
+            StockMovement.reference_type == "SALE_VOID"
+        ).first()
+        assert movement_ret is not None
+        assert movement_ret.movement_type in ("return", "RETURN")
+        assert movement_ret.quantity == 3
+    finally:
+        db.close()
+
+    # Attempting to void already voided sale returns 400
+    second_void = client.post(f"/api/v1/sales/{sale_id}/void", headers=headers, json={"reason": "Repeat void"})
+    assert second_void.status_code == 400
+
+    # Attempting to update a cancelled sale returns 400
+    upd_void = client.put(f"/api/v1/sales/{sale_id}", headers=headers, json={"payment_method": "cash"})
+    assert upd_void.status_code == 400
+
+
+def test_sales_summary_endpoint(sales_tenant, sales_fixtures):
+    """Test GET /api/v1/sales/summary and /analytics/summary."""
+    headers = sales_tenant["headers"]
+    store_id = sales_fixtures["store_id"]
+    p1 = sales_fixtures["prod1_id"]
+    p2 = sales_fixtures["prod2_id"]
+
+    # Create 2 sales with different payment methods
+    client.post(
+        "/api/v1/sales",
+        headers=headers,
+        json={
+            "store_id": store_id,
+            "payment_method": "cash",
+            "items": [{"product_id": p1, "quantity": 1}],
+        },
+    )
+    client.post(
+        "/api/v1/sales",
+        headers=headers,
+        json={
+            "store_id": store_id,
+            "payment_method": "card",
+            "items": [{"product_id": p2, "quantity": 2}],
+        },
+    )
+
+    # Call summary endpoint
+    res = client.get(f"/api/v1/sales/summary?store_id={store_id}", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total_sales_count"] >= 2
+    assert data["total_revenue"] > 0
+    assert "cash" in data["payment_methods"]
+    assert "card" in data["payment_methods"]
+
+    # Also test /analytics/summary alias
+    alias_res = client.get(f"/api/v1/sales/analytics/summary?store_id={store_id}", headers=headers)
+    assert alias_res.status_code == 200
+    alias_data = alias_res.json()
+    assert alias_data["total_sales_count"] == data["total_sales_count"]
+
