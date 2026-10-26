@@ -249,6 +249,21 @@ class ExcelExportService:
         if biz_name:
             ws_summary.cell(row=current_row, column=1, value=str(biz_name)).font = subtitle_font
             current_row += 1
+        biz_addr = getattr(branding, "address", None) if branding else None
+        if biz_addr:
+            ws_summary.cell(row=current_row, column=1, value=str(biz_addr)).font = Font(name="Calibri", size=9, italic=True, color="555555")
+            current_row += 1
+        _biz_contact_parts = []
+        if branding:
+            if getattr(branding, "phone", None):
+                _biz_contact_parts.append(f"Tel: {branding.phone}")
+            if getattr(branding, "email", None):
+                _biz_contact_parts.append(f"Email: {branding.email}")
+            if getattr(branding, "show_gstin", True) and getattr(branding, "gstin", None):
+                _biz_contact_parts.append(f"GSTIN: {branding.gstin}")
+        if _biz_contact_parts:
+            ws_summary.cell(row=current_row, column=1, value=" | ".join(_biz_contact_parts)).font = Font(name="Calibri", size=9, color="666666")
+            current_row += 1
 
         current_row += 1  # blank line
 

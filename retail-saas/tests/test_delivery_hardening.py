@@ -145,8 +145,8 @@ def test_patch_delivery_partner_rejection_and_acceptance(tenant_a):
         )
         assert resp.status_code == 422, f"Failed for {bad_trk}"
 
-    # Rejected delivery person
-    for bad_person in ["12345", "string", "------", ""]:
+    # Rejected delivery person (e.g. numeric "11", "12345", "string", "------", "")
+    for bad_person in ["11", "00", "12345", "string", "------", "!@#$%", "pppp", "@#e0", ""]:
         resp = client.patch(
             f"/api/v1/delivery/{delivery_id}/partner",
             json={"delivery_person": bad_person, "tracking_number": "TRK-VALID-01"},
@@ -207,7 +207,7 @@ def test_delivery_export_format_required_no_silent_default(tenant_a):
     assert resp_missing.status_code == 422
 
     # Invalid formats must return 422
-    for bad_fmt in ["pdf", "json", "xml", "txt", "string", "123"]:
+    for bad_fmt in ["yaml", "json", "xml", "txt", "string", "123"]:
         resp_bad = client.get(f"/api/v1/delivery/export?format={bad_fmt}", headers=headers)
         assert resp_bad.status_code == 422, f"Failed for {bad_fmt}"
 
@@ -219,6 +219,12 @@ def test_delivery_export_format_required_no_silent_default(tenant_a):
     resp_csv = client.get("/api/v1/delivery/export?format=csv", headers=headers)
     assert resp_csv.status_code == 200
     assert "text/csv" in resp_csv.headers.get("content-type", "")
+
+    resp_pdf = client.get("/api/v1/delivery/export?format=pdf", headers=headers)
+    assert resp_pdf.status_code == 200
+    assert resp_pdf.headers.get("content-type", "") == "application/pdf"
+    assert "deliveries.pdf" in resp_pdf.headers.get("content-disposition", "")
+    assert resp_pdf.content.startswith(b"%PDF-")
 
 
 # ==============================================================================
@@ -268,21 +274,36 @@ def test_delivery_cancel_reason_hardening_and_409_state_conflict(tenant_a):
 def test_delivery_methods_cost_and_days_hardening(tenant_a):
     headers, _ = tenant_a
 
-    # Cost = 0.00 is explicitly allowed
+    # Zero cost (0.00) is rejected with 422
     resp_zero_cost = client.post(
         "/api/v1/delivery/methods",
         json={
-            "name": "Free Store Pickup",
-            "code": "FREE_PICKUP_001",
-            "description": "Free customer pickup at store counter",
+            "name": "Zero Cost Method",
+            "code": "ZERO_COST_001",
+            "description": "Zero cost test description",
             "cost": 0.00,
             "estimated_days": 1,
             "is_active": True,
         },
         headers=headers,
     )
-    assert resp_zero_cost.status_code == 201
-    assert float(resp_zero_cost.json()["data"]["cost"]) == 0.00
+    assert resp_zero_cost.status_code == 422
+
+    # Positive cost is accepted
+    resp_pos_cost = client.post(
+        "/api/v1/delivery/methods",
+        json={
+            "name": "Standard Store Pickup",
+            "code": "STD_PICKUP_001",
+            "description": "Customer pickup at store counter",
+            "cost": 5.00,
+            "estimated_days": 1,
+            "is_active": True,
+        },
+        headers=headers,
+    )
+    assert resp_pos_cost.status_code == 201
+    assert float(resp_pos_cost.json()["data"]["cost"]) == 5.00
 
     # Negative cost is rejected
     resp_neg_cost = client.post(
@@ -488,7 +509,7 @@ def test_delivery_tenant_isolation_returns_404(tenant_a, tenant_b):
 
     method_resp = client.post(
         "/api/v1/delivery/methods",
-        json={"name": "Tenant A Method", "code": "T_A_ISOL_METH", "description": "Tenant A method desc"},
+        json={"name": "Tenant A Method", "code": "T_A_ISOL_METH", "description": "Tenant A method desc", "cost": 10.00},
         headers=headers_a,
     )
     method_id = method_resp.json()["data"]["id"]
@@ -515,3 +536,540 @@ def test_delivery_tenant_isolation_returns_404(tenant_a, tenant_b):
     assert client.put(f"/api/v1/delivery/methods/{method_id}", json={"name": "Hacked"}, headers=headers_b).status_code == 404
     assert client.put(f"/api/v1/delivery/zones/{zone_id}", json={"name": "Hacked"}, headers=headers_b).status_code == 404
     assert client.put(f"/api/v1/delivery/partners/{partner_id}", json={"name": "Hacked"}, headers=headers_b).status_code == 404
+
+
+# ==============================================================================
+# 12. Strict Delivery Method Field Validations Hardening
+# ==============================================================================
+
+def test_delivery_methods_strict_validation_hardening(tenant_a):
+    headers, _ = tenant_a
+
+    # 1. Invalid names: "d0", "123445", "!@##$%", "ppppp", "p0@#$", symbol spam, placeholders
+    invalid_names = [
+        "d0",
+        "123445",
+        "!@##$%",
+        "ppppp",
+        "p0@#$",
+        "string",
+        "null",
+        "none",
+        "----",
+        "++++",
+        "(())",
+        "[[]]",
+        "{{}}",
+        "\\\\\\",
+        "||",
+        ";;;",
+        ":::",
+        "???",
+        ">>>",
+        "<<<",
+        "////",
+    ]
+    for bad_name in invalid_names:
+        resp = client.post(
+            "/api/v1/delivery/methods",
+            json={
+                "name": bad_name,
+                "code": "VALID_CODE_01",
+                "description": "Valid descriptive text",
+                "cost": 15.00,
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 422, f"Expected 422 for bad name '{bad_name}', got {resp.status_code}"
+
+    # 2. Invalid codes: "d000", "0000", "d0", "AAAA", "123445", "!@##$%", "p0@#$", "----"
+    invalid_codes = [
+        "d000",
+        "0000",
+        "d0",
+        "AAAA",
+        "123445",
+        "!@##$%",
+        "p0@#$",
+        "----",
+        "string",
+    ]
+    for bad_code in invalid_codes:
+        resp = client.post(
+            "/api/v1/delivery/methods",
+            json={
+                "name": "Valid Method Name",
+                "code": bad_code,
+                "description": "Valid descriptive text",
+                "cost": 15.00,
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 422, f"Expected 422 for bad code '{bad_code}', got {resp.status_code}"
+
+    # 3. Invalid descriptions: "00-", "123445", "!@##$%", "ppppp", symbol spam
+    invalid_descriptions = [
+        "00-",
+        "123445",
+        "!@##$%",
+        "ppppp",
+        "string",
+        "\\\\\\",
+        "----",
+    ]
+    for bad_desc in invalid_descriptions:
+        resp = client.post(
+            "/api/v1/delivery/methods",
+            json={
+                "name": "Valid Method Name",
+                "code": "VALID_CODE_02",
+                "description": bad_desc,
+                "cost": 15.00,
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 422, f"Expected 422 for bad desc '{bad_desc}', got {resp.status_code}"
+
+    # 4. Estimated days: 365 rejected, 60 accepted
+    resp_365 = client.post(
+        "/api/v1/delivery/methods",
+        json={
+            "name": "Standard Delivery",
+            "code": "STD_DLV_01",
+            "description": "Standard delivery service",
+            "cost": 25.00,
+            "estimated_days": 365,
+        },
+        headers=headers,
+    )
+    assert resp_365.status_code == 422
+
+    # Valid method creation succeeds
+    resp_ok = client.post(
+        "/api/v1/delivery/methods",
+        json={
+            "name": "Standard Delivery",
+            "code": "STD_DLV_01",
+            "description": "Standard delivery service within 3 business days",
+            "cost": 25.00,
+            "estimated_days": 3,
+            "is_active": True,
+        },
+        headers=headers,
+    )
+    assert resp_ok.status_code == 201
+    assert resp_ok.json()["data"]["name"] == "Standard Delivery"
+    assert resp_ok.json()["data"]["code"] == "STD_DLV_01"
+    assert resp_ok.json()["data"]["estimated_days"] == 3
+
+
+# ==============================================================================
+# 13. PUT Delivery Method Malformed JSON Error Message Specifies Expected Value
+# ==============================================================================
+
+def test_delivery_method_update_malformed_json_specifies_expected_value(tenant_a):
+    headers, _ = tenant_a
+
+    # Create a delivery method first
+    create_resp = client.post(
+        "/api/v1/delivery/methods",
+        json={
+            "name": "SwiftShip Logistics",
+            "code": "SSL-PUNE-02",
+            "description": "Fast and secure delivery service for retail orders",
+            "cost": 200.0,
+            "estimated_days": 2,
+            "is_active": True,
+        },
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    method_id = create_resp.json()["data"]["id"]
+
+    # Send malformed JSON payload where "is_active": has no value
+    raw_headers = dict(headers)
+    raw_headers["Content-Type"] = "application/json"
+    malformed_body = b'{\n  "is_active":\n}'
+
+    resp = client.put(
+        f"/api/v1/delivery/methods/{method_id}",
+        content=malformed_body,
+        headers=raw_headers,
+    )
+    assert resp.status_code == 422
+    res = resp.json()
+
+    # Must NOT report "field: '18'" or generic "JSON decode error" without expected value
+    assert "18" not in res["message"]
+    assert "is_active" in res["message"]
+    assert "Expected a boolean" in res["message"]
+    assert res["errors"][0]["field"] == "is_active"
+    assert "Expected a boolean" in res["errors"][0]["message"]
+
+
+def test_delivery_zone_update_malformed_json_specifies_expected_value(tenant_a):
+    headers, _ = tenant_a
+
+    # Create a delivery zone first
+    create_resp = client.post(
+        "/api/v1/delivery/zones",
+        json={
+            "name": "Pune Camp Zone",
+            "code": "PUN-CAMP-01",
+            "description": "Pune Camp and Cantonment zone",
+            "city": "Pune",
+            "state": "Maharashtra",
+            "pincodes": ["411001"],
+            "is_active": True,
+        },
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    zone_id = create_resp.json()["data"]["id"]
+
+    # Send malformed JSON payload where "is_active": has no value (exact user screenshot scenario)
+    raw_headers = dict(headers)
+    raw_headers["Content-Type"] = "application/json"
+    malformed_body = b'{\n  "is_active":\n}'
+
+    resp = client.put(
+        f"/api/v1/delivery/zones/{zone_id}",
+        content=malformed_body,
+        headers=raw_headers,
+    )
+    assert resp.status_code == 422
+    res = resp.json()
+
+    # Must NOT report "field: '21'" or generic "JSON decode error" without expected value
+    assert "21" not in res["message"]
+    assert "is_active" in res["message"]
+    assert "Expected a boolean" in res["message"]
+    assert res["errors"][0]["field"] == "is_active"
+    assert "Expected a boolean" in res["errors"][0]["message"]
+
+
+def test_delivery_zones_geo_and_text_hardening(tenant_a):
+    headers, _ = tenant_a
+
+    # 1. Exact invalid payload reported by QA/User
+    resp_screenshot = client.post(
+        "/api/v1/delivery/zones",
+        json={
+            "name": "ww",
+            "code": "W000",
+            "description": "00-",
+            "city": "maharashtra",
+            "state": "pune",
+            "pincodes": ["415516"],
+            "is_active": True,
+        },
+        headers=headers,
+    )
+    assert resp_screenshot.status_code == 422
+
+    # 2. Reject state as a city (e.g. city='Maharashtra' or 'Gujarat')
+    for bad_city in ["maharashtra", "Maharashtra", "Gujarat", "Karnataka", "india", "japan"]:
+        resp = client.post(
+            "/api/v1/delivery/zones",
+            json={
+                "name": "Valid Zone Name",
+                "code": "VAL_ZONE_GEO1",
+                "description": "Valid zone description",
+                "city": bad_city,
+                "state": "Maharashtra",
+                "pincodes": ["400001"],
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 422, f"Expected 422 for city='{bad_city}'"
+
+    # 3. Reject city as a state (e.g. state='pune' or 'mumbai')
+    for bad_state in ["pune", "Pune", "Mumbai", "Nagpur", "random_state", "12345", "!@#$%"]:
+        resp = client.post(
+            "/api/v1/delivery/zones",
+            json={
+                "name": "Valid Zone Name",
+                "code": "VAL_ZONE_GEO2",
+                "description": "Valid zone description",
+                "city": "Pune",
+                "state": bad_state,
+                "pincodes": ["411001"],
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 422, f"Expected 422 for state='{bad_state}'"
+
+    # 4. Reject Pincode that does not match State (e.g. state='Gujarat' with Maharashtra pincode 415516)
+    resp_pincode_mismatch = client.post(
+        "/api/v1/delivery/zones",
+        json={
+            "name": "Gujarat Zone",
+            "code": "GJ_ZONE_01",
+            "description": "Gujarat zone description",
+            "city": "Surat",
+            "state": "Gujarat",
+            "pincodes": ["415516"],
+        },
+        headers=headers,
+    )
+    assert resp_pincode_mismatch.status_code == 422
+    assert "Pincode '415516' does not belong to state 'Gujarat'" in resp_pincode_mismatch.json()["message"]
+
+    # 5. Reject City that does not match State (e.g. city='Pune' with state='Gujarat')
+    resp_city_state_mismatch = client.post(
+        "/api/v1/delivery/zones",
+        json={
+            "name": "Mismatched Zone",
+            "code": "MISMATCH_ZONE_01",
+            "description": "Valid zone description",
+            "city": "Pune",
+            "state": "Gujarat",
+            "pincodes": ["380001"],
+        },
+        headers=headers,
+    )
+    assert resp_city_state_mismatch.status_code == 422
+    assert "belongs to state 'Maharashtra'" in resp_city_state_mismatch.json()["message"]
+
+    # 6. Reject invalid names, codes, descriptions, and spam symbols
+    for bad_name in ["ww", "pppp", "12345", "!@#$%", "---", "   ", ""]:
+        resp = client.post(
+            "/api/v1/delivery/zones",
+            json={"name": bad_name, "code": "VAL_ZONE_SPAM", "pincodes": ["400001"]},
+            headers=headers,
+        )
+        assert resp.status_code == 422
+
+    for bad_code in ["W000", "w0@", "12345", "!@#$%", "---", "   ", ""]:
+        resp = client.post(
+            "/api/v1/delivery/zones",
+            json={"name": "Valid Zone Name", "code": bad_code, "pincodes": ["400001"]},
+            headers=headers,
+        )
+        assert resp.status_code == 422
+
+    for bad_desc in ["00-", "---", "12345", "!@#$%", "pppp", "w0@"]:
+        resp = client.post(
+            "/api/v1/delivery/zones",
+            json={"name": "Valid Zone Name", "code": "VAL_ZONE_DESC", "description": bad_desc, "pincodes": ["400001"]},
+            headers=headers,
+        )
+        assert resp.status_code == 422
+
+    # 7. Reject Pincode that matches State but does NOT match City (e.g. city='Mumbai' with Satara pincode '415516')
+    resp_city_pincode_mismatch = client.post(
+        "/api/v1/delivery/zones",
+        json={
+            "name": "Mumbai Central Zone",
+            "code": "MUMBAI-CENTRAL-01",
+            "description": "Delivery zone covering Mumbai residential areas",
+            "city": "Mumbai",
+            "state": "Maharashtra",
+            "pincodes": ["415516"],
+            "is_active": True,
+        },
+        headers=headers,
+    )
+    assert resp_city_pincode_mismatch.status_code == 422
+    assert "Pincode '415516' does not match city 'Mumbai'" in resp_city_pincode_mismatch.json()["message"]
+
+    # 8. Valid delivery zone creates successfully
+    resp_ok = client.post(
+        "/api/v1/delivery/zones",
+        json={
+            "name": "West Zone Pune",
+            "code": "WZ-PUN-01",
+            "description": "Pune West Zone coverage belt",
+            "city": "Pune",
+            "state": "Maharashtra",
+            "pincodes": ["411001", "411004"],
+            "is_active": True,
+        },
+        headers=headers,
+    )
+    assert resp_ok.status_code == 201
+    zone = resp_ok.json()["data"]
+    assert zone["name"] == "West Zone Pune"
+    assert zone["code"] == "WZ-PUN-01"
+    assert zone["city"] == "Pune"
+    assert zone["state"] == "Maharashtra"
+    assert "411001" in zone["pincodes"]
+
+
+def test_delivery_partner_connect_hardening(tenant_a):
+    headers, _ = tenant_a
+
+    base_payload = {
+        "name": "Delhivery Express",
+        "code": "DELHIVERY_EXP",
+        "description": "National express courier partner",
+        "contact_email": "support@delhivery.com",
+        "contact_phone": "+919876543210",
+        "api_key": "live_key_delhivery_12345",
+        "api_secret": "live_secret_delhivery_67890",
+        "tracking_url_template": "https://delhivery.com/track/{tracking_number}",
+        "is_active": True,
+    }
+
+    # 1. Invalid contact email rejected (e.g. "---@PP.COM", "!@#$%", "pppp")
+    for bad_email in ["---@PP.COM", "!@#$%", "pppp", "string", "12345"]:
+        payload = dict(base_payload)
+        payload["contact_email"] = bad_email
+        resp = client.post("/api/v1/delivery/partners/connect", json=payload, headers=headers)
+        assert resp.status_code == 422, f"Expected 422 for bad email: {bad_email}"
+
+    # 2. Invalid contact phone rejected (e.g. 9 digits "600000000", dummy 10 digits "6000000000", "!@#$%", "pppp", "0000000000")
+    for bad_phone in ["600000000", "6000000000", "7000000000", "9999999999", "6111111111", "12345", "!@#$%", "pppp", "0000000000", "5555555555"]:
+        payload = dict(base_payload)
+        payload["contact_phone"] = bad_phone
+        resp = client.post("/api/v1/delivery/partners/connect", json=payload, headers=headers)
+        assert resp.status_code == 422, f"Expected 422 for bad phone: {bad_phone}"
+
+    # 3. Invalid name and code rejected (e.g. "00", "0000", "!@#$%", "pppp", "@#e0")
+    for bad_name in ["00", "12345", "!@#$%", "pppp", "@#e0", "----", ""]:
+        payload = dict(base_payload)
+        payload["name"] = bad_name
+        resp = client.post("/api/v1/delivery/partners/connect", json=payload, headers=headers)
+        assert resp.status_code == 422, f"Expected 422 for bad name: {bad_name}"
+
+    for bad_code in ["0000", "12345", "!@#$%", "pppp", "@#e0", "----", ""]:
+        payload = dict(base_payload)
+        payload["code"] = bad_code
+        resp = client.post("/api/v1/delivery/partners/connect", json=payload, headers=headers)
+        assert resp.status_code == 422, f"Expected 422 for bad code: {bad_code}"
+
+    # 4. Invalid tracking url rejected (e.g. "https://0000", "https://----", "!@#$%", "string")
+    for bad_url in ["https://0000", "https://----", "https://!@#$%", "string", "pppp", "http://1234"]:
+        payload = dict(base_payload)
+        payload["tracking_url_template"] = bad_url
+        resp = client.post("/api/v1/delivery/partners/connect", json=payload, headers=headers)
+        assert resp.status_code == 422, f"Expected 422 for bad tracking url: {bad_url}"
+
+    # 5. Invalid description rejected (e.g. "0P", "!@#$%", "pppp", "@#e0")
+    for bad_desc in ["0P", "!@#$%", "pppp", "@#e0", "----", ""]:
+        payload = dict(base_payload)
+        payload["description"] = bad_desc
+        resp = client.post("/api/v1/delivery/partners/connect", json=payload, headers=headers)
+        assert resp.status_code == 422, f"Expected 422 for bad description: {bad_desc}"
+
+    # 6. Invalid API key and secret rejected (e.g. "0-0", "12345", "!@#$%", "pppp", "@#e0")
+    for bad_cred in ["0-0", "12345", "!@#$%", "pppp", "@#e0", "------"]:
+        payload = dict(base_payload)
+        payload["api_key"] = bad_cred
+        resp = client.post("/api/v1/delivery/partners/connect", json=payload, headers=headers)
+        assert resp.status_code == 422, f"Expected 422 for bad api_key: {bad_cred}"
+
+        payload = dict(base_payload)
+        payload["api_secret"] = bad_cred
+        resp = client.post("/api/v1/delivery/partners/connect", json=payload, headers=headers)
+        assert resp.status_code == 422, f"Expected 422 for bad api_secret: {bad_cred}"
+
+    # 7. Valid partner connects successfully
+    resp_ok = client.post("/api/v1/delivery/partners/connect", json=base_payload, headers=headers)
+    assert resp_ok.status_code == 201
+    partner = resp_ok.json()["data"]
+    assert partner["name"] == "Delhivery Express"
+    assert partner["code"] == "DELHIVERY_EXP"
+    assert partner["contact_email"] == "support@delhivery.com"
+    assert partner["contact_phone"] == "+919876543210"
+    assert partner["tracking_url_template"] == "https://delhivery.com/track/{tracking_number}"
+    assert partner["is_active"] is True
+
+
+def test_delivery_partner_connect_malformed_json_specifies_expected_value(tenant_a):
+    headers, _ = tenant_a
+    raw_headers = dict(headers)
+    raw_headers["Content-Type"] = "application/json"
+
+    # User screenshot payload with "is_active": lacking a value
+    malformed_body = b'''{
+  "name": "Delhivery Express",
+  "code": "DELHIVERY_EXP",
+  "description": "National express courier partner",
+  "contact_email": "support@delhivery.com",
+  "contact_phone": "+919876543210",
+  "api_key": "live_key_delhivery_12345",
+  "api_secret": "live_secret_delhivery_67890",
+  "tracking_url_template": "https://delhivery.com/track/{tracking_number}",
+  "is_active":
+}'''
+
+    resp = client.post(
+        "/api/v1/delivery/partners/connect",
+        content=malformed_body,
+        headers=raw_headers,
+    )
+    assert resp.status_code == 422
+    res = resp.json()
+    assert "is_active" in res["message"]
+    assert "Expected a boolean" in res["message"]
+    assert res["errors"][0]["field"] == "is_active"
+    assert "Expected a boolean" in res["errors"][0]["message"]
+
+
+def test_delivery_history_status_matches_list_api(tenant_a):
+    headers, user = tenant_a
+    from app.core.database import SessionLocal
+    from app.models.delivery import Delivery
+    from app.models.order import Order, OrderTracking
+    from app.models.store import Store
+    import uuid
+
+    db = SessionLocal()
+    try:
+        tenant_id = user["tenant_id"]
+        uid = uuid.uuid4().hex[:8]
+        store = Store(tenant_id=tenant_id, name=f"Store {uid}", code=f"ST-{uid}")
+        db.add(store)
+        db.flush()
+
+        order = Order(
+            tenant_id=tenant_id,
+            store_id=store.id,
+            order_number=f"ORD-{uid}",
+            order_type="pos",
+            status="confirmed",
+        )
+        db.add(order)
+        db.flush()
+
+        # Simulate user screenshot scenario:
+        # Order tracking has status="confirmed", delivery has status="pending"
+        delivery = Delivery(
+            tenant_id=tenant_id,
+            order_id=order.id,
+            status="pending",
+        )
+        db.add(delivery)
+
+        order_tracking = OrderTracking(
+            order_id=order.id,
+            status="confirmed",
+            remarks="Order confirmed",
+        )
+        db.add(order_tracking)
+        db.commit()
+        db.refresh(delivery)
+        del_id = delivery.id
+    finally:
+        db.close()
+
+    # 1. Check List API status: delivery is "pending"
+    list_resp = client.get("/api/v1/delivery", headers=headers)
+    assert list_resp.status_code == 200
+    deliveries = list_resp.json()["data"]
+    target_delivery = next(d for d in deliveries if d["id"] == del_id)
+    assert target_delivery["status"] == "pending"
+
+    # 2. Check History API: must NOT return "confirmed", must match delivery status "pending"
+    hist_resp = client.get(f"/api/v1/delivery/{del_id}/history", headers=headers)
+    assert hist_resp.status_code == 200
+    hist_data = hist_resp.json()["data"]
+    assert len(hist_data) >= 1
+    assert hist_data[0]["status"] == target_delivery["status"]
+    assert hist_data[0]["status"] == "pending"
+    assert "confirmed" not in [h["status"] for h in hist_data]
+
+
+
+

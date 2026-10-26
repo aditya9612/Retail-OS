@@ -164,7 +164,7 @@ class PurchaseOrderService:
                 raise ConflictException(f"Unit cost cannot be negative for product {it.product_id}")
 
         # 2. Duplicate invoice number check per supplier and tenant
-        invoice_val = getattr(data, "invoice_number", None) or getattr(data, "invoice_id", None)
+        invoice_val = getattr(data, "invoice_number", None)
         if invoice_val and str(invoice_val).strip():
             clean_inv = str(invoice_val).strip()
             existing_po_inv = (
@@ -216,7 +216,7 @@ class PurchaseOrderService:
                 tenant_id=tenant_id, store_id=data.store_id
             ),
             status="draft",
-            notes=data.notes or data.remarks,
+            notes=data.notes,
             expected_delivery_date=data.expected_delivery_date,
             created_by_id=user_id,
         )
@@ -412,12 +412,10 @@ class PurchaseOrderService:
                 raise ConflictException(f"Warehouse '{warehouse.name}' is inactive or disabled")
             purchase_order.warehouse_id = data.warehouse_id
 
-        if data.remarks is not None:
-            purchase_order.remarks = data.remarks
         if data.notes is not None:
             purchase_order.notes = data.notes
 
-        inv_update = getattr(data, "invoice_number", None) or getattr(data, "invoice_id", None)
+        inv_update = getattr(data, "invoice_number", None)
         if inv_update is not None:
             clean_inv = str(inv_update).strip() if inv_update else ""
             if clean_inv:
@@ -531,13 +529,11 @@ class PurchaseOrderService:
 
         if getattr(data, "invoice_number", None) is not None:
             purchase_order.invoice_number = data.invoice_number
-        elif getattr(data, "invoice_id", None) is not None:
-            purchase_order.invoice_number = data.invoice_id
 
         target_store_id = self._resolve_receiving_store_id(tenant_id, purchase_order)
         inventory_service = InventoryService(self.db)
 
-        resolved_notes = getattr(data, "notes", None) or getattr(data, "remarks", None)
+        resolved_notes = getattr(data, "notes", None)
 
         # Partial receiving by specific item list vs receiving remaining balance
         if data.items:
@@ -572,7 +568,7 @@ class PurchaseOrderService:
                     "supplier_id": purchase_order.supplier_id,
                     "unit_cost": cost,
                     "batch_number": batch_no,
-                    "notes": resolved_notes or data.remarks or f"PO Received: {purchase_order.order_number}",
+                    "notes": resolved_notes or f"PO Received: {purchase_order.order_number}",
                 }
                 exp_date = rec_item.expiry_date or data.expiry_date
                 if exp_date is not None:
@@ -604,7 +600,7 @@ class PurchaseOrderService:
                     "supplier_id": purchase_order.supplier_id,
                     "unit_cost": cost,
                     "batch_number": batch_no,
-                    "notes": resolved_notes or data.remarks or f"PO Received: {purchase_order.order_number}",
+                    "notes": resolved_notes or f"PO Received: {purchase_order.order_number}",
                 }
                 if data.expiry_date is not None:
                     stock_req_data["expiry_date"] = data.expiry_date
@@ -788,15 +784,18 @@ class PurchaseOrderService:
     def get_stats(
         self,
         tenant_id: int,
+        store_id: Optional[int] = None,
     ) -> PurchaseOrderStatsResponse:
-        orders = (
+        q = (
             self.db.query(PurchaseOrder)
             .filter(
                 PurchaseOrder.tenant_id == tenant_id,
                 PurchaseOrder.is_deleted == False,
             )
-            .all()
         )
+        if store_id is not None:
+            q = q.filter(PurchaseOrder.store_id == store_id)
+        orders = q.all()
 
         total_orders = len(orders)
         draft_orders = sum(1 for o in orders if o.status == "draft")

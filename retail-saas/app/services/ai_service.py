@@ -1,3 +1,4 @@
+from typing import Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -34,9 +35,9 @@ class AIService:
             for i in items
         ]
 
-    def demand_forecast(self, tenant_id: int, product_id: int) -> dict:
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-        total_sold = (
+    def demand_forecast(self, tenant_id: int, product_id: int, days: int = 30, store_id: Optional[int] = None) -> dict:
+        thirty_days_ago = datetime.utcnow() - timedelta(days=days)
+        df_q = (
             self.db.query(func.coalesce(func.sum(OrderItem.quantity), 0))
             .join(Order)
             .filter(
@@ -45,8 +46,10 @@ class AIService:
                 Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.DELIVERED.value]),
                 Order.created_at >= thirty_days_ago,
             )
-            .scalar()
         )
+        if store_id is not None:
+            df_q = df_q.filter(Order.store_id == store_id)
+        total_sold = df_q.scalar()
         daily_avg = float(total_sold) / 30.0
         return {
             "product_id": product_id,
@@ -57,8 +60,8 @@ class AIService:
             "forecast_next_30_days": round(daily_avg * 30, 0),
         }
 
-    def best_selling_products(self, tenant_id: int, limit: int = 10) -> list[dict]:
-        rows = (
+    def best_selling_products(self, tenant_id: int, limit: int = 10, store_id: Optional[int] = None) -> list[dict]:
+        bsp_q = (
             self.db.query(
                 OrderItem.product_id,
                 Product.name.label("product_name"),
@@ -67,11 +70,10 @@ class AIService:
             .join(Order, Order.id == OrderItem.order_id)
             .join(Product, Product.id == OrderItem.product_id)
             .filter(Order.tenant_id == tenant_id, Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.DELIVERED.value]))
-            .group_by(OrderItem.product_id, Product.name)
-            .order_by(func.sum(OrderItem.quantity).desc())
-            .limit(limit)
-            .all()
         )
+        if store_id is not None:
+            bsp_q = bsp_q.filter(Order.store_id == store_id)
+        rows = bsp_q.group_by(OrderItem.product_id, Product.name).order_by(func.sum(OrderItem.quantity).desc()).limit(limit).all()
         return [{"product_id": r[0], "product_name": r[1], "quantity_sold": int(r[2])} for r in rows]
 
     def customer_purchase_patterns(self, tenant_id: int, customer_id: int) -> dict:

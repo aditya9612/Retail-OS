@@ -1,3 +1,5 @@
+from fastapi import Query
+from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -12,10 +14,11 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 @router.get("/products")
 def product_performance(
     limit: int = 10,
+    store_id: Optional[int] = Query(None, gt=0, description="Filter product performance by store ID"),
     user: User = Depends(require_permission("analytics:read")),
     db: Session = Depends(get_db),
 ):
-    return ReportService(db).product_performance(user.tenant_id, limit)
+    return ReportService(db).product_performance(user.tenant_id, limit, store_id=store_id)
 
 
 @router.get("/customers")

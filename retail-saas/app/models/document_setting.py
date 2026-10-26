@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Index, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -34,8 +34,12 @@ class DocumentSetting(Base, TimestampMixin):
     website: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     gstin: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     footer_text: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    terms_and_conditions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     invoice_prefix: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     bill_prefix: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    padding_length: Mapped[int] = mapped_column(Integer, default=6, nullable=False)
+    primary_color: Mapped[Optional[str]] = mapped_column(String(20), default="#1E3A8A", nullable=True)
+    secondary_color: Mapped[Optional[str]] = mapped_column(String(20), default="#059669", nullable=True)
 
     # Display flags – default to True where sensible, but can be overridden
     show_gstin: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

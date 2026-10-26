@@ -50,8 +50,17 @@ def tenant_b(auth_setup_factory, unique_slug):
     return headers, user
 
 
+from app.schemas.customer import validate_phone_number
+
+
 def random_phone():
-    return f"9{random.randint(100000000, 999999999)}"
+    while True:
+        num = f"9{random.randint(100000000, 999999999)}"
+        try:
+            validate_phone_number(num)
+            return num
+        except Exception:
+            pass
 
 
 def random_email(prefix="cust"):
@@ -398,11 +407,75 @@ def test_feedback_crud_and_tenant_isolation(tenant_a, tenant_b):
     fb_data = fb_resp.json()
     assert fb_data["customer_id"] == cust_a["id"]
     assert fb_data["rating"] == 5
+    assert fb_data["comments"] == "Excellent pos service"
+    assert fb_data["feedback"] is None
+
+    # Create feedback where comments is empty/null and feedback is fulfilled
+    fb_null_comment_resp = client.post(
+        "/api/v1/customers/feedback",
+        json={
+            "customer_id": cust_a["id"],
+            "rating": 5,
+            "comments": "",
+            "suggestions": "Billing thoda fast kara",
+            "feedback": "Overall experience khup chan hota, parat nakki yein.",
+        },
+        headers=headers_a,
+    )
+    assert fb_null_comment_resp.status_code == 201, fb_null_comment_resp.text
+    fb_nc_data = fb_null_comment_resp.json()
+    assert fb_nc_data["comments"] is None, f"Expected comments to be null, got: {fb_nc_data['comments']}"
+    assert fb_nc_data["feedback"] == "Overall experience khup chan hota, parat nakki yein."
+    assert fb_nc_data["suggestions"] == "Billing thoda fast kara"
+
+    # 1. Feedback with ONLY rating (all 3 comments, feedback, suggestions empty/null) is accepted (201)
+    fb_rating_only_resp = client.post(
+        "/api/v1/customers/feedback",
+        json={
+            "customer_id": cust_a["id"],
+            "rating": 5,
+            "comments": "",
+            "suggestions": "",
+            "feedback": "",
+        },
+        headers=headers_a,
+    )
+    assert fb_rating_only_resp.status_code == 201, fb_rating_only_resp.text
+    ro_data = fb_rating_only_resp.json()
+    assert ro_data["comments"] is None
+    assert ro_data["feedback"] is None
+    assert ro_data["suggestions"] is None
+    assert ro_data["rating"] == 5
+
+    # 2. Reject random junk / symbols spam in comments, feedback, or suggestions with 422
+    junk_samples = ["!@#$%", "13456", "ppppp", "----", "{{{}}}", "+++", "[[]]", "///", "|||", "\\\\\\"]
+    for junk in junk_samples:
+        bad_fb = client.post(
+            "/api/v1/customers/feedback",
+            json={"customer_id": cust_a["id"], "rating": 5, "feedback": junk},
+            headers=headers_a,
+        )
+        assert bad_fb.status_code == 422, f"Failed to reject junk feedback '{junk}': {bad_fb.status_code}"
+
+        bad_comm = client.post(
+            "/api/v1/customers/feedback",
+            json={"customer_id": cust_a["id"], "rating": 5, "comments": junk},
+            headers=headers_a,
+        )
+        assert bad_comm.status_code == 422, f"Failed to reject junk comments '{junk}': {bad_comm.status_code}"
+
+        bad_sugg = client.post(
+            "/api/v1/customers/feedback",
+            json={"customer_id": cust_a["id"], "rating": 5, "suggestions": junk},
+            headers=headers_a,
+        )
+        assert bad_sugg.status_code == 422, f"Failed to reject junk suggestions '{junk}': {bad_sugg.status_code}"
+
 
     # Tenant B cannot create feedback for Tenant A's customer
     cross_resp = client.post(
         "/api/v1/customers/feedback",
-        json={"customer_id": cust_a["id"], "rating": 4},
+        json={"customer_id": cust_a["id"], "rating": 4, "comments": "Cross tenant test"},
         headers=headers_b,
     )
     assert cross_resp.status_code == 404
@@ -410,7 +483,7 @@ def test_feedback_crud_and_tenant_isolation(tenant_a, tenant_b):
     # Invalid customer_id (<= 0) rejected with 422
     inv_resp = client.post(
         "/api/v1/customers/feedback",
-        json={"customer_id": -5, "rating": 5},
+        json={"customer_id": -5, "rating": 5, "comments": "Invalid id test"},
         headers=headers_a,
     )
     assert inv_resp.status_code == 422
@@ -418,7 +491,7 @@ def test_feedback_crud_and_tenant_isolation(tenant_a, tenant_b):
     # Non-existent customer_id rejected with 404
     non_exist_resp = client.post(
         "/api/v1/customers/feedback",
-        json={"customer_id": 999999, "rating": 5},
+        json={"customer_id": 999999, "rating": 5, "comments": "Non exist customer"},
         headers=headers_a,
     )
     assert non_exist_resp.status_code == 404
@@ -426,7 +499,7 @@ def test_feedback_crud_and_tenant_isolation(tenant_a, tenant_b):
     # Non-existent invoice_id rejected with 404
     inv_invoice_resp = client.post(
         "/api/v1/customers/feedback",
-        json={"customer_id": cust_a["id"], "invoice_id": 999999, "rating": 5},
+        json={"customer_id": cust_a["id"], "invoice_id": 999999, "rating": 5, "comments": "Non exist invoice"},
         headers=headers_a,
     )
     assert inv_invoice_resp.status_code == 404
@@ -749,6 +822,28 @@ def test_customer_notes_and_created_by(tenant_a, tenant_b):
             headers=headers_a,
         )
         assert xss_resp.status_code == 422, f"Failed to reject XSS: {payload}"
+
+    # Numerical spam and decimal point dominance rejected (Image 1 fix)
+    unlimited_num_note = "A@5.16785124192817242117818187168761668544154545414565678587668688668464562246564168764145444141414144585785788564541224125363526585798754141212212142424"
+    assert client.post(
+        "/api/v1/customers/notes",
+        json={"customer_id": cust["id"], "note": unlimited_num_note},
+        headers=headers_a,
+    ).status_code == 422, "Excessive digits/decimals in note must be rejected"
+
+    # Dummy test phrase and repeating question marks rejected (Image 2 fix)
+    assert client.post(
+        "/api/v1/customers/notes",
+        json={"customer_id": cust["id"], "note": "NOTE IS NOT REQUIRED?????"},
+        headers=headers_a,
+    ).status_code == 422, "Dummy phrase and repeating question marks must be rejected"
+
+    # Repeating question marks rejected
+    assert client.post(
+        "/api/v1/customers/notes",
+        json={"customer_id": cust["id"], "note": "Customer wants delivery Sunday???"},
+        headers=headers_a,
+    ).status_code == 422, "Repeating ??? must be rejected"
 
     # Invalid customer ID (<= 0)
     inv_resp = client.get("/api/v1/customers/notes", params={"customer_id": 0}, headers=headers_a)
@@ -1255,14 +1350,14 @@ def test_wallet_remarks_and_reference_validation(tenant_a):
     )
     assert res_debit_bad_remark.status_code == 422, "Invalid remarks should fail with 422 before insufficient balance"
 
-    # Natural-language remarks with legitimate punctuation must be accepted
+    # Natural-language remarks with legitimate letters/punctuation (no digits) must be accepted
     good_remarks = [
         "Wallet credit",
         "Customer payment",
         "Refund adjustment",
         "Customer wallet top-up",
         "Cash payment received",
-        "Refund adjustment for order #123",
+        "Refund adjustment for returned order",
         "Manual wallet credit - approved by manager.",
     ]
     for remark in good_remarks:
@@ -1274,6 +1369,78 @@ def test_wallet_remarks_and_reference_validation(tenant_a):
         )
         assert res_good.status_code == 200, f"Failed to accept valid remark: {remark}"
         assert res_good.json()["remarks"] == remark
+
+    # 1. Reject excessively long reference numbers (> 30 characters, e.g. 71-digit from Image 1)
+    long_ref_71 = "12345551414502450421155312556431256431205431205128946513264451326451324865132"
+    res_long_ref = client.post(
+        "/api/v1/customers/wallet/credit",
+        json={"customer_id": cust["id"], "amount": "1.00", "reference_no": long_ref_71, "remarks": "Wallet recharge"},
+        headers=headers,
+    )
+    assert res_long_ref.status_code == 422, "Excessively long reference number must be rejected"
+
+    # Reject reference number < 3 characters (e.g. '12')
+    res_short_ref = client.post(
+        "/api/v1/customers/wallet/credit",
+        json={"customer_id": cust["id"], "amount": "1.00", "reference_no": "12", "remarks": "Wallet recharge"},
+        headers=headers,
+    )
+    assert res_short_ref.status_code == 422, "Reference number < 3 characters must be rejected"
+
+    # 2. Reject remarks containing numbers (digits strictly forbidden per user requirement)
+    for num_remark in ["Order 123", "Cash 500", "Refund 1", "Bill no 456"]:
+        res_num_remark = client.post(
+            "/api/v1/customers/wallet/credit",
+            json={"customer_id": cust["id"], "amount": "1.00", "reference_no": str(random.randint(10000000, 99999999)), "remarks": num_remark},
+            headers=headers,
+        )
+        assert res_num_remark.status_code == 422, f"Remarks containing numbers must fail with 422: {num_remark}"
+
+    # 3. Reject placeholder remarks 'NA' (from Image 1)
+    res_na = client.post(
+        "/api/v1/customers/wallet/credit",
+        json={"customer_id": cust["id"], "amount": "1.00", "reference_no": str(random.randint(10000000, 99999999)), "remarks": "NA"},
+        headers=headers,
+    )
+    assert res_na.status_code == 422, "Remarks placeholder 'NA' must be rejected"
+
+    # 4. Reject excessively long remarks (> 100 characters) and keyboard smash gibberish (from Image 2)
+    gibberish_smash = "fvygbhjnhgvftdszerxdtcfygubhugytfdrxtcfygvubhvgctdxrtcfyguhjnhbugvyftdrseaeszrdxtcfvgybhunjimjnihubgyvftcdrxsezxdrctfvgybhunjhgyftdxrctfvgbhuugyftdctfvgybhuuuuujinnnnnhugyfdxrfgybhu ybhu"
+    res_smash = client.post(
+        "/api/v1/customers/wallet/credit",
+        json={"customer_id": cust["id"], "amount": "1.00", "reference_no": "123", "remarks": gibberish_smash},
+        headers=headers,
+    )
+    assert res_smash.status_code == 422, "Excessively long/gibberish remarks must be rejected"
+
+    # 5. Verify the EXACT same validations apply to DEBIT wallet (/api/v1/customers/wallet/debit)
+    res_debit_long_ref = client.post(
+        "/api/v1/customers/wallet/debit",
+        json={"customer_id": cust["id"], "amount": "1.00", "reference_no": long_ref_71, "remarks": "Wallet debit"},
+        headers=headers,
+    )
+    assert res_debit_long_ref.status_code == 422, "Debit must reject long reference number"
+
+    res_debit_num_remark = client.post(
+        "/api/v1/customers/wallet/debit",
+        json={"customer_id": cust["id"], "amount": "1.00", "reference_no": f"REF{random.randint(10000, 99999)}", "remarks": "Debit 123"},
+        headers=headers,
+    )
+    assert res_debit_num_remark.status_code == 422, "Debit must reject remarks with numbers"
+
+    res_debit_na = client.post(
+        "/api/v1/customers/wallet/debit",
+        json={"customer_id": cust["id"], "amount": "1.00", "reference_no": f"REF{random.randint(10000, 99999)}", "remarks": "NA"},
+        headers=headers,
+    )
+    assert res_debit_na.status_code == 422, "Debit must reject NA placeholder remarks"
+
+    res_debit_smash = client.post(
+        "/api/v1/customers/wallet/debit",
+        json={"customer_id": cust["id"], "amount": "1.00", "reference_no": f"REF{random.randint(10000, 99999)}", "remarks": gibberish_smash},
+        headers=headers,
+    )
+    assert res_debit_smash.status_code == 422, "Debit must reject excessively long/gibberish remarks"
 
 
 def test_loyalty_earn_reason_validation(tenant_a):
@@ -1656,7 +1823,7 @@ def test_cross_tenant_access_blocked_comprehensive(tenant_a, tenant_b):
 
 def test_customer_email_case_and_whitespace_normalization(tenant_a):
     headers_a, _ = tenant_a
-    raw_email = "  User.Shopper@Example.COM  "
+    raw_email = "  user.shopper@example.com  "
     normalized_email = "user.shopper@example.com"
 
     res_1 = client.post(
@@ -1667,10 +1834,19 @@ def test_customer_email_case_and_whitespace_normalization(tenant_a):
     assert res_1.status_code == 201, res_1.text
     assert res_1.json()["email"] == normalized_email
 
-    # Attempting to register same email with different casing/whitespace in same tenant must fail with 409
+    # Email starting with or containing uppercase letters must fail with 422
+    res_upper = client.post(
+        "/api/v1/customers",
+        json={"name": "Customer Uppercase", "phone": random_phone(), "email": "User.Shopper@Example.COM", "address": "123 Street, Pune"},
+        headers=headers_a,
+    )
+    assert res_upper.status_code == 422
+    assert "lowercase" in res_upper.text.lower()
+
+    # Attempting to register duplicate email in same tenant must fail with 409
     res_2 = client.post(
         "/api/v1/customers",
-        json={"name": "Customer Collide", "phone": random_phone(), "email": "USER.SHOPPER@EXAMPLE.COM", "address": "456 Street, Pune"},
+        json={"name": "Customer Collide", "phone": random_phone(), "email": normalized_email, "address": "456 Street, Pune"},
         headers=headers_a,
     )
     assert res_2.status_code == 409
@@ -1696,3 +1872,135 @@ def test_customer_phone_representation_regression(tenant_a):
     )
     assert res_2.status_code == 201, res_2.text
     assert res_2.json()["phone"] == phone_plus91
+
+
+def test_create_customer_capital_email_rejected(tenant_a):
+    headers_a, _ = tenant_a
+    # Email starting with capital letter (e.g. Prasad.patil.alibag@gmail.com)
+    res = client.post(
+        "/api/v1/customers",
+        json={
+            "name": "Prasad Patil",
+            "phone": random_phone(),
+            "email": "Prasad.patil.alibag@gmail.com",
+            "address": "Alibag, Raigad - 402201",
+        },
+        headers=headers_a,
+    )
+    assert res.status_code == 422
+    assert "lowercase" in res.text.lower()
+
+
+def test_create_customer_serial_and_dummy_phone_rejected(tenant_a):
+    headers_a, _ = tenant_a
+    dummy_phones = [
+        "+919876543210",  # Descending serial from screenshot
+        "9876543210",     # 10-digit descending serial
+        "6789012345",     # 10-digit ascending serial
+        "9123456789",     # 9-digit ascending sequence
+        "9999999999",     # All identical digits
+        "8888888888",     # All identical digits
+        "9000000000",     # Dummy trailing 9 zeros
+        "8000000000",     # Dummy trailing 9 zeros
+        "9876500000",     # Ending with 5 dummy zeros
+        "9800000123",     # 5 consecutive identical digits
+    ]
+
+    for p in dummy_phones:
+        res = client.post(
+            "/api/v1/customers",
+            json={
+                "name": "Ramesh Patil",
+                "phone": p,
+                "email": "ramesh.patil@example.com",
+                "address": "Pen City",
+            },
+            headers=headers_a,
+        )
+        assert res.status_code == 422, f"Expected 422 for dummy/serial phone '{p}', got {res.status_code}: {res.text}"
+
+
+def test_create_and_update_customer_invalid_boolean_rejected(tenant_a):
+    headers_a, _ = tenant_a
+
+    invalid_bool_values = ["YES", "yes", "NO", "no", "true", "false", 1, 0, "Y", "N"]
+
+    for val in invalid_bool_values:
+        # 1. Reject on whatsapp_opt_in
+        res = client.post(
+            "/api/v1/customers",
+            json={
+                "name": "Vikas Kale",
+                "phone": random_phone(),
+                "email": f"vikas.{random.randint(1000, 9999)}@example.com",
+                "address": "Pimpri, Pune - 411017",
+                "whatsapp_opt_in": val,
+            },
+            headers=headers_a,
+        )
+        assert res.status_code == 422, f"Expected 422 for whatsapp_opt_in={val!r}, got {res.status_code}: {res.text}"
+        assert "expected a boolean" in res.text.lower() or "boolean" in res.text.lower()
+
+        # 2. Reject on sms_opt_in
+        res_sms = client.post(
+            "/api/v1/customers",
+            json={
+                "name": "Vikas Kale",
+                "phone": random_phone(),
+                "email": f"vikas.{random.randint(1000, 9999)}@example.com",
+                "address": "Pimpri, Pune - 411017",
+                "sms_opt_in": val,
+            },
+            headers=headers_a,
+        )
+        assert res_sms.status_code == 422, f"Expected 422 for sms_opt_in={val!r}, got {res_sms.status_code}: {res_sms.text}"
+        assert "expected a boolean" in res_sms.text.lower() or "boolean" in res_sms.text.lower()
+
+    # 3. Create a valid customer first
+    valid_res = client.post(
+        "/api/v1/customers",
+        json={
+            "name": "Vikas Kale",
+            "phone": random_phone(),
+            "email": f"vikas.{random.randint(1000, 9999)}@example.com",
+            "address": "Pimpri, Pune - 411017",
+            "whatsapp_opt_in": True,
+            "sms_opt_in": False,
+        },
+        headers=headers_a,
+    )
+    assert valid_res.status_code == 201, valid_res.text
+    cust_id = valid_res.json()["id"]
+
+    # 4. Reject updating with invalid boolean "YES"
+    update_res = client.put(
+        f"/api/v1/customers/{cust_id}",
+        json={"whatsapp_opt_in": "YES"},
+        headers=headers_a,
+    )
+    assert update_res.status_code == 422, f"Expected 422 for update whatsapp_opt_in='YES', got {update_res.status_code}"
+    assert "expected a boolean" in update_res.text.lower() or "boolean" in update_res.text.lower()
+
+
+def test_create_customer_valid_booleans_accepted(tenant_a):
+    headers_a, _ = tenant_a
+
+    res = client.post(
+        "/api/v1/customers",
+        json={
+            "name": "Anjali Deshmukh",
+            "phone": random_phone(),
+            "email": f"anjali.{random.randint(1000, 9999)}@example.com",
+            "address": "Kothrud, Pune - 411038",
+            "whatsapp_opt_in": False,
+            "sms_opt_in": True,
+        },
+        headers=headers_a,
+    )
+    assert res.status_code == 201, res.text
+    data = res.json()
+    assert data["whatsapp_opt_in"] is False
+    assert data["sms_opt_in"] is True
+
+
+

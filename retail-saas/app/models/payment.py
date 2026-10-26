@@ -2,7 +2,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, Numeric, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, Numeric, String, Text, func, case
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -34,6 +35,12 @@ class Payment(Base, TimestampMixin):
 
     invoice_id: Mapped[int | None] = mapped_column(
         ForeignKey("invoices.id"),
+        nullable=True,
+        index=True,
+    )
+
+    shift_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pos_shifts.id"),
         nullable=True,
         index=True,
     )
@@ -178,13 +185,19 @@ class PaymentGateway(Base, TimestampMixin):
 
         if "merchant_id" in kwargs:
             m_id = kwargs.pop("merchant_id")
-            if "api_key" not in kwargs:
-                kwargs["api_key"] = m_id
+            cfg = kwargs.get("config") or {}
+            if "api_key" in kwargs and kwargs["api_key"] != m_id:
+                if isinstance(cfg, dict):
+                    cfg["api_key"] = kwargs.pop("api_key")
+                else:
+                    kwargs.pop("api_key")
+            kwargs["api_key"] = m_id
+            kwargs["config"] = cfg
 
         kwargs.pop("environment", None)
         super().__init__(**kwargs)
 
-    @property
+    @hybrid_property
     def gateway_name(self) -> str:
         return self.name
 
@@ -192,7 +205,11 @@ class PaymentGateway(Base, TimestampMixin):
     def gateway_name(self, val: str) -> None:
         self.name = val
 
-    @property
+    @gateway_name.expression
+    def gateway_name(cls):
+        return cls.name
+
+    @hybrid_property
     def secret_key(self) -> str | None:
         return self.api_secret
 
@@ -200,7 +217,11 @@ class PaymentGateway(Base, TimestampMixin):
     def secret_key(self, val: str | None) -> None:
         self.api_secret = val
 
-    @property
+    @secret_key.expression
+    def secret_key(cls):
+        return cls.api_secret
+
+    @hybrid_property
     def merchant_id(self) -> str | None:
         return self.api_key
 
@@ -208,13 +229,21 @@ class PaymentGateway(Base, TimestampMixin):
     def merchant_id(self, val: str | None) -> None:
         self.api_key = val
 
-    @property
+    @merchant_id.expression
+    def merchant_id(cls):
+        return cls.api_key
+
+    @hybrid_property
     def status(self) -> str:
         return "ACTIVE" if self.is_active else "INACTIVE"
 
     @status.setter
     def status(self, val: str) -> None:
         self.is_active = (str(val).upper() == "ACTIVE")
+
+    @status.expression
+    def status(cls):
+        return case((cls.is_active == True, "ACTIVE"), else_="INACTIVE")
 
     @property
     def environment(self) -> str:
@@ -273,7 +302,7 @@ class PaymentSplit(Base):
         kwargs.pop("updated_at", None)
         super().__init__(**kwargs)
 
-    @property
+    @hybrid_property
     def payment_mode(self) -> str:
         return self.payment_method
 
@@ -281,13 +310,21 @@ class PaymentSplit(Base):
     def payment_mode(self, val: str) -> None:
         self.payment_method = val
 
-    @property
+    @payment_mode.expression
+    def payment_mode(cls):
+        return cls.payment_method
+
+    @hybrid_property
     def transaction_id(self) -> int:
         return self.payment_id
 
     @transaction_id.setter
     def transaction_id(self, val: int) -> None:
         self.payment_id = val
+
+    @transaction_id.expression
+    def transaction_id(cls):
+        return cls.payment_id
 
 
 class Settlement(Base, TimestampMixin):

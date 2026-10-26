@@ -191,7 +191,7 @@ class PurchaseOrderReturnService:
             store_id=target_store_id,
             warehouse_id=target_wh_id,
             reason=data.reason,
-            remarks=data.remarks,
+            remarks=getattr(data, "remarks", None),
             status="requested",
             total_amount=Decimal("0.00"),
             created_by_id=user_id,
@@ -345,7 +345,7 @@ class PurchaseOrderReturnService:
         if data.reason is not None:
             purchase_order_return.reason = data.reason
 
-        if data.remarks is not None:
+        if getattr(data, "remarks", None) is not None:
             purchase_order_return.remarks = data.remarks
 
         if data.debit_note_number is not None:
@@ -511,56 +511,45 @@ class PurchaseOrderReturnService:
 
         return self.repo.update(por)
 
-    def get_stats(self, tenant_id: int) -> dict:
+    def get_stats(self, tenant_id: int, store_id: Optional[int] = None) -> dict:
         """Computes summary statistics and KPIs for vendor returns."""
-        total_returns = (
-            self.db.query(PurchaseOrderReturn)
-            .filter(PurchaseOrderReturn.tenant_id == tenant_id)
-            .count()
-        )
+        base_q = self.db.query(PurchaseOrderReturn).filter(PurchaseOrderReturn.tenant_id == tenant_id)
+        if store_id is not None:
+            base_q = base_q.filter(PurchaseOrderReturn.store_id == store_id)
 
-        requested_count = (
-            self.db.query(PurchaseOrderReturn)
-            .filter(PurchaseOrderReturn.tenant_id == tenant_id, PurchaseOrderReturn.status == "requested")
-            .count()
-        )
+        total_returns = base_q.count()
+        requested_count = base_q.filter(PurchaseOrderReturn.status == "requested").count()
+        approved_count = base_q.filter(PurchaseOrderReturn.status == "approved").count()
+        completed_count = base_q.filter(PurchaseOrderReturn.status == "completed").count()
+        rejected_count = base_q.filter(PurchaseOrderReturn.status == "rejected").count()
 
-        approved_count = (
-            self.db.query(PurchaseOrderReturn)
-            .filter(PurchaseOrderReturn.tenant_id == tenant_id, PurchaseOrderReturn.status == "approved")
-            .count()
-        )
-
-        completed_count = (
-            self.db.query(PurchaseOrderReturn)
-            .filter(PurchaseOrderReturn.tenant_id == tenant_id, PurchaseOrderReturn.status == "completed")
-            .count()
-        )
-
-        rejected_count = (
-            self.db.query(PurchaseOrderReturn)
-            .filter(PurchaseOrderReturn.tenant_id == tenant_id, PurchaseOrderReturn.status == "rejected")
-            .count()
-        )
-
-        total_debit_amount = (
+        debit_q = (
             self.db.query(func.coalesce(func.sum(PurchaseOrderReturn.total_amount), Decimal("0.00")))
             .filter(
                 PurchaseOrderReturn.tenant_id == tenant_id,
                 PurchaseOrderReturn.status.in_({"requested", "approved", "completed"}),
             )
-            .scalar()
+        )
+        if store_id is not None:
+            debit_q = debit_q.filter(PurchaseOrderReturn.store_id == store_id)
+        total_debit_amount = (
+            debit_q.scalar()
             or Decimal("0.00")
         )
 
         # Top return reasons
-        reason_rows = (
+        reasons_q = (
             self.db.query(
                 PurchaseOrderReturn.reason,
                 func.count(PurchaseOrderReturn.id).label("count"),
                 func.coalesce(func.sum(PurchaseOrderReturn.total_amount), Decimal("0.00")).label("total_amount"),
             )
             .filter(PurchaseOrderReturn.tenant_id == tenant_id)
+        )
+        if store_id is not None:
+            reasons_q = reasons_q.filter(PurchaseOrderReturn.store_id == store_id)
+        reason_rows = (
+            reasons_q
             .group_by(PurchaseOrderReturn.reason)
             .order_by(func.count(PurchaseOrderReturn.id).desc())
             .limit(5)

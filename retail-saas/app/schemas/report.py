@@ -256,6 +256,39 @@ class ProfitLossResponse(BaseModel):
 
 
 # ============================================================================
+# PAYMENT & BILLING REPORTS
+# ============================================================================
+
+class DailyBillingResponse(BaseModel):
+    date: str
+    invoice_count: int
+    total_sales: float
+    cash_sales: float
+    card_sales: float
+    upi_sales: float
+    wallet_sales: float
+    discount_amount: float
+    refund_amount: float
+    net_collection: float
+
+
+class PaymentMethodDetail(BaseModel):
+    total_amount: float
+    transaction_count: int
+
+
+class PaymentSummaryResponse(BaseModel):
+    start_date: str
+    end_date: str
+    payment_breakdown: Dict[str, PaymentMethodDetail] = Field(default_factory=dict)
+    grand_total: float
+
+
+class ReportTaskAsyncResponse(BaseModel):
+    task_id: str
+
+
+# ============================================================================
 # EXPORT REQUEST
 # ============================================================================
 
@@ -313,3 +346,4 @@ class ReportExportRequest(BaseModel):
     store_id: Optional[int] = Field(None, gt=0, description="Optional store filter ID.")
     threshold: Optional[int] = Field(None, ge=0, description="Stock threshold for slow-moving products.")
     limit: Optional[int] = Field(None, gt=0, le=500, description="Maximum number of items/ranking rows to return.")
+    mode: Optional[Literal["download", "preview"]] = Field(default="download", description="Delivery mode: 'download' or 'preview'")

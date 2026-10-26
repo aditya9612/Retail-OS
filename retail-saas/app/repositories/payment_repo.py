@@ -16,11 +16,15 @@ def get_payment_by_transaction_id(
     tenant_id: int,
     transaction_id: str,
 ):
+    from sqlalchemy import or_
     return (
         db.query(Payment)
         .filter(
             Payment.tenant_id == tenant_id,
-            Payment.transaction_id == transaction_id,
+            or_(
+                Payment.transaction_id == transaction_id,
+                Payment.gateway_transaction_id == transaction_id,
+            ),
         )
         .first()
     )
@@ -164,6 +168,9 @@ def update_gateway(
         exclude_none=True,
     )
 
+    if "merchant_id" in update_data:
+        gateway.api_key = update_data.pop("merchant_id")
+
     for key, value in update_data.items():
         setattr(gateway, key, value)
 
@@ -186,6 +193,16 @@ def delete_gateway(
 
     if gateway is None:
         return None
+
+    from app.models.payment import Settlement
+    has_payments = db.query(Payment).filter(Payment.gateway_id == gateway_id, Payment.tenant_id == tenant_id).first()
+    has_settlements = db.query(Settlement).filter(Settlement.gateway_id == gateway_id, Settlement.tenant_id == tenant_id).first()
+
+    if has_payments or has_settlements:
+        gateway.is_active = False
+        db.commit()
+        db.refresh(gateway)
+        return gateway
 
     db.delete(gateway)
     db.commit()
@@ -243,7 +260,7 @@ def list_payment_splits(
         db.query(PaymentSplit)
         .join(
             Payment,
-            Payment.id == PaymentSplit.transaction_id,
+            Payment.id == PaymentSplit.payment_id,
         )
         .filter(
             Payment.tenant_id == tenant_id,
@@ -262,7 +279,7 @@ def get_payment_split(
         db.query(PaymentSplit)
         .join(
             Payment,
-            Payment.id == PaymentSplit.transaction_id,
+            Payment.id == PaymentSplit.payment_id,
         )
         .filter(
             PaymentSplit.id == split_id,

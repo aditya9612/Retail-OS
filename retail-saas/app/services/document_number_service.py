@@ -15,7 +15,7 @@ class DocumentNumberService:
     """
     Enterprise-grade Document Numbering Engine for Retail-OS.
     Generates structured, atomic, concurrency-safe serial numbers for:
-    - Invoices:       {STORE}-{POS}-{YYYYMMDD}-{SEQUENCE}  (e.g. STR01-POS01-20261013-000001)
+    - Invoices:       INV-{STORE}-{POS}-{YYYYMMDD}-{SEQUENCE}  (e.g. INV-STR01-POS01-20261013-000001)
     - Credit Notes:   CN-{STORE}-{YYYYMMDD}-{SEQUENCE}    (e.g. CN-STR01-20261013-000001)
     - Orders:         ORD-{STORE}-{POS}-{YYYYMMDD}-{SEQ}  (e.g. ORD-STR01-POS01-20261013-000001)
     - Purchase Orders:PO-{STORE}-{YYYYMMDD}-{SEQUENCE}    (e.g. PO-STR01-20261013-000001)
@@ -107,33 +107,33 @@ class DocumentNumberService:
         doc_date: Optional[datetime] = None,
     ) -> str:
         """
-        Generate invoice number, respecting custom DocumentSettings prefix
-        when configured, or defaulting to enterprise store-POS series.
+        Generate invoice number in standard enterprise format:
+        INV-STR01-POS01-YYYYMMDD-000001
         """
-        prefix = None
-        try:
-            from app.services.document_settings_service import DocumentSettingsService
-            branding = DocumentSettingsService(self.db).resolve_branding(
-                tenant_id=tenant_id, store_id=store_id
-            )
-            if branding and getattr(branding, "invoice_prefix", None):
-                cand = str(branding.invoice_prefix).strip()
-                if cand:
-                    prefix = cand.rstrip("-")
-        except Exception:
-            pass
+        from app.services.document_settings_service import DocumentSettingsService
+        branding = DocumentSettingsService(self.db).resolve_branding(
+            tenant_id=tenant_id,
+            store_id=store_id,
+        )
+        prefix = (branding.invoice_prefix or "INV").strip().rstrip("-") or "INV"
+        padding_length = int(getattr(branding, "padding_length", 6) or 6)
 
+        branding = DocumentSettingsService(self.db).resolve_branding(
+            tenant_id=tenant_id,
+            store_id=store_id,
+        )
+        prefix = (branding.invoice_prefix or "INV").strip().rstrip("-") or "INV"
         store_code = self._resolve_store_code(tenant_id, store_id)
         pos_code = self._resolve_pos_code(pos_id)
         dt = doc_date or datetime.utcnow()
         date_str = dt.strftime("%Y%m%d")
 
-        if prefix:
+        if prefix.upper() != "INV":
             period_key = dt.year
             series_key = f"inv_{prefix.lower()}"[:64]
             while True:
                 seq = self._next_sequence(tenant_id, series_key, period_key)
-                inv_number = f"{prefix}-{period_key}-{seq:06d}"
+                inv_number = f"{prefix}-{period_key}-{seq:0{padding_length}d}"
                 collision = (
                     self.db.query(Invoice)
                     .filter(
@@ -149,7 +149,7 @@ class DocumentNumberService:
             series_key = f"inv_{store_code.lower()}_{pos_code.lower()}"[:64]
             while True:
                 seq = self._next_sequence(tenant_id, series_key, period_key)
-                inv_number = f"{store_code}-{pos_code}-{date_str}-{seq:06d}"
+                inv_number = f"INV-{store_code}-{pos_code}-{date_str}-{seq:0{padding_length}d}"
                 collision = (
                     self.db.query(Invoice)
                     .filter(
@@ -183,7 +183,6 @@ class DocumentNumberService:
             collision = (
                 self.db.query(CreditNote)
                 .filter(
-                    CreditNote.tenant_id == tenant_id,
                     CreditNote.credit_note_no == cn_number,
                 )
                 .first()

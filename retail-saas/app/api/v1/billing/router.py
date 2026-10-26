@@ -11,14 +11,20 @@ from app.models.product import Product
 from app.models.store import Store
 from app.models.user import User
 from app.schemas.billing import (
+    InvoiceCreate,
     ReturnItemRequest,
     TenderChangeRequest,
     TenderChangeResponse,
 )
+from app.schemas.order import InvoiceResponse
 from app.schemas.cart import (
+    CartCustomerResponse,
+    CartCustomerSetRequest,
     CartDiscountApply,
     CartItemCreate,
     CartItemUpdate,
+    CartScanRequest,
+    CartStockValidationResponse,
     CartSummaryResponse,
 )
 from app.schemas.pos_held_cart import (
@@ -197,6 +203,12 @@ def _ensure_price_override_allowed(
                 "Price override not allowed for your role"
             )
 
+        cost_price = product.cost_price or Decimal("0.00")
+        if cost_price > 0 and unit_price < cost_price:
+            raise AppException(
+                f"Unit price cannot be lower than product cost price ({cost_price:.2f})"
+            )
+
 
 @router.post(
     "/cart/add-item",
@@ -258,6 +270,57 @@ def cart_add_item(
     return _to_cart_response(cart)
 
 
+@router.post(
+    "/cart/scan",
+    response_model=CartSummaryResponse,
+    dependencies=[Depends(require_operational_write)],
+)
+def cart_scan_item(
+    payload: CartScanRequest,
+    store_id: Optional[int] = Query(default=None, gt=0),
+    same_state: Optional[bool] = Query(default=None),
+    user: User = Depends(require_permission("billing:write")),
+    db: Session = Depends(get_db),
+):
+    """Rapid barcode scanner endpoint: Looks up product by barcode/SKU and adds/increments it in active cart."""
+    effective_store_id = payload.store_id or store_id or user.store_id
+    if effective_store_id is None:
+        raise AppException("store_id is required in body or query")
+
+    if user.store_id is not None and effective_store_id != user.store_id:
+        raise ForbiddenException("Access denied: cannot add cart items for another store")
+
+    if user.store_id is None:
+        if not is_tenant_wide_authorized(user, db):
+            raise ForbiddenException("Access denied: user has no assigned store")
+        store = (
+            db.query(Store)
+            .filter(
+                Store.id == effective_store_id,
+                Store.tenant_id == user.tenant_id,
+                Store.is_active.is_(True),
+            )
+            .first()
+        )
+        if not store:
+            raise NotFoundException(f"Store {effective_store_id} not found")
+
+    effective_same_state = payload.same_state if payload.same_state is not None else (same_state if same_state is not None else True)
+
+    cart = CartService(db).scan_barcode(
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        store_id=effective_store_id,
+        barcode=payload.barcode,
+        quantity=payload.quantity,
+        unit_price=payload.unit_price,
+        discount=payload.discount,
+        same_state=effective_same_state,
+    )
+
+    return _to_cart_response(cart)
+
+
 @router.put(
     "/cart/update-item",
     response_model=CartSummaryResponse,
@@ -270,6 +333,14 @@ def cart_update_item(
     ),
     db: Session = Depends(get_db),
 ):
+    if payload.quantity is not None and payload.quantity == Decimal("0"):
+        cart = CartService(db).remove_item(
+            user.tenant_id,
+            user.id,
+            payload.product_id,
+        )
+        return _to_cart_response(cart)
+
     _ensure_price_override_allowed(
         user,
         db,
@@ -311,6 +382,22 @@ def cart_remove_item(
     return _to_cart_response(cart)
 
 
+@router.delete(
+    "/cart/clear",
+    response_model=CartSummaryResponse,
+    dependencies=[Depends(require_operational_write)],
+)
+def cart_clear(
+    user: User = Depends(require_permission("billing:write")),
+    db: Session = Depends(get_db),
+):
+    """Empties/discards the current active cart completely."""
+    cart_svc = CartService(db)
+    cart_svc.clear_cart(user.tenant_id, user.id)
+    empty_cart = cart_svc.get_cart(user.tenant_id, user.id)
+    return _to_cart_response(empty_cart)
+
+
 @router.get(
     "/cart",
     response_model=CartSummaryResponse,
@@ -327,6 +414,93 @@ def get_cart(
     )
 
     return _to_cart_response(cart)
+
+
+@router.post(
+    "/cart/customer",
+    response_model=CartCustomerResponse,
+    dependencies=[Depends(require_operational_write)],
+)
+def cart_set_customer(
+    payload: CartCustomerSetRequest,
+    user: User = Depends(require_permission("billing:write")),
+    db: Session = Depends(get_db),
+):
+    """Associates a customer to the active cart by ID or phone number."""
+    from app.models.customer import Customer
+
+    customer_obj = None
+    if payload.customer_id:
+        customer_obj = (
+            db.query(Customer)
+            .filter(
+                Customer.id == payload.customer_id,
+                Customer.tenant_id == user.tenant_id,
+            )
+            .first()
+        )
+        if not customer_obj:
+            raise NotFoundException(f"Customer {payload.customer_id} not found")
+    elif payload.phone:
+        clean_phone = payload.phone.strip()
+        customer_obj = (
+            db.query(Customer)
+            .filter(
+                Customer.tenant_id == user.tenant_id,
+                Customer.phone == clean_phone,
+            )
+            .first()
+        )
+        if not customer_obj:
+            raise NotFoundException(f"Customer with phone '{clean_phone}' not found")
+    else:
+        raise AppException("Either customer_id or phone must be provided")
+
+    cart_svc = CartService(db)
+    cart = cart_svc.set_customer(user.tenant_id, user.id, customer_obj.id)
+
+    return CartCustomerResponse(
+        customer_id=customer_obj.id,
+        name=customer_obj.name,
+        phone=customer_obj.phone,
+        email=customer_obj.email,
+        loyalty_points=getattr(customer_obj, "loyalty_points", Decimal("0.00")),
+        credit_balance=getattr(customer_obj, "wallet_balance", getattr(customer_obj, "credit_limit", Decimal("0.00"))),
+        cart=_to_cart_response(cart),
+    )
+
+
+@router.delete(
+    "/cart/customer",
+    response_model=CartSummaryResponse,
+    dependencies=[Depends(require_operational_write)],
+)
+def cart_remove_customer(
+    user: User = Depends(require_permission("billing:write")),
+    db: Session = Depends(get_db),
+):
+    """Detaches/removes the customer from the active cart."""
+    cart_svc = CartService(db)
+    cart = cart_svc.clear_customer(user.tenant_id, user.id)
+    return _to_cart_response(cart)
+
+
+@router.get(
+    "/cart/validate-stock",
+    response_model=CartStockValidationResponse,
+)
+def cart_validate_stock(
+    store_id: Optional[int] = Query(default=None, gt=0),
+    user: User = Depends(require_permission("billing:read")),
+    db: Session = Depends(get_db),
+):
+    """Validates real-time inventory availability for all items in the active cart before checkout."""
+    effective_store_id = store_id or user.store_id
+    return CartService(db).validate_stock(
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        store_id=effective_store_id,
+    )
 
 
 @router.post(
@@ -350,6 +524,49 @@ def cart_apply_discount(
     )
 
     return _to_cart_response(cart)
+
+
+@router.post(
+    "/checkout",
+    response_model=InvoiceResponse,
+    status_code=201,
+    dependencies=[Depends(require_operational_write)],
+)
+def billing_checkout(
+    payload: InvoiceCreate,
+    user: User = Depends(require_permission("billing:write")),
+    db: Session = Depends(get_db),
+):
+    """Direct POS Checkout: Finalizes sale directly from active cart or provided line items, creating an invoice and linking payments."""
+    effective_store_id = payload.store_id or user.store_id
+    if effective_store_id is None:
+        raise AppException("store_id is required")
+
+    if user.store_id is not None and effective_store_id != user.store_id:
+        raise ForbiddenException("Access denied: cannot create invoice for another store")
+
+    if user.store_id is None:
+        if not is_tenant_wide_authorized(user, db):
+            raise ForbiddenException("Access denied: user has no assigned store")
+        store = (
+            db.query(Store)
+            .filter(
+                Store.id == effective_store_id,
+                Store.tenant_id == user.tenant_id,
+                Store.is_active.is_(True),
+            )
+            .first()
+        )
+        if not store:
+            raise NotFoundException(f"Store {effective_store_id} not found")
+
+    payload.store_id = effective_store_id
+    return BillingService(db).create_invoice_from_cart(
+        user.tenant_id,
+        user.id,
+        payload,
+        user=user,
+    )
 
 
 @router.post(
@@ -477,19 +694,45 @@ def calculate_tender_change(
     payload: TenderChangeRequest,
     user: User = Depends(require_permission("billing:read")),
 ):
-    """Validates cash tendered and calculates change returned to customer."""
-    if payload.tendered_amount < payload.payable_amount:
-        raise AppException(
-            f"Insufficient cash tendered: tendered amount ({payload.tendered_amount}) is less than payable amount ({payload.payable_amount})"
+    """Validates cash tendered and calculates change returned to customer, with optional split tender and denomination breakdown."""
+    other_payments_total = Decimal("0.00")
+    if payload.other_payments:
+        other_payments_total = sum(
+            Decimal(str(p.amount)) for p in payload.other_payments
         )
 
-    change_due = (payload.tendered_amount - payload.payable_amount).quantize(Decimal("0.01"))
+    net_payable_cash = max(Decimal("0.00"), payload.payable_amount - other_payments_total)
+
+    if payload.tendered_amount < net_payable_cash:
+        raise AppException(
+            f"Insufficient cash tendered: tendered amount ({payload.tendered_amount}) is less than payable amount ({net_payable_cash})"
+        )
+
+    change_due = (payload.tendered_amount - net_payable_cash).quantize(Decimal("0.01"))
     is_exact = change_due == Decimal("0.00")
+
+    denominations = None
+    if payload.calculate_denominations and change_due > Decimal("0.00"):
+        denoms = [500, 200, 100, 50, 20, 10, 5, 2, 1]
+        remaining = int(change_due)
+        breakdown = {}
+        for d in denoms:
+            if remaining >= d:
+                count = remaining // d
+                remaining %= d
+                breakdown[str(d)] = count
+        fraction = float((change_due - Decimal(str(int(change_due)))).quantize(Decimal("0.01")))
+        if fraction > 0:
+            breakdown["coins"] = fraction
+        denominations = breakdown
 
     return TenderChangeResponse(
         payable_amount=payload.payable_amount,
         tendered_amount=payload.tendered_amount,
+        other_payments_total=other_payments_total.quantize(Decimal("0.01")),
+        net_payable_cash=net_payable_cash.quantize(Decimal("0.01")),
         change_due=change_due,
         is_exact=is_exact,
+        denominations=denominations,
         status="success",
     )

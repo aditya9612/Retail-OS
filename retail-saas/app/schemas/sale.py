@@ -1,3 +1,4 @@
+from enum import Enum
 from datetime import datetime
 import math
 import re
@@ -256,6 +257,9 @@ class SaleCreate(BaseModel):
     @field_validator("sale_number", mode="before")
     @classmethod
     def validate_sale_number(cls, value):
+        if value is None:
+            return None
+
         if not isinstance(value, str):
             raise ValueError("Sale number must be a valid string.")
 
@@ -698,3 +702,20 @@ class SaleResponse(BaseModel):
         from_attributes=True
     )
 
+
+class SaleThermalMode(str, Enum):
+    preview = "preview"
+    view = "view"
+    download = "download"
+    pdf = "pdf"
+    html = "html"
+    json = "json"
+    text = "text"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        return None

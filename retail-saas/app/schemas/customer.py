@@ -9,6 +9,7 @@ from pydantic import (
     ConfigDict,
     EmailStr,
     Field,
+    StrictBool,
     field_validator,
     model_validator,
 )
@@ -41,6 +42,36 @@ def validate_phone_number(v: str) -> str:
             "Phone number must be 10 digits starting with 6-9, "
             "or +91 followed by 10 digits starting with 6-9"
         )
+
+    core_digits = v[3:] if v.startswith("+91") else v
+
+    # Reject full sequential / serial numbers (e.g. 9876543210, 6789012345, 8765432109)
+    ascending_seq = "01234567890123456789"
+    descending_seq = "98765432109876543210"
+    if core_digits in descending_seq or core_digits in ascending_seq:
+        raise ValueError("Phone number cannot be a sequential serial number")
+
+    # Reject 7 or more consecutive ascending or descending sequential digits (e.g. 9123456789, 9876543200)
+    for i in range(len(core_digits) - 6):
+        sub = core_digits[i:i+7]
+        if sub in "0123456789" or sub in "9876543210":
+            raise ValueError("Phone number cannot contain sequential serial digits")
+
+    # Reject identical repeated digits (e.g. 9999999999, 8888888888, 7777777777, 6666666666)
+    if len(set(core_digits)) == 1:
+        raise ValueError("Phone number cannot consist of identical repeated digits")
+
+    # Reject repetitive dummy digits where remaining 9 digits are identical (e.g. 9000000000, 8000000000, 7000000000, 6000000000, 9111111111)
+    if len(set(core_digits[1:])) == 1:
+        raise ValueError("Phone number cannot consist of repetitive dummy digits")
+
+    # Reject 5 or more consecutive identical digits (e.g. 9800000123, 9999912345)
+    if re.search(r"(\d)\1{4,}", core_digits):
+        raise ValueError("Phone number cannot contain 5 or more consecutive identical digits")
+
+    # Reject ending with multiple dummy zeros (e.g. 9876500000, 9123400000)
+    if core_digits.endswith("00000"):
+        raise ValueError("Phone number cannot end with multiple dummy zeros")
 
     return v
 
@@ -82,6 +113,15 @@ def validate_customer_name(v: str) -> str:
     return v
 
 
+CUSTOMER_DISALLOWED_TEXT_PLACEHOLDERS = {
+    "string", "null", "none", "undefined", "test", "dummy", "sample",
+    "placeholder", "name", "description", "unknown", "n/a", "na",
+    "temp", "false", "true", "p0@#$", "ppppp", "123445"
+}
+
+CUSTOMER_FORBIDDEN_TEXT_SYMBOLS = set(r"\|[]{}<>~^")
+
+
 def validate_meaningful_text(
     v: Optional[str],
     field_name: str = "Field",
@@ -113,10 +153,17 @@ def validate_meaningful_text(
             f"{min_length} and {max_length} characters"
         )
 
-    if v.lower() in {"string", "null", "none", "undefined", "-----", "@#$%%"}:
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in CUSTOMER_DISALLOWED_TEXT_PLACEHOLDERS or clean_norm in CUSTOMER_DISALLOWED_TEXT_PLACEHOLDERS:
         raise ValueError(
             f"{field_name} cannot be placeholder '{v}'"
         )
+
+    if any(c in CUSTOMER_FORBIDDEN_TEXT_SYMBOLS for c in v):
+        raise ValueError(f"{field_name} contains invalid special characters")
+
+    if re.search(r"[-+@#*/=_]{2,}", v):
+        raise ValueError(f"{field_name} cannot contain consecutive repeating symbols")
 
     dangerous_patterns = [
         r"<\s*script",
@@ -143,7 +190,8 @@ def validate_meaningful_text(
             f"HTML tags are not allowed in {field_name.lower()}"
         )
 
-    alpha_count = sum(1 for c in v if c.isalpha())
+    alpha_chars = [c.lower() for c in v if c.isalpha()]
+    alpha_count = len(alpha_chars)
 
     if alpha_count == 0:
         if v.isdigit():
@@ -154,6 +202,11 @@ def validate_meaningful_text(
         raise ValueError(
             f"{field_name} must contain meaningful text with letters, "
             "not only numbers or symbols"
+        )
+
+    if len(alpha_chars) >= 2 and len(set(alpha_chars)) < 2:
+        raise ValueError(
+            f"{field_name} cannot consist of repetitive characters '{v}'"
         )
 
     return v
@@ -228,8 +281,15 @@ class CustomerBase(BaseModel):
 
     birthday: Optional[date] = None
 
-    whatsapp_opt_in: bool = True
-    sms_opt_in: bool = True
+    whatsapp_opt_in: StrictBool = True
+    sms_opt_in: StrictBool = True
+
+    @field_validator("whatsapp_opt_in", "sms_opt_in", mode="before")
+    @classmethod
+    def validate_opt_in_bool(cls, v: Any, info) -> Any:
+        if v is None or not isinstance(v, bool):
+            raise ValueError(f"Invalid value for {info.field_name}. Expected a boolean: true or false.")
+        return v
 
     status: Literal[
         "active",
@@ -244,12 +304,22 @@ class CustomerBase(BaseModel):
         "inactive"
     ] = "new"
 
-    @field_validator("email")
+    credit_limit: Optional[Decimal] = Field(default=Decimal("0.00"), ge=Decimal("0.00"))
+    outstanding_balance: Optional[Decimal] = Field(default=Decimal("0.00"))
+
+    @field_validator("email", mode="before")
     @classmethod
-    def validate_customer_email(cls, v: Optional[EmailStr]) -> Optional[str]:
+    def validate_customer_email(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return None
-        return validate_email_address(str(v), field_name="Customer email", required=False)
+        if not isinstance(v, str):
+            raise ValueError("Customer email must be a string")
+        v_str = v.strip()
+        if not v_str:
+            return None
+        if any(c.isupper() for c in v_str):
+            raise ValueError("Customer email must contain lowercase letters only")
+        return validate_email_address(v_str, field_name="Customer email", required=False)
 
     @field_validator("phone")
     @classmethod
@@ -386,8 +456,16 @@ class CustomerUpdate(BaseModel):
 
     birthday: Optional[date] = None
 
-    whatsapp_opt_in: Optional[bool] = None
-    sms_opt_in: Optional[bool] = None
+    whatsapp_opt_in: Optional[StrictBool] = None
+    sms_opt_in: Optional[StrictBool] = None
+
+    @field_validator("whatsapp_opt_in", "sms_opt_in", mode="before")
+    @classmethod
+    def validate_update_opt_in_bool(cls, v: Any, info) -> Any:
+        if v is None or not isinstance(v, bool):
+            raise ValueError(f"Invalid value for {info.field_name}. Expected a boolean: true or false.")
+        return v
+    credit_limit: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"))
 
     @field_validator("name", mode="before")
     @classmethod
@@ -566,6 +644,11 @@ class CustomerUpdate(BaseModel):
                 f"Email cannot be placeholder '{v}'"
             )
 
+        if any(c.isupper() for c in v):
+            raise ValueError(
+                "Customer email must contain lowercase letters only"
+            )
+
         return validate_email_address(v, field_name="Customer email", required=True)
 
     @field_validator("gstin", mode="before")
@@ -722,6 +805,18 @@ class CustomerFeedbackCreate(BaseModel):
         max_length=2000
     )
 
+    @field_validator("comments", "suggestions", "feedback", mode="before")
+    @classmethod
+    def clean_feedback_strings_before(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v_strip = v.strip()
+            if not v_strip:
+                return None
+            return v_strip
+        return v
+
     @field_validator("comments")
     @classmethod
     def validate_comments(
@@ -776,17 +871,6 @@ class CustomerFeedbackCreate(BaseModel):
             required=False,
         )
 
-    @model_validator(mode="after")
-    def sync_comments_and_feedback(self):
-
-        if self.feedback and not self.comments:
-            self.comments = self.feedback
-
-        elif self.comments and not self.feedback:
-            self.feedback = self.comments
-
-        return self
-
 
 class CustomerFeedbackResponse(BaseModel):
 
@@ -819,15 +903,16 @@ class WalletOperationBase(BaseModel):
     )
 
     reference_no: str = Field(
-        min_length=2,
-        max_length=100,
-        description="Reference number"
+        min_length=3,
+        max_length=30,
+        description="Reference number (3 to 30 characters)"
     )
 
     remarks: Optional[str] = Field(
         default=None,
-        max_length=255,
-        description="Remarks must be meaningful text if provided"
+        min_length=3,
+        max_length=100,
+        description="Remarks must be meaningful text without numbers (3 to 100 characters)"
     )
 
     @field_validator("reference_no", mode="before")
@@ -844,17 +929,25 @@ class WalletOperationBase(BaseModel):
         if not v:
             raise ValueError("Reference number cannot be empty or whitespace")
 
-        if v.lower() in {"string", "null", "none", "undefined"}:
+        if len(v) < 3 or len(v) > 30:
+            raise ValueError("Reference number must be between 3 and 30 characters")
+
+        if v.lower() in {"string", "null", "none", "undefined", "test", "dummy", "sample"}:
             raise ValueError(f"Reference number cannot be placeholder '{v}'")
 
-        if re.fullmatch(r"^0+$", v) or (re.fullmatch(r"^[0_-]+$", v) and not any(c.isalpha() or c in '123456789' for c in v)):
-            raise ValueError("Reference number cannot be zero or all zeros")
-
-        if not re.fullmatch(r"^[A-Za-z0-9_-]{2,100}$", v):
-            raise ValueError("Reference number contains invalid characters")
+        if not re.fullmatch(r"^[A-Za-z0-9_-]{3,30}$", v):
+            raise ValueError("Reference number contains invalid characters (only alphanumeric, hyphens, and underscores allowed)")
 
         if not any(c.isdigit() for c in v):
             raise ValueError("Reference number cannot be alphabetic-only")
+
+        # Reject all zeros, all same character repeated, or sequential dummy strings
+        digits_only = "".join(c for c in v if c.isdigit())
+        if digits_only and len(set(digits_only)) == 1 and len(digits_only) >= 5:
+            raise ValueError("Reference number cannot be repeated identical digits")
+
+        if re.fullmatch(r"^0+$", v) or (re.fullmatch(r"^[0_-]+$", v) and not any(c.isalpha() or c in '123456789' for c in v)):
+            raise ValueError("Reference number cannot be zero or all zeros")
 
         return v
 
@@ -863,13 +956,54 @@ class WalletOperationBase(BaseModel):
     def validate_remarks(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return None
-        return validate_meaningful_text(
-            v,
-            "Remarks",
-            1,
-            255,
-            required=True,
-        )
+
+        if not isinstance(v, str):
+            raise ValueError("Remarks must be a string")
+
+        v = v.strip()
+
+        if not v:
+            raise ValueError("Remarks cannot be empty or whitespace")
+
+        if len(v) < 3 or len(v) > 100:
+            raise ValueError("Remarks must be between 3 and 100 characters")
+
+        # Reject numeric digits strictly in remarks per requirement
+        if any(c.isdigit() for c in v):
+            raise ValueError("Remarks cannot contain numeric digits")
+
+        # Reject placeholders
+        clean_norm = re.sub(r"[^a-zA-Z]", "", v.lower())
+        if v.lower() in CUSTOMER_DISALLOWED_TEXT_PLACEHOLDERS or clean_norm in CUSTOMER_DISALLOWED_TEXT_PLACEHOLDERS:
+            raise ValueError(f"Remarks cannot be placeholder '{v}'")
+
+        if v.lower() in {"na", "n/a", "nil", "none", "null", "test", "dummy", "sample"}:
+            raise ValueError(f"Remarks cannot be placeholder '{v}'")
+
+        # Reject forbidden special symbols
+        if any(c in CUSTOMER_FORBIDDEN_TEXT_SYMBOLS for c in v):
+            raise ValueError("Remarks contains invalid special characters")
+
+        # Reject consecutive repeating symbols
+        if re.search(r"[-+*/=_]{2,}", v):
+            raise ValueError("Remarks cannot contain consecutive repeating symbols")
+
+        # Require meaningful alphabetic words
+        alpha_chars = [c.lower() for c in v if c.isalpha()]
+        if len(alpha_chars) < 3:
+            raise ValueError("Remarks must contain at least 3 letters")
+
+        # Reject single character repeated (e.g. "aaaaa", "ppppp")
+        if len(set(alpha_chars)) < 2:
+            raise ValueError(f"Remarks cannot consist of repetitive characters '{v}'")
+
+        # Reject keyboard smash / gibberish: any unbroken word longer than 25 characters
+        words = v.split()
+        for word in words:
+            if len(word) > 25:
+                raise ValueError("Remarks cannot contain excessively long unbroken words or random gibberish")
+
+        return v
 
 
 class WalletCreditRequest(WalletOperationBase):
@@ -1172,6 +1306,12 @@ class ReferralCreate(BaseModel):
         gt=0
     )
 
+    referral_code: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        description="Optional custom referral code. If not provided, one is automatically generated."
+    )
+
     @model_validator(mode="after")
     def validate_referral(self):
 
@@ -1211,21 +1351,108 @@ class CustomerNoteCreate(BaseModel):
     )
 
     note: str = Field(
-        min_length=1,
-        max_length=5000
+        min_length=5,
+        max_length=5000,
+        description="Meaningful note text (letters must exceed digits, no repeating ??)",
     )
 
     @field_validator("note")
     @classmethod
     def validate_note(cls, v: str):
+        if v is None:
+            raise ValueError("Note is required and cannot be null")
 
-        return validate_meaningful_text(
-            v,
-            "Note",
-            1,
-            5000,
-            required=True,
-        )
+        if not isinstance(v, str):
+            raise ValueError("Note must be a string")
+
+        v = v.strip()
+
+        if not v:
+            raise ValueError("Note cannot be empty or whitespace")
+
+        if len(v) < 5 or len(v) > 5000:
+            raise ValueError("Note must be between 5 and 5000 characters")
+
+        # Reject HTML or dangerous script injections
+        dangerous_patterns = [
+            r"<\s*script",
+            r"<\s*/\s*script",
+            r"<\s*iframe",
+            r"<\s*style",
+            r"javascript\s*:",
+            r"onload\s*=",
+            r"onerror\s*=",
+            r"<\s*img",
+            r"<\s*a\s+",
+            r"alert\s*\(",
+        ]
+        for pattern in dangerous_patterns:
+            if re.search(pattern, v, re.IGNORECASE):
+                raise ValueError("Note contains invalid or dangerous HTML/script content")
+
+        if "<" in v and ">" in v:
+            raise ValueError("HTML tags are not allowed in note")
+
+        # Reject consecutive repeating question marks or punctuation (e.g. ????? from Image 2)
+        if re.search(r"\?{2,}", v):
+            raise ValueError("Note cannot contain consecutive repeating question marks")
+
+        if re.search(r"!{3,}", v):
+            raise ValueError("Note cannot contain consecutive repeating exclamation marks")
+
+        if re.search(r"[-+*/=_]{3,}", v):
+            raise ValueError("Note cannot contain consecutive repeating symbols")
+
+        # Reject placeholder phrases or meta dummy text
+        clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+        if v.lower() in CUSTOMER_DISALLOWED_TEXT_PLACEHOLDERS or clean_norm in CUSTOMER_DISALLOWED_TEXT_PLACEHOLDERS:
+            raise ValueError(f"Note cannot be placeholder '{v}'")
+
+        clean_phrase = re.sub(r"[^a-zA-Z\s]", "", v.lower()).strip()
+        clean_phrase = re.sub(r"\s+", " ", clean_phrase)
+        disallowed_note_phrases = {
+            "note is not required",
+            "not required",
+            "no note",
+            "nothing",
+            "test note",
+            "dummy note",
+            "sample note",
+            "ordinary note",
+        }
+        if clean_phrase in disallowed_note_phrases:
+            raise ValueError(f"Note cannot be placeholder or test phrase '{v}'")
+
+        # Letter and digit checks (Image 1 fix)
+        alpha_chars = [c.lower() for c in v if c.isalpha()]
+        alpha_count = len(alpha_chars)
+        digit_count = sum(1 for c in v if c.isdigit())
+
+        if alpha_count < 3:
+            raise ValueError("Note must contain meaningful text with at least 3 letters")
+
+        # Digits must not dominate descriptive text (rejects 99% numerical/decimal spam)
+        if digit_count >= alpha_count:
+            raise ValueError("Note cannot contain more digits than letters or be dominated by numbers/decimals")
+
+        # Reject long consecutive numeric sequences
+        if re.search(r"\d{15,}", v):
+            raise ValueError("Note cannot contain excessively long continuous number sequences")
+
+        # Reject repetitive single character spam (e.g. "aaaaa", "ppppp")
+        if len(set(alpha_chars)) < 2:
+            raise ValueError(f"Note cannot consist of repetitive characters '{v}'")
+
+        # Reject excessively long unbroken words, numbers, or gibberish (e.g. Image 1 token)
+        words = v.split()
+        if len(words) < 2 and len(v) > 20:
+            raise ValueError("Note must contain at least 2 words")
+
+        for word in words:
+            if len(word) > 35:
+                raise ValueError("Note cannot contain excessively long unbroken words, numbers, or random gibberish")
+
+        return v
 
 
 class CustomerNoteResponse(BaseModel):
@@ -1475,3 +1702,85 @@ class LoyaltyReportListResponse(BaseModel):
     success: bool = True
     message: str
     data: list[LoyaltyReportResponse] = Field(default_factory=list)
+
+
+class CreditLimitUpdateRequest(BaseModel):
+    credit_limit: Decimal = Field(
+        ...,
+        ge=Decimal("0.00"),
+        le=Decimal("99999999.99"),
+        description="Customer credit limit (must be non-negative)",
+    )
+
+
+class CustomerPaymentRequest(BaseModel):
+    amount: Decimal = Field(
+        ...,
+        gt=Decimal("0.00"),
+        le=Decimal("99999999.99"),
+        description="Payment amount to credit against dues",
+    )
+    payment_method: str = Field(
+        default="cash",
+        description="Payment method: cash, upi, card, bank_transfer",
+    )
+    reference_no: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Transaction or payment reference number",
+    )
+    notes: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Payment remarks or invoice reference",
+    )
+
+
+class CustomerLedgerEntryResponse(BaseModel):
+    id: int
+    customer_id: int
+    entry_type: str
+    amount: Decimal
+    balance_after: Decimal
+    reference_no: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CustomerLedgerStatementResponse(BaseModel):
+    success: bool = True
+    customer_id: int
+    customer_name: str
+    credit_limit: Decimal
+    outstanding_balance: Decimal
+    total_debit: Decimal = Decimal("0.00")
+    total_credit: Decimal = Decimal("0.00")
+    entries: list[CustomerLedgerEntryResponse] = Field(default_factory=list)
+
+
+class FeedbackAnalyticsResponse(BaseModel):
+    success: bool = True
+    total_feedbacks: int
+    average_rating: float
+    rating_breakdown: dict[str, int]
+    nps_score: float
+
+
+class CustomerDeleteResponse(BaseModel):
+    success: bool = True
+    message: str
+    customer_id: int
+
+
+class SendLedgerPdfResponse(BaseModel):
+    success: bool = True
+    message: str
+    customer_id: int
+    customer_name: str
+    phone: Optional[str] = None
+    outstanding_balance: Decimal
+    communication_id: int
+
+

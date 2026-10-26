@@ -1,11 +1,12 @@
 from datetime import date
 import re
-from typing import Optional, Union
+from typing import Optional, Union, Literal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.pdf_utils import render_pdf_or_preview
 from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.customer import (
@@ -49,12 +50,20 @@ from app.schemas.customer import (
     TopCustomerListResponse,
     LifetimeValueListResponse,
     LoyaltyReportListResponse,
+    CreditLimitUpdateRequest,
+    CustomerPaymentRequest,
+    CustomerLedgerEntryResponse,
+    CustomerLedgerStatementResponse,
+    FeedbackAnalyticsResponse,
+    CustomerDeleteResponse,
+    SendLedgerPdfResponse,
 )
 from app.services.customer_service import (
     fetch_customers,
     fetch_customer_stats,
+    CustomerService,
 )
-from app.services.order_service import CustomerService, OrderService
+from app.services.order_service import OrderService
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 
@@ -178,10 +187,34 @@ def create_feedback(
 )
 def get_feedback(
     customer_id: Optional[int] = Query(None, gt=0, deprecated=True, description="Deprecated: Use GET /customers/feedback/{customer_id} instead"),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_feedback(user.tenant_id, customer_id)
+    return CustomerService(db).get_feedback(
+        user.tenant_id,
+        customer_id,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
+    "/feedback/analytics",
+    response_model=FeedbackAnalyticsResponse,
+)
+def get_feedback_analytics(
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).get_feedback_analytics(
+        user.tenant_id,
+        from_date=from_date,
+        to_date=to_date,
+    )
 
 
 @router.get(
@@ -190,10 +223,17 @@ def get_feedback(
 )
 def get_feedback_by_customer_id(
     customer_id: int = Path(..., gt=0),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_feedback(user.tenant_id, customer_id)
+    return CustomerService(db).get_feedback(
+        user.tenant_id,
+        customer_id,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get(
@@ -247,12 +287,16 @@ def debit_wallet(
 )
 def wallet_transactions(
     customer_id: int = Path(..., gt=0),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_wallet_transactions(
         user.tenant_id,
         customer_id,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -261,15 +305,23 @@ def wallet_transactions(
     response_model=Union[list[CustomerResponse], SubResourceNoDataResponse],
 )
 def birthday_customers(
+    month: Optional[int] = Query(None, ge=1, le=12),
+    day: Optional[int] = Query(None, ge=1, le=31),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    today = date.today()
+    if month is None and day is None:
+        today = date.today()
+        target_month = today.month
+        target_day = today.day
+    else:
+        target_month = month
+        target_day = day
 
     return CustomerService(db).get_birthday_customers(
         tenant_id=user.tenant_id,
-        month=today.month,
-        day=today.day,
+        month=target_month,
+        day=target_day,
     )
 
 
@@ -293,11 +345,15 @@ def create_referral(
     response_model=CustomerReferralListResponse,
 )
 def get_referrals(
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     referrals = CustomerService(db).get_referrals(
         user.tenant_id,
+        page=page,
+        page_size=page_size,
     )
     return {
         "success": True,
@@ -311,11 +367,15 @@ def get_referrals(
     response_model=CustomerCommunicationListResponse,
 )
 def get_communications(
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     comms = CustomerService(db).get_communications(
         user.tenant_id,
+        page=page,
+        page_size=page_size,
     )
     return {
         "success": True,
@@ -346,12 +406,16 @@ def create_note(
 )
 def get_notes(
     customer_id: Optional[int] = Query(None, gt=0, deprecated=True, description="Deprecated: Use GET /customers/notes/{customer_id} instead"),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_notes(
         user.tenant_id,
         customer_id,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -361,12 +425,16 @@ def get_notes(
 )
 def get_notes_by_customer_id(
     customer_id: int = Path(..., gt=0),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_notes(
         user.tenant_id,
         customer_id,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -398,6 +466,7 @@ def export_directory(
         ...,
         description="Export format (required: 'excel', 'pdf')"
     ),
+    mode: Literal["download", "preview"] = Query(default="download", description="Delivery mode: 'download' (attachment) or 'preview' (visual preview)"),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db)
 ):
@@ -419,13 +488,10 @@ def export_directory(
             }
         )
 
-    return StreamingResponse(
-        file,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition":
-            "attachment; filename=customer_directory.pdf"
-        }
+    return render_pdf_or_preview(
+        pdf_content=file,
+        filename_base="customer_directory",
+        mode=mode,
     )
 
 
@@ -446,6 +512,18 @@ def update_customer(
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).update_customer(user.tenant_id, customer_id, data)
+
+
+@router.delete(
+    "/{customer_id}",
+    response_model=CustomerDeleteResponse,
+)
+def delete_customer(
+    customer_id: int = Path(..., gt=0),
+    user: User = Depends(require_permission("customers:write")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).delete_customer(user.tenant_id, customer_id)
 
 
 @router.get(
@@ -521,12 +599,16 @@ def get_loyalty(
 )
 def get_loyalty_history(
     customer_id: int = Path(..., gt=0),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_loyalty_history(
         user.tenant_id,
         customer_id,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -544,6 +626,112 @@ def update_customer_status(
         user.tenant_id,
         customer_id,
         data.status
+    )
+
+
+@router.patch(
+    "/{customer_id}/credit-limit",
+    response_model=CustomerResponse,
+)
+def update_credit_limit(
+    customer_id: int = Path(..., gt=0),
+    data: CreditLimitUpdateRequest = ...,
+    user: User = Depends(require_permission("customers:write")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).update_credit_limit(
+        user.tenant_id,
+        customer_id,
+        data.credit_limit,
+    )
+
+
+@router.get(
+    "/{customer_id}/ledger",
+    response_model=CustomerLedgerStatementResponse,
+)
+def get_customer_ledger(
+    customer_id: int = Path(..., gt=0),
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).get_customer_ledger(
+        user.tenant_id,
+        customer_id,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+
+@router.post(
+    "/{customer_id}/ledger/payment",
+    response_model=CustomerLedgerEntryResponse,
+    status_code=201,
+)
+def record_customer_payment(
+    customer_id: int = Path(..., gt=0),
+    data: CustomerPaymentRequest = ...,
+    user: User = Depends(require_permission("customers:write")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).record_customer_payment(
+        user.tenant_id,
+        customer_id,
+        data,
+    )
+
+
+@router.get(
+    "/{customer_id}/ledger/pdf",
+    summary="Download or Preview Customer Ledger PDF",
+    description="Exports or previews customer account statement/ledger. Mode can be 'download' (attachment .pdf) or 'preview' (visual PNG preview in Swagger UI / browser).",
+    responses={
+        200: {
+            "content": {
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}},
+                "image/png": {"schema": {"type": "string", "format": "binary"}, "description": "Visual document PNG preview for Swagger UI / browser"},
+            },
+            "description": "Rendered Ledger PDF download or visual PNG preview for Swagger UI.",
+        }
+    },
+)
+def export_customer_ledger_pdf(
+    customer_id: int = Path(..., gt=0),
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
+    mode: Literal["download", "preview"] = Query(default="download", description="Delivery mode: 'download' or 'preview'"),
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    pdf_stream = CustomerService(db).export_ledger_pdf(
+        user.tenant_id,
+        customer_id,
+        from_date=from_date,
+        to_date=to_date,
+    )
+    return render_pdf_or_preview(
+        pdf_content=pdf_stream,
+        filename_base=f"customer_{customer_id}_ledger",
+        mode=mode,
+    )
+
+
+@router.post(
+    "/{customer_id}/send-ledger-pdf",
+    response_model=SendLedgerPdfResponse,
+)
+def send_customer_ledger_pdf(
+    customer_id: int = Path(..., gt=0),
+    channel: str = Query("WHATSAPP", pattern="^(WHATSAPP|SMS|EMAIL)$"),
+    user: User = Depends(require_permission("customers:write")),
+    db: Session = Depends(get_db),
+):
+    return CustomerService(db).send_ledger_pdf(
+        user.tenant_id,
+        customer_id,
+        channel=channel,
     )
 
 
@@ -573,12 +761,16 @@ def send_sms(
     response_model=CustomerCommunicationListResponse,
 )
 def get_sms_notifications(
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     sms_list = CustomerService(db).get_communications_by_type(
         user.tenant_id,
         "SMS",
+        page=page,
+        page_size=page_size,
     )
     return {
         "success": True,
@@ -613,12 +805,16 @@ def send_whatsapp(
     response_model=CustomerCommunicationListResponse,
 )
 def get_whatsapp_notifications(
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     wa_list = CustomerService(db).get_communications_by_type(
         user.tenant_id,
         "WHATSAPP",
+        page=page,
+        page_size=page_size,
     )
     return {
         "success": True,
@@ -647,10 +843,18 @@ def send_campaign(
     response_model=list[TopCustomerResponse],
 )
 def top_customers(
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
+    limit: Optional[int] = Query(10, ge=1, le=100),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
-    return CustomerService(db).get_top_customers(user.tenant_id)
+    return CustomerService(db).get_top_customers(
+        user.tenant_id,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit or 10,
+    )
 
 
 @router.get(
@@ -658,11 +862,15 @@ def top_customers(
     response_model=RetentionResponse,
 )
 def retention_report(
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_retention_report(
-        user.tenant_id
+        user.tenant_id,
+        from_date=from_date,
+        to_date=to_date,
     )
 
 
@@ -671,11 +879,15 @@ def retention_report(
     response_model=list[LifetimeValueResponse],
 )
 def lifetime_value(
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_lifetime_value(
-        user.tenant_id
+        user.tenant_id,
+        from_date=from_date,
+        to_date=to_date,
     )
 
 
@@ -684,9 +896,13 @@ def lifetime_value(
     response_model=list[LoyaltyReportResponse],
 )
 def loyalty_report(
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
     user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).get_loyalty_report(
-        user.tenant_id
+        user.tenant_id,
+        from_date=from_date,
+        to_date=to_date,
     )

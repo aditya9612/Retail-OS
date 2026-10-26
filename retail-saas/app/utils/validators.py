@@ -3,6 +3,20 @@ from decimal import Decimal
 from typing import Any, Optional
 
 
+DISALLOWED_TEXT_PLACEHOLDERS = {
+    "string", "null", "none", "undefined", "test", "dummy", "sample",
+    "placeholder", "name", "description", "delivery", "unknown", "n/a", "na",
+    "temp", "false", "true", "p0@#$", "ppppp", "123445"
+}
+
+DISALLOWED_CODE_PLACEHOLDERS = {
+    "STRING", "NULL", "NONE", "UNDEFINED", "TEST", "DUMMY", "SAMPLE",
+    "CODE", "DEFAULT", "TEMP", "NAME", "VALUE", "METHOD", "ZONE", "PARTNER"
+}
+
+FORBIDDEN_TEXT_SYMBOLS = set(r"\|[]{}<>?;:~^$%")
+
+
 def validate_meaningful_text(
     value: Any,
     field_name: str = "Field",
@@ -13,7 +27,7 @@ def validate_meaningful_text(
     """
     Validates that a string field contains meaningful textual content.
     Rejects: None (if required), empty/whitespace, placeholders ("string", "null", "none", "undefined"),
-    numeric-only, and special-character-only strings.
+    numeric-only, special-character-only strings, repetitive spam ("ppppp"), and symbol spam.
     Allows legitimate punctuation and spaces.
     """
     if value is None:
@@ -28,7 +42,8 @@ def validate_meaningful_text(
     if not v:
         raise ValueError(f"{field_name} cannot be empty or whitespace")
 
-    if v.lower() in ("string", "null", "none", "undefined"):
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_TEXT_PLACEHOLDERS or clean_norm in DISALLOWED_TEXT_PLACEHOLDERS:
         raise ValueError(f"{field_name} cannot be placeholder '{value}'")
 
     if len(v) < min_length or len(v) > max_length:
@@ -39,8 +54,28 @@ def validate_meaningful_text(
     if v.isdigit():
         raise ValueError(f"{field_name} cannot be numeric-only")
 
-    if not any(c.isalnum() for c in v):
-        raise ValueError(f"{field_name} cannot consist only of special characters")
+    # Reject forbidden special symbols (\, |, [, ], {, }, <, >, ?, ;, :, ~, ^, $, %)
+    if any(c in FORBIDDEN_TEXT_SYMBOLS for c in v):
+        raise ValueError(f"{field_name} contains invalid special characters")
+
+    # Reject consecutive repeating symbols (e.g. ---, +++, //, ...)
+    if re.search(r"[-+@#*/=_]{2,}", v):
+        raise ValueError(f"{field_name} cannot contain consecutive repeating symbols")
+
+    # Must contain alphabetic letters
+    alpha_chars = [c.lower() for c in v if c.isalpha()]
+    alpha_count = len(alpha_chars)
+    if alpha_count < 2:
+        raise ValueError(f"{field_name} must contain at least 2 letters")
+
+    # Must not be single character repeated (e.g. "ppppp", "aaaa")
+    if len(set(alpha_chars)) < 2:
+        raise ValueError(f"{field_name} cannot consist of repetitive characters '{value}'")
+
+    # Digits must not dominate descriptive text (excluding addresses)
+    digit_count = sum(1 for c in v if c.isdigit())
+    if digit_count > alpha_count and not any(k in field_name.lower() for k in ["address", "tracking"]):
+        raise ValueError(f"{field_name} cannot contain more digits than letters")
 
     return v
 
@@ -52,9 +87,9 @@ def validate_person_name(
 ) -> Optional[str]:
     """
     Validates a human person name.
-    Rejects: numbers, placeholders ("string", "null"), special-only, empty/whitespace.
+    Rejects: numbers, placeholders ("string", "null"), special-only, empty/whitespace, repetitive spam.
     Allows: letters, spaces, hyphens, apostrophes, and periods (e.g. "Amit Shinde", "O'Connor").
-    Requires at least 2 alphabetic characters.
+    Requires at least 2 alphabetic characters and at least 2 distinct letters.
     """
     if value is None:
         if required:
@@ -68,7 +103,8 @@ def validate_person_name(
     if not v:
         raise ValueError(f"{field_name} cannot be empty or whitespace")
 
-    if v.lower() in ("string", "null", "none", "undefined"):
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_TEXT_PLACEHOLDERS or clean_norm in DISALLOWED_TEXT_PLACEHOLDERS:
         raise ValueError(f"{field_name} cannot be placeholder '{value}'")
 
     if len(v) < 2 or len(v) > 100:
@@ -81,9 +117,15 @@ def validate_person_name(
         if not (c.isalpha() or c in " '-."):
             raise ValueError(f"{field_name} contains invalid characters")
 
-    alpha_count = sum(1 for c in v if c.isalpha())
-    if alpha_count < 2:
+    if re.search(r"[-'.]{2,}", v):
+        raise ValueError(f"{field_name} cannot contain consecutive repeating symbols")
+
+    alpha_chars = [c.lower() for c in v if c.isalpha()]
+    if len(alpha_chars) < 2:
         raise ValueError(f"{field_name} must contain at least 2 letters")
+
+    if len(set(alpha_chars)) < 2:
+        raise ValueError(f"{field_name} cannot consist of repetitive characters '{value}'")
 
     return v
 
@@ -98,7 +140,8 @@ def validate_code(
     """
     Validates uppercase identifier codes across Delivery Method, Zone, and Partner.
     Format: Alphanumeric uppercase with hyphens and underscores (^[A-Z0-9_-]+$).
-    Must contain at least one letter. Rejects numeric-only, special-only, and placeholders.
+    Must start with a letter, contain at least two distinct letters, and reject
+    numeric-only, single-character spam, zero-padding, and placeholders.
     """
     if value is None:
         if required:
@@ -112,7 +155,8 @@ def validate_code(
     if not v:
         raise ValueError(f"{field_name} cannot be empty or whitespace")
 
-    if v in ("STRING", "NULL", "NONE", "UNDEFINED"):
+    clean_norm = re.sub(r"[^A-Z0-9]", "", v)
+    if v in DISALLOWED_CODE_PLACEHOLDERS or clean_norm in DISALLOWED_CODE_PLACEHOLDERS:
         raise ValueError(f"{field_name} cannot be placeholder '{value}'")
 
     if len(v) < min_length or len(v) > max_length:
@@ -125,11 +169,24 @@ def validate_code(
             f"{field_name} can only contain uppercase letters, numbers, underscores, and hyphens"
         )
 
+    if v.startswith(("-", "_")) or v.endswith(("-", "_")):
+        raise ValueError(f"{field_name} cannot start or end with a hyphen or underscore")
+
+    if "--" in v or "__" in v or "-_" in v or "_-" in v:
+        raise ValueError(f"{field_name} cannot contain consecutive hyphens or underscores")
+
     if v.isdigit():
         raise ValueError(f"{field_name} cannot be numeric-only")
 
-    if not any(c.isalpha() for c in v):
-        raise ValueError(f"{field_name} must contain at least one letter")
+    if not v[0].isalpha():
+        raise ValueError(f"{field_name} must start with an alphabetic letter")
+
+    alpha_chars = [c for c in v if c.isalpha()]
+    if len(alpha_chars) < 2:
+        raise ValueError(f"{field_name} must contain at least 2 alphabetic letters")
+
+    if len(set(alpha_chars)) < 2:
+        raise ValueError(f"{field_name} cannot consist of repetitive characters '{value}'")
 
     return v
 
@@ -156,7 +213,8 @@ def validate_indian_phone(
     if not v:
         raise ValueError(f"{field_name} cannot be empty or whitespace")
 
-    if v.lower() in ("string", "null", "none", "undefined"):
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_TEXT_PLACEHOLDERS or clean_norm in DISALLOWED_TEXT_PLACEHOLDERS:
         raise ValueError(f"{field_name} cannot be placeholder '{value}'")
 
     clean = re.sub(r"[\s\-\(\)\.]", "", v)
@@ -166,6 +224,36 @@ def validate_indian_phone(
             f"{field_name} must be a 10-digit Indian mobile number starting with 6-9, "
             "or +91 followed by 10 digits starting with 6-9"
         )
+
+    core_digits = clean[3:] if clean.startswith("+91") else clean
+
+    # Reject full sequential / serial numbers (e.g. 9876543210, 6789012345, 8765432109)
+    ascending_seq = "01234567890123456789"
+    descending_seq = "98765432109876543210"
+    if core_digits in descending_seq or core_digits in ascending_seq:
+        raise ValueError(f"{field_name} cannot be a sequential serial number '{value}'")
+
+    # Reject 7 or more consecutive ascending or descending sequential digits (e.g. 9123456789, 9876543200)
+    for i in range(len(core_digits) - 6):
+        sub = core_digits[i:i+7]
+        if sub in "0123456789" or sub in "9876543210":
+            raise ValueError(f"{field_name} cannot contain sequential serial digits '{value}'")
+
+    # Reject identical digits (e.g. 9999999999, 8888888888, 7777777777, 6666666666)
+    if len(set(core_digits)) == 1:
+        raise ValueError(f"{field_name} cannot consist of identical repeated digits '{value}'")
+
+    # Reject dummy repetitive sequence where remaining 9 digits are all identical (e.g. 6000000000, 7000000000, 8000000000, 9000000000, 6111111111)
+    if len(set(core_digits[1:])) == 1:
+        raise ValueError(f"{field_name} cannot consist of repetitive dummy digits '{value}'")
+
+    # Reject 5 or more consecutive identical digits (e.g. 6000000000, 9800000123)
+    if re.search(r"(\d)\1{4,}", core_digits):
+        raise ValueError(f"{field_name} cannot contain 5 or more consecutive identical digits")
+
+    # Reject ending with multiple dummy zeros (e.g. 6000000000, 9876500000)
+    if core_digits.endswith("00000"):
+        raise ValueError(f"{field_name} cannot end with multiple dummy zeros")
 
     return clean
 
@@ -180,7 +268,7 @@ def validate_tracking_number(
     Length: 3 to 100 characters.
     Allowed chars: alphanumeric and -_#/
     Rejects: null/empty (if required), placeholders ("string", "null"),
-    numeric-only ("123", "123456"), and special-only ("------", "###").
+    numeric-only ("123", "123456"), special-only ("------", "###"), and repetitive characters.
     """
     if value is None:
         if required:
@@ -194,7 +282,8 @@ def validate_tracking_number(
     if not v:
         raise ValueError(f"{field_name} cannot be empty or whitespace")
 
-    if v.lower() in ("string", "null", "none", "undefined"):
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_TEXT_PLACEHOLDERS or clean_norm in DISALLOWED_TEXT_PLACEHOLDERS:
         raise ValueError(f"{field_name} cannot be placeholder '{value}'")
 
     if len(v) < 3 or len(v) > 100:
@@ -207,8 +296,12 @@ def validate_tracking_number(
     if v.isdigit():
         raise ValueError(f"{field_name} cannot be numeric-only")
 
-    if not any(c.isalnum() for c in v):
+    alnum_chars = [c for c in v if c.isalnum()]
+    if not alnum_chars:
         raise ValueError(f"{field_name} must contain alphanumeric characters")
+
+    if len(set(alnum_chars)) < 2:
+        raise ValueError(f"{field_name} cannot consist of repetitive characters")
 
     return v
 
@@ -223,7 +316,7 @@ def validate_real_address(
     """
     Validates real-world addresses.
     Allows: numbers, letters, spaces, commas, hyphens, slashes, building/flat numbers, PIN codes.
-    Rejects: "string", placeholders, numeric-only, and special-character-only values.
+    Rejects: "string", placeholders, numeric-only, special-character-only values, and repetitive characters.
     """
     if value is None:
         if required:
@@ -237,7 +330,8 @@ def validate_real_address(
     if not v:
         raise ValueError(f"{field_name} cannot be empty or whitespace")
 
-    if v.lower() in ("string", "null", "none", "undefined"):
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_TEXT_PLACEHOLDERS or clean_norm in DISALLOWED_TEXT_PLACEHOLDERS:
         raise ValueError(f"{field_name} cannot be placeholder '{value}'")
 
     if len(v) < min_length or len(v) > max_length:
@@ -251,10 +345,15 @@ def validate_real_address(
     if not any(c.isalnum() for c in v):
         raise ValueError(f"{field_name} must contain alphanumeric characters")
 
-    alpha_count = sum(1 for c in v if c.isalpha())
-    if alpha_count < 2:
+    alpha_chars = [c.lower() for c in v if c.isalpha()]
+    if len(alpha_chars) < 2:
         raise ValueError(
             f"{field_name} must contain meaningful address text with letters"
+        )
+
+    if len(set(alpha_chars)) < 2:
+        raise ValueError(
+            f"{field_name} cannot consist of repetitive characters"
         )
 
     return v
@@ -290,6 +389,16 @@ def validate_single_pincode(p: Any) -> str:
             f"Invalid pincode: '{p}'. First digit of Indian pincode cannot be 0"
         )
 
+    if len(set(p_str)) == 1:
+        raise ValueError(
+            f"Invalid pincode: '{p}'. Pincode cannot have all identical digits"
+        )
+
+    if p_str in {"123456", "654321"}:
+        raise ValueError(
+            f"Invalid pincode: '{p}'. Sequential dummy pincode not allowed"
+        )
+
     return p_str
 
 
@@ -318,6 +427,396 @@ def validate_pincodes_list(value: Any, required: bool = True) -> list[str]:
             validated.append(p)
 
     return validated
+
+
+INDIAN_STATES_AND_UTS: set[str] = {
+    "Andhra Pradesh",
+    "Arunachal Pradesh",
+    "Assam",
+    "Bihar",
+    "Chhattisgarh",
+    "Goa",
+    "Gujarat",
+    "Haryana",
+    "Himachal Pradesh",
+    "Jharkhand",
+    "Karnataka",
+    "Kerala",
+    "Madhya Pradesh",
+    "Maharashtra",
+    "Manipur",
+    "Meghalaya",
+    "Mizoram",
+    "Nagaland",
+    "Odisha",
+    "Punjab",
+    "Rajasthan",
+    "Sikkim",
+    "Tamil Nadu",
+    "Telangana",
+    "Tripura",
+    "Uttar Pradesh",
+    "Uttarakhand",
+    "West Bengal",
+    "Andaman and Nicobar Islands",
+    "Chandigarh",
+    "Dadra and Nagar Haveli and Daman and Diu",
+    "Delhi",
+    "Jammu and Kashmir",
+    "Ladakh",
+    "Lakshadweep",
+    "Puducherry",
+}
+
+NON_CITY_LOCATION_NAMES: set[str] = {
+    "india", "japan", "china", "nepal", "bhutan", "bangladesh", "pakistan",
+    "sri lanka", "afghanistan", "united states", "usa", "us", "united kingdom",
+    "uk", "canada", "australia", "germany", "france", "italy", "spain",
+    "russia", "singapore", "malaysia", "thailand", "unknown", "world",
+    "global", "country", "state", "city", "none", "null", "string"
+}
+
+INDIAN_STATE_PINCODE_PREFIXES: dict[str, set[str]] = {
+    "Andhra Pradesh": {"51", "52", "53"},
+    "Arunachal Pradesh": {"79"},
+    "Assam": {"78"},
+    "Bihar": {"80", "81", "82", "83", "84", "85"},
+    "Chhattisgarh": {"49"},
+    "Goa": {"40"},  # 403xxx
+    "Gujarat": {"36", "37", "38", "39"},
+    "Haryana": {"12", "13"},
+    "Himachal Pradesh": {"17"},
+    "Jharkhand": {"81", "82", "83"},
+    "Karnataka": {"56", "57", "58", "59"},
+    "Kerala": {"67", "68", "69"},
+    "Madhya Pradesh": {"45", "46", "47", "48"},
+    "Maharashtra": {"40", "41", "42", "43", "44"},
+    "Manipur": {"79"},
+    "Meghalaya": {"79"},
+    "Mizoram": {"79"},
+    "Nagaland": {"79"},
+    "Odisha": {"75", "76", "77"},
+    "Punjab": {"14", "15", "16"},
+    "Rajasthan": {"30", "31", "32", "33", "34"},
+    "Sikkim": {"73"},
+    "Tamil Nadu": {"60", "61", "62", "63", "64", "65", "66"},
+    "Telangana": {"50"},
+    "Tripura": {"79"},
+    "Uttar Pradesh": {"20", "21", "22", "23", "24", "25", "26", "27", "28"},
+    "Uttarakhand": {"24", "26"},
+    "West Bengal": {"70", "71", "72", "73", "74"},
+    "Andaman and Nicobar Islands": {"74"},
+    "Chandigarh": {"16"},
+    "Dadra and Nagar Haveli and Daman and Diu": {"39"},
+    "Delhi": {"11"},
+    "Jammu and Kashmir": {"18", "19"},
+    "Ladakh": {"19"},
+    "Lakshadweep": {"68"},
+    "Puducherry": {"60"},  # 605xxx
+}
+
+MAJOR_INDIAN_CITIES_STATE_MAP: dict[str, str] = {
+    "mumbai": "Maharashtra",
+    "pune": "Maharashtra",
+    "nagpur": "Maharashtra",
+    "nashik": "Maharashtra",
+    "thane": "Maharashtra",
+    "aurangabad": "Maharashtra",
+    "chhatrapati sambhajinagar": "Maharashtra",
+    "solapur": "Maharashtra",
+    "amravati": "Maharashtra",
+    "kolhapur": "Maharashtra",
+    "navi mumbai": "Maharashtra",
+    "pimpri-chinchwad": "Maharashtra",
+    "ahmedabad": "Gujarat",
+    "surat": "Gujarat",
+    "vadodara": "Gujarat",
+    "rajkot": "Gujarat",
+    "bengaluru": "Karnataka",
+    "bangalore": "Karnataka",
+    "mysuru": "Karnataka",
+    "mysore": "Karnataka",
+    "hubli": "Karnataka",
+    "mangalore": "Karnataka",
+    "mangaluru": "Karnataka",
+    "hyderabad": "Telangana",
+    "warangal": "Telangana",
+    "chennai": "Tamil Nadu",
+    "coimbatore": "Tamil Nadu",
+    "madurai": "Tamil Nadu",
+    "tiruchirappalli": "Tamil Nadu",
+    "salem": "Tamil Nadu",
+    "kolkata": "West Bengal",
+    "howrah": "West Bengal",
+    "durgapur": "West Bengal",
+    "asansol": "West Bengal",
+    "jaipur": "Rajasthan",
+    "jodhpur": "Rajasthan",
+    "udaipur": "Rajasthan",
+    "kota": "Rajasthan",
+    "lucknow": "Uttar Pradesh",
+    "kanpur": "Uttar Pradesh",
+    "agra": "Uttar Pradesh",
+    "varanasi": "Uttar Pradesh",
+    "prayagraj": "Uttar Pradesh",
+    "allahabad": "Uttar Pradesh",
+    "noida": "Uttar Pradesh",
+    "ghaziabad": "Uttar Pradesh",
+    "meerut": "Uttar Pradesh",
+    "patna": "Bihar",
+    "gaya": "Bihar",
+    "bhagalpur": "Bihar",
+    "muzaffarpur": "Bihar",
+    "bhopal": "Madhya Pradesh",
+    "indore": "Madhya Pradesh",
+    "jabalpur": "Madhya Pradesh",
+    "gwalior": "Madhya Pradesh",
+    "ranchi": "Jharkhand",
+    "jamshedpur": "Jharkhand",
+    "dhanbad": "Jharkhand",
+    "bhubaneswar": "Odisha",
+    "cuttack": "Odisha",
+    "rourkela": "Odisha",
+    "chandigarh": "Chandigarh",
+    "ludhiana": "Punjab",
+    "amritsar": "Punjab",
+    "jalandhar": "Punjab",
+    "dehradun": "Uttarakhand",
+    "haridwar": "Uttarakhand",
+    "shimla": "Himachal Pradesh",
+    "srinagar": "Jammu and Kashmir",
+    "jammu": "Jammu and Kashmir",
+    "guwahati": "Assam",
+    "visakhapatnam": "Andhra Pradesh",
+    "vijayawada": "Andhra Pradesh",
+    "guntur": "Andhra Pradesh",
+    "delhi": "Delhi",
+    "new delhi": "Delhi",
+    "panaji": "Goa",
+    "margao": "Goa",
+    "raipur": "Chhattisgarh",
+}
+
+MAJOR_CITY_PINCODE_PREFIXES: dict[str, set[str]] = {
+    "mumbai": {"400"},
+    "navi mumbai": {"400", "410"},
+    "thane": {"400", "401"},
+    "pune": {"411", "412"},
+    "pimpri-chinchwad": {"411"},
+    "nashik": {"422"},
+    "nagpur": {"440", "441"},
+    "aurangabad": {"431"},
+    "chhatrapati sambhajinagar": {"431"},
+    "kolhapur": {"416"},
+    "solapur": {"413"},
+    "satara": {"415"},
+    "amravati": {"444"},
+    "ahmednagar": {"414"},
+    "jalgaon": {"425"},
+    "nanded": {"431"},
+    "delhi": {"110"},
+    "new delhi": {"110"},
+    "bengaluru": {"560", "562"},
+    "bangalore": {"560", "562"},
+    "hyderabad": {"500"},
+    "chennai": {"600"},
+    "kolkata": {"700"},
+    "ahmedabad": {"380", "382"},
+    "surat": {"394", "395"},
+    "vadodara": {"390", "391"},
+    "rajkot": {"360"},
+    "jaipur": {"302"},
+    "jodhpur": {"342"},
+    "lucknow": {"226"},
+    "kanpur": {"208"},
+    "agra": {"282"},
+    "varanasi": {"221"},
+    "noida": {"201"},
+    "ghaziabad": {"201"},
+    "patna": {"800"},
+    "bhopal": {"462"},
+    "indore": {"452"},
+    "chandigarh": {"160"},
+    "dehradun": {"248"},
+    "shimla": {"171"},
+    "srinagar": {"190"},
+    "jammu": {"180"},
+    "ranchi": {"834"},
+    "bhubaneswar": {"751"},
+    "guwahati": {"781"},
+    "visakhapatnam": {"530"},
+    "vijayawada": {"520"},
+    "panaji": {"403"},
+    "margao": {"403"},
+    "raipur": {"492"},
+}
+
+
+def validate_indian_state(value: Any, required: bool = False) -> Optional[str]:
+    """
+    Validates that a state is an official Indian State or Union Territory.
+    Accepts case-insensitive matching and returns the standard title-cased name.
+    Rejects placeholders, numeric/symbol spam, and city names (e.g. 'Pune').
+    """
+    if value is None:
+        if required:
+            raise ValueError("State cannot be null")
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("State must be a string")
+
+    v = value.strip()
+    if not v:
+        raise ValueError("State cannot be empty or whitespace")
+
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_TEXT_PLACEHOLDERS or clean_norm in DISALLOWED_TEXT_PLACEHOLDERS:
+        raise ValueError(f"State cannot be placeholder '{value}'")
+
+    if v.isdigit():
+        raise ValueError("State cannot be numeric-only")
+
+    if any(c in FORBIDDEN_TEXT_SYMBOLS for c in v):
+        raise ValueError("State contains invalid special characters")
+
+    if re.search(r"[-+@#*/=_]{2,}", v):
+        raise ValueError("State cannot contain consecutive repeating symbols")
+
+    # Reject city names supplied as states (e.g., state='Pune', 'Mumbai')
+    if v.lower() in MAJOR_INDIAN_CITIES_STATE_MAP:
+        correct_state = MAJOR_INDIAN_CITIES_STATE_MAP[v.lower()]
+        raise ValueError(
+            f"Invalid Indian state: '{value}'. '{value}' is a city in {correct_state}, not a state"
+        )
+
+    matched = next((s for s in INDIAN_STATES_AND_UTS if s.lower() == v.lower()), None)
+    if not matched:
+        raise ValueError(
+            f"Invalid Indian state or union territory: '{value}'. Must be a valid Indian state or UT"
+        )
+
+    return matched
+
+
+def validate_city_name(value: Any, required: bool = False) -> Optional[str]:
+    """
+    Validates an Indian city name.
+    Rejects placeholders, numeric/symbol spam, countries, and Indian state/UT names (e.g. 'Maharashtra').
+    Allows letters, spaces, hyphens, and apostrophes.
+    """
+    if value is None:
+        if required:
+            raise ValueError("City cannot be null")
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("City must be a string")
+
+    v = value.strip()
+    if not v:
+        raise ValueError("City cannot be empty or whitespace")
+
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_TEXT_PLACEHOLDERS or clean_norm in DISALLOWED_TEXT_PLACEHOLDERS:
+        raise ValueError(f"City cannot be placeholder '{value}'")
+
+    if len(v) < 2 or len(v) > 100:
+        raise ValueError("City must be between 2 and 100 characters")
+
+    if v.isdigit():
+        raise ValueError("City cannot be numeric-only")
+
+    if any(c in FORBIDDEN_TEXT_SYMBOLS for c in v):
+        raise ValueError("City contains invalid special characters")
+
+    if re.search(r"[-+@#*/=_]{2,}", v):
+        raise ValueError("City cannot contain consecutive repeating symbols")
+
+    # Reject Indian State/UT names passed as city
+    if v.lower() in {s.lower() for s in INDIAN_STATES_AND_UTS}:
+        raise ValueError(
+            f"City cannot be an Indian state or union territory name: '{value}'"
+        )
+
+    # Reject country or global names
+    if v.lower() in NON_CITY_LOCATION_NAMES:
+        raise ValueError(f"City cannot be a country or invalid location name: '{value}'")
+
+    if not re.fullmatch(r"[A-Za-z]+(?:[ .'-][A-Za-z]+)*", v):
+        raise ValueError("City must contain only letters, spaces, hyphens and apostrophes")
+
+    alpha_chars = [c.lower() for c in v if c.isalpha()]
+    if len(alpha_chars) < 2:
+        raise ValueError("City must contain at least 2 letters")
+
+    if len(set(alpha_chars)) < 2:
+        raise ValueError(f"City cannot consist of repetitive characters '{value}'")
+
+    return v.title() if len(v) > 3 else v
+
+
+def validate_zone_pincodes_match_geo(
+    pincodes: list[str],
+    state: Optional[str] = None,
+    city: Optional[str] = None,
+) -> None:
+    """
+    Validates that each 6-digit Indian pincode matches the specified state and city based on
+    official Indian Postal PIN code prefixes.
+    """
+    if not pincodes:
+        return
+
+    # 1. State-level prefix matching (first 2 digits)
+    if state:
+        canonical_state = next((s for s in INDIAN_STATES_AND_UTS if s.lower() == state.lower()), state)
+        allowed_state_prefixes = INDIAN_STATE_PINCODE_PREFIXES.get(canonical_state)
+
+        if allowed_state_prefixes:
+            for p in pincodes:
+                if not isinstance(p, str) or len(p) != 6 or not p.isdigit():
+                    continue
+
+                prefix2 = p[:2]
+
+                # Specific check for Goa (403xxx) vs Maharashtra (400-402, 404-449)
+                if canonical_state == "Goa" and not p.startswith("403"):
+                    raise ValueError(
+                        f"Pincode '{p}' does not belong to state 'Goa'. Goa pincodes start with '403'"
+                    )
+                if canonical_state == "Maharashtra" and p.startswith("403"):
+                    raise ValueError(
+                        f"Pincode '{p}' belongs to Goa (403xxx), not Maharashtra"
+                    )
+
+                if prefix2 not in allowed_state_prefixes:
+                    sorted_prefixes = ", ".join(sorted(allowed_state_prefixes))
+                    raise ValueError(
+                        f"Pincode '{p}' does not belong to state '{canonical_state}'. "
+                        f"Pincodes for '{canonical_state}' must start with [{sorted_prefixes}]"
+                    )
+
+    # 2. City-level prefix matching (first 3 digits)
+    if city:
+        city_lower = city.strip().lower()
+        allowed_city_prefixes = MAJOR_CITY_PINCODE_PREFIXES.get(city_lower)
+
+        if allowed_city_prefixes:
+            for p in pincodes:
+                if not isinstance(p, str) or len(p) != 6 or not p.isdigit():
+                    continue
+
+                prefix3 = p[:3]
+                if prefix3 not in allowed_city_prefixes:
+                    sorted_prefixes = ", ".join(sorted(allowed_city_prefixes))
+                    raise ValueError(
+                        f"Pincode '{p}' does not match city '{city}'. "
+                        f"Pincodes for '{city}' must start with [{sorted_prefixes}]"
+                    )
+
+
+validate_zone_pincodes_match_state = validate_zone_pincodes_match_geo
 
 
 def validate_strict_bool(
@@ -354,7 +853,9 @@ def validate_positive_money(
     """
     if value is None:
         if required:
-            return Decimal("0.00") if allow_zero else None
+            if not allow_zero:
+                raise ValueError(f"{field_name} is required and must be greater than zero")
+            return Decimal("0.00")
         return None
 
     if isinstance(value, bool):
@@ -390,11 +891,11 @@ def validate_positive_int(
     value: Any,
     field_name: str = "Estimated days",
     required: bool = False,
+    max_value: Optional[int] = 60,
 ) -> Optional[int]:
     """
     Validates that a field is a strict positive integer (> 0).
-    Rejects 0, negative integers, floats/decimals, booleans, and strings.
-    Does not enforce any arbitrary upper limit.
+    Rejects 0, negative integers, floats/decimals, booleans, strings, and values exceeding max_value.
     """
     if value is None:
         if required:
@@ -416,6 +917,9 @@ def validate_positive_int(
     if value <= 0:
         raise ValueError(f"{field_name} must be a positive integer (> 0)")
 
+    if max_value is not None and value > max_value:
+        raise ValueError(f"{field_name} cannot exceed {max_value}")
+
     return value
 
 
@@ -426,8 +930,10 @@ def validate_carrier_credentials(
 ) -> Optional[str]:
     """
     Validates API key / API secret credentials.
-    Rejects placeholders ("string", "null", "none"), empty/whitespace, and special-only strings.
-    Preserves actual carrier credentials up to 255 characters.
+    Rejects placeholders ("string", "null", "none"), empty/whitespace, numeric-only,
+    forbidden special characters (\\, |, [], {}, <>, ?, ;, :, ~, ^, $, %),
+    consecutive repeating symbols, repetitive spam, and dummy values ("0-0", "@#e0").
+    Requires between 6 and 255 characters with at least 4 alphanumeric characters.
     """
     if value is None:
         if required:
@@ -441,14 +947,31 @@ def validate_carrier_credentials(
     if not v:
         raise ValueError(f"{field_name} cannot be empty or whitespace")
 
-    if v.lower() in ("string", "null", "none", "undefined"):
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_TEXT_PLACEHOLDERS or clean_norm in DISALLOWED_TEXT_PLACEHOLDERS:
         raise ValueError(f"{field_name} cannot be placeholder '{value}'")
 
-    if len(v) > 255:
-        raise ValueError(f"{field_name} cannot exceed 255 characters")
+    if len(v) < 6 or len(v) > 255:
+        raise ValueError(f"{field_name} must be between 6 and 255 characters")
 
-    if not any(c.isalnum() for c in v):
-        raise ValueError(f"{field_name} cannot consist only of special characters")
+    if v.isdigit():
+        raise ValueError(f"{field_name} cannot be numeric-only")
+
+    # Reject forbidden symbols (\, |, [, ], {, }, <, >, ?, ;, :, ~, ^, $, %)
+    if any(c in FORBIDDEN_TEXT_SYMBOLS for c in v):
+        raise ValueError(f"{field_name} contains invalid special characters")
+
+    # Reject consecutive repeating symbols (e.g. ---, +++, ***)
+    if re.search(r"[-+@#*/=_]{2,}", v):
+        raise ValueError(f"{field_name} cannot contain consecutive repeating symbols")
+
+    alnum = [c for c in v if c.isalnum()]
+    if len(alnum) < 4:
+        raise ValueError(f"{field_name} must contain at least 4 alphanumeric characters")
+
+    # Reject repetitive characters like pppppp, aaaaaa, 000000
+    if len(set(v)) < 3:
+        raise ValueError(f"{field_name} cannot consist of repetitive characters '{value}'")
 
     return v
 
@@ -460,8 +983,10 @@ def validate_tracking_url(
 ) -> Optional[str]:
     """
     Validates tracking URL template.
-    Must start with http:// or https:// and have valid URL structure.
-    Allows template placeholder '{tracking_number}'.
+    Must start with http:// or https:// and have valid URL structure with a valid domain.
+    Allows template placeholder '{tracking_number}' or '{tracking_id}'.
+    Rejects: numeric-only hosts (e.g. https://0000), special character spam,
+    invalid domains, and placeholders.
     """
     if value is None:
         if required:
@@ -475,7 +1000,8 @@ def validate_tracking_url(
     if not v:
         raise ValueError(f"{field_name} cannot be empty or whitespace")
 
-    if v.lower() in ("string", "null", "none", "undefined"):
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_TEXT_PLACEHOLDERS or clean_norm in DISALLOWED_TEXT_PLACEHOLDERS:
         raise ValueError(f"{field_name} cannot be placeholder '{value}'")
 
     if len(v) > 255:
@@ -484,8 +1010,43 @@ def validate_tracking_url(
     if not (v.startswith("http://") or v.startswith("https://")):
         raise ValueError(f"{field_name} must start with http:// or https://")
 
-    if len(v.split("://", 1)[1].strip()) < 3:
+    # Check for forbidden raw symbols (allowing valid template braces e.g. {tracking_number})
+    for c in r"\|<>?;~^$%":
+        if c in v:
+            raise ValueError(f"{field_name} contains invalid characters")
+
+    scheme, rest = v.split("://", 1)
+    if not rest or len(rest.strip()) < 3:
         raise ValueError(f"{field_name} is malformed")
+
+    # Extract host
+    host_part = rest.split("/")[0].split("?")[0].split("#")[0].strip()
+    if not host_part:
+        raise ValueError(f"{field_name} must contain a host")
+
+    host = host_part.split(":")[0].strip()
+
+    if host.isdigit():
+        raise ValueError(f"{field_name} host cannot be numeric-only")
+
+    if any(c in r"[]{}()\/!@#$^&*+=;:<>?" for c in host):
+        raise ValueError(f"{field_name} host contains invalid characters")
+
+    if re.search(r"[-_]{2,}", host):
+        raise ValueError(f"{field_name} host cannot contain consecutive hyphens or underscores")
+
+    if host.startswith(("-", ".")) or host.endswith(("-", ".")):
+        raise ValueError(f"{field_name} host cannot start or end with a hyphen or dot")
+
+    if host.lower() != "localhost":
+        if "." not in host:
+            raise ValueError(f"{field_name} must contain a valid domain name")
+        labels = host.split(".")
+        tld = labels[-1]
+        is_ipv4 = len(labels) == 4 and all(part.isdigit() and 0 <= int(part) <= 255 for part in labels)
+        if not is_ipv4:
+            if not tld.isalpha() or len(tld) < 2:
+                raise ValueError(f"{field_name} must have a valid domain extension")
 
     return v
 
@@ -719,9 +1280,9 @@ def validate_aadhaar_number(
 ) -> Optional[str]:
     """
     Validates Indian Aadhaar card number.
-    Format: exactly 12 numeric digits, cannot start with 0 or 1.
+    Format: exactly 12 numeric digits with a valid Verhoeff checksum.
     Automatically strips spaces and hyphens (e.g. '1234 5678 9012' -> '123456789012').
-    Rejects: non-digits, length != 12, starting with 0/1, repeated dummy digits.
+    Rejects: invalid format, starting with 0/1, repeated digits, or bad checksum.
     """
     if value is None:
         if required:
@@ -762,6 +1323,36 @@ def validate_aadhaar_number(
         raise ValueError(
             f"Invalid {field_name}. Aadhaar number cannot contain 12 identical digits"
         )
+
+    multiplication_table = (
+        (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+        (1, 2, 3, 4, 0, 6, 7, 8, 9, 5),
+        (2, 3, 4, 0, 1, 7, 8, 9, 5, 6),
+        (3, 4, 0, 1, 2, 8, 9, 5, 6, 7),
+        (4, 0, 1, 2, 3, 9, 5, 6, 7, 8),
+        (5, 9, 8, 7, 6, 0, 4, 3, 2, 1),
+        (6, 5, 9, 8, 7, 1, 0, 4, 3, 2),
+        (7, 6, 5, 9, 8, 2, 1, 0, 4, 3),
+        (8, 7, 6, 5, 9, 3, 2, 1, 0, 4),
+        (9, 8, 7, 6, 5, 4, 3, 2, 1, 0),
+    )
+    permutation_table = (
+        (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+        (1, 5, 7, 6, 2, 8, 3, 0, 9, 4),
+        (5, 8, 0, 3, 7, 9, 6, 1, 4, 2),
+        (8, 9, 1, 6, 0, 4, 3, 5, 2, 7),
+        (9, 4, 5, 3, 1, 2, 6, 8, 7, 0),
+        (4, 2, 8, 6, 5, 7, 3, 9, 0, 1),
+        (2, 7, 9, 3, 8, 0, 6, 4, 1, 5),
+        (7, 0, 4, 6, 9, 1, 3, 2, 5, 8),
+    )
+    checksum = 0
+    for position, digit in enumerate(reversed(clean_v)):
+        checksum = multiplication_table[checksum][
+            permutation_table[position % 8][int(digit)]
+        ]
+    if checksum != 0:
+        raise ValueError(f"Invalid {field_name}. Aadhaar checksum is invalid")
 
     return clean_v
 
@@ -851,4 +1442,3 @@ def validate_website_url(
         raise ValueError(f"Invalid {field_name.lower()} format")
 
     return v
-

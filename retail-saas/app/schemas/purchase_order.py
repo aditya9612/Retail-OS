@@ -228,22 +228,10 @@ class PurchaseOrderCreate(BaseModel):
         description="Invoice or Delivery Challan number",
     )
 
-    invoice_id: Optional[str] = Field(
-        default=None,
-        max_length=100,
-        description="Alias for invoice_number",
-    )
-
     notes: Optional[str] = Field(
         default=None,
         max_length=1000,
         description="Notes for the purchase order",
-    )
-
-    remarks: Optional[str] = Field(
-        default=None,
-        max_length=1000,
-        description="Alias for notes",
     )
 
     expected_delivery_date: Optional[datetime] = Field(
@@ -270,43 +258,15 @@ class PurchaseOrderCreate(BaseModel):
     def validate_invoice_number(cls, value: Optional[str]) -> Optional[str]:
         return validate_po_invoice(value, "Invoice number")
 
-    @field_validator("invoice_id")
-    @classmethod
-    def validate_invoice_id(cls, value: Optional[str]) -> Optional[str]:
-        return validate_po_invoice(value, "Invoice ID")
-
     @field_validator("notes")
     @classmethod
     def validate_notes(cls, value: Optional[str]) -> Optional[str]:
         return validate_po_notes(value, "Notes")
 
-    @field_validator("remarks")
-    @classmethod
-    def validate_remarks(cls, value: Optional[str]) -> Optional[str]:
-        return validate_po_notes(value, "Remarks")
-
     @field_validator("expected_delivery_date")
     @classmethod
     def validate_delivery_date(cls, value: Optional[datetime]) -> Optional[datetime]:
         return validate_po_delivery_date(value)
-
-    @model_validator(mode="before")
-    @classmethod
-    def reconcile_notes_and_invoices(cls, data):
-        if isinstance(data, dict):
-            if "invoice_number" in data and data["invoice_number"] is not None:
-                validate_po_invoice(data["invoice_number"], "Invoice number")
-            if "invoice_id" in data and data["invoice_id"] is not None:
-                validate_po_invoice(data["invoice_id"], "Invoice ID")
-
-            if "notes" in data and data["notes"] is not None:
-                validate_po_notes(data["notes"], "Notes")
-            if "remarks" in data and data["remarks"] is not None:
-                validate_po_notes(data["remarks"], "Remarks")
-
-            _reconcile_aliases(data, "notes", "remarks")
-            _reconcile_aliases(data, "invoice_number", "invoice_id")
-        return data
 
     @field_validator("items")
     @classmethod
@@ -339,17 +299,7 @@ class PurchaseOrderUpdate(BaseModel):
         max_length=100,
     )
 
-    invoice_id: Optional[str] = Field(
-        default=None,
-        max_length=100,
-    )
-
     notes: Optional[str] = Field(
-        default=None,
-        max_length=1000,
-    )
-
-    remarks: Optional[str] = Field(
         default=None,
         max_length=1000,
     )
@@ -376,43 +326,15 @@ class PurchaseOrderUpdate(BaseModel):
     def validate_invoice_number(cls, value: Optional[str]) -> Optional[str]:
         return validate_po_invoice(value, "Invoice number")
 
-    @field_validator("invoice_id")
-    @classmethod
-    def validate_invoice_id(cls, value: Optional[str]) -> Optional[str]:
-        return validate_po_invoice(value, "Invoice ID")
-
     @field_validator("notes")
     @classmethod
     def validate_notes(cls, value: Optional[str]) -> Optional[str]:
         return validate_po_notes(value, "Notes")
 
-    @field_validator("remarks")
-    @classmethod
-    def validate_remarks(cls, value: Optional[str]) -> Optional[str]:
-        return validate_po_notes(value, "Remarks")
-
     @field_validator("expected_delivery_date")
     @classmethod
     def validate_delivery_date(cls, value: Optional[datetime]) -> Optional[datetime]:
         return validate_po_delivery_date(value)
-
-    @model_validator(mode="before")
-    @classmethod
-    def reconcile_notes_and_invoices(cls, data):
-        if isinstance(data, dict):
-            if "invoice_number" in data and data["invoice_number"] is not None:
-                validate_po_invoice(data["invoice_number"], "Invoice number")
-            if "invoice_id" in data and data["invoice_id"] is not None:
-                validate_po_invoice(data["invoice_id"], "Invoice ID")
-
-            if "notes" in data and data["notes"] is not None:
-                validate_po_notes(data["notes"], "Notes")
-            if "remarks" in data and data["remarks"] is not None:
-                validate_po_notes(data["remarks"], "Remarks")
-
-            _reconcile_aliases(data, "notes", "remarks")
-            _reconcile_aliases(data, "invoice_number", "invoice_id")
-        return data
 
 
 class PurchaseOrderReceiveItem(BaseModel):
@@ -426,14 +348,6 @@ class PurchaseOrderReceive(BaseModel):
     invoice_number: Optional[str] = Field(
         default=None,
         max_length=100,
-    )
-    invoice_id: Optional[str] = Field(
-        default=None,
-        max_length=100,
-    )
-    remarks: Optional[str] = Field(
-        default=None,
-        max_length=500,
     )
     notes: Optional[str] = Field(
         default=None,
@@ -458,38 +372,10 @@ class PurchaseOrderReceive(BaseModel):
     def validate_invoice_number(cls, value: Optional[str]) -> Optional[str]:
         return validate_po_invoice(value, "Invoice number")
 
-    @field_validator("invoice_id")
-    @classmethod
-    def validate_invoice_id(cls, value: Optional[str]) -> Optional[str]:
-        return validate_po_invoice(value, "Invoice ID")
-
     @field_validator("notes")
     @classmethod
     def validate_notes(cls, value: Optional[str]) -> Optional[str]:
         return validate_po_notes(value, "Notes")
-
-    @field_validator("remarks")
-    @classmethod
-    def validate_remarks(cls, value: Optional[str]) -> Optional[str]:
-        return validate_po_notes(value, "Remarks")
-
-    @model_validator(mode="before")
-    @classmethod
-    def reconcile_notes_and_invoices(cls, data):
-        if isinstance(data, dict):
-            if "invoice_number" in data and data["invoice_number"] is not None:
-                validate_po_invoice(data["invoice_number"], "Invoice number")
-            if "invoice_id" in data and data["invoice_id"] is not None:
-                validate_po_invoice(data["invoice_id"], "Invoice ID")
-
-            if "notes" in data and data["notes"] is not None:
-                validate_po_notes(data["notes"], "Notes")
-            if "remarks" in data and data["remarks"] is not None:
-                validate_po_notes(data["remarks"], "Remarks")
-
-            _reconcile_aliases(data, "notes", "remarks")
-            _reconcile_aliases(data, "invoice_number", "invoice_id")
-        return data
 
 
 class PurchaseOrderStatusUpdate(BaseModel):
@@ -581,7 +467,6 @@ class PurchaseOrderResponse(BaseModel):
     order_number: str
     po_number: Optional[str] = None
     invoice_number: Optional[str] = None
-    invoice_id: Optional[str] = None
     status: str
     subtotal: Decimal = Decimal("0.00")
     tax_amount: Decimal = Decimal("0.00")
@@ -589,7 +474,6 @@ class PurchaseOrderResponse(BaseModel):
     shipping_charges: Decimal = Decimal("0.00")
     total_amount: Decimal = Decimal("0.00")
     notes: Optional[str] = None
-    remarks: Optional[str] = None
     expected_delivery_date: Optional[datetime] = None
     created_by_id: Optional[int] = None
     created_by_name: Optional[str] = None
@@ -610,17 +494,8 @@ class PurchaseOrderResponse(BaseModel):
     def sync_aliases(self):
         if self.order_number and not self.po_number:
             self.po_number = self.order_number
-        if self.notes is not None and self.remarks is None:
-            self.remarks = self.notes
-        elif self.remarks is not None and self.notes is None:
-            self.notes = self.remarks
-        if self.invoice_number and not self.invoice_id:
-            self.invoice_id = self.invoice_number
-        elif self.invoice_id and not self.invoice_number:
-            self.invoice_number = self.invoice_id
         if self.invoice_number and self.invoice_number.strip().lower() in DISALLOWED_PO_PLACEHOLDERS:
             self.invoice_number = None
-            self.invoice_id = None
         if self.items:
             self.total_quantity = sum(it.quantity for it in self.items)
             self.total_received_quantity = sum(it.received_quantity or 0 for it in self.items)

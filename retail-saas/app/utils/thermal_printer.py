@@ -1,5 +1,3 @@
-
-
 from decimal import Decimal
 from typing import Literal
 
@@ -41,9 +39,12 @@ def generate_thermal_payload(
     customer_mobile: str | None = None,
     gstin: str | None = None,
     printer_type: PrinterType = "generic",
+    is_reprint: bool = False,
 ) -> dict:
     width = 42 if printer_type == "tvs" else 32
     lines: list[str] = [_esc_init(), _esc_align(1), _esc_bold(True)]
+    if is_reprint:
+        lines.append(_line("*** DUPLICATE / REPRINT ***", width))
     lines.append(_line(store_name.upper(), width))
     lines.append(_esc_bold(False))
     if gstin:

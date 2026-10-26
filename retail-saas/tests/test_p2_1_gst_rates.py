@@ -92,6 +92,41 @@ def test_gst_rate_detail_success_same_tenant(tenant_a):
     assert validated.id == rate_id
 
 
+def test_gst_rate_can_be_updated_with_put_and_patch(tenant_a):
+    headers = tenant_a["headers"]
+    created = client.post(
+        "/api/v1/gst-rates",
+        json={"hsn_code": "8472", "gst_rate": "18"},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    rate_id = created.json()["id"]
+
+    patched = client.patch(
+        f"/api/v1/gst-rates/{rate_id}",
+        json={"gst_rate": "12"},
+        headers=headers,
+    )
+    assert patched.status_code == 200, patched.text
+    assert Decimal(str(patched.json()["gst_rate"])) == Decimal("12.00")
+
+    updated = client.put(
+        f"/api/v1/gst-rates/{rate_id}",
+        json={"hsn_code": "8473"},
+        headers=headers,
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["hsn_code"] == "8473"
+
+    invalid = client.put(
+        f"/api/v1/gst-rates/{rate_id}",
+        json={"gst_rate": "7"},
+        headers=headers,
+    )
+    assert invalid.status_code == 422
+    assert "5" in invalid.text and "12" in invalid.text and "28" in invalid.text
+
+
 def test_gst_rate_detail_non_existent(tenant_a):
     """Requesting a non-existent GST rate returns 404."""
     headers = tenant_a["headers"]

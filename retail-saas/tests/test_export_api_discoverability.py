@@ -142,16 +142,15 @@ def test_reports_export_unified_endpoints():
     paths = response.json().get("paths", {})
 
     post_export = paths.get("/api/v1/reports/export", {}).get("post")
-    assert post_export is not None, "Route POST /api/v1/reports/export not found"
-    assert "Report Exports" in post_export.get("tags", [])
-    content = post_export.get("responses", {}).get("200", {}).get("content", {})
-    assert "text/csv" in content
-    assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in content
-    assert "application/pdf" in content
+    assert post_export is None, "Route POST /api/v1/reports/export should be removed"
 
     get_export = paths.get("/api/v1/reports/export", {}).get("get")
     assert get_export is not None, "Route GET /api/v1/reports/export not found"
     assert "Report Exports" in get_export.get("tags", [])
+    content = get_export.get("responses", {}).get("200", {}).get("content", {})
+    assert "text/csv" in content
+    assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in content
+    assert "application/pdf" in content
 
 
 def test_report_type_enum_in_openapi():

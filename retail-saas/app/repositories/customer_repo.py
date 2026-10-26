@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Optional
+from app.core.exceptions import AppException
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
@@ -82,6 +84,9 @@ def delete_customer(db: Session, tenant_id: int, customer_id: int):
 
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
+
+    if customer.outstanding_balance and customer.outstanding_balance > Decimal("0.00"):
+        raise AppException("Cannot deactivate customer with outstanding dues")
 
     customer.status = "inactive"
 

@@ -52,11 +52,28 @@ class CartItemCreate(BaseModel):
         return value
 
 
+class CartScanRequest(BaseModel):
+    barcode: str = Field(min_length=1, max_length=100, description="Barcode or SKU of the product")
+    quantity: Decimal = Field(default=Decimal("1.000"), gt=0, max_digits=12, decimal_places=3)
+    unit_price: Optional[Decimal] = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    discount: Decimal = Field(default=Decimal("0.00"), ge=0, max_digits=12, decimal_places=2)
+    store_id: Optional[int] = Field(default=None, gt=0)
+    same_state: Optional[bool] = Field(default=None)
+
+    @field_validator("barcode")
+    @classmethod
+    def validate_barcode(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Barcode cannot be empty")
+        return value
+
+
 class CartItemUpdate(BaseModel):
     product_id: int = Field(gt=0)
     quantity: Optional[Decimal] = Field(
         default=None,
-        gt=0,
+        ge=0,
         max_digits=12,
         decimal_places=3,
     )
@@ -76,8 +93,8 @@ class CartItemUpdate(BaseModel):
     @field_validator("quantity")
     @classmethod
     def validate_quantity(cls, value: Optional[Decimal]) -> Optional[Decimal]:
-        if value is not None and value <= 0:
-            raise ValueError("Quantity must be greater than zero")
+        if value is not None and value < 0:
+            raise ValueError("Quantity cannot be negative")
         return value
 
     @field_validator("unit_price")
@@ -155,3 +172,34 @@ class CartSummaryResponse(BaseModel):
     grand_total: Decimal
     same_state: bool
     coupon_code: Optional[str] = None
+
+
+class CartCustomerSetRequest(BaseModel):
+    customer_id: Optional[int] = Field(default=None, gt=0)
+    phone: Optional[str] = Field(default=None, min_length=3, max_length=20)
+
+
+class CartCustomerResponse(BaseModel):
+    customer_id: Optional[int] = None
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    loyalty_points: Optional[Decimal] = None
+    credit_balance: Optional[Decimal] = None
+    cart: CartSummaryResponse
+
+
+class CartStockValidationItem(BaseModel):
+    product_id: int
+    product_name: str
+    sku: str
+    requested_quantity: Decimal
+    available_quantity: Decimal
+    is_sufficient: bool
+
+
+class CartStockValidationResponse(BaseModel):
+    store_id: int
+    is_valid: bool
+    items: list[CartStockValidationItem]
+    insufficient_items_count: int

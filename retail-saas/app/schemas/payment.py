@@ -137,6 +137,16 @@ class PaymentCreate(BaseModel):
 
         return value
 
+    @field_validator("transaction_id", mode="before")
+    @classmethod
+    def normalize_transaction_id(cls, value: Any) -> Any:
+        # Treat an empty transaction ID as omitted. Cash payments do not need one;
+        # non-cash payments are rejected by validate_transaction_requirement.
+        if isinstance(value, str) and not value.strip():
+            return None
+
+        return value
+
     @field_validator("transaction_id")
     @classmethod
     def validate_transaction(cls, value: Optional[str]) -> Optional[str]:
@@ -507,6 +517,8 @@ class PaymentSplitResponse(BaseModel):
     transaction_id: int
     payment_method: str
     amount: Decimal
+    status: Optional[str] = "completed"
+    created_at: Optional[datetime] = None
 
 
 class SettlementCreate(BaseModel):
@@ -540,8 +552,9 @@ class SettlementCreate(BaseModel):
     @field_validator("settlement_date")
     @classmethod
     def validate_settlement_date(cls, value: date) -> date:
-        if value < date.today():
-            raise ValueError("Settlement date cannot be in the past")
+        from datetime import timedelta
+        if value > date.today() + timedelta(days=7):
+            raise ValueError("Settlement date cannot be more than 7 days in the future")
 
         return value
 
@@ -584,6 +597,8 @@ class SettlementResponse(BaseModel):
     total_amount: Decimal
     status: str
     reference_no: Optional[str] = None
+    settled_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
 
 
 class PaymentWebhookRequest(BaseModel):
@@ -624,7 +639,10 @@ class PaymentWebhookRequest(BaseModel):
             "payment.failed",
             "payment.refunded",
         }:
-            raise ValueError("Unsupported payment event type")
+            raise ValueError(
+                "Unsupported payment event type. Allowed values: "
+                "payment.completed, payment.failed, payment.refunded"
+            )
 
         return value
 

@@ -1,9 +1,18 @@
 
+from enum import Enum
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 
 VALID_ORDER_TYPES = ["pos", "ecommerce"]
@@ -16,6 +25,7 @@ VALID_ORDER_STATUSES = [
     "delivered",
     "cancelled",
     "returned",
+    "partially_returned",
     "refunded",
 ]
 
@@ -167,7 +177,7 @@ class OrderItemResponse(BaseModel):
     product_name: str = ""
     sku: str = ""
     quantity: int
-    unit_price: Decimal
+    unit_price: Decimal = Decimal("0.00")
     discount: Decimal = Decimal("0.00")
     discount_amount: Decimal = Decimal("0.00")
     tax_rate: Decimal = Decimal("0.00")
@@ -185,6 +195,25 @@ class OrderItemResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
+
+    @field_validator(
+        "unit_price",
+        "discount",
+        "discount_amount",
+        "tax_rate",
+        "tax_amount",
+        "total",
+        "total_amount",
+        "cgst_amount",
+        "sgst_amount",
+        "igst_amount",
+        mode="before",
+    )
+    @classmethod
+    def coerce_item_decimals(cls, v):
+        if v is None:
+            return Decimal("0.00")
+        return v
 
 
 class OrderCreate(BaseModel):
@@ -231,6 +260,13 @@ class OrderCreate(BaseModel):
         min_length=3,
         max_length=500,
         description="Delivery address is optional for POS orders",
+    )
+
+    delivery_pincode: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=20,
+        description="Optional delivery pincode / postal code",
     )
 
     notes: Optional[str] = Field(
@@ -330,6 +366,26 @@ class OrderCreate(BaseModel):
 
         return v
 
+    @field_validator("delivery_pincode")
+    @classmethod
+    def validate_delivery_pincode(
+        cls,
+        v: Optional[str],
+    ) -> Optional[str]:
+
+        if v is None:
+            return None
+
+        v = v.strip()
+
+        if not v:
+            return None
+
+        if v.lower() in INVALID_STRING_VALUES:
+            raise ValueError("Invalid delivery pincode")
+
+        return v
+
     @field_validator("notes")
     @classmethod
     def validate_notes(
@@ -360,13 +416,13 @@ class OrderCreate(BaseModel):
         if not v:
             raise ValueError("Order must contain at least one item")
 
-        product_ids = [
-            item.product_id
+        item_keys = [
+            (item.product_id, getattr(item, "variant_id", None))
             for item in v
         ]
 
-        if len(product_ids) != len(set(product_ids)):
-            raise ValueError("Order cannot contain duplicate products")
+        if len(item_keys) != len(set(item_keys)):
+            raise ValueError("Order cannot contain duplicate products or variants")
 
         return v
 
@@ -403,6 +459,12 @@ class OrderUpdate(BaseModel):
         max_length=500,
     )
 
+    delivery_pincode: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=20,
+    )
+
     notes: Optional[str] = Field(
         default=None,
         min_length=1,
@@ -413,6 +475,11 @@ class OrderUpdate(BaseModel):
         default=None,
         min_length=1,
         max_length=30,
+    )
+
+    items: Optional[List[OrderItemCreate]] = Field(
+        default=None,
+        description="Optional replacement items for draft order",
     )
 
     @field_validator("coupon_code")
@@ -480,6 +547,26 @@ class OrderUpdate(BaseModel):
 
         return v
 
+    @field_validator("delivery_pincode")
+    @classmethod
+    def validate_delivery_pincode(
+        cls,
+        v: Optional[str],
+    ) -> Optional[str]:
+
+        if v is None:
+            return None
+
+        v = v.strip()
+
+        if not v:
+            return None
+
+        if v.lower() in INVALID_STRING_VALUES:
+            raise ValueError("Invalid delivery pincode")
+
+        return v
+
     @field_validator("notes")
     @classmethod
     def validate_notes(
@@ -539,16 +626,21 @@ class OrderResponse(BaseModel):
     id: int
     tenant_id: int
     store_id: int
-    customer_id: Optional[int]
+    customer_id: Optional[int] = None
     order_number: str
     order_type: str
     status: str
     coupon_code: Optional[str] = None
-    discount_amount: Decimal
-    subtotal: Decimal
-    tax_amount: Decimal
-    total_amount: Decimal
+    discount_amount: Decimal = Decimal("0.00")
+    subtotal: Decimal = Decimal("0.00")
+    cgst_amount: Decimal = Decimal("0.00")
+    sgst_amount: Decimal = Decimal("0.00")
+    igst_amount: Decimal = Decimal("0.00")
+    tax_amount: Decimal = Decimal("0.00")
+    round_off: Decimal = Decimal("0.00")
+    total_amount: Decimal = Decimal("0.00")
     payment_status: Optional[str] = "pending"
+    payment_method: Optional[str] = None
     delivery_address: Optional[str] = None
     delivery_pincode: Optional[str] = None
     delivery_status: Optional[str] = None
@@ -560,27 +652,35 @@ class OrderResponse(BaseModel):
         "from_attributes": True
     }
 
+    @field_validator(
+        "discount_amount",
+        "subtotal",
+        "cgst_amount",
+        "sgst_amount",
+        "igst_amount",
+        "tax_amount",
+        "round_off",
+        "total_amount",
+        mode="before",
+    )
+    @classmethod
+    def coerce_order_decimals(cls, v):
+        if v is None:
+            return Decimal("0.00")
+        return v
 
-class InvoiceResponse(BaseModel):
 
+class InvoiceItemResponse(BaseModel):
     id: int
-    tenant_id: int
-    store_id: Optional[int] = None
-    order_id: int
-    invoice_number: str
-    status: str
-    subtotal: Decimal
+    product_id: int
+    quantity: Decimal
+    unit_price: Decimal
     discount_amount: Decimal
-    cgst_amount: Decimal
-    sgst_amount: Decimal
-    igst_amount: Decimal
+    gst_rate: Decimal
+    gst_amount: Decimal
     total_amount: Decimal
-    pdf_url: Optional[str]
-    created_at: datetime
 
-    model_config = {
-        "from_attributes": True
-    }
+    model_config = {"from_attributes": True}
 
 
 class PaymentResponse(BaseModel):
@@ -589,14 +689,72 @@ class PaymentResponse(BaseModel):
     tenant_id: int
     order_id: int
     payment_method: str
+    payment_mode: str = Field(
+        validation_alias=AliasChoices("payment_mode", "payment_method")
+    )
     status: str
     amount: Decimal
     transaction_id: Optional[str]
+    transaction_reference: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("transaction_reference", "transaction_id"),
+    )
+    amount_tendered: Optional[Decimal] = None
+    change_due: Optional[Decimal] = None
     created_at: datetime
 
     model_config = {
         "from_attributes": True
     }
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def coerce_payment_amount(cls, v):
+        if v is None:
+            return Decimal("0.00")
+        return v
+
+
+class InvoiceResponse(BaseModel):
+
+    id: int
+    tenant_id: int
+    store_id: Optional[int] = None
+    order_id: int
+    customer_id: Optional[int] = None
+    same_state: Optional[bool] = None
+    invoice_number: str
+    status: str
+    subtotal: Decimal = Decimal("0.00")
+    discount_amount: Decimal = Decimal("0.00")
+    cgst_amount: Decimal = Decimal("0.00")
+    sgst_amount: Decimal = Decimal("0.00")
+    igst_amount: Decimal = Decimal("0.00")
+    total_amount: Decimal = Decimal("0.00")
+    pdf_url: Optional[str] = None
+    items: List[InvoiceItemResponse] = Field(default_factory=list)
+    payments: List[PaymentResponse] = Field(default_factory=list)
+    created_at: datetime
+
+    model_config = {
+        "from_attributes": True
+    }
+
+    @field_validator(
+        "subtotal",
+        "discount_amount",
+        "cgst_amount",
+        "sgst_amount",
+        "igst_amount",
+        "total_amount",
+        mode="before",
+    )
+    @classmethod
+    def coerce_invoice_decimals(cls, v):
+        if v is None:
+            return Decimal("0.00")
+        return v
+
 
 
 class OrderTrackingResponse(BaseModel):
@@ -679,4 +837,249 @@ class OrderStatusUpdateRequest(BaseModel):
                 "Invalid remarks"
             )
 
+        return v
+
+
+class OrderAddItemsRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    items: List[OrderItemCreate] = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Items to add to the draft order",
+    )
+
+
+class POSPaymentData(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    payment_method: str = Field(
+        default="cash",
+        description="Payment method: cash, upi, card, credit_card, debit_card, wallet",
+    )
+
+    amount: Optional[Decimal] = Field(
+        default=None,
+        gt=0,
+        description="Amount tendered by customer. If None, exactly order total is used.",
+    )
+
+    transaction_id: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Optional external transaction reference or UTR",
+    )
+
+    notes: Optional[str] = Field(
+        default=None,
+        max_length=255,
+    )
+
+    @field_validator("payment_method")
+    @classmethod
+    def validate_pos_payment_method(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v:
+            raise ValueError("Payment method cannot be empty")
+        if v in INVALID_STRING_VALUES:
+            raise ValueError("Invalid payment method")
+        return v
+
+
+class POSCheckoutRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    store_id: int = Field(
+        ...,
+        gt=0,
+        description="Store ID where POS transaction is occurring",
+    )
+
+    customer_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Optional customer ID for loyalty and purchase history",
+    )
+
+    coupon_code: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=50,
+    )
+
+    discount_amount: Decimal = Field(
+        default=Decimal("0.00"),
+        ge=0,
+        le=Decimal("100"),
+        description="Overall discount percentage (0 to 100)",
+    )
+
+    notes: Optional[str] = Field(
+        default=None,
+        max_length=1000,
+    )
+
+    same_state: bool = Field(
+        default=True,
+        description="True for intra-state (CGST+SGST), False for inter-state (IGST)",
+    )
+
+    items: List[OrderItemCreate] = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+    )
+
+    payment: POSPaymentData = Field(
+        default_factory=POSPaymentData,
+        description="Payment details for instant settlement",
+    )
+
+    generate_invoice: bool = Field(
+        default=True,
+        description="Whether to generate an official tax invoice immediately",
+    )
+
+    @field_validator("coupon_code")
+    @classmethod
+    def validate_pos_coupon_code(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            raise ValueError("Coupon code cannot be empty")
+        if v.lower() in INVALID_STRING_VALUES:
+            raise ValueError("Invalid coupon code")
+        return v.upper()
+
+    @field_validator("items")
+    @classmethod
+    def validate_pos_items(cls, v: List[OrderItemCreate]) -> List[OrderItemCreate]:
+        if not v:
+            raise ValueError("Order must contain at least one item")
+        item_keys = [
+            (item.product_id, getattr(item, "variant_id", None))
+            for item in v
+        ]
+        if len(item_keys) != len(set(item_keys)):
+            raise ValueError("Order cannot contain duplicate products or variants")
+        return v
+
+
+class POSCheckoutResponse(BaseModel):
+    order: OrderResponse
+    payment: Optional[PaymentResponse] = None
+    invoice: Optional[InvoiceResponse] = None
+    change_due: Decimal = Decimal("0.00")
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+class OrderStatsResponse(BaseModel):
+    total_orders: int
+    total_revenue: Decimal
+    draft_orders: int
+    confirmed_orders: int
+    completed_orders: int
+    cancelled_orders: int
+    average_order_value: Decimal
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+class OrderReceiptItemResponse(BaseModel):
+    name: str
+    quantity: int
+    unit_price: Decimal = Decimal("0.00")
+    tax_amount: Decimal = Decimal("0.00")
+    discount_amount: Decimal = Decimal("0.00")
+    total_amount: Decimal = Decimal("0.00")
+
+    @field_validator(
+        "unit_price",
+        "tax_amount",
+        "discount_amount",
+        "total_amount",
+        mode="before",
+    )
+    @classmethod
+    def coerce_receipt_item_decimals(cls, v):
+        if v is None:
+            return Decimal("0.00")
+        return v
+
+
+class OrderThermalMode(str, Enum):
+    preview = "preview"
+    view = "view"
+    download = "download"
+    pdf = "pdf"
+    html = "html"
+    json = "json"
+    text = "text"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        return None
+
+
+class OrderReceiptResponse(BaseModel):
+    order_id: int
+    order_number: str
+    store_name: str
+    store_code: Optional[str] = None
+    store_address: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    items: List[OrderReceiptItemResponse]
+    subtotal: Decimal = Decimal("0.00")
+    discount_amount: Decimal = Decimal("0.00")
+    cgst_amount: Decimal = Decimal("0.00")
+    sgst_amount: Decimal = Decimal("0.00")
+    igst_amount: Decimal = Decimal("0.00")
+    tax_amount: Decimal = Decimal("0.00")
+    round_off: Decimal = Decimal("0.00")
+    total_amount: Decimal = Decimal("0.00")
+    payment_status: str
+    payment_method: Optional[str] = None
+    created_at: datetime
+    formatted_receipt: str
+
+    model_config = {
+        "from_attributes": True
+    }
+
+    @field_validator(
+        "subtotal",
+        "discount_amount",
+        "cgst_amount",
+        "sgst_amount",
+        "igst_amount",
+        "tax_amount",
+        "round_off",
+        "total_amount",
+        mode="before",
+    )
+    @classmethod
+    def coerce_receipt_decimals(cls, v):
+        if v is None:
+            return Decimal("0.00")
         return v

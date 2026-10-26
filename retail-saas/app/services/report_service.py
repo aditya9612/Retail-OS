@@ -1895,6 +1895,20 @@ class ReportService:
         if fmt == "csv":
             stream = io.StringIO()
             writer = csv.writer(stream)
+            # Add branding metadata header rows
+            if branding:
+                if branding.business_name:
+                    writer.writerow([f"# Business: {branding.business_name}"])
+                _csv_meta = []
+                if branding.address:
+                    _csv_meta.append(f"Address: {branding.address}")
+                if branding.phone:
+                    _csv_meta.append(f"Phone: {branding.phone}")
+                if branding.gstin and branding.show_gstin:
+                    _csv_meta.append(f"GSTIN: {branding.gstin}")
+                if _csv_meta:
+                    writer.writerow([f"# {' | '.join(_csv_meta)}"])
+                writer.writerow([])  # Blank separator
             writer.writerow(headers)
             for r in rows:
                 writer.writerow(r)
@@ -1926,6 +1940,7 @@ class ReportService:
         # -------------------------------------------------------------
         elif fmt == "pdf":
             from app.services.document_renderer_service import DocumentRenderer
+            from app.core.pdf_utils import render_pdf_or_preview
             pdf_bytes = DocumentRenderer().render_report_pdf(
                 title=title,
                 metadata=metadata,
@@ -1936,10 +1951,11 @@ class ReportService:
                 report_type=rtype,
                 presentation=presentation,
             )
-            return StreamingResponse(
-                io.BytesIO(pdf_bytes),
-                media_type="application/pdf",
-                headers={"Content-Disposition": f"attachment; filename={filename}.pdf"},
+            mode_val = getattr(data, "mode", "download") or "download"
+            return render_pdf_or_preview(
+                pdf_content=pdf_bytes,
+                filename_base=filename,
+                mode=mode_val,
             )
 
         else:
@@ -1971,25 +1987,30 @@ class ReportService:
         }
 
     def daily_billing_closure(
-        self, tenant_id: int, target_date: date | None = None
+        self,
+        user_or_tenant: Union[User, int],
+        target_date: date | None = None,
+        store_id: Optional[int] = None,
     ) -> dict:
+        tenant_id, resolved_store_id = self._resolve_tenant_and_store(
+            user_or_tenant, store_id
+        )
         target_date = target_date or date.today()
         start = datetime.combine(target_date, datetime.min.time())
         end = start + timedelta(days=1)
 
-        invoices = (
-            self.db.query(Invoice)
-            .filter(
-                Invoice.tenant_id == tenant_id,
-                Invoice.created_at >= start,
-                Invoice.created_at < end,
-            )
-            .all()
+        inv_query = self.db.query(Invoice).filter(
+            Invoice.tenant_id == tenant_id,
+            Invoice.created_at >= start,
+            Invoice.created_at < end,
         )
+        if resolved_store_id is not None:
+            inv_query = inv_query.filter(Invoice.store_id == resolved_store_id)
+        invoices = inv_query.all()
         total_sales = sum((i.total_amount for i in invoices), Decimal("0"))
         discount_total = sum((i.discount_amount for i in invoices), Decimal("0"))
 
-        payments = (
+        pmt_query = (
             self.db.query(Payment)
             .join(Order, Payment.order_id == Order.id)
             .filter(
@@ -1998,8 +2019,10 @@ class ReportService:
                 Payment.created_at < end,
                 Payment.status == PaymentStatus.COMPLETED.value,
             )
-            .all()
         )
+        if resolved_store_id is not None:
+            pmt_query = pmt_query.filter(Order.store_id == resolved_store_id)
+        payments = pmt_query.all()
         cash_sales = sum(
             (p.amount for p in payments if p.payment_method == "cash"),
             Decimal("0"),
@@ -2021,7 +2044,7 @@ class ReportService:
             Decimal("0"),
         )
 
-        refunds = (
+        refund_query = (
             self.db.query(Refund)
             .filter(
                 Refund.tenant_id == tenant_id,
@@ -2029,8 +2052,14 @@ class ReportService:
                 Refund.created_at >= start,
                 Refund.created_at < end,
             )
-            .all()
         )
+        if resolved_store_id is not None:
+            refund_query = (
+                refund_query.join(Invoice, Refund.invoice_id == Invoice.id)
+                .join(Order, Invoice.order_id == Order.id)
+                .filter(Order.store_id == resolved_store_id)
+            )
+        refunds = refund_query.all()
         refund_amount = sum((r.refund_amount for r in refunds), Decimal("0"))
         net_collection = total_sales - refund_amount
 
@@ -2045,12 +2074,21 @@ class ReportService:
             "discount_amount": float(discount_total),
             "refund_amount": float(refund_amount),
             "net_collection": float(net_collection),
+            "store_id": resolved_store_id,
         }
 
     def payment_summary(
-        self, tenant_id: int, start_date: date, end_date: date
+        self,
+        user_or_tenant: Union[User, int],
+        start_date: date,
+        end_date: date,
+        store_id: Optional[int] = None,
     ) -> dict:
-        payments = (
+        self._validate_date_range(start_date, end_date)
+        tenant_id, resolved_store_id = self._resolve_tenant_and_store(
+            user_or_tenant, store_id
+        )
+        pmt_q = (
             self.db.query(
                 Payment.payment_method, func.sum(Payment.amount), func.count(Payment.id)
             )
@@ -2061,9 +2099,10 @@ class ReportService:
                 Payment.created_at >= datetime.combine(start_date, datetime.min.time()),
                 Payment.created_at <= datetime.combine(end_date, datetime.max.time()),
             )
-            .group_by(Payment.payment_method)
-            .all()
         )
+        if resolved_store_id is not None:
+            pmt_q = pmt_q.filter(Order.store_id == resolved_store_id)
+        payments = pmt_q.group_by(Payment.payment_method).all()
         breakdown = {
             row[0]: {"total_amount": float(row[1]), "transaction_count": row[2]}
             for row in payments
@@ -2074,10 +2113,11 @@ class ReportService:
             "end_date": str(end_date),
             "payment_breakdown": breakdown,
             "grand_total": grand_total,
+            "store_id": resolved_store_id,
         }
 
-    def product_performance(self, tenant_id: int, limit: int = 10) -> list[dict]:
-        rows = (
+    def product_performance(self, tenant_id: int, limit: int = 10, store_id: Optional[int] = None) -> list[dict]:
+        q = (
             self.db.query(
                 OrderItem.product_id,
                 Product.name.label("product_name"),
@@ -2090,11 +2130,10 @@ class ReportService:
                 Order.tenant_id == tenant_id,
                 Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.DELIVERED.value]),
             )
-            .group_by(OrderItem.product_id, Product.name)
-            .order_by(func.sum(OrderItem.total_amount).desc())
-            .limit(limit)
-            .all()
         )
+        if store_id is not None:
+            q = q.filter(Order.store_id == store_id)
+        rows = q.group_by(OrderItem.product_id, Product.name).order_by(func.sum(OrderItem.total_amount).desc()).limit(limit).all()
         return [
             {
                 "product_id": r[0],

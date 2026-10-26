@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.pdf_utils import render_pdf_or_preview
 from app.core.security import require_operational_write, require_permission
 from app.models.user import User
 
@@ -111,11 +112,13 @@ def list_purchase_orders(
     description="Returns aggregate counts and valuation metrics for open, approved, received, and cancelled purchase orders.",
 )
 def get_purchase_order_stats(
+    store_id: Optional[int] = Query(None, gt=0, description="Filter PO stats by store ID"),
     user: User = Depends(require_permission("purchase_orders:read")),
     db: Session = Depends(get_db),
 ):
     return PurchaseOrderService(db).get_stats(
         tenant_id=user.tenant_id,
+        store_id=store_id,
     )
 
 
@@ -165,7 +168,8 @@ def get_purchase_order_grns(
     responses={
         200: {
             "content": {
-                "application/pdf": {},
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}},
+                "image/png": {"schema": {"type": "string", "format": "binary"}, "description": "Visual document PNG preview for Swagger UI / browser"},
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {},
                 "text/csv": {},
             },
@@ -185,15 +189,16 @@ def get_purchase_order_pdf(
         purchase_order_id=purchase_order_id,
     )
 
-    disposition = "inline" if mode == "preview" else "attachment"
-
     if format == "pdf":
         file_bytes = PurchaseOrderService(db).generate_pdf(
             tenant_id=user.tenant_id,
             purchase_order_id=purchase_order_id,
         )
-        media_type = "application/pdf"
-        ext = "pdf"
+        return render_pdf_or_preview(
+            pdf_content=file_bytes,
+            filename_base=f"PO-{po.order_number}",
+            mode=mode,
+        )
     elif format == "excel":
         file_bytes = PurchaseOrderService(db).generate_excel(
             tenant_id=user.tenant_id,
@@ -211,6 +216,7 @@ def get_purchase_order_pdf(
     else:
         raise AppException(f"Unsupported export format '{format}'. Choose from: pdf, excel, csv")
 
+    disposition = "attachment"
     return Response(
         content=file_bytes,
         media_type=media_type,

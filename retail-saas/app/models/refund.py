@@ -33,6 +33,12 @@ class Refund(Base, TimestampMixin):
         index=True,
     )
 
+    shift_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pos_shifts.id"),
+        nullable=True,
+        index=True,
+    )
+
     refund_amount: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
         nullable=False,
@@ -87,3 +93,31 @@ class Refund(Base, TimestampMixin):
         back_populates="refund",
         uselist=False,
     )
+
+    @property
+    def invoice_number(self) -> str | None:
+        return self.invoice.invoice_number if self.invoice else None
+
+    @property
+    def credit_note_no(self) -> str | None:
+        return self.credit_note.credit_note_no if self.credit_note else None
+
+    @property
+    def credit_note_id(self) -> int | None:
+        return self.credit_note.id if self.credit_note else None
+
+    @property
+    def store_id(self) -> int | None:
+        return self.invoice.store_id if self.invoice else None
+
+    @property
+    def customer_id(self) -> int | None:
+        if self.invoice and self.invoice.order:
+            return self.invoice.order.customer_id
+        return None
+
+    @property
+    def customer_name(self) -> str | None:
+        if self.invoice and self.invoice.order and self.invoice.order.customer:
+            return self.invoice.order.customer.name
+        return None

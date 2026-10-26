@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends
+from typing import Optional
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -22,19 +23,21 @@ def reorder_prediction(
 def demand_forecast(
     product_id: int,
     days: int = 30,
+    store_id: Optional[int] = Query(None, gt=0, description="Filter demand forecast by store ID"),
     user: User = Depends(require_permission("analytics:read")),
     db: Session = Depends(get_db),
 ):
-    return AIService(db).demand_forecast(user.tenant_id, product_id, days)
+    return AIService(db).demand_forecast(user.tenant_id, product_id, days=days, store_id=store_id)
 
 
 @router.get("/best-sellers")
 def best_sellers(
     limit: int = 10,
+    store_id: Optional[int] = Query(None, gt=0, description="Filter best sellers by store ID"),
     user: User = Depends(require_permission("analytics:read")),
     db: Session = Depends(get_db),
 ):
-    return AIService(db).best_selling_products(user.tenant_id, limit)
+    return AIService(db).best_selling_products(user.tenant_id, limit, store_id=store_id)
 
 
 @router.get("/customer-patterns/{customer_id}")

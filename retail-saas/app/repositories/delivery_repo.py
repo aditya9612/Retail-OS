@@ -1,11 +1,15 @@
+from datetime import datetime
+from decimal import Decimal
+from typing import Optional
+
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.delivery import Delivery
 from app.models.delivery_method import DeliveryMethod
 from app.models.delivery_zone import DeliveryZone
 from app.models.delivery_partner import DeliveryPartner
-from app.models.order import OrderTracking
+from app.models.order import Order, OrderTracking
 
 
 class DeliveryRepository:
@@ -16,16 +20,76 @@ class DeliveryRepository:
     def list_deliveries(
         self,
         tenant_id: int,
-    ) -> list[Delivery]:
-
-        return (
+        page: int | None = None,
+        page_size: int | None = None,
+        status: str | None = None,
+        delivery_person: str | None = None,
+        partner_id: int | None = None,
+        order_id: int | None = None,
+        is_cod: bool | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        search: str | None = None,
+        store_id: int | None = None,
+    ) -> tuple[list[Delivery], int]:
+        query = (
             self.db.query(Delivery)
-            .filter(
-                Delivery.tenant_id == tenant_id,
+            .options(
+                joinedload(Delivery.order),
+                joinedload(Delivery.partner),
+                joinedload(Delivery.delivery_method),
+                joinedload(Delivery.zone),
             )
-            .order_by(Delivery.created_at.desc())
-            .all()
+            .filter(Delivery.tenant_id == tenant_id)
         )
+
+        if status:
+            s_clean = status.strip().lower()
+            if s_clean != "all":
+                query = query.filter(func.lower(Delivery.status) == s_clean)
+
+        if delivery_person:
+            query = query.filter(func.lower(Delivery.delivery_person).contains(delivery_person.strip().lower()))
+
+        if partner_id is not None:
+            query = query.filter(Delivery.partner_id == partner_id)
+
+        if order_id is not None:
+            query = query.filter(Delivery.order_id == order_id)
+
+        if is_cod is not None:
+            query = query.filter(Delivery.is_cod == is_cod)
+
+        if date_from is not None:
+            query = query.filter(Delivery.created_at >= date_from)
+
+        if date_to is not None:
+            query = query.filter(Delivery.created_at <= date_to)
+
+        if store_id is not None:
+            query = query.join(Delivery.order).filter(Order.store_id == store_id)
+
+        if search and search.strip():
+            term = f"%{search.strip().lower()}%"
+            query = query.outerjoin(Delivery.order).filter(
+                (func.lower(Delivery.tracking_number).like(term))
+                | (func.lower(Delivery.delivery_person).like(term))
+                | (func.lower(Order.order_number).like(term))
+            )
+
+        total = query.count()
+
+        query = query.order_by(Delivery.created_at.desc(), Delivery.id.desc())
+
+        if page is not None and page_size is not None:
+            skip = (page - 1) * page_size
+            items = query.offset(skip).limit(page_size).all()
+        elif page_size is not None:
+            items = query.limit(page_size).all()
+        else:
+            items = query.all()
+
+        return items, total
 
     def get_by_id(
         self,
@@ -35,6 +99,12 @@ class DeliveryRepository:
 
         return (
             self.db.query(Delivery)
+            .options(
+                joinedload(Delivery.order),
+                joinedload(Delivery.partner),
+                joinedload(Delivery.delivery_method),
+                joinedload(Delivery.zone),
+            )
             .filter(
                 Delivery.id == delivery_id,
                 Delivery.tenant_id == tenant_id,
@@ -99,16 +169,18 @@ class DeliveryRepository:
     def get_stats(
         self,
         tenant_id: int,
+        store_id: Optional[int] = None,
     ) -> dict[str, int]:
-        results = (
+        query = (
             self.db.query(
                 Delivery.status,
                 func.count(Delivery.id),
             )
             .filter(Delivery.tenant_id == tenant_id)
-            .group_by(Delivery.status)
-            .all()
         )
+        if store_id is not None:
+            query = query.join(Delivery.order).filter(Order.store_id == store_id)
+        results = query.group_by(Delivery.status).all()
         counts = {status: count for status, count in results}
         total = sum(counts.values())
         return {
@@ -124,11 +196,107 @@ class DeliveryRepository:
         self,
         tenant_id: int,
         status: str | None = None,
+        store_id: int | None = None,
     ) -> list[Delivery]:
         query = self.db.query(Delivery).filter(Delivery.tenant_id == tenant_id)
         if status:
             query = query.filter(Delivery.status == status)
+        if store_id is not None:
+            query = query.join(Delivery.order).filter(Order.store_id == store_id)
         return query.order_by(Delivery.created_at.desc()).all()
+
+    def get_cod_reconciliation(
+        self,
+        tenant_id: int,
+        delivery_person: str | None = None,
+        partner_id: int | None = None,
+        status: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        store_id: int | None = None,
+    ) -> dict:
+        query = (
+            self.db.query(Delivery)
+            .options(
+                joinedload(Delivery.order),
+                joinedload(Delivery.partner),
+            )
+            .filter(
+                Delivery.tenant_id == tenant_id,
+                Delivery.is_cod == True,
+            )
+        )
+
+        if delivery_person:
+            query = query.filter(func.lower(Delivery.delivery_person).contains(delivery_person.strip().lower()))
+
+        if partner_id is not None:
+            query = query.filter(Delivery.partner_id == partner_id)
+
+        if store_id is not None:
+            query = query.join(Delivery.order).filter(Order.store_id == store_id)
+
+        if status:
+            s_clean = status.strip().lower()
+            if s_clean == "collected":
+                query = query.filter(Delivery.cod_collected == True)
+            elif s_clean == "pending":
+                query = query.filter(Delivery.cod_collected == False)
+
+        if date_from is not None:
+            query = query.filter(Delivery.created_at >= date_from)
+
+        if date_to is not None:
+            query = query.filter(Delivery.created_at <= date_to)
+
+        deliveries = query.order_by(Delivery.created_at.desc()).all()
+
+        total_cod_orders = len(deliveries)
+        total_cod_amount = sum((d.cod_amount or Decimal("0.00")) for d in deliveries)
+
+        collected = [d for d in deliveries if d.cod_collected]
+        collected_orders_count = len(collected)
+        total_collected_amount = sum((d.cod_amount or Decimal("0.00")) for d in collected)
+
+        pending = [d for d in deliveries if not d.cod_collected]
+        pending_orders_count = len(pending)
+        total_pending_amount = sum((d.cod_amount or Decimal("0.00")) for d in pending)
+
+        by_delivery_person: dict[str, Decimal] = {}
+        for d in deliveries:
+            person = d.delivery_person or (d.partner.name if d.partner else "Unassigned")
+            by_delivery_person[person] = by_delivery_person.get(person, Decimal("0.00")) + (d.cod_amount or Decimal("0.00"))
+
+        delivery_items = []
+        for d in deliveries:
+            delivery_items.append({
+                "delivery_id": d.id,
+                "order_id": d.order_id,
+                "order_number": d.order.order_number if d.order else f"ORD-{d.order_id}",
+                "delivery_person": d.delivery_person,
+                "partner_id": d.partner_id,
+                "partner_name": d.partner.name if d.partner else None,
+                "cod_amount": d.cod_amount or Decimal("0.00"),
+                "cod_collected": d.cod_collected,
+                "cod_collected_at": d.cod_collected_at,
+                "delivery_status": d.status,
+                "delivered_at": d.delivered_at,
+                "recipient_name": d.recipient_name,
+                "recipient_phone": d.recipient_phone,
+            })
+
+        return {
+            "summary": {
+                "total_cod_orders": total_cod_orders,
+                "total_cod_amount": total_cod_amount,
+                "collected_orders_count": collected_orders_count,
+                "total_collected_amount": total_collected_amount,
+                "pending_orders_count": pending_orders_count,
+                "total_pending_amount": total_pending_amount,
+                "by_delivery_person": by_delivery_person,
+            },
+            "deliveries": delivery_items,
+        }
 
     def list_methods(
         self,
@@ -340,4 +508,4 @@ class DeliveryRepository:
                 return zone
         return None
 
-
+

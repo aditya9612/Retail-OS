@@ -806,6 +806,16 @@ def test_correct_gst_reversal_and_original_invoice_linkage(db):
     user, order, invoice, inv_item = create_test_sale(db, tenant.id, store.id, product, qty=Decimal("10"), batch=batch)
 
     service = BillingService(db)
+    with pytest.raises(AppException, match="Condition must be one of"):
+        service.process_return(
+            tenant_id=tenant.id,
+            invoice_id=invoice.id,
+            product_id=product.id,
+            return_quantity=Decimal("1"),
+            user=user,
+            condition="unknown",
+        )
+
     # Return 5 units with credit note issued
     res = service.process_return(
         tenant_id=tenant.id,
@@ -814,10 +824,14 @@ def test_correct_gst_reversal_and_original_invoice_linkage(db):
         return_quantity=Decimal("5"),
         user=user,
         issue_credit_note=True,
+        refund_method="upi",
     )
 
     cn = db.get(CreditNote, res["credit_note_id"])
     assert cn is not None
+    assert res["refund_id"] is not None
+    assert res["issue_credit_note"] is True
+    assert res["refund_method"] == "upi"
     assert cn.invoice_id == invoice.id
     # Half return -> exactly half CGST and SGST
     assert cn.cgst_amount == (invoice.cgst_amount / 2).quantize(Decimal("0.01"))

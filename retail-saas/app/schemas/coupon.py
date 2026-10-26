@@ -201,6 +201,33 @@ class CouponBase(BaseModel):
         description="Usage limit must be greater than 0",
     )
 
+    usage_limit_per_customer: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Usage limit per customer",
+    )
+
+    applicable_categories: Optional[list[str]] = Field(
+        default=None,
+        description="List of applicable category names or IDs",
+    )
+
+    applicable_products: Optional[list[str]] = Field(
+        default=None,
+        description="List of applicable product SKUs or IDs",
+    )
+
+    store_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Optional store ID restriction",
+    )
+
+    first_order_only: Optional[bool] = Field(
+        default=False,
+        description="Whether coupon applies to first order only",
+    )
+
     start_date: date = Field(
         ...,
         description="Coupon start date",
@@ -336,6 +363,16 @@ class CouponUpdate(BaseModel):
         default=None,
         gt=0,
     )
+
+    usage_limit_per_customer: Optional[int] = Field(
+        default=None,
+        gt=0,
+    )
+
+    applicable_categories: Optional[list[str]] = None
+    applicable_products: Optional[list[str]] = None
+    store_id: Optional[int] = None
+    first_order_only: Optional[bool] = None
 
     start_date: Optional[date] = None
 
@@ -476,6 +513,12 @@ class CouponResponse(BaseModel):
     maximum_discount: Optional[Decimal]
     usage_limit: int
     used_count: int
+    usage_limit_per_customer: Optional[int] = None
+    applicable_categories: Optional[list[str]] = None
+    applicable_products: Optional[list[str]] = None
+    store_id: Optional[int] = None
+    first_order_only: bool = False
+    is_deleted: bool = False
     start_date: date
     end_date: date
     is_active: bool
@@ -499,6 +542,9 @@ class ValidateCouponRequest(BaseModel):
         gt=0,
         description="Order amount must be greater than 0",
     )
+    customer_id: Optional[int] = Field(default=None, gt=0)
+    customer_phone: Optional[str] = Field(default=None, max_length=20)
+    store_id: Optional[int] = Field(default=None, gt=0)
 
     @field_validator("coupon_code")
     @classmethod
@@ -530,6 +576,9 @@ class ApplyCouponRequest(BaseModel):
         gt=0,
         description="Order amount must be greater than 0",
     )
+    customer_id: Optional[int] = Field(default=None, gt=0)
+    customer_phone: Optional[str] = Field(default=None, max_length=20)
+    store_id: Optional[int] = Field(default=None, gt=0)
 
     @field_validator("coupon_code")
     @classmethod
@@ -598,3 +647,55 @@ class CouponStatsResponse(BaseModel):
     inactive_coupons: int
     scheduled_coupons: int
     total_used: int
+
+
+class CouponRedemptionResponse(BaseModel):
+    id: int
+    tenant_id: int
+    coupon_id: int
+    order_id: Optional[int] = None
+    customer_id: Optional[int] = None
+    customer_phone: Optional[str] = None
+    discount_amount: float
+    order_amount: float
+    redeemed_at: datetime
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+class BulkGenerateCouponsRequest(BaseModel):
+    prefix: str = Field(..., min_length=2, max_length=20, description="Code prefix, e.g. FEST")
+    count: int = Field(default=10, ge=1, le=500, description="Number of unique vouchers to generate")
+    description: str = Field(..., min_length=3, max_length=255)
+    discount_type: str = Field(..., description="Discount type: percentage or fixed")
+    discount_value: Decimal = Field(..., gt=0)
+    minimum_order_amount: Decimal = Field(default=Decimal("1.00"), ge=Decimal("1.00"))
+    maximum_discount: Optional[Decimal] = None
+    usage_limit: int = Field(default=1, gt=0)
+    usage_limit_per_customer: Optional[int] = Field(default=1, gt=0)
+    start_date: date
+    end_date: date
+
+
+class BulkGenerateCouponsResponse(BaseModel):
+    success: bool = True
+    message: str
+    generated_count: int
+    coupons: list[CouponResponse] = []
+
+
+class ApplicableCouponItem(BaseModel):
+    coupon: CouponResponse
+    is_applicable: bool
+    discount_amount: float
+    final_amount: float
+    message: str
+    shortfall: Optional[float] = None
+
+
+class ApplicableCouponsResponse(BaseModel):
+    order_amount: float
+    applicable_coupons: list[ApplicableCouponItem] = []
+    locked_coupons: list[ApplicableCouponItem] = []

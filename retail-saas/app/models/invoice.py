@@ -64,3 +64,18 @@ class Invoice(Base, TimestampMixin):
     @tax_breakdown.setter
     def tax_breakdown(self, val: dict) -> None:
         self._tax_breakdown = val
+
+    @property
+    def customer_id(self) -> Optional[int]:
+        return self.order.customer_id if self.order else None
+
+    @property
+    def same_state(self) -> Optional[bool]:
+        configured_value = getattr(self, "_same_state", None)
+        if configured_value is not None:
+            return configured_value
+        if self.igst_amount != Decimal("0.00"):
+            return False
+        if self.cgst_amount != Decimal("0.00") or self.sgst_amount != Decimal("0.00"):
+            return True
+        return None
