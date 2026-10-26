@@ -544,6 +544,78 @@ def register_exception_handlers(app):
                         content=formatted,
                     )
 
+        if (
+            request.method in ("POST", "PUT", "PATCH")
+            and "/customers" in clean_path
+        ):
+            has_json_invalid = any(err.get("type") == "json_invalid" for err in errors)
+            if has_json_invalid:
+                try:
+                    raw_body = await request.body()
+                    body_text = raw_body.decode("utf-8", errors="replace")
+                except Exception:
+                    body_text = ""
+
+                detected_field = None
+                for err in errors:
+                    if err.get("type") == "json_invalid":
+                        loc = err.get("loc", ())
+                        pos = loc[1] if len(loc) > 1 and isinstance(loc[1], int) else None
+                        before_pos = body_text[:pos] if pos is not None else body_text
+                        m = re.findall(r'["\']([a-zA-Z0-9_]+)["\']\s*:\s*$', before_pos.rstrip())
+                        if m:
+                            detected_field = m[-1]
+                            break
+
+                if not detected_field:
+                    if re.search(r'["\']whatsapp_opt_in["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']whatsapp_opt_in["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "whatsapp_opt_in"
+                    elif re.search(r'["\']sms_opt_in["\']\s*:\s*[^"{\[\w\s]', body_text) or re.search(r'["\']sms_opt_in["\']\s*:\s*$', body_text.strip().rstrip("}")):
+                        detected_field = "sms_opt_in"
+                    elif re.search(r'["\']phone["\']\s*:\s*[^"{\[\w\s]', body_text):
+                        detected_field = "phone"
+                    elif re.search(r'["\']name["\']\s*:\s*[^"{\[\w\s]', body_text):
+                        detected_field = "name"
+                    elif re.search(r'["\']email["\']\s*:\s*[^"{\[\w\s]', body_text):
+                        detected_field = "email"
+
+                field_expected = {
+                    "whatsapp_opt_in": ("bool_parsing", "Expected a boolean: true or false for 'whatsapp_opt_in'"),
+                    "sms_opt_in": ("bool_parsing", "Expected a boolean: true or false for 'sms_opt_in'"),
+                    "phone": ("string_type", "Expected a string for customer phone"),
+                    "name": ("string_type", "Expected a string for customer name"),
+                    "email": ("string_type", "Expected a valid email string for customer email"),
+                }
+
+                if detected_field in field_expected:
+                    err_type, expected_desc = field_expected[detected_field]
+                    error_msg = f"Invalid value for {detected_field}. {expected_desc}."
+                    formatted = {
+                        "success": False,
+                        "message": f"Validation failed: '{detected_field}': {error_msg}",
+                        "detail": [
+                            {
+                                "type": err_type,
+                                "loc": ["body", detected_field],
+                                "msg": error_msg,
+                                "input": None,
+                                "ctx": {"error": expected_desc},
+                            }
+                        ],
+                        "errors": [
+                            {
+                                "field": detected_field,
+                                "message": error_msg,
+                                "type": err_type,
+                                "loc": ["body", detected_field],
+                            }
+                        ],
+                    }
+                    return JSONResponse(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        content=formatted,
+                    )
+
         formatted = _format_pydantic_errors(errors)
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

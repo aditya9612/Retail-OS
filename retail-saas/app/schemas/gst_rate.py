@@ -28,6 +28,8 @@ class GstRateCreate(BaseModel):
         s = v.strip()
         if not s.isdigit():
             raise ValueError("HSN code must contain digits only")
+        if not s.strip("0"):
+            raise ValueError("HSN code cannot consist only of zeroes")
         return s
 
     @field_validator("gst_rate")
@@ -35,6 +37,7 @@ class GstRateCreate(BaseModel):
     def validate_gst_slab(cls, v: Decimal) -> Decimal:
         if v not in VALID_GST_SLABS:
             raise ValueError(f"GST rate must be one of {[str(s) for s in VALID_GST_SLABS]}")
+        return v
         return v
 
     model_config = {
@@ -63,6 +66,8 @@ class GstRateUpdate(BaseModel):
             s = v.strip()
             if not s.isdigit():
                 raise ValueError("HSN code must contain digits only")
+            if not s.strip("0"):
+                raise ValueError("HSN code cannot consist only of zeroes")
             return s
         return v
 

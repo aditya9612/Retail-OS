@@ -203,6 +203,12 @@ def _ensure_price_override_allowed(
                 "Price override not allowed for your role"
             )
 
+        cost_price = product.cost_price or Decimal("0.00")
+        if cost_price > 0 and unit_price < cost_price:
+            raise AppException(
+                f"Unit price cannot be lower than product cost price ({cost_price:.2f})"
+            )
+
 
 @router.post(
     "/cart/add-item",

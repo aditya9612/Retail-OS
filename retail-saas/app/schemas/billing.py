@@ -1,9 +1,10 @@
+
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 VALID_REFUND_METHODS = ["cash", "upi", "store_credit"]
 VALID_PAYMENT_MODES = [
@@ -105,6 +106,19 @@ class InvoiceReprintRequest(BaseModel):
     )
 
 
+    @field_validator("printer_type", mode="before")
+    @classmethod
+    def validate_printer_type(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("printer_type must be a string")
+        value = value.strip().lower()
+        if value not in {"generic", "epson", "tvs"}:
+            raise ValueError(
+                "printer_type must be one of: generic, epson, tvs"
+            )
+        return value
+
+
 class InvoiceVoidRequest(BaseModel):
     reason: Optional[str] = Field(
         default="Customer cancelled at counter",
@@ -139,6 +153,7 @@ class RefundCreate(BaseModel):
                 f"refund_method must be one of {VALID_REFUND_METHODS}"
             )
         return v
+
 
 
 class RefundRejectRequest(BaseModel):
@@ -210,6 +225,7 @@ class CreditNoteResponse(BaseModel):
     cgst_amount: Decimal
     sgst_amount: Decimal
     igst_amount: Decimal
+    reason: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -226,6 +242,21 @@ class CreditNoteCreate(BaseModel):
     refund_method: Optional[str] = Field(default=None, description="Refund method: store_credit, cash, upi, bank_transfer")
     valid_days: Optional[int] = Field(default=90, ge=1, le=365, description="Validity period in days (default: 90)")
     notes: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def validate_reason(cls, v):
+        if v is None:
+            return v
+        if isinstance(v, str):
+            v = v.strip()
+            if len(v) < 3:
+                raise ValueError(
+                    "Reason must contain at least 3 non-whitespace characters"
+                )
+            if len(v) > 500:
+                raise ValueError("Reason cannot exceed 500 characters")
+        return v
 
 
 class CreditNoteValidateRequest(BaseModel):
@@ -289,6 +320,7 @@ class CreditNoteThermalResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+
 class PaymentSplit(BaseModel):
     payment_mode: str = Field(description="Must be a valid payment mode")
     amount: Decimal = Field(
@@ -320,6 +352,18 @@ class PaymentSplit(BaseModel):
                 f"payment_mode must be one of {VALID_PAYMENT_MODES}"
             )
         return v
+
+    @field_validator("transaction_reference", mode="before")
+    @classmethod
+    def validate_transaction_reference(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("transaction_reference must be a string")
+        value = value.strip()
+        if not value or value.lower() in {"string", "null", "none", "undefined"}:
+            raise ValueError("transaction_reference cannot be empty or a placeholder")
+        return value
 
 
 class TenderPaymentSplit(BaseModel):
@@ -366,7 +410,10 @@ class InvoiceCreate(BaseModel):
     same_state: bool = True
     items: Optional[list[InvoiceItemCreate]] = Field(
         default=None,
-        description="Optional direct line items. If omitted, items from user's active cart will be used.",
+        description=(
+            "Optional direct line items. If omitted, items from user's "
+            "active cart will be used."
+        ),
     )
     payments: list["PaymentSplit"] = Field(
         default_factory=list,
@@ -392,11 +439,70 @@ class ReturnItemRequest(BaseModel):
         le=Decimal("10000"),
         description="Return quantity must be greater than 0",
     )
-    reason: Optional[str] = Field(default=None, min_length=3, max_length=500)
-    condition: str = Field(default="sellable", description="Item condition: sellable, damaged, expired")
-    idempotency_key: Optional[str] = Field(default=None, max_length=100, description="Optional idempotency key")
-    issue_credit_note: bool = Field(default=False, description="Whether to atomically issue credit note")
-    refund_method: str = Field(default="cash", description="Refund method if issuing credit note")
+    reason: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=500,
+        validation_alias=AliasChoices("reason", "notes"),
+    )
+    condition: str = Field(
+        default="sellable",
+        description="Item condition: sellable, damaged, expired",
+    )
+    idempotency_key: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+        description="Optional idempotency key",
+    )
+    issue_credit_note: bool = Field(
+        default=False,
+        description="Whether to atomically issue credit note",
+    )
+    refund_method: str = Field(
+        default="cash",
+        description="Refund method if issuing credit note",
+    )
+
+    @field_validator("condition", mode="before")
+    @classmethod
+    def validate_condition(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("condition must be one of: sellable, damaged, expired")
+        value = value.strip().lower()
+        if value not in {"sellable", "damaged", "expired"}:
+            raise ValueError("condition must be one of: sellable, damaged, expired")
+        return value
+
+    @field_validator("idempotency_key", mode="before")
+    @classmethod
+    def validate_idempotency_key(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("idempotency_key must be a string")
+        value = value.strip()
+        if (
+            not value
+            or value.lower() in {"string", "null", "none", "undefined"}
+            or any(character.isspace() for character in value)
+        ):
+            raise ValueError("idempotency_key must be a non-empty token without spaces")
+        return value
+
+    @field_validator("refund_method", mode="before")
+    @classmethod
+    def validate_return_refund_method(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError(
+                f"refund_method must be one of {VALID_REFUND_METHODS}"
+            )
+        value = value.strip().lower()
+        if value not in VALID_REFUND_METHODS:
+            raise ValueError(
+                f"refund_method must be one of {VALID_REFUND_METHODS}"
+            )
+        return value
 
 
 class ThermalPrintResponse(BaseModel):

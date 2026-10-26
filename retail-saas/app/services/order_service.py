@@ -293,7 +293,7 @@ class OrderService:
             discount=item.discount,
             tax_rate=tax["gst_rate"],
             tax_amount=tax["gst_amount"],
-            total=tax["total_amount"],
+            total_amount=tax["total_amount"],
             cgst_amount=tax["cgst_amount"],
             sgst_amount=tax["sgst_amount"],
             igst_amount=tax["igst_amount"],
@@ -453,6 +453,13 @@ class OrderService:
                 data.customer_id,
             )
 
+        delivery_pincode = getattr(data, "delivery_pincode", None)
+        if not delivery_pincode and data.delivery_address:
+            import re
+            match = re.search(r"\b([1-9]\d{5})\b", data.delivery_address)
+            if match:
+                delivery_pincode = match.group(1)
+
         order = Order(
             tenant_id=tenant_id,
             store_id=data.store_id,
@@ -466,6 +473,7 @@ class OrderService:
             coupon_code=data.coupon_code,
             discount_amount=Decimal("0.00"),
             delivery_address=data.delivery_address,
+            delivery_pincode=delivery_pincode,
             notes=data.notes,
         )
 
@@ -533,15 +541,10 @@ class OrderService:
                 order_amount=subtotal,
             )
 
-            coupon_discount = (
-                self._calculate_coupon_discount(
-                    coupon,
-                    subtotal,
-                )
-            )
-
             order.coupon_code = coupon.code
-            order.discount_amount = coupon_discount
+            # Draft orders do not have coupon discount applied and do not consume coupon usage.
+            # Discount and usage increment are applied upon order confirmation.
+            order.discount_amount = Decimal("0.00")
 
         else:
 
@@ -557,27 +560,26 @@ class OrderService:
         created_order = self.repo.create(order, commit=commit)
 
         if data.coupon_code:
-
-            coupon.used_count += 1
-            try:
-                from app.models.coupon import CouponRedemption
-                redemption = CouponRedemption(
-                    tenant_id=tenant_id,
-                    coupon_id=coupon.id,
-                    order_id=created_order.id,
-                    customer_id=created_order.customer_id,
-                    discount_amount=getattr(order, 'discount_amount', Decimal('0.00')) or Decimal('0.00'),
-                    order_amount=getattr(order, 'total_amount', Decimal('0.00')) or Decimal('0.00'),
-                )
-                self.db.add(redemption)
-            except Exception:
-                pass
-            if commit:
-                self.db.commit()
-                self.db.refresh(created_order)
-            else:
-                self.db.flush()
-
+            if order.status == OrderStatus.CONFIRMED.value:
+                coupon.used_count += 1
+                try:
+                    from app.models.coupon import CouponRedemption
+                    redemption = CouponRedemption(
+                        tenant_id=tenant_id,
+                        coupon_id=coupon.id,
+                        order_id=created_order.id,
+                        customer_id=created_order.customer_id,
+                        discount_amount=getattr(order, 'discount_amount', Decimal('0.00')) or Decimal('0.00'),
+                        order_amount=getattr(order, 'total_amount', Decimal('0.00')) or Decimal('0.00'),
+                    )
+                    self.db.add(redemption)
+                except Exception:
+                    pass
+                if commit:
+                    self.db.commit()
+                    self.db.refresh(created_order)
+                else:
+                    self.db.flush()
         return created_order
 
     def get_order(
@@ -753,12 +755,15 @@ class OrderService:
 
                 update_data["coupon_code"] = coupon.code
 
-                update_data["discount_amount"] = (
-                    self._calculate_coupon_discount(
-                        coupon,
-                        order.subtotal,
+                if order.status == OrderStatus.DRAFT.value:
+                    update_data["discount_amount"] = Decimal("0.00")
+                else:
+                    update_data["discount_amount"] = (
+                        self._calculate_coupon_discount(
+                            coupon,
+                            order.subtotal,
+                        )
                     )
-                )
 
         elif "discount_amount" in update_data:
 
@@ -770,12 +775,15 @@ class OrderService:
                     order_amount=order.subtotal,
                 )
 
-                update_data["discount_amount"] = (
-                    self._calculate_coupon_discount(
-                        coupon,
-                        order.subtotal,
+                if order.status == OrderStatus.DRAFT.value:
+                    update_data["discount_amount"] = Decimal("0.00")
+                else:
+                    update_data["discount_amount"] = (
+                        self._calculate_coupon_discount(
+                            coupon,
+                            order.subtotal,
+                        )
                     )
-                )
 
             else:
 
@@ -785,6 +793,12 @@ class OrderService:
                         update_data["discount_amount"],
                     )
                 )
+
+        if "delivery_address" in update_data and "delivery_pincode" not in update_data:
+            import re
+            match = re.search(r"\b([1-9]\d{5})\b", update_data["delivery_address"] or "")
+            if match:
+                update_data["delivery_pincode"] = match.group(1)
 
         for key, value in update_data.items():
             setattr(
@@ -878,6 +892,20 @@ class OrderService:
                             ),
                             commit=False,
                         )
+
+                if order.coupon_code and order.discount_amount == Decimal("0.00"):
+                    coupon = self._validate_coupon(
+                        tenant_id=tenant_id,
+                        coupon_code=order.coupon_code,
+                        order_amount=order.subtotal,
+                    )
+                    coupon_discount = self._calculate_coupon_discount(
+                        coupon,
+                        order.subtotal,
+                    )
+                    order.discount_amount = coupon_discount
+                    self._recalculate_order(order)
+                    coupon.used_count += 1
 
                 order.status = OrderStatus.CONFIRMED.value
 
@@ -1075,6 +1103,21 @@ class OrderService:
                 f"Cannot change order status "
                 f"from '{current_status}' to '{status}'"
             )
+
+        if current_status == OrderStatus.DRAFT.value and status == OrderStatus.CONFIRMED.value:
+            if order.coupon_code and order.discount_amount == Decimal("0.00"):
+                coupon = self._validate_coupon(
+                    tenant_id=tenant_id,
+                    coupon_code=order.coupon_code,
+                    order_amount=order.subtotal,
+                )
+                coupon_discount = self._calculate_coupon_discount(
+                    coupon,
+                    order.subtotal,
+                )
+                order.discount_amount = coupon_discount
+                self._recalculate_order(order)
+                coupon.used_count += 1
 
         order.status = status
 

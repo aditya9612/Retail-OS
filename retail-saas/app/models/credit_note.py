@@ -67,3 +67,7 @@ class CreditNote(Base, TimestampMixin):
         if self.valid_until and self.valid_until < datetime.utcnow():
             return True
         return False
+
+    @property
+    def reason(self) -> Optional[str]:
+        return self.refund.reason if self.refund else None

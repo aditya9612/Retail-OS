@@ -4,7 +4,15 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 
 VALID_ORDER_TYPES = ["pos", "ecommerce"]
@@ -254,6 +262,13 @@ class OrderCreate(BaseModel):
         description="Delivery address is optional for POS orders",
     )
 
+    delivery_pincode: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=20,
+        description="Optional delivery pincode / postal code",
+    )
+
     notes: Optional[str] = Field(
         default=None,
         min_length=1,
@@ -351,6 +366,26 @@ class OrderCreate(BaseModel):
 
         return v
 
+    @field_validator("delivery_pincode")
+    @classmethod
+    def validate_delivery_pincode(
+        cls,
+        v: Optional[str],
+    ) -> Optional[str]:
+
+        if v is None:
+            return None
+
+        v = v.strip()
+
+        if not v:
+            return None
+
+        if v.lower() in INVALID_STRING_VALUES:
+            raise ValueError("Invalid delivery pincode")
+
+        return v
+
     @field_validator("notes")
     @classmethod
     def validate_notes(
@@ -422,6 +457,12 @@ class OrderUpdate(BaseModel):
         default=None,
         min_length=3,
         max_length=500,
+    )
+
+    delivery_pincode: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=20,
     )
 
     notes: Optional[str] = Field(
@@ -503,6 +544,26 @@ class OrderUpdate(BaseModel):
 
         if v.isdigit():
             raise ValueError("Delivery address cannot contain only numbers")
+
+        return v
+
+    @field_validator("delivery_pincode")
+    @classmethod
+    def validate_delivery_pincode(
+        cls,
+        v: Optional[str],
+    ) -> Optional[str]:
+
+        if v is None:
+            return None
+
+        v = v.strip()
+
+        if not v:
+            return None
+
+        if v.lower() in INVALID_STRING_VALUES:
+            raise ValueError("Invalid delivery pincode")
 
         return v
 
@@ -609,12 +670,59 @@ class OrderResponse(BaseModel):
         return v
 
 
+class InvoiceItemResponse(BaseModel):
+    id: int
+    product_id: int
+    quantity: Decimal
+    unit_price: Decimal
+    discount_amount: Decimal
+    gst_rate: Decimal
+    gst_amount: Decimal
+    total_amount: Decimal
+
+    model_config = {"from_attributes": True}
+
+
+class PaymentResponse(BaseModel):
+
+    id: int
+    tenant_id: int
+    order_id: int
+    payment_method: str
+    payment_mode: str = Field(
+        validation_alias=AliasChoices("payment_mode", "payment_method")
+    )
+    status: str
+    amount: Decimal
+    transaction_id: Optional[str]
+    transaction_reference: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("transaction_reference", "transaction_id"),
+    )
+    amount_tendered: Optional[Decimal] = None
+    change_due: Optional[Decimal] = None
+    created_at: datetime
+
+    model_config = {
+        "from_attributes": True
+    }
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def coerce_payment_amount(cls, v):
+        if v is None:
+            return Decimal("0.00")
+        return v
+
+
 class InvoiceResponse(BaseModel):
 
     id: int
     tenant_id: int
     store_id: Optional[int] = None
     order_id: int
+    customer_id: Optional[int] = None
+    same_state: Optional[bool] = None
     invoice_number: str
     status: str
     subtotal: Decimal = Decimal("0.00")
@@ -624,6 +732,8 @@ class InvoiceResponse(BaseModel):
     igst_amount: Decimal = Decimal("0.00")
     total_amount: Decimal = Decimal("0.00")
     pdf_url: Optional[str] = None
+    items: List[InvoiceItemResponse] = Field(default_factory=list)
+    payments: List[PaymentResponse] = Field(default_factory=list)
     created_at: datetime
 
     model_config = {
@@ -645,28 +755,6 @@ class InvoiceResponse(BaseModel):
             return Decimal("0.00")
         return v
 
-
-class PaymentResponse(BaseModel):
-
-    id: int
-    tenant_id: int
-    order_id: int
-    payment_method: str
-    status: str
-    amount: Decimal = Decimal("0.00")
-    transaction_id: Optional[str] = None
-    created_at: datetime
-
-    model_config = {
-        "from_attributes": True
-    }
-
-    @field_validator("amount", mode="before")
-    @classmethod
-    def coerce_payment_amount(cls, v):
-        if v is None:
-            return Decimal("0.00")
-        return v
 
 
 class OrderTrackingResponse(BaseModel):

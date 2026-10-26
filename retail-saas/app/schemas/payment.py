@@ -137,6 +137,16 @@ class PaymentCreate(BaseModel):
 
         return value
 
+    @field_validator("transaction_id", mode="before")
+    @classmethod
+    def normalize_transaction_id(cls, value: Any) -> Any:
+        # Treat an empty transaction ID as omitted. Cash payments do not need one;
+        # non-cash payments are rejected by validate_transaction_requirement.
+        if isinstance(value, str) and not value.strip():
+            return None
+
+        return value
+
     @field_validator("transaction_id")
     @classmethod
     def validate_transaction(cls, value: Optional[str]) -> Optional[str]:
@@ -629,7 +639,10 @@ class PaymentWebhookRequest(BaseModel):
             "payment.failed",
             "payment.refunded",
         }:
-            raise ValueError("Unsupported payment event type")
+            raise ValueError(
+                "Unsupported payment event type. Allowed values: "
+                "payment.completed, payment.failed, payment.refunded"
+            )
 
         return value
 

@@ -227,6 +227,18 @@ def validate_indian_phone(
 
     core_digits = clean[3:] if clean.startswith("+91") else clean
 
+    # Reject full sequential / serial numbers (e.g. 9876543210, 6789012345, 8765432109)
+    ascending_seq = "01234567890123456789"
+    descending_seq = "98765432109876543210"
+    if core_digits in descending_seq or core_digits in ascending_seq:
+        raise ValueError(f"{field_name} cannot be a sequential serial number '{value}'")
+
+    # Reject 7 or more consecutive ascending or descending sequential digits (e.g. 9123456789, 9876543200)
+    for i in range(len(core_digits) - 6):
+        sub = core_digits[i:i+7]
+        if sub in "0123456789" or sub in "9876543210":
+            raise ValueError(f"{field_name} cannot contain sequential serial digits '{value}'")
+
     # Reject identical digits (e.g. 9999999999, 8888888888, 7777777777, 6666666666)
     if len(set(core_digits)) == 1:
         raise ValueError(f"{field_name} cannot consist of identical repeated digits '{value}'")
@@ -1268,9 +1280,9 @@ def validate_aadhaar_number(
 ) -> Optional[str]:
     """
     Validates Indian Aadhaar card number.
-    Format: exactly 12 numeric digits, cannot start with 0 or 1.
+    Format: exactly 12 numeric digits with a valid Verhoeff checksum.
     Automatically strips spaces and hyphens (e.g. '1234 5678 9012' -> '123456789012').
-    Rejects: non-digits, length != 12, starting with 0/1, repeated dummy digits.
+    Rejects: invalid format, starting with 0/1, repeated digits, or bad checksum.
     """
     if value is None:
         if required:
@@ -1311,6 +1323,36 @@ def validate_aadhaar_number(
         raise ValueError(
             f"Invalid {field_name}. Aadhaar number cannot contain 12 identical digits"
         )
+
+    multiplication_table = (
+        (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+        (1, 2, 3, 4, 0, 6, 7, 8, 9, 5),
+        (2, 3, 4, 0, 1, 7, 8, 9, 5, 6),
+        (3, 4, 0, 1, 2, 8, 9, 5, 6, 7),
+        (4, 0, 1, 2, 3, 9, 5, 6, 7, 8),
+        (5, 9, 8, 7, 6, 0, 4, 3, 2, 1),
+        (6, 5, 9, 8, 7, 1, 0, 4, 3, 2),
+        (7, 6, 5, 9, 8, 2, 1, 0, 4, 3),
+        (8, 7, 6, 5, 9, 3, 2, 1, 0, 4),
+        (9, 8, 7, 6, 5, 4, 3, 2, 1, 0),
+    )
+    permutation_table = (
+        (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+        (1, 5, 7, 6, 2, 8, 3, 0, 9, 4),
+        (5, 8, 0, 3, 7, 9, 6, 1, 4, 2),
+        (8, 9, 1, 6, 0, 4, 3, 5, 2, 7),
+        (9, 4, 5, 3, 1, 2, 6, 8, 7, 0),
+        (4, 2, 8, 6, 5, 7, 3, 9, 0, 1),
+        (2, 7, 9, 3, 8, 0, 6, 4, 1, 5),
+        (7, 0, 4, 6, 9, 1, 3, 2, 5, 8),
+    )
+    checksum = 0
+    for position, digit in enumerate(reversed(clean_v)):
+        checksum = multiplication_table[checksum][
+            permutation_table[position % 8][int(digit)]
+        ]
+    if checksum != 0:
+        raise ValueError(f"Invalid {field_name}. Aadhaar checksum is invalid")
 
     return clean_v
 
@@ -1400,4 +1442,3 @@ def validate_website_url(
         raise ValueError(f"Invalid {field_name.lower()} format")
 
     return v
-

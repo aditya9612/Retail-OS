@@ -165,6 +165,7 @@ def get_gst_rate(
     summary="Update GST Rate",
     description="Updates existing GST rate, HSN code, description, or active status.",
 )
+@router.patch("/{rate_id}", response_model=GstRateResponse)
 def update_gst_rate(
     rate_id: int,
     payload: GstRateUpdate,

@@ -45,6 +45,7 @@ class Order(Base, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
     delivery_address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     delivery_pincode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    coupon_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     customer: Mapped[Optional["Customer"]] = relationship("Customer", back_populates="orders")
     store: Mapped[Optional["Store"]] = relationship("Store")

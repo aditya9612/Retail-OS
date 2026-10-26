@@ -2,6 +2,8 @@
 from datetime import datetime
 from typing import Any, Optional
 import re
+from pathlib import PurePosixPath
+from urllib.parse import urlsplit
 
 from pydantic import (
     BaseModel,
@@ -18,12 +20,41 @@ from app.utils.constants import RoleEnum, OFFICIAL_ROLES
 
 
 PHONE_PATTERN = re.compile(r"^(?:\+91)?[6-9]\d{9}$")
+PROFILE_PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 FULL_NAME_PATTERN = re.compile(
     r"^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[ .'-][A-Za-zÀ-ÖØ-öø-ÿ]+)*$"
 )
 
 SPECIAL_CHARACTERS = r"""!@#$%^&*()_+\-=[]{};':"\|,.<>/?`~"""
+
+
+def validate_profile_photo(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+
+    value = value.strip()
+    parsed = urlsplit(value)
+    path = parsed.path
+    photo_path = PurePosixPath(path)
+
+    if parsed.scheme:
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username is not None
+        ):
+            raise ValueError("Profile photo must be an image URL or /uploads/users/ path")
+    elif parsed.netloc or not path.startswith("/uploads/users/"):
+        raise ValueError("Profile photo must be an image URL or /uploads/users/ path")
+
+    if (
+        any(part in {".", ".."} for part in photo_path.parts)
+        or photo_path.suffix.lower() not in PROFILE_PHOTO_EXTENSIONS
+    ):
+        raise ValueError("Profile photo must be a JPG, JPEG, PNG, or WEBP image")
+
+    return value
 
 
 class UserBase(BaseModel):
@@ -72,6 +103,11 @@ class UserBase(BaseModel):
         default=None,
         description="Profile photo URL or file path",
     )
+
+    @field_validator("profile_photo")
+    @classmethod
+    def validate_profile_photo_value(cls, value: Optional[str]) -> Optional[str]:
+        return validate_profile_photo(value)
 
     pan_number: Optional[str] = Field(
         default=None,
@@ -302,6 +338,11 @@ class UserUpdate(BaseModel):
         description="Profile photo image URL",
         examples=["/uploads/users/photo_123.jpg"],
     )
+
+    @field_validator("profile_photo")
+    @classmethod
+    def validate_profile_photo_value(cls, value: Optional[str]) -> Optional[str]:
+        return validate_profile_photo(value)
 
     pan_number: Optional[str] = Field(
         default=None,
@@ -629,4 +670,3 @@ class UsersByStoreResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
     )
-

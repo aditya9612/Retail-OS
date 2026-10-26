@@ -516,6 +516,7 @@ def deactivate_user(
 @router.delete(
     "/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    description="Deletes the user successfully and returns no response body.",
 )
 def delete_user(
     user_id: int,
@@ -619,4 +620,3 @@ def remove_store(
         previous_store_id=previous_store_id,
         role=role_name,
     )
-

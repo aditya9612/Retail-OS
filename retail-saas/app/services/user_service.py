@@ -324,6 +324,27 @@ class UserService:
 
             update_data["full_name"] = full_name
 
+        for identifier_field, identifier_label in (
+            ("pan_number", "PAN number"),
+            ("addhar_number", "Aadhaar number"),
+        ):
+            identifier = update_data.get(identifier_field)
+            if identifier is None or identifier == getattr(user, identifier_field):
+                continue
+
+            duplicate = (
+                self.db.query(User.id)
+                .filter(
+                    User.tenant_id == tenant_id,
+                    User.is_deleted.is_(False),
+                    getattr(User, identifier_field) == identifier,
+                    User.id != user.id,
+                )
+                .first()
+            )
+            if duplicate:
+                raise ConflictException(f"{identifier_label} is already in use")
+
         if "password" in update_data:
             password = update_data.pop(
                 "password"
@@ -725,4 +746,3 @@ class UserService:
             total_users=total_assigned_count,
             stores=store_summaries,
         )
-

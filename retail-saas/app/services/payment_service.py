@@ -153,22 +153,30 @@ class PaymentService:
 
             if order is None:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                    status_code=404,
                     detail="Order not found",
                 )
 
             query = query.filter(Payment.order_id == order_id)
 
         if status is not None:
-            normalized_status = (
-                "completed" if status == "success" else status
-            )
+            normalized_status = str(status).strip().lower()
+            if normalized_status == "success":
+                normalized_status = "completed"
             query = query.filter(Payment.status == normalized_status)
 
         if method is not None:
-            query = query.filter(Payment.payment_method == method)
+            normalized_method = str(method).strip().lower()
+            query = query.filter(Payment.payment_method == normalized_method)
 
-        return query.order_by(Payment.id.desc()).all()
+        payments = query.order_by(Payment.id.desc()).all()
+        if not payments:
+            raise HTTPException(
+                status_code=404,
+                detail="No Data Found",
+            )
+
+        return payments
 
     def refund_payment(self, payment_id: int):
         payment = self.get_payment(payment_id)

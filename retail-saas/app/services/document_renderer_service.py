@@ -1915,10 +1915,28 @@ class DocumentRenderer:
         cn_raw = data.get("credit_note_no") or data.get("credit_note_number", "")
         cn_number = format_document_number(cn_raw, branding.invoice_prefix, "credit_note")
 
-        meta_box_h = 44
+        meta_box_h = 48
         c.setFillColor(box_bg)
         c.setStrokeColor(border_color)
         c.rect(margin, y - meta_box_h, width - 2 * margin, meta_box_h, fill=1, stroke=1)
+
+        # Keep the credit note number and date in separate columns.
+        c.setFillColor(text_dark)
+        c.setFont(self.bold_font, 9)
+        c.drawString(margin + 10, y - 15, f"Credit Note No: {str(cn_number)[:32]}")
+
+        created_at_val = data.get("created_at")
+        date_str = ""
+        if created_at_val:
+            date_str = created_at_val.strftime("%d-%m-%Y") if hasattr(created_at_val, "strftime") else str(created_at_val)[:10]
+            c.drawRightString(width - margin - 10, y - 15, f"Date: {date_str}")
+
+        orig_inv = data.get("original_invoice_number") or data.get("invoice_number", "")
+        c.setFont(self.default_font, 8.5)
+        c.drawString(margin + 10, y - 34, f"Against Invoice: {str(orig_inv or 'N/A')[:35]}")
+
+        reason = str(data.get("reason") or "Returned goods / adjustment")
+        c.drawString(margin + 220, y - 34, f"Reason: {reason[:35]}")
 
         # QR Code if enabled
         has_qr = False

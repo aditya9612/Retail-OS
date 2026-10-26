@@ -259,6 +259,18 @@ def ensure_schema_compatibility() -> None:
                     except Exception as exc:
                         logger.warning("Could not add customers.%s: %s", col_name, exc)
 
+        if "customer_feedback" in existing_cols:
+            fb_cols = existing_cols["customer_feedback"]
+            if "feedback" not in fb_cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text("ALTER TABLE `customer_feedback` ADD COLUMN `feedback` TEXT NULL")
+                        )
+                    fb_cols.add("feedback")
+                except Exception as exc:
+                    logger.warning("Could not add customer_feedback.feedback: %s", exc)
+
         if "products" in existing_cols:
             prod_cols = existing_cols["products"]
             if "selling_price" not in prod_cols and "price" in prod_cols:
