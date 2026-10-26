@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.services.excel_export_service import ExcelExportService
 
 from app.models.audit_log import AuditLog
+from app.models.category import Category
 from app.models.customer import Customer
 from app.models.inventory import Inventory
 from app.models.invoice import Invoice
@@ -2117,27 +2118,97 @@ class ReportService:
             "store_id": resolved_store_id,
         }
 
+    @staticmethod
+    def _resolve_analytics_date_range(
+        period: Optional[str] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+    ) -> tuple[Optional[datetime], Optional[datetime]]:
+        today = date.today()
+        start_dt, end_dt = None, None
+
+        if date_from or date_to:
+            if date_from and date_to and date_from > date_to:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="date_from must be before or equal to date_to",
+                )
+            if date_from:
+                start_dt = datetime.combine(date_from, time.min)
+            if date_to:
+                end_dt = datetime.combine(date_to + timedelta(days=1), time.min)
+            return start_dt, end_dt
+
+        if not period:
+            return None, None
+
+        p = period.lower()
+        if p == "today":
+            start_dt = datetime.combine(today, time.min)
+            end_dt = datetime.combine(today + timedelta(days=1), time.min)
+        elif p == "yesterday":
+            y = today - timedelta(days=1)
+            start_dt = datetime.combine(y, time.min)
+            end_dt = datetime.combine(today, time.min)
+        elif p == "this_week":
+            start_w = today - timedelta(days=today.weekday())
+            start_dt = datetime.combine(start_w, time.min)
+            end_dt = datetime.combine(today + timedelta(days=1), time.min)
+        elif p == "last_week":
+            start_last_w = today - timedelta(days=today.weekday() + 7)
+            end_last_w = start_last_w + timedelta(days=7)
+            start_dt = datetime.combine(start_last_w, time.min)
+            end_dt = datetime.combine(end_last_w, time.min)
+        elif p == "this_month":
+            start_dt = datetime.combine(today.replace(day=1), time.min)
+            end_dt = datetime.combine(today + timedelta(days=1), time.min)
+        elif p == "last_month":
+            first_of_this = today.replace(day=1)
+            last_day_prev = first_of_this - timedelta(days=1)
+            start_prev = last_day_prev.replace(day=1)
+            start_dt = datetime.combine(start_prev, time.min)
+            end_dt = datetime.combine(first_of_this, time.min)
+        elif p == "this_year":
+            start_dt = datetime.combine(today.replace(month=1, day=1), time.min)
+            end_dt = datetime.combine(today + timedelta(days=1), time.min)
+        elif p == "last_year":
+            start_dt = datetime.combine(today.replace(year=today.year - 1, month=1, day=1), time.min)
+            end_dt = datetime.combine(today.replace(year=today.year, month=1, day=1), time.min)
+
+        return start_dt, end_dt
+
     def product_performance(
         self,
         tenant_id: int,
         limit: int = 10,
         store_id: Optional[int] = None,
         period: Optional[str] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        sort_by: str = "revenue",
+        order: str = "desc",
+        category_id: Optional[int] = None,
     ) -> list[dict]:
         if store_id is not None:
             store = self.db.query(Store).filter(Store.id == store_id, Store.tenant_id == tenant_id).first()
             if not store:
                 raise NotFoundException("Store not found")
 
+        start_dt, end_dt = self._resolve_analytics_date_range(period, date_from, date_to)
+
         q = (
             self.db.query(
                 OrderItem.product_id,
                 func.coalesce(Product.name, "Unknown Product").label("product_name"),
+                Product.sku.label("sku"),
+                Category.name.label("category_name"),
+                func.coalesce(Product.cost_price, Decimal("0.00")).label("cost_price"),
                 func.coalesce(func.sum(OrderItem.quantity), 0).label("qty"),
-                func.coalesce(func.sum(OrderItem.total_amount), 0).label("revenue"),
+                func.coalesce(func.sum(OrderItem.total_amount), Decimal("0.00")).label("revenue"),
             )
             .join(Order, Order.id == OrderItem.order_id)
             .join(Product, Product.id == OrderItem.product_id)
+            .outerjoin(Category, Category.id == Product.category_id)
             .filter(
                 Order.tenant_id == tenant_id,
                 Product.tenant_id == tenant_id,
@@ -2149,42 +2220,358 @@ class ReportService:
         if store_id is not None:
             q = q.filter(Order.store_id == store_id)
 
-        if period:
-            today = date.today()
-            if period == "this_month":
-                start_dt = datetime.combine(today.replace(day=1), time.min)
-                end_dt = datetime.combine(today + timedelta(days=1), time.min)
-            elif period == "last_month":
-                end_d = today.replace(day=1)
-                start_d = (end_d - timedelta(days=1)).replace(day=1)
-                start_dt = datetime.combine(start_d, time.min)
-                end_dt = datetime.combine(end_d, time.min)
-            elif period == "this_year":
-                start_dt = datetime.combine(today.replace(month=1, day=1), time.min)
-                end_dt = datetime.combine(today + timedelta(days=1), time.min)
-            else:
-                start_dt, end_dt = None, None
+        if category_id is not None:
+            q = q.filter(Product.category_id == category_id)
 
-            if start_dt and end_dt:
-                q = q.filter(Order.created_at >= start_dt, Order.created_at < end_dt)
+        if start_dt:
+            q = q.filter(Order.created_at >= start_dt)
+        if end_dt:
+            q = q.filter(Order.created_at < end_dt)
 
-        rows = (
-            q.group_by(OrderItem.product_id, Product.name)
-            .order_by(func.sum(OrderItem.total_amount).desc())
-            .limit(limit)
-            .all()
-        )
-        return [
-            {
+        rows = q.group_by(
+            OrderItem.product_id,
+            Product.name,
+            Product.sku,
+            Category.name,
+            Product.cost_price,
+        ).all()
+
+        items = []
+        for r in rows:
+            qty_sold = int(r[5])
+            rev = float(round(r[6], 2))
+            cp = float(round(r[4] or Decimal("0.00"), 2))
+            cogs = float(round(qty_sold * cp, 2))
+            profit = float(round(rev - cogs, 2))
+            margin = float(round((profit / rev * 100), 2)) if rev > 0 else 0.0
+
+            items.append({
                 "product_id": r[0],
                 "product_name": r[1],
-                "quantity_sold": int(r[2]),
-                "revenue": float(round(r[3], 2)),
-            }
-            for r in rows
-        ]
+                "sku": r[2],
+                "category_name": r[3],
+                "cost_price": cp,
+                "quantity_sold": qty_sold,
+                "revenue": rev,
+                "cogs": cogs,
+                "gross_profit": profit,
+                "margin_percentage": margin,
+            })
+
+        reverse = (order.lower() != "asc")
+        if sort_by == "quantity":
+            items.sort(key=lambda x: x["quantity_sold"], reverse=reverse)
+        elif sort_by == "profit":
+            items.sort(key=lambda x: x["gross_profit"], reverse=reverse)
+        elif sort_by == "margin":
+            items.sort(key=lambda x: x["margin_percentage"], reverse=reverse)
+        else:
+            items.sort(key=lambda x: x["revenue"], reverse=reverse)
+
+        return items[:limit]
 
     def customer_analytics(
+        self,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+        period: Optional[str] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+    ) -> dict:
+        if store_id is not None:
+            store = self.db.query(Store).filter(Store.id == store_id, Store.tenant_id == tenant_id).first()
+            if not store:
+                raise NotFoundException("Store not found")
+
+        start_dt, end_dt = self._resolve_analytics_date_range(period, date_from, date_to)
+        excluded_statuses = ["draft", "cancelled", "canceled", "void", "deleted"]
+
+        total_customers = int(
+            self.db.query(func.count(Customer.id))
+            .filter(Customer.tenant_id == tenant_id)
+            .scalar() or 0
+        )
+
+        order_base = self.db.query(Order).filter(
+            Order.tenant_id == tenant_id,
+            func.lower(Order.status).notin_(excluded_statuses),
+        )
+        if store_id is not None:
+            order_base = order_base.filter(Order.store_id == store_id)
+        if start_dt:
+            order_base = order_base.filter(Order.created_at >= start_dt)
+        if end_dt:
+            order_base = order_base.filter(Order.created_at < end_dt)
+
+        orders_stats = (
+            order_base.with_entities(
+                func.count(Order.id).label("total_orders"),
+                func.coalesce(func.sum(Order.total_amount), Decimal("0.00")).label("total_revenue"),
+            ).first()
+        )
+        tot_orders = int(orders_stats.total_orders or 0) if orders_stats else 0
+        tot_rev = float(orders_stats.total_revenue or 0.0) if orders_stats else 0.0
+
+        orders_per_cust_sq = (
+            order_base.filter(Order.customer_id.isnot(None))
+            .with_entities(
+                Order.customer_id,
+                func.count(Order.id).label("cust_order_count"),
+            )
+            .group_by(Order.customer_id)
+            .subquery()
+        )
+
+        cust_counts = (
+            self.db.query(
+                func.count(orders_per_cust_sq.c.customer_id).label("active_customers"),
+                func.coalesce(func.sum(case((orders_per_cust_sq.c.cust_order_count == 1, 1), else_=0)), 0).label("one_time"),
+                func.coalesce(func.sum(case((orders_per_cust_sq.c.cust_order_count > 1, 1), else_=0)), 0).label("repeat"),
+            ).first()
+        )
+
+        active = int(cust_counts.active_customers or 0) if cust_counts else 0
+        one_time = int(cust_counts.one_time or 0) if cust_counts else 0
+        repeat = int(cust_counts.repeat or 0) if cust_counts else 0
+
+        scoped_total_customers = active if store_id is not None else total_customers
+        zero_order = max(0, scoped_total_customers - active)
+        repeat_rate = round((repeat / active * 100), 2) if active > 0 else 0.0
+        aov = round((tot_rev / tot_orders), 2) if tot_orders > 0 else 0.0
+
+        return {
+            "total_customers": scoped_total_customers,
+            "active_customers": active,
+            "repeat_customers": repeat,
+            "one_time_customers": one_time,
+            "zero_order_customers": zero_order,
+            "repeat_rate_percentage": repeat_rate,
+            "total_orders": tot_orders,
+            "total_revenue": round(tot_rev, 2),
+            "average_order_value": aov,
+        }
+
+    def dead_stock(
+        self,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+        category_id: Optional[int] = None,
+        days: int = 60,
+        limit: int = 50,
+    ) -> dict:
+        if store_id is not None:
+            store = self.db.query(Store).filter(Store.id == store_id, Store.tenant_id == tenant_id).first()
+            if not store:
+                raise NotFoundException("Store not found")
+
+        cutoff_dt = datetime.now() - timedelta(days=days)
+        excluded_statuses = ["draft", "cancelled", "canceled", "void", "deleted"]
+
+        inv_q = (
+            self.db.query(
+                Inventory.product_id,
+                func.sum(Inventory.quantity).label("stock_qty"),
+            )
+            .filter(Inventory.tenant_id == tenant_id)
+        )
+        if store_id is not None:
+            inv_q = inv_q.filter(Inventory.store_id == store_id)
+        inv_sq = inv_q.group_by(Inventory.product_id).having(func.sum(Inventory.quantity) > 0).subquery()
+
+        sold_q = (
+            self.db.query(
+                OrderItem.product_id,
+                func.max(Order.created_at).label("last_sold_date"),
+                func.sum(
+                    case(
+                        (Order.created_at >= cutoff_dt, OrderItem.quantity),
+                        else_=0,
+                    )
+                ).label("sold_in_cutoff"),
+            )
+            .join(Order, Order.id == OrderItem.order_id)
+            .filter(
+                Order.tenant_id == tenant_id,
+                func.lower(Order.status).notin_(excluded_statuses),
+            )
+        )
+        if store_id is not None:
+            sold_q = sold_q.filter(Order.store_id == store_id)
+        sold_sq = sold_q.group_by(OrderItem.product_id).subquery()
+
+        main_q = (
+            self.db.query(
+                Product.id,
+                Product.name,
+                Product.sku,
+                Category.name.label("category_name"),
+                Product.created_at,
+                func.coalesce(Product.cost_price, Decimal("0.00")),
+                inv_sq.c.stock_qty,
+                sold_sq.c.last_sold_date,
+                func.coalesce(sold_sq.c.sold_in_cutoff, 0),
+            )
+            .join(inv_sq, inv_sq.c.product_id == Product.id)
+            .outerjoin(Category, Category.id == Product.category_id)
+            .outerjoin(sold_sq, sold_sq.c.product_id == Product.id)
+            .filter(Product.tenant_id == tenant_id, Product.is_active == True)
+        )
+
+        if category_id is not None:
+            main_q = main_q.filter(Product.category_id == category_id)
+
+        rows = main_q.all()
+        now = datetime.now()
+        dead_items = []
+        total_tied_capital = 0.0
+
+        for r in rows:
+            prod_id, name, sku, cat_name, p_created_at, cp, stock_qty, last_sold, recent_sold = r
+            stock_qty = int(stock_qty or 0)
+            if stock_qty <= 0:
+                continue
+
+            if recent_sold is not None and recent_sold > 0:
+                continue
+
+            cost_price = float(round(cp or Decimal("0.00"), 2))
+            stock_val = float(round(stock_qty * cost_price, 2))
+
+            if last_sold:
+                days_inactive = max(0, (now - last_sold).days)
+            else:
+                days_inactive = max(0, (now - (p_created_at or now)).days)
+
+            dead_items.append({
+                "product_id": prod_id,
+                "product_name": name,
+                "sku": sku,
+                "category_name": cat_name,
+                "current_stock": stock_qty,
+                "cost_price": cost_price,
+                "stock_value": stock_val,
+                "days_inactive": days_inactive,
+                "last_sold_date": last_sold,
+            })
+            total_tied_capital += stock_val
+
+        dead_items.sort(key=lambda x: x["stock_value"], reverse=True)
+
+        return {
+            "threshold_days": days,
+            "total_dead_stock_items": len(dead_items),
+            "total_tied_capital": round(total_tied_capital, 2),
+            "items": dead_items[:limit],
+        }
+
+    def sales_trends(
+        self,
+        tenant_id: int,
+        interval: str = "daily",
+        period: Optional[str] = "this_month",
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        store_id: Optional[int] = None,
+    ) -> dict:
+        if store_id is not None:
+            store = self.db.query(Store).filter(Store.id == store_id, Store.tenant_id == tenant_id).first()
+            if not store:
+                raise NotFoundException("Store not found")
+
+        start_dt, end_dt = self._resolve_analytics_date_range(period, date_from, date_to)
+        if not start_dt and not end_dt:
+            end_dt = datetime.combine(date.today() + timedelta(days=1), time.min)
+            start_dt = end_dt - timedelta(days=30)
+
+        excluded_statuses = ["draft", "cancelled", "canceled", "void", "deleted"]
+
+        orders_q = (
+            self.db.query(Order)
+            .filter(
+                Order.tenant_id == tenant_id,
+                func.lower(Order.status).notin_(excluded_statuses),
+            )
+        )
+        if start_dt:
+            orders_q = orders_q.filter(Order.created_at >= start_dt)
+        if end_dt:
+            orders_q = orders_q.filter(Order.created_at < end_dt)
+        if store_id is not None:
+            orders_q = orders_q.filter(Order.store_id == store_id)
+
+        orders = orders_q.order_by(Order.created_at.asc()).all()
+
+        order_ids = [o.id for o in orders]
+        cogs_by_order: dict[int, float] = {}
+        if order_ids:
+            cogs_rows = (
+                self.db.query(
+                    OrderItem.order_id,
+                    func.sum(OrderItem.quantity * func.coalesce(Product.cost_price, Decimal("0.00")))
+                )
+                .join(Product, Product.id == OrderItem.product_id)
+                .filter(OrderItem.order_id.in_(order_ids))
+                .group_by(OrderItem.order_id)
+                .all()
+            )
+            for oid, cogs_val in cogs_rows:
+                cogs_by_order[oid] = float(cogs_val or 0.0)
+
+        buckets: dict[str, dict] = {}
+        for o in orders:
+            dt = o.created_at
+            if interval == "hourly":
+                key = dt.strftime("%Y-%m-%d %H:00")
+            elif interval == "weekly":
+                key = dt.strftime("%Y-W%W")
+            elif interval == "monthly":
+                key = dt.strftime("%Y-%m")
+            else:
+                key = dt.strftime("%Y-%m-%d")
+
+            if key not in buckets:
+                buckets[key] = {
+                    "period_label": key,
+                    "order_count": 0,
+                    "total_revenue": 0.0,
+                    "total_cogs": 0.0,
+                }
+            buckets[key]["order_count"] += 1
+            buckets[key]["total_revenue"] += float(o.total_amount or 0.0)
+            buckets[key]["total_cogs"] += cogs_by_order.get(o.id, 0.0)
+
+        trends = []
+        tot_rev = 0.0
+        tot_orders = 0
+        for key in sorted(buckets.keys()):
+            b = buckets[key]
+            rev = round(b["total_revenue"], 2)
+            cogs = round(b["total_cogs"], 2)
+            profit = round(rev - cogs, 2)
+            cnt = b["order_count"]
+            aov = round(rev / cnt, 2) if cnt > 0 else 0.0
+            tot_rev += rev
+            tot_orders += cnt
+            trends.append({
+                "period_label": key,
+                "order_count": cnt,
+                "total_revenue": rev,
+                "total_cogs": cogs,
+                "gross_profit": profit,
+                "average_order_value": aov,
+            })
+
+        overall_aov = round(tot_rev / tot_orders, 2) if tot_orders > 0 else 0.0
+
+        return {
+            "interval": interval,
+            "total_revenue": round(tot_rev, 2),
+            "total_orders": tot_orders,
+            "overall_aov": overall_aov,
+            "trends": trends,
+        }
+
+    def customer_segments(
         self,
         tenant_id: int,
         store_id: Optional[int] = None,
@@ -2196,90 +2583,203 @@ class ReportService:
 
         excluded_statuses = ["draft", "cancelled", "canceled", "void", "deleted"]
 
+        customers = (
+            self.db.query(Customer)
+            .filter(Customer.tenant_id == tenant_id)
+            .all()
+        )
+        total_customers = len(customers)
+
+        cust_order_q = (
+            self.db.query(
+                Order.customer_id,
+                func.count(Order.id).label("order_count"),
+                func.sum(Order.total_amount).label("total_spend"),
+                func.max(Order.created_at).label("last_order_at"),
+            )
+            .filter(
+                Order.tenant_id == tenant_id,
+                Order.customer_id.isnot(None),
+                func.lower(Order.status).notin_(excluded_statuses),
+            )
+        )
         if store_id is not None:
-            total_customers_query = (
-                self.db.query(func.count(func.distinct(Order.customer_id)))
-                .filter(
-                    Order.tenant_id == tenant_id,
-                    Order.store_id == store_id,
-                    Order.customer_id.isnot(None),
-                    func.lower(Order.status).notin_(excluded_statuses),
-                )
-            )
-            total_customers = int(total_customers_query.scalar() or 0)
+            cust_order_q = cust_order_q.filter(Order.store_id == store_id)
 
-            repeat_subquery = (
-                self.db.query(Order.customer_id)
-                .filter(
-                    Order.tenant_id == tenant_id,
-                    Order.store_id == store_id,
-                    Order.customer_id.isnot(None),
-                    func.lower(Order.status).notin_(excluded_statuses),
-                )
-                .group_by(Order.customer_id)
-                .having(func.count(Order.id) > 1)
-                .subquery()
-            )
-            repeat = int(self.db.query(func.count()).select_from(repeat_subquery).scalar() or 0)
+        stats_rows = cust_order_q.group_by(Order.customer_id).all()
+        cust_stats = {
+            r[0]: {
+                "count": int(r[1]),
+                "spend": float(r[2] or 0.0),
+                "last_at": r[3],
+            }
+            for r in stats_rows
+        }
 
-            orders_stats = (
-                self.db.query(
-                    func.count(Order.id).label("total_orders"),
-                    func.coalesce(func.sum(Order.total_amount), 0).label("total_revenue"),
-                )
-                .filter(
-                    Order.tenant_id == tenant_id,
-                    Order.store_id == store_id,
-                    func.lower(Order.status).notin_(excluded_statuses),
-                )
-                .first()
-            )
-        else:
-            total_customers = int(
-                self.db.query(func.count(Customer.id))
-                .filter(Customer.tenant_id == tenant_id)
-                .scalar() or 0
-            )
+        now = datetime.now()
+        segment_buckets: dict[str, dict] = {
+            "Champions": {"count": 0, "spend": 0.0},
+            "Loyal Customers": {"count": 0, "spend": 0.0},
+            "Potential Loyalists": {"count": 0, "spend": 0.0},
+            "Recent Buyers": {"count": 0, "spend": 0.0},
+            "At Risk": {"count": 0, "spend": 0.0},
+            "Lost Customers": {"count": 0, "spend": 0.0},
+            "Prospects (No Orders)": {"count": 0, "spend": 0.0},
+        }
 
-            repeat_subquery = (
-                self.db.query(Order.customer_id)
-                .filter(
-                    Order.tenant_id == tenant_id,
-                    Order.customer_id.isnot(None),
-                    func.lower(Order.status).notin_(excluded_statuses),
-                )
-                .group_by(Order.customer_id)
-                .having(func.count(Order.id) > 1)
-                .subquery()
-            )
-            repeat = int(self.db.query(func.count()).select_from(repeat_subquery).scalar() or 0)
+        for c in customers:
+            st = cust_stats.get(c.id)
+            if not st or st["count"] == 0:
+                segment_buckets["Prospects (No Orders)"]["count"] += 1
+                continue
 
-            orders_stats = (
-                self.db.query(
-                    func.count(Order.id).label("total_orders"),
-                    func.coalesce(func.sum(Order.total_amount), 0).label("total_revenue"),
-                )
-                .filter(
-                    Order.tenant_id == tenant_id,
-                    func.lower(Order.status).notin_(excluded_statuses),
-                )
-                .first()
-            )
+            cnt = st["count"]
+            spend = st["spend"]
+            last_dt = st["last_at"]
+            recency_days = (now - last_dt).days if last_dt else 999
 
-        tot_orders = int(orders_stats.total_orders or 0) if orders_stats else 0
-        tot_rev = float(orders_stats.total_revenue or 0.0) if orders_stats else 0.0
-        one_time = max(0, total_customers - repeat)
-        repeat_rate = round((repeat / total_customers * 100), 2) if total_customers > 0 else 0.0
-        aov = round((tot_rev / tot_orders), 2) if tot_orders > 0 else 0.0
+            if cnt >= 4 and recency_days <= 30:
+                seg = "Champions"
+            elif cnt >= 3 and recency_days <= 60:
+                seg = "Loyal Customers"
+            elif cnt >= 2 and recency_days <= 45:
+                seg = "Potential Loyalists"
+            elif recency_days <= 30:
+                seg = "Recent Buyers"
+            elif cnt >= 2 and recency_days > 60 and recency_days <= 120:
+                seg = "At Risk"
+            elif recency_days > 120:
+                seg = "Lost Customers"
+            else:
+                seg = "At Risk"
+
+            segment_buckets[seg]["count"] += 1
+            segment_buckets[seg]["spend"] += spend
+
+        segments_res = []
+        for seg_name, data in segment_buckets.items():
+            cnt = data["count"]
+            tot_sp = round(data["spend"], 2)
+            pct = round((cnt / total_customers * 100), 2) if total_customers > 0 else 0.0
+            avg_sp = round((tot_sp / cnt), 2) if cnt > 0 else 0.0
+            segments_res.append({
+                "segment": seg_name,
+                "customer_count": cnt,
+                "percentage_of_total": pct,
+                "total_revenue": tot_sp,
+                "average_spend": avg_sp,
+            })
 
         return {
             "total_customers": total_customers,
-            "repeat_customers": repeat,
-            "one_time_customers": one_time,
-            "repeat_rate_percentage": repeat_rate,
-            "total_orders": tot_orders,
-            "total_revenue": round(tot_rev, 2),
-            "average_order_value": aov,
+            "segments": segments_res,
+        }
+
+    def demand_forecast(
+        self,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+        days_ahead: int = 7,
+    ) -> dict:
+        if store_id is not None:
+            store = self.db.query(Store).filter(Store.id == store_id, Store.tenant_id == tenant_id).first()
+            if not store:
+                raise NotFoundException("Store not found")
+
+        days_ahead = max(1, min(30, days_ahead))
+        excluded_statuses = ["draft", "cancelled", "canceled", "void", "deleted"]
+        today = date.today()
+        history_start = datetime.combine(today - timedelta(days=60), time.min)
+        now_dt = datetime.combine(today + timedelta(days=1), time.min)
+
+        orders_q = (
+            self.db.query(
+                Order.created_at,
+                Order.total_amount,
+            )
+            .filter(
+                Order.tenant_id == tenant_id,
+                func.lower(Order.status).notin_(excluded_statuses),
+                Order.created_at >= history_start,
+                Order.created_at < now_dt,
+            )
+        )
+        if store_id is not None:
+            orders_q = orders_q.filter(Order.store_id == store_id)
+
+        orders = orders_q.all()
+
+        daily_sales: dict[date, dict] = {}
+        for d in range(60):
+            cur_d = today - timedelta(days=d)
+            daily_sales[cur_d] = {"revenue": 0.0, "orders": 0}
+
+        for o_created, o_amt in orders:
+            d = o_created.date()
+            if d in daily_sales:
+                daily_sales[d]["revenue"] += float(o_amt or 0.0)
+                daily_sales[d]["orders"] += 1
+
+        total_hist_rev = sum(v["revenue"] for v in daily_sales.values())
+        total_hist_orders = sum(v["orders"] for v in daily_sales.values())
+        num_days = len(daily_sales) or 1
+
+        daily_avg_rev = total_hist_rev / num_days
+        daily_avg_orders = total_hist_orders / num_days
+
+        dow_totals: dict[int, dict] = {i: {"revenue": 0.0, "count": 0} for i in range(7)}
+        for d, v in daily_sales.items():
+            w = d.weekday()
+            dow_totals[w]["revenue"] += v["revenue"]
+            dow_totals[w]["count"] += 1
+
+        dow_multipliers: dict[int, float] = {}
+        for w, data in dow_totals.items():
+            if data["count"] > 0 and daily_avg_rev > 0:
+                dow_avg = data["revenue"] / data["count"]
+                dow_multipliers[w] = max(0.5, min(2.0, dow_avg / daily_avg_rev))
+            else:
+                dow_multipliers[w] = 1.0
+
+        recent_7_rev = sum(daily_sales.get(today - timedelta(days=i), {}).get("revenue", 0.0) for i in range(7)) / 7.0
+        prev_21_rev = sum(daily_sales.get(today - timedelta(days=i), {}).get("revenue", 0.0) for i in range(7, 28)) / 21.0
+
+        if prev_21_rev > 0:
+            growth_rate = max(-0.5, min(0.5, (recent_7_rev - prev_21_rev) / prev_21_rev))
+        else:
+            growth_rate = 0.0
+
+        forecast_list = []
+        tot_pred_rev = 0.0
+        tot_pred_orders = 0
+
+        for i in range(1, days_ahead + 1):
+            future_d = today + timedelta(days=i)
+            w = future_d.weekday()
+            multiplier = dow_multipliers.get(w, 1.0)
+
+            pred_rev = max(0.0, round(daily_avg_rev * (1.0 + growth_rate) * multiplier, 2))
+            pred_orders = max(0, int(round(daily_avg_orders * (1.0 + growth_rate) * multiplier)))
+
+            tot_pred_rev += pred_rev
+            tot_pred_orders += pred_orders
+
+            forecast_list.append({
+                "date": future_d.strftime("%Y-%m-%d"),
+                "predicted_revenue": pred_rev,
+                "predicted_orders": pred_orders,
+                "confidence_score": 0.85 if total_hist_orders >= 10 else 0.65,
+            })
+
+        return {
+            "days_ahead": days_ahead,
+            "historical_days_analyzed": num_days,
+            "daily_average_revenue": round(daily_avg_rev, 2),
+            "daily_average_orders": round(daily_avg_orders, 2),
+            "growth_rate_percentage": round(growth_rate * 100, 2),
+            "total_forecasted_revenue": round(tot_pred_rev, 2),
+            "total_forecasted_orders": tot_pred_orders,
+            "forecast": forecast_list,
         }
 
     def log_audit(
