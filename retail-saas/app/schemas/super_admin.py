@@ -353,6 +353,42 @@ class SuperAdminPINSetup(BaseModel):
         return clean
 
 
+class SuperAdminPINReset(BaseModel):
+    identifier: str = Field(
+        ...,
+        description="Super Admin registered email or phone number",
+    )
+    otp: str = Field(
+        ...,
+        min_length=4,
+        max_length=8,
+        description="OTP verification code sent to mobile/email",
+    )
+    new_pin: str = Field(
+        ...,
+        min_length=4,
+        max_length=6,
+        description="New 4 or 6 digit security PIN",
+    )
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+
+    @field_validator("new_pin", mode="before")
+    @classmethod
+    def validate_new_pin(cls, v: str) -> str:
+        clean = str(v).strip()
+        if not clean.isdigit() or len(clean) not in {4, 6}:
+            raise ValueError("PIN must be exactly 4 or 6 numeric digits")
+        return clean
+
+
+class SuperAdminMessageResponse(BaseModel):
+    success: bool = True
+    message: str
+
+
 class SuperAdminResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True
@@ -592,6 +628,16 @@ class SuperAdminDashboardResponse(BaseModel):
         default=Decimal("0.00"),
         examples=[Decimal("24999.00")],
         description="Cumulative paid SaaS invoice revenue (SUM of total_amount where status = 'paid')",
+    )
+    monthly_recurring_revenue: Decimal = Field(
+        default=Decimal("0.00"),
+        examples=[Decimal("4999.00")],
+        description="Current Monthly Recurring Revenue (MRR) calculated from active SaaS subscriptions",
+    )
+    annual_recurring_revenue: Decimal = Field(
+        default=Decimal("0.00"),
+        examples=[Decimal("59988.00")],
+        description="Current Annual Recurring Revenue (ARR = MRR * 12)",
     )
 
 

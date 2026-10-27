@@ -27,11 +27,13 @@ from app.schemas.super_admin import (
     SuperAdminInvoiceListResponse,
     SuperAdminListResponse,
     SuperAdminLogin,
+    SuperAdminMessageResponse,
     SuperAdminOTPSend,
     SuperAdminOTPSendResponse,
     SuperAdminOTPVerify,
     SuperAdminOverridePlanRequest,
     SuperAdminPINLogin,
+    SuperAdminPINReset,
     SuperAdminPINSetup,
     SuperAdminPINSetupResponse,
     SuperAdminProfileResponse,
@@ -208,12 +210,6 @@ def super_admin_verify_otp(
     summary="Setup / Change Security PIN",
     description="Set or change a 4 or 6 digit security PIN using email or mobile number.",
 )
-@router.post(
-    "/pin/reset",
-    response_model=SuperAdminPINSetupResponse,
-    summary="Reset Security PIN",
-    description="Reset a 4 or 6 digit security PIN using email or mobile number.",
-)
 def super_admin_setup_pin(
     data: SuperAdminPINSetup,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(
@@ -235,6 +231,19 @@ def super_admin_setup_pin(
         data=data,
         current_super_admin=current_super_admin,
     )
+
+
+@router.post(
+    "/pin/reset",
+    response_model=SuperAdminPINSetupResponse,
+    summary="Reset Security PIN with OTP",
+    description="Reset a 4 or 6 digit security PIN using verified OTP.",
+)
+def super_admin_reset_pin(
+    data: SuperAdminPINReset,
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).reset_pin(data)
 
 
 @router.get(
@@ -579,6 +588,29 @@ def impersonate_tenant(
 
 
 @router.post(
+    "/tenants/{tenant_id}/impersonate/end",
+    response_model=SuperAdminMessageResponse,
+    summary="End Tenant Impersonation Session",
+    description="End and record completion of a tenant impersonation session.",
+)
+@router.post(
+    "/store-owners/{tenant_id}/impersonate/end",
+    response_model=SuperAdminMessageResponse,
+    summary="End Tenant Impersonation Session (Alias)",
+    include_in_schema=False,
+)
+def end_tenant_impersonation(
+    tenant_id: int,
+    current_super_admin: SuperAdmin = Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return SuperAdminService(db).end_impersonation(
+        tenant_id=tenant_id,
+        current_super_admin=current_super_admin,
+    )
+
+
+@router.post(
     "/tenants/{tenant_id}/subscription/extend-trial",
     response_model=SuperAdminTenantSubscriptionDetailResponse,
     summary="Extend Tenant SaaS Trial",
@@ -774,6 +806,7 @@ def update_plan_entitlement(
 
 @router.delete(
     "/saas-plans/{plan_id}/entitlements/{dimension}",
+    response_model=SuperAdminMessageResponse,
     status_code=status.HTTP_200_OK,
     summary="Delete SaaS Plan Entitlement",
 )
@@ -1061,6 +1094,7 @@ def get_broadcast_announcement(
 
 @router.delete(
     "/broadcast-announcement",
+    response_model=SuperAdminMessageResponse,
     summary="Clear Broadcast Announcement",
     description="Clears the current active broadcast announcement banner.",
 )
@@ -1163,6 +1197,7 @@ def update_super_admin_status(
 
 @router.post(
     "/change-password",
+    response_model=SuperAdminMessageResponse,
     summary="Change Super Admin Password",
     include_in_schema=False,
 )

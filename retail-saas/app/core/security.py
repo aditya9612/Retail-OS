@@ -421,7 +421,7 @@ def require_permission(permission: str):
             return user
 
         # Backward compatibility for existing owner and admin roles in DB
-        if user.role and user.role.name in ["admin", "owner"] and (permission.startswith("dashboard:") or permission.startswith("ecommerce:")):
+        if user.role and user.role.name in ["admin", "owner"] and (permission.startswith("dashboard:") or permission.startswith("ecommerce:") or permission.startswith("reviews:")):
             return user
 
         # Backward compatibility for pos:shift_manage for existing cashier, manager, owner roles in DB

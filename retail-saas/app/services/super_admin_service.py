@@ -62,6 +62,7 @@ from app.schemas.super_admin import (
     SuperAdminOTPVerify,
     SuperAdminOverridePlanRequest,
     SuperAdminPINLogin,
+    SuperAdminPINReset,
     SuperAdminPINSetup,
     SuperAdminPINSetupResponse,
     SuperAdminPlanSummary,
@@ -309,27 +310,7 @@ class SuperAdminService:
         if not super_admin.is_active:
             raise UnauthorizedException("Super Admin account is disabled")
 
-        otp_valid = False
-        if data.otp.strip() == "123456":
-            otp_valid = True
-        else:
-            try:
-                from app.core.redis_client import get_redis
-                r = get_redis()
-                val = r.get(f"sa:otp:{clean_id}")
-                if val and str(val).strip() == data.otp.strip():
-                    otp_valid = True
-                    r.delete(f"sa:otp:{clean_id}")
-            except Exception:
-                pass
-
-            if not otp_valid and clean_id in _IN_MEMORY_OTP_STORE:
-                stored_otp, expires = _IN_MEMORY_OTP_STORE[clean_id]
-                if datetime.utcnow() <= expires and str(stored_otp).strip() == data.otp.strip():
-                    otp_valid = True
-                    _IN_MEMORY_OTP_STORE.pop(clean_id, None)
-
-        if not otp_valid:
+        if not self._verify_otp(clean_id, data.otp):
             raise UnauthorizedException("Invalid or expired OTP")
 
         token_data = {
@@ -342,6 +323,38 @@ class SuperAdminService:
             "refresh_token": create_super_admin_refresh_token(token_data),
             "token_type": "bearer",
         }
+
+    def _verify_otp(self, clean_id: str, otp: str) -> bool:
+        clean_otp = str(otp).strip()
+        otp_valid = False
+
+        try:
+            from app.core.redis_client import get_redis
+            r = get_redis()
+            val = r.get(f"sa:otp:{clean_id}")
+            if val and str(val).strip() == clean_otp:
+                otp_valid = True
+                r.delete(f"sa:otp:{clean_id}")
+        except Exception:
+            pass
+
+        if not otp_valid and clean_id in _IN_MEMORY_OTP_STORE:
+            stored_otp, expires = _IN_MEMORY_OTP_STORE[clean_id]
+            if datetime.utcnow() <= expires and str(stored_otp).strip() == clean_otp:
+                otp_valid = True
+                _IN_MEMORY_OTP_STORE.pop(clean_id, None)
+
+        if not otp_valid:
+            from app.core.config import get_settings
+            settings = get_settings()
+            is_fixed_allowed = (
+                getattr(settings, "AUTH_FIXED_OTP_ENABLED", False)
+                or getattr(settings, "APP_ENV", "production").lower() in ["development", "dev", "testing", "test"]
+            )
+            if is_fixed_allowed and clean_otp == getattr(settings, "AUTH_FIXED_OTP", "123456"):
+                otp_valid = True
+
+        return otp_valid
 
     def setup_pin(
         self,
@@ -379,6 +392,14 @@ class SuperAdminService:
         if not super_admin.is_active:
             raise UnauthorizedException("Super Admin account is disabled")
 
+        # Security check: if unauthenticated caller tries to setup PIN on an account that already has one,
+        # require OTP verification via /pin/reset or require authenticated session.
+        if current_super_admin is None and super_admin_id is None:
+            if super_admin.pin_hash is not None:
+                raise UnauthorizedException(
+                    "Security PIN is already configured for this account. Please use /pin/reset with OTP verification to reset your PIN, or login first."
+                )
+
         clean_pin = data.pin.strip()
         super_admin.pin_hash = get_password_hash(clean_pin)
         super_admin.pin_set_at = datetime.utcnow()
@@ -395,6 +416,54 @@ class SuperAdminService:
             "updated_at": super_admin.updated_at,
             "success": True,
             "message": "Security PIN configured successfully",
+        }
+
+    def reset_pin(
+        self,
+        data: SuperAdminPINReset,
+    ) -> dict:
+        clean_id = data.identifier.strip().lower()
+        phone_clean = clean_id.replace(" ", "").replace("-", "")
+        if phone_clean.startswith("+91"):
+            phone_clean = phone_clean[3:]
+
+        super_admin = (
+            self.db.query(SuperAdmin)
+            .filter(
+                or_(
+                    func.lower(SuperAdmin.email) == clean_id,
+                    SuperAdmin.phone == clean_id,
+                    SuperAdmin.phone == phone_clean,
+                )
+            )
+            .first()
+        )
+        if not super_admin:
+            raise NotFoundException("Super Admin not found with this email or mobile number")
+
+        if not super_admin.is_active:
+            raise UnauthorizedException("Super Admin account is disabled")
+
+        if not self._verify_otp(clean_id, data.otp):
+            raise UnauthorizedException("Invalid or expired OTP")
+
+        clean_pin = data.new_pin.strip()
+        super_admin.pin_hash = get_password_hash(clean_pin)
+        super_admin.pin_set_at = datetime.utcnow()
+        self.db.commit()
+        self.db.refresh(super_admin)
+
+        return {
+            "id": super_admin.id,
+            "email": super_admin.email,
+            "full_name": super_admin.full_name,
+            "phone": super_admin.phone,
+            "is_active": super_admin.is_active,
+            "has_pin": True,
+            "created_at": super_admin.created_at,
+            "updated_at": super_admin.updated_at,
+            "success": True,
+            "message": "Security PIN reset successfully",
         }
 
     def get_by_id(
@@ -1096,6 +1165,23 @@ class SuperAdminService:
             u.is_active = False
             u.is_deleted = True
 
+        # Cancel any active/trialing/past_due SaaS subscriptions to stop recurring billing
+        active_subs = (
+            self.db.query(SaaSSubscription)
+            .filter(
+                SaaSSubscription.tenant_id == tenant_id,
+                SaaSSubscription.status.in_(["trialing", "active", "past_due"]),
+            )
+            .all()
+        )
+        now = datetime.utcnow()
+        for sub in active_subs:
+            sub.status = "cancelled"
+            sub.cancelled_at = now
+            sub.cancel_at_period_end = True
+
+        tenant.subscription_status = "cancelled"
+
         self.db.commit()
         return {
             "success": True,
@@ -1367,6 +1453,27 @@ class SuperAdminService:
         )
         total_saas_revenue = Decimal(str(total_rev)) if total_rev is not None else Decimal("0.00")
 
+        # Calculate MRR & ARR from active subscriptions
+        active_subs_list = (
+            self.db.query(SaaSSubscription)
+            .options(joinedload(SaaSSubscription.plan))
+            .filter(SaaSSubscription.status == "active")
+            .all()
+        )
+        mrr_sum = Decimal("0.00")
+        for sub in active_subs_list:
+            interval = (sub.billing_interval or (sub.plan.billing_interval if sub.plan else "monthly")).lower()
+            unit_p = sub.unit_price if sub.unit_price is not None else (
+                sub.plan.price if sub.plan else Decimal("0.00")
+            )
+            if interval in ["annual", "yearly"]:
+                mrr_sum += (Decimal(str(unit_p)) / Decimal("12.0"))
+            else:
+                mrr_sum += Decimal(str(unit_p))
+
+        monthly_recurring_revenue = mrr_sum.quantize(Decimal("0.01"))
+        annual_recurring_revenue = (monthly_recurring_revenue * Decimal("12.0")).quantize(Decimal("0.01"))
+
         total_stores = self.db.query(Store).count()
         active_stores = self.db.query(Store).filter(Store.is_active.is_(True)).count()
         active_plans = self.db.query(SaaSPlan).filter(SaaSPlan.is_active.is_(True)).count()
@@ -1394,6 +1501,8 @@ class SuperAdminService:
             "pending_upgrades_count": pending_upgrades_count,
             "scheduled_downgrades_count": scheduled_downgrades_count,
             "total_saas_revenue": total_saas_revenue,
+            "monthly_recurring_revenue": monthly_recurring_revenue,
+            "annual_recurring_revenue": annual_recurring_revenue,
         }
 
     # =========================
@@ -2347,6 +2456,36 @@ class SuperAdminService:
             "impersonated_user_id": user.id,
             "impersonated_email": user.email,
             "impersonated_by_super_admin_id": current_super_admin.id,
+        }
+
+    def end_impersonation(
+        self,
+        tenant_id: int,
+        current_super_admin: SuperAdmin,
+    ) -> dict:
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            raise NotFoundException("Tenant not found")
+
+        try:
+            AuditService(self.db).log(
+                tenant_id=tenant.id,
+                user_id=None,
+                action="TENANT_IMPERSONATION_ENDED",
+                resource="tenant",
+                resource_id=tenant.id,
+                details={
+                    "ended_by_super_admin_id": current_super_admin.id,
+                    "ended_by_email": current_super_admin.email,
+                },
+                commit=True,
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "message": f"Impersonation session for tenant '{tenant.name}' ended successfully",
         }
 
     def list_audit_logs(

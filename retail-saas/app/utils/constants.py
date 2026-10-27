@@ -137,6 +137,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         "purchase_orders:read",
         "purchase_orders:write",
         "pos:shift_manage",
+        "reviews:read",
+        "reviews:write",
     ],
 
     UserRole.MANAGER: [
@@ -156,6 +158,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         "purchase_orders:read",
         "purchase_orders:write",
         "pos:shift_manage",
+        "reviews:read",
+        "reviews:write",
     ],
 
     UserRole.ACCOUNTANT: [

@@ -690,7 +690,7 @@ class CustomerUpdate(BaseModel):
         return validate_gstin_number(v, field_name="GSTIN", required=False)
 
 
-class CustomerResponse(CustomerBase):
+class CustomerResponse(BaseModel):
 
     model_config = ConfigDict(
         from_attributes=True
@@ -698,14 +698,33 @@ class CustomerResponse(CustomerBase):
 
     id: int
     tenant_id: int
+    name: str
+    email: Optional[str] = None
+    phone: str
+    address: Optional[str] = None
+    gstin: Optional[str] = None
+    birthday: Optional[date] = None
+    whatsapp_opt_in: bool = True
+    sms_opt_in: bool = True
+    status: str = "active"
+    segment: str = "new"
+    credit_limit: Optional[Decimal] = Decimal("0.00")
+    outstanding_balance: Optional[Decimal] = Decimal("0.00")
     loyalty_points: Optional[int] = 0
     created_at: datetime
     updated_at: Optional[datetime] = None
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def sanitize_name(cls, v):
+        if v is None:
+            return "Customer"
+        s = str(v).strip()
+        return s if s else "Customer"
+
     @field_validator("status", mode="before")
     @classmethod
     def sanitize_status(cls, v):
-
         if v is None or not str(v).strip():
             return "active"
 
@@ -713,12 +732,11 @@ class CustomerResponse(CustomerBase):
         if s in ("active", "inactive", "blocked"):
             return s
 
-        return v
+        return "active"
 
     @field_validator("segment", mode="before")
     @classmethod
     def sanitize_segment(cls, v):
-
         if v is None or not str(v).strip():
             return "new"
 
@@ -726,23 +744,20 @@ class CustomerResponse(CustomerBase):
         if s in ("new", "regular", "vip", "inactive"):
             return s
 
-        return v
+        return "new"
 
     @field_validator("email", mode="before")
     @classmethod
     def sanitize_email(cls, v):
-
         if v is None or not str(v).strip():
             return None
 
-        s = str(v).strip()
-
+        s = str(v).strip().lower()
         return s if ("@" in s and "." in s) else None
 
     @field_validator("gstin", mode="before")
     @classmethod
     def sanitize_gstin(cls, v):
-
         if v is None or not str(v).strip():
             return None
 
@@ -751,11 +766,41 @@ class CustomerResponse(CustomerBase):
     @field_validator("phone", mode="before")
     @classmethod
     def sanitize_phone(cls, v):
-
         if v is None:
             return ""
 
         return str(v).strip()
+
+    @field_validator("whatsapp_opt_in", "sms_opt_in", mode="before")
+    @classmethod
+    def sanitize_opt_in(cls, v):
+        if v is None:
+            return True
+        if isinstance(v, (int, float)):
+            return bool(v)
+        if isinstance(v, str):
+            return v.lower() in ("true", "1", "t", "yes", "y")
+        return bool(v)
+
+    @field_validator("credit_limit", "outstanding_balance", mode="before")
+    @classmethod
+    def sanitize_decimal(cls, v):
+        if v is None:
+            return Decimal("0.00")
+        try:
+            return Decimal(str(v))
+        except Exception:
+            return Decimal("0.00")
+
+    @field_validator("loyalty_points", mode="before")
+    @classmethod
+    def sanitize_loyalty(cls, v):
+        if v is None:
+            return 0
+        try:
+            return int(v)
+        except Exception:
+            return 0
 
 
 class MessageResponse(BaseModel):
