@@ -1,8 +1,12 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class SaaSUPIInitiateRequest(BaseModel):
+    invoice_id: Optional[int] = Field(None, description="Invoice ID to pay")
 
 
 class UPICheckoutPreviewResponse(BaseModel):
@@ -42,9 +46,25 @@ class UPIQRCodeResponse(BaseModel):
 
 class UPISubmitRequest(BaseModel):
     reference: str = Field(..., min_length=1, max_length=64)
-    utr: str = Field(..., min_length=1, max_length=50)
+    utr: str = Field(
+        ...,
+        min_length=4,
+        max_length=50,
+        pattern=r"^[A-Za-z0-9\-_]{4,50}$",
+        description="Bank UPI UTR / RRN (alphanumeric transaction reference)",
+    )
     payer_vpa: Optional[str] = Field(None, max_length=100)
     proof_image_url: Optional[str] = Field(None, max_length=500)
+
+    @field_validator("utr", mode="before")
+    @classmethod
+    def validate_utr(cls, v: str) -> str:
+        if isinstance(v, str):
+            clean = v.strip()
+            if not clean:
+                raise ValueError("UTR cannot be empty or whitespace only")
+            return clean
+        return v
 
 
 class UPITransactionResponse(BaseModel):

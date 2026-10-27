@@ -259,10 +259,13 @@ class SaaSInvoiceService:
         tenant_id: int,
         page: int = 1,
         page_size: int = 20,
+        status: Optional[str] = None,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
     ) -> dict:
         """
         Lists paginated SaaS invoices for a tenant.
-        Enforces tenant isolation and deterministic ordering (created_at DESC, id DESC).
+        Enforces tenant isolation, deterministic ordering, and optional status/date range filtering.
         """
         page = max(1, page)
         page_size = max(1, min(100, page_size))
@@ -270,6 +273,14 @@ class SaaSInvoiceService:
         query = self.db.query(SaaSInvoice).filter(
             SaaSInvoice.tenant_id == tenant_id
         )
+
+        if status:
+            clean_status = status.strip().lower()
+            query = query.filter(SaaSInvoice.status == clean_status)
+        if from_date:
+            query = query.filter(SaaSInvoice.created_at >= from_date)
+        if to_date:
+            query = query.filter(SaaSInvoice.created_at <= to_date)
 
         total = query.count()
         total_pages = math.ceil(total / page_size) if total > 0 else 0
@@ -293,3 +304,26 @@ class SaaSInvoiceService:
             "total": total,
             "total_pages": total_pages,
         }
+
+    def generate_invoice_pdf(
+        self,
+        tenant_id: int,
+        invoice_id: int,
+    ) -> tuple[bytes, SaaSInvoice]:
+        """
+        Generates standard GST Tax Invoice PDF for a tenant SaaS subscription invoice.
+        Enforces strict tenant isolation.
+        """
+        invoice = self.get_invoice(tenant_id=tenant_id, invoice_id=invoice_id)
+        from app.models.tenant import Tenant
+        from app.utils.pdf_generator import generate_saas_invoice_pdf
+
+        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        plan = invoice.subscription.plan if invoice.subscription else None
+
+        pdf_bytes = generate_saas_invoice_pdf(
+            invoice=invoice,
+            tenant=tenant,
+            plan=plan,
+        )
+        return pdf_bytes, invoice

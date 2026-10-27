@@ -20,6 +20,11 @@ class SaaSInvoiceResponse(BaseModel):
     paid_at: Optional[datetime] = None
     pdf_url: Optional[str] = None
     notes: Optional[str] = None
+    sac_code: Optional[str] = Field(default="998313", description="Services Accounting Code for SaaS (998313)")
+    tax_rate: Optional[Decimal] = Field(default=Decimal("18.00"), description="GST rate percentage")
+    cgst_amount: Optional[Decimal] = Field(default=Decimal("0.00"), description="Central GST amount (9%)")
+    sgst_amount: Optional[Decimal] = Field(default=Decimal("0.00"), description="State GST amount (9%)")
+    igst_amount: Optional[Decimal] = Field(default=Decimal("0.00"), description="Integrated GST amount (18%)")
     created_at: datetime
     updated_at: datetime
 

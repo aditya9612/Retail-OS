@@ -33,6 +33,10 @@ class SaaSSubscriptionResponse(BaseModel):
     cancel_at_period_end: bool
     pending_plan_id: Optional[int] = None
     scheduled_plan_id: Optional[int] = None
+    plan_name: Optional[str] = None
+    plan_code: Optional[str] = None
+    max_stores: Optional[int] = None
+    max_users: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 

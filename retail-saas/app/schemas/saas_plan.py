@@ -139,6 +139,8 @@ class SaaSPlanResponse(BaseModel):
     billing_interval: str
     trial_days: int
     is_active: bool
+    max_stores: Optional[int] = None
+    max_users: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 

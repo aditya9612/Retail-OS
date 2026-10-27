@@ -71,6 +71,24 @@ class SaaSPlan(Base, TimestampMixin):
         cascade="all, delete-orphan",
     )
 
+    @property
+    def max_stores(self) -> Optional[int]:
+        if not self.entitlements:
+            return None
+        for ent in self.entitlements:
+            if ent.dimension == "stores":
+                return None if getattr(ent, "is_unlimited", False) else ent.value
+        return None
+
+    @property
+    def max_users(self) -> Optional[int]:
+        if not self.entitlements:
+            return None
+        for ent in self.entitlements:
+            if ent.dimension == "users":
+                return None if getattr(ent, "is_unlimited", False) else ent.value
+        return None
+
 
 class SaaSSubscription(Base, TimestampMixin):
     __tablename__ = "saas_subscriptions"
@@ -181,6 +199,22 @@ class SaaSSubscription(Base, TimestampMixin):
         back_populates="subscription",
     )
 
+    @property
+    def plan_name(self) -> Optional[str]:
+        return self.plan.name if self.plan else None
+
+    @property
+    def plan_code(self) -> Optional[str]:
+        return self.plan.code if self.plan else None
+
+    @property
+    def max_stores(self) -> Optional[int]:
+        return self.plan.max_stores if self.plan else None
+
+    @property
+    def max_users(self) -> Optional[int]:
+        return self.plan.max_users if self.plan else None
+
 
 class SaaSInvoice(Base, TimestampMixin):
     __tablename__ = "saas_invoices"
@@ -271,6 +305,30 @@ class SaaSInvoice(Base, TimestampMixin):
         "SaaSUPITransaction",
         back_populates="invoice",
     )
+
+    @property
+    def sac_code(self) -> str:
+        return "998313"
+
+    @property
+    def tax_rate(self) -> Decimal:
+        return Decimal("18.00")
+
+    @property
+    def cgst_amount(self) -> Decimal:
+        if self.tax_amount and self.tax_amount > Decimal("0.00"):
+            return (self.tax_amount / 2).quantize(Decimal("0.01"))
+        return Decimal("0.00")
+
+    @property
+    def sgst_amount(self) -> Decimal:
+        if self.tax_amount and self.tax_amount > Decimal("0.00"):
+            return (self.tax_amount / 2).quantize(Decimal("0.01"))
+        return Decimal("0.00")
+
+    @property
+    def igst_amount(self) -> Decimal:
+        return Decimal("0.00")
 
 
 class SaaSUPITransaction(Base, TimestampMixin):

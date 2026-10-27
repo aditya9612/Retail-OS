@@ -1,8 +1,12 @@
+from datetime import datetime
+from typing import Literal, Optional
+
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.exceptions import ForbiddenException, NotFoundException
+from app.core.exceptions import AppException, ForbiddenException, NotFoundException
+from app.core.pdf_utils import render_pdf_or_preview
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.saas_invoice import (
@@ -18,6 +22,7 @@ from app.schemas.saas_subscription import (
     SaaSSubscriptionResponse,
 )
 from app.schemas.saas_upi import (
+    SaaSUPIInitiateRequest,
     UPICheckoutPreviewResponse,
     UPIInitiateResponse,
     UPIQRCodeResponse,
@@ -43,12 +48,15 @@ router = APIRouter(
 def get_billing_history(
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page (1-100)"),
+    status: Optional[str] = Query(None, description="Filter by invoice status: unpaid, paid, void, cancelled"),
+    from_date: Optional[datetime] = Query(None, description="Filter invoices created on or after date"),
+    to_date: Optional[datetime] = Query(None, description="Filter invoices created on or before date"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Retrieves paginated SaaS invoice billing history for the authenticated tenant.
-    Enforces strict tenant isolation.
+    Enforces strict tenant isolation, deterministic ordering, and optional status/date range filtering.
     """
     if not current_user.tenant_id:
         raise ForbiddenException("User is not associated with any tenant")
@@ -57,6 +65,9 @@ def get_billing_history(
         tenant_id=current_user.tenant_id,
         page=page,
         page_size=page_size,
+        status=status,
+        from_date=from_date,
+        to_date=to_date,
     )
 
 
@@ -80,6 +91,36 @@ def get_invoice_detail(
     return SaaSInvoiceService(db).get_invoice(
         tenant_id=current_user.tenant_id,
         invoice_id=invoice_id,
+    )
+
+
+@router.get(
+    "/invoices/{invoice_id}/pdf",
+    summary="Download or Preview SaaS Invoice PDF",
+    description="Generates or downloads standard GST Tax Invoice PDF for tenant SaaS subscription billing.",
+)
+def get_saas_invoice_pdf(
+    invoice_id: int,
+    mode: Literal["download", "preview"] = Query(default="download"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Generates and returns standard GST Tax Invoice PDF for the specified SaaS invoice.
+    Supports mode='download' (file attachment) or mode='preview' (inline high-res PNG preview).
+    Enforces strict tenant isolation.
+    """
+    if not current_user.tenant_id:
+        raise ForbiddenException("User is not associated with any tenant")
+
+    pdf_bytes, invoice = SaaSInvoiceService(db).generate_invoice_pdf(
+        tenant_id=current_user.tenant_id,
+        invoice_id=invoice_id,
+    )
+    return render_pdf_or_preview(
+        pdf_content=pdf_bytes,
+        filename_base=f"saas_invoice_{invoice.invoice_number}",
+        mode=mode,
     )
 
 
@@ -111,20 +152,31 @@ def get_checkout_preview(
     summary="Initiate SaaS UPI Checkout",
 )
 def initiate_checkout(
-    invoice_id: int = Query(..., description="Invoice ID to pay"),
+    payload: Optional[SaaSUPIInitiateRequest] = None,
+    invoice_id: Optional[int] = Query(None, description="Invoice ID to pay (query param for backward compatibility)"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Creates or reuses a pending UPI transaction for the given invoice.
     Enforces tenant isolation, idempotency window, and amount integrity.
+    Supports either JSON body `{"invoice_id": 123}` or query parameter `?invoice_id=123`.
     """
     if not current_user.tenant_id:
         raise ForbiddenException("User is not associated with any tenant")
 
+    target_invoice_id = None
+    if payload and payload.invoice_id is not None:
+        target_invoice_id = payload.invoice_id
+    elif invoice_id is not None:
+        target_invoice_id = invoice_id
+
+    if not target_invoice_id:
+        raise AppException("invoice_id is required in JSON body or query parameter")
+
     return SaaSUPIService(db).initiate_checkout(
         tenant_id=current_user.tenant_id,
-        invoice_id=invoice_id,
+        invoice_id=target_invoice_id,
     )
 
 
