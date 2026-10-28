@@ -2150,6 +2150,7 @@ class BillingService:
         user: Optional[User] = None,
         idempotency_key: Optional[str] = None,
         commit: bool = True,
+        approved_by: Optional[int] = None,
     ) -> Refund:
         self.get_invoice(
             tenant_id,
@@ -2245,6 +2246,23 @@ class BillingService:
                     f"Cumulative refund amount ({total_active + refund_amount}) cannot exceed eligible paid amount ({eligible_paid_amount})"
                 )
 
+            approver_user_id = approved_by
+            if approver_user_id is not None:
+                approver = (
+                    self.db.query(User)
+                    .filter(
+                        User.id == approver_user_id,
+                        User.tenant_id == tenant_id,
+                    )
+                    .first()
+                )
+                if not approver:
+                    raise AppException(
+                        f"Approver user {approver_user_id} not found in this tenant"
+                    )
+            elif user and getattr(user, "id", None):
+                approver_user_id = user.id
+
             refund = Refund(
                 tenant_id=tenant_id,
                 invoice_id=invoice_id,
@@ -2253,6 +2271,7 @@ class BillingService:
                 status=RefundStatus.PENDING.value,
                 reason=reason,
                 refund_reference=idempotency_key,
+                approved_by=approver_user_id,
             )
 
             self.db.add(refund)
