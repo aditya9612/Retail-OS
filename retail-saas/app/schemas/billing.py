@@ -1,4 +1,5 @@
 
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
@@ -15,6 +16,23 @@ VALID_PAYMENT_MODES = [
     "wallet",
     "qr",
 ]
+
+DISALLOWED_REFUND_PLACEHOLDERS = {
+    "string",
+    "null",
+    "none",
+    "undefined",
+    "test",
+    "sample",
+    "dummy",
+    "temp",
+    "n/a",
+    "na",
+    "null value",
+    "unknown",
+    "placeholder",
+    "reason",
+}
 
 
 class InvoiceReprintRequest(BaseModel):
@@ -42,6 +60,11 @@ class RefundCreate(BaseModel):
     )
     refund_method: str = Field(description="Must be cash, upi or store_credit")
     reason: Optional[str] = Field(default=None, min_length=3, max_length=500)
+    approved_by: Optional[int] = Field(
+        default=None,
+        validation_alias=AliasChoices("approved_by", "approver_id"),
+        description="Approver user ID",
+    )
 
     @field_validator("refund_method")
     @classmethod
@@ -57,15 +80,50 @@ class RefundCreate(BaseModel):
     def validate_reason(cls, v):
         if v is None:
             return v
-        if isinstance(v, str):
-            v = v.strip()
-            if len(v) < 3:
-                raise ValueError(
-                    "Reason must contain at least 3 non-whitespace characters"
-                )
-            if len(v) > 500:
-                raise ValueError("Reason cannot exceed 500 characters")
+        if not isinstance(v, str):
+            raise ValueError("Reason must be a string")
+        v = v.strip()
+        if not v:
+            return None
+        if len(v) < 3 or len(v) > 500:
+            raise ValueError(
+                "Reason must be between 3 and 500 characters"
+            )
+
+        clean_norm = re.sub(r"[^a-zA-Z]", "", v.lower())
+        if v.lower() in DISALLOWED_REFUND_PLACEHOLDERS or clean_norm in DISALLOWED_REFUND_PLACEHOLDERS:
+            raise ValueError("Please provide a valid refund reason")
+
+        if v.isdigit():
+            raise ValueError("Reason cannot contain only numbers")
+
+        alpha_chars = [c.lower() for c in v if c.isalpha()]
+        if len(alpha_chars) < 3:
+            raise ValueError("Reason must contain at least 3 alphabetic letters")
+
+        if len(set(alpha_chars)) < 2:
+            raise ValueError("Reason cannot consist of repetitive characters")
+
+        if re.search(r"[-+*/=_./\\|@#$%^&*!~`?]{2,}", v):
+            raise ValueError("Reason cannot contain consecutive special characters")
+
+        if not re.fullmatch(r"[A-Za-z0-9\s,./#&'()\-:;!?]+", v):
+            raise ValueError("Reason contains invalid characters")
+
         return v
+
+    @field_validator("approved_by", mode="before")
+    @classmethod
+    def validate_approved_by(cls, v):
+        if v is None or v == "":
+            return None
+        try:
+            val = int(v)
+            if val <= 0:
+                raise ValueError("approved_by must be a positive integer")
+            return val
+        except (ValueError, TypeError):
+            raise ValueError("approved_by must be a valid user ID integer")
 
 
 class RefundResponse(BaseModel):

@@ -349,6 +349,7 @@ def test_refund_approval_creates_credit_note(billing_setup):
     assert refund_resp.status_code == 201
     refund = refund_resp.json()
     assert refund["status"] == "pending"
+    assert refund["approved_by"] is not None
 
     approve_resp = client.post(
         f"/api/v1/refunds/{refund['id']}/approve",
@@ -452,7 +453,7 @@ def test_invoice_search_by_gstin_and_payment_status(billing_setup):
         "/api/v1/customers",
         json={
             "name": "GST Customer",
-            "phone": "9876543210",
+            "phone": "9821473690",
             "gstin": "27AAAAA0000A1Z5",
             "address": "123 Market Road, Mumbai",
         },
@@ -523,3 +524,62 @@ def test_create_invoice_direct_items(billing_setup):
     assert data["subtotal"] == "400.00"
     assert data["cgst_amount"] == "36.00"
     assert data["sgst_amount"] == "36.00"
+
+
+def test_refund_validation_and_approver_details(billing_setup):
+    headers, store, product = billing_setup
+
+    inv = client.post(
+        "/api/v1/invoices",
+        json={
+            "store_id": store["id"],
+            "same_state": True,
+            "items": [
+                {
+                    "product_id": product["id"],
+                    "quantity": 1,
+                    "unit_price": "500.00",
+                    "discount": "0.00",
+                }
+            ],
+            "payments": [
+                {
+                    "payment_mode": "cash",
+                    "amount": "590.00",
+                }
+            ],
+        },
+        headers=headers,
+    ).json()
+    invoice_id = inv["id"]
+
+    # 1. Reject invalid reasons: dummy, symbols, numbers, placeholders
+    for bad_reason in ["o//", "string", "12345", "test", "dummy", "----", "aaa"]:
+        resp = client.post(
+            "/api/v1/refunds",
+            json={
+                "invoice_id": invoice_id,
+                "refund_amount": "50.00",
+                "refund_method": "cash",
+                "reason": bad_reason,
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 422, f"Expected 422 for reason '{bad_reason}', got {resp.status_code}"
+
+    # 2. Accept valid reason and verify pending refund includes approver details
+    valid_resp = client.post(
+        "/api/v1/refunds",
+        json={
+            "invoice_id": invoice_id,
+            "refund_amount": "50.00",
+            "refund_method": "cash",
+            "reason": "Defective item returned by customer",
+        },
+        headers=headers,
+    )
+    assert valid_resp.status_code == 201
+    refund_data = valid_resp.json()
+    assert refund_data["status"] == "pending"
+    assert refund_data["approved_by"] is not None
+    assert isinstance(refund_data["approved_by"], int)
