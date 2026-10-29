@@ -116,7 +116,7 @@ class UserBase(BaseModel):
 
     addhar_number: Optional[str] = Field(
         default=None,
-        description="Aadhaar card 12-digit number",
+        description="Aadhaar card 12-digit number with valid Verhoeff checksum (e.g. 987654321012)",
     )
 
     @field_validator("pan_number")

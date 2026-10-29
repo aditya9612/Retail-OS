@@ -38,19 +38,6 @@ USER_CREATE_OPENAPI_EXTRA = {
     "requestBody": {
         "required": True,
         "content": {
-            "application/json": {
-                "schema": UserCreate.model_json_schema(),
-                "example": {
-                    "email": "cashier@retailmart.com",
-                    "full_name": "Amit Sharma",
-                    "password": "SecurePassword@123",
-                    "phone": "9876543210",
-                    "role": "cashier",
-                    "store_id": 1,
-                    "pan_number": "ABCDE1234F",
-                    "addhar_number": "987654321012",
-                },
-            },
             "multipart/form-data": {
                 "schema": {
                     "type": "object",
@@ -62,57 +49,42 @@ USER_CREATE_OPENAPI_EXTRA = {
                             "format": "email",
                             "title": "Email Address",
                             "description": "Valid email address is required",
-                            "example": "cashier@retailmart.com",
                         },
                         "full_name": {
                             "type": "string",
                             "title": "Full Name",
                             "description": "Full name of the user (2 to 100 characters)",
-                            "example": "Amit Sharma",
                         },
                         "password": {
                             "type": "string",
                             "format": "password",
                             "title": "Password",
                             "description": "Password (min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char)",
-                            "example": "SecurePass@123",
                         },
                         "phone": {
                             "type": "string",
                             "title": "Phone Number",
                             "description": "Mandatory 10-digit Indian phone number",
-                            "example": "9876543210",
                         },
                         "role": {
                             "type": "string",
                             "title": "Role Name",
-                            "description": "Role name from GET /api/v1/roles (e.g. cashier, manager, or custom roles created by Owner). Alternatively, provide 'role_id'.",
-                            "default": "cashier",
-                            "example": "cashier",
-                        },
-                        "role_id": {
-                            "type": "integer",
-                            "title": "Role ID",
-                            "description": "Role ID from GET /api/v1/roles (optional if role name is provided)",
-                            "example": 2,
+                            "description": "Role name from GET /api/v1/roles (e.g. cashier, manager, admin, accountant, staff. Defaults to cashier if empty)",
                         },
                         "store_id": {
                             "type": "integer",
                             "title": "Store ID",
                             "description": "Store ID to assign the user to",
-                            "example": 1,
                         },
                         "pan_number": {
                             "type": "string",
                             "title": "PAN Number",
                             "description": "PAN card number (e.g. ABCDE1234F)",
-                            "example": "ABCDE1234F",
                         },
                         "addhar_number": {
                             "type": "string",
                             "title": "Aadhaar Number",
-                            "description": "Aadhaar card 12-digit number (e.g. 987654321012)",
-                            "example": "987654321012",
+                            "description": "Aadhaar card 12-digit number with valid Verhoeff checksum (e.g. 987654321012)",
                         },
                         "pancard": {
                             "type": "string",
@@ -198,7 +170,7 @@ async def _save_user_file(
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create User",
-    description="Create a new user with role, mandatory phone number, and KYC/profile details. Supports both application/json and multipart/form-data with file uploads.",
+    description="Create a new user with role, mandatory phone number, and KYC/profile details. Supports multipart/form-data with file uploads.",
     openapi_extra=USER_CREATE_OPENAPI_EXTRA,
 )
 async def create_user(
