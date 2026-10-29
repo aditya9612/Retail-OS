@@ -604,8 +604,8 @@ class StoreExpenseResponse(BaseModel):
     created_by_name: Optional[str] = None
 
     @field_serializer("amount", mode="plain")
-    def serialize_amount(self, v: Decimal) -> str:
-        return f"{Decimal(str(v)):.2f}"
+    def serialize_amount(self, v: Decimal) -> float:
+        return round(float(v), 2)
 
     model_config = ConfigDict(from_attributes=True)
 
