@@ -37,6 +37,7 @@ def create_refund(
         payload.refund_method,
         payload.reason,
         user=user,
+        approved_by=payload.approved_by,
     )
 
 
