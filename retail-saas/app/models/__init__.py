@@ -57,6 +57,10 @@ from app.models.saas_plan_entitlement import (
     SaaSPlanEntitlement,
     EntitlementDimension,
 )
+from app.models.whatsapp import (
+    WhatsAppSetting,
+    WhatsAppLog,
+)
 
 
 __all__ = [
@@ -122,4 +126,6 @@ __all__ = [
     "ProductVariant",
     "ProductBatch",
     "OrderItemBatchAllocation",
+    "WhatsAppSetting",
+    "WhatsAppLog",
 ]

@@ -595,6 +595,16 @@ class BillingService:
             self.db.commit()
             self.db.refresh(invoice)
 
+            # Step 9: Asynchronous WhatsApp Invoice dispatch
+            try:
+                from app.tasks.whatsapp_tasks import send_whatsapp_invoice_task
+                send_whatsapp_invoice_task.delay(
+                    tenant_id=tenant_id,
+                    invoice_id=invoice.id,
+                )
+            except Exception as exc:
+                logger.warning('Could not queue WhatsApp invoice dispatch: %s', exc)
+
             if idempotency_key and redis_client:
                 try:
                     redis_client.setex(f"idempotency:invoice:{tenant_id}:{idempotency_key}", 86400, str(invoice.id))

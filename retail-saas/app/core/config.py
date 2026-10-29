@@ -31,9 +31,12 @@ class Settings(BaseSettings):
     AWS_REGION: str = "ap-south-1"
     AWS_S3_BUCKET: str = "retail-saas-files"
 
-    WHATSAPP_API_URL: str = ""
+    WHATSAPP_API_URL: str = "https://graph.facebook.com/v19.0"
     WHATSAPP_API_TOKEN: str = ""
     WHATSAPP_PHONE_NUMBER_ID: str = ""
+    WHATSAPP_BUSINESS_ACCOUNT_ID: str = ""
+    WHATSAPP_WEBHOOK_VERIFY_TOKEN: str = "retail_os_webhook_verify_token"
+    APP_BASE_URL: str = "https://testing.myretailos.com"
 
     CORS_ORIGINS: List[str] = [
         "https://testing.myretailos.com",
