@@ -108,7 +108,7 @@ def test_create_and_read_expense_has_rich_details(setup_data):
     )
     assert resp.status_code == 201, resp.text
     data = resp.json()
-    assert data["amount"] == "500.50"
+    assert data["amount"] == 500.50
     assert data["category"] == "Rent"
     assert data["store_name"] == store1.name
     assert data["status"] == "active"

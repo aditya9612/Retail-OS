@@ -485,6 +485,8 @@ class ProductService:
             and not product.is_active
             and update_data["is_active"] is True
         ):
+            if effective_expiry_date and effective_expiry_date < date.today():
+                raise ConflictException("Cannot activate an expired product")
             entitlement_svc = SaaSEntitlementService(
                 self.db
             )
@@ -523,6 +525,9 @@ class ProductService:
 
         # Quota check only when toggling inactive -> active
         if not product.is_active:
+            from datetime import date
+            if product.expiry_date and product.expiry_date < date.today():
+                raise ConflictException("Cannot activate an expired product")
             entitlement_svc = SaaSEntitlementService(self.db)
             entitlement_svc.require_limit(
                 tenant_id=tenant_id,

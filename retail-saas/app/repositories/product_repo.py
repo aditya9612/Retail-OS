@@ -118,6 +118,8 @@ class ProductRepository:
             conditions.append(Product.barcode.ilike(f"%{q}%"))
             conditions.append(Product.brand.ilike(f"%{q}%"))
 
+        from datetime import date
+        today = date.today()
         return (
             self.db.query(Product)
             .options(
@@ -127,6 +129,7 @@ class ProductRepository:
             .filter(
                 Product.tenant_id == tenant_id,
                 Product.is_active.is_(True),
+                or_(Product.expiry_date.is_(None), Product.expiry_date >= today),
                 or_(*conditions),
             )
             .distinct()
@@ -158,7 +161,12 @@ class ProductRepository:
         )
 
         if not include_inactive:
-            query = query.filter(Product.is_active.is_(True))
+            from datetime import date
+            today = date.today()
+            query = query.filter(
+                Product.is_active.is_(True),
+                or_(Product.expiry_date.is_(None), Product.expiry_date >= today),
+            )
 
         if category_id is not None:
             query = query.filter(Product.category_id == category_id)
@@ -254,6 +262,7 @@ class ProductRepository:
                 Product.tenant_id == tenant_id,
                 Product.is_active.is_(True),
                 Product.expiry_date.isnot(None),
+                Product.expiry_date >= today,
                 Product.expiry_date <= cutoff_date,
             )
             .all()
@@ -274,6 +283,7 @@ class ProductRepository:
                 ProductBatch.is_active.is_(True),
                 ProductBatch.remaining_quantity > 0,
                 ProductBatch.expiry_date.isnot(None),
+                ProductBatch.expiry_date >= today,
                 ProductBatch.expiry_date <= cutoff_date,
                 Product.id.notin_(found_ids) if found_ids else True,
             )

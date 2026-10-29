@@ -1,9 +1,10 @@
 from datetime import datetime, timedelta
+from calendar import monthrange
 from decimal import Decimal
 from typing import Optional
 import threading
 
-from fastapi import status
+from fastapi import status as http_status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -80,11 +81,72 @@ class StoreTargetService:
             start_date = data.start_date
             end_date = data.end_date
 
+            period_clean = data.period.strip().lower() if data.period else None
+            if period_clean in ("15_days", "15 days"):
+                period_clean = "15_days"
+
+            if period_clean == "daily":
+                start_date = data.start_date.replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                end_date = data.start_date.replace(
+                    hour=23, minute=59, second=59, microsecond=0
+                )
+            elif period_clean == "weekly":
+                # Week runs Monday (weekday 0) through Sunday (weekday 6)
+                start_of_week = (
+                    data.start_date - timedelta(days=data.start_date.weekday())
+                ).replace(hour=0, minute=0, second=0, microsecond=0)
+                start_date = start_of_week
+                end_date = (start_of_week + timedelta(days=6)).replace(
+                    hour=23, minute=59, second=59, microsecond=0
+                )
+            elif period_clean == "15_days":
+                start_date = data.start_date.replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                end_date = (start_date + timedelta(days=14)).replace(
+                    hour=23, minute=59, second=59, microsecond=0
+                )
+            elif period_clean == "monthly":
+                year = data.start_date.year
+                month = data.start_date.month
+                _, last_day = monthrange(year, month)
+                start_date = data.start_date.replace(
+                    day=1, hour=0, minute=0, second=0, microsecond=0
+                )
+                end_date = data.start_date.replace(
+                    day=last_day, hour=23, minute=59, second=59, microsecond=0
+                )
+            elif period_clean == "quarterly":
+                quarter = (data.start_date.month - 1) // 3 + 1
+                start_month = (quarter - 1) * 3 + 1
+                end_month = start_month + 2
+                _, last_day = monthrange(data.start_date.year, end_month)
+                start_date = data.start_date.replace(
+                    month=start_month, day=1, hour=0, minute=0, second=0, microsecond=0
+                )
+                end_date = data.start_date.replace(
+                    month=end_month, day=last_day, hour=23, minute=59, second=59, microsecond=0
+                )
+            elif period_clean == "yearly":
+                start_date = data.start_date.replace(
+                    month=1, day=1, hour=0, minute=0, second=0, microsecond=0
+                )
+                end_date = data.start_date.replace(
+                    month=12, day=31, hour=23, minute=59, second=59, microsecond=0
+                )
+            elif period_clean != "all":
+                raise AppException(
+                    "Period must be one of: all, daily, weekly, 15_days, monthly, quarterly, yearly",
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
+
             # Validate date range.
             if end_date <= start_date:
                 raise AppException(
                     "End date must be greater than start date",
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 )
 
             # Check overlap only for the same target type and period.
@@ -143,6 +205,20 @@ class StoreTargetService:
     ) -> list[StoreTarget]:
         if tenant_id is None:
             raise AppException("Tenant ID is required")
+
+        # Validate period filter
+        if period is not None and period.strip():
+            clean_period = period.strip().lower()
+            if clean_period in ("15_days", "15 days"):
+                clean_period = "15_days"
+            if clean_period not in {"all", "daily", "weekly", "15_days", "monthly", "quarterly", "yearly"}:
+                raise AppException(
+                    "Period must be one of: all, daily, weekly, 15_days, monthly, quarterly, yearly",
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
+            period = None if clean_period == "all" else clean_period
+        else:
+            period = None
 
         # Enforce store scoping.
         if current_user_store_id is not None:
@@ -273,7 +349,7 @@ class StoreTargetService:
             if new_end <= new_start:
                 raise AppException(
                     "End date must be greater than start date",
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 )
 
             # Resolve the effective target type, period and status.
@@ -507,6 +583,21 @@ class StoreTargetService:
         if tenant_id is None:
             raise AppException("Tenant ID is required")
 
+        applied_period_filter = None
+        if period is not None and period.strip():
+            clean_period = period.strip().lower()
+            if clean_period in ("15_days", "15 days"):
+                clean_period = "15_days"
+            if clean_period not in {"all", "daily", "weekly", "15_days", "monthly", "quarterly", "yearly"}:
+                raise AppException(
+                    "Period must be one of: all, daily, weekly, 15_days, monthly, quarterly, yearly",
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
+            applied_period_filter = clean_period
+            query_period = None if clean_period == "all" else clean_period
+        else:
+            query_period = None
+
         query = (
             db.query(StoreTarget)
             .join(Store, Store.id == StoreTarget.store_id)
@@ -520,8 +611,8 @@ class StoreTargetService:
         if current_user_store_id is not None:
             query = query.filter(StoreTarget.store_id == current_user_store_id)
 
-        if period is not None and period.strip():
-            query = query.filter(StoreTarget.period == period.strip().lower())
+        if query_period is not None:
+            query = query.filter(StoreTarget.period == query_period)
 
         if target_type is not None and target_type.strip():
             query = query.filter(func.lower(StoreTarget.target_type) == target_type.strip().lower())
@@ -562,7 +653,7 @@ class StoreTargetService:
 
         return {
             "total_ranked": len(items),
-            "period_filter": period,
+            "period_filter": applied_period_filter,
             "target_type_filter": target_type,
             "leaderboard": items,
         }
@@ -577,6 +668,21 @@ class StoreTargetService:
         if tenant_id is None:
             raise AppException("Tenant ID is required")
 
+        applied_period = None
+        if period is not None and period.strip():
+            clean_period = period.strip().lower()
+            if clean_period in ("15_days", "15 days"):
+                clean_period = "15_days"
+            if clean_period not in {"all", "daily", "weekly", "15_days", "monthly", "quarterly", "yearly"}:
+                raise AppException(
+                    "Period must be one of: all, daily, weekly, 15_days, monthly, quarterly, yearly",
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
+            applied_period = clean_period
+            query_period = None if clean_period == "all" else clean_period
+        else:
+            query_period = None
+
         query = (
             db.query(StoreTarget)
             .join(Store, Store.id == StoreTarget.store_id)
@@ -590,8 +696,8 @@ class StoreTargetService:
         if current_user_store_id is not None:
             query = query.filter(StoreTarget.store_id == current_user_store_id)
 
-        if period is not None and period.strip():
-            query = query.filter(StoreTarget.period == period.strip().lower())
+        if query_period is not None:
+            query = query.filter(StoreTarget.period == query_period)
 
         targets = query.all()
 
@@ -636,7 +742,7 @@ class StoreTargetService:
             "achieved_targets_count": achieved_count,
             "on_track_targets_count": on_track_count,
             "lagging_targets_count": lagging_count,
-            "period": period,
+            "period": applied_period,
         }
 
     @staticmethod
