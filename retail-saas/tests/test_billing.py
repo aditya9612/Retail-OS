@@ -82,6 +82,54 @@ def test_cart_add_and_gst_totals(billing_setup):
     assert get_resp.json()["grand_total"] == "472.00"
 
 
+def test_get_cart_by_store_id(billing_setup):
+    headers, store, product = billing_setup
+    add_resp = client.post(
+        "/api/v1/billing/cart/add-item",
+        params={"store_id": store["id"]},
+        json={"product_id": product["id"], "quantity": "1"},
+        headers=headers,
+    )
+    assert add_resp.status_code == 200
+
+    matching_store = client.get(
+        "/api/v1/billing/cart",
+        params={"store_id": store["id"]},
+        headers=headers,
+    )
+    assert matching_store.status_code == 200
+    assert matching_store.json()["store_id"] == store["id"]
+
+    other_store = client.post(
+        "/api/v1/stores",
+        json={"name": "Other Billing Store", "code": "OBS1"},
+        headers=headers,
+    )
+    assert other_store.status_code == 201
+
+    mismatched_store = client.get(
+        "/api/v1/billing/cart",
+        params={"store_id": other_store.json()["id"]},
+        headers=headers,
+    )
+    assert mismatched_store.status_code == 409
+    assert "active cart belongs to store" in mismatched_store.json()["detail"]["message"]
+
+
+def test_get_empty_cart_by_store_id_returns_store_context(billing_setup):
+    headers, store, _ = billing_setup
+
+    response = client.get(
+        "/api/v1/billing/cart",
+        params={"store_id": store["id"]},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["store_id"] == store["id"]
+    assert response.json()["items"] == []
+
+
 def test_cart_price_override_cannot_be_below_product_cost(billing_setup):
     headers, store, product = billing_setup
     db = SessionLocal()

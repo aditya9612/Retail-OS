@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.exceptions import AppException, ForbiddenException, NotFoundException
+from app.core.exceptions import AppException, ConflictException, ForbiddenException, NotFoundException
 from app.core.security import is_tenant_wide_authorized, require_operational_write, require_permission
 from app.models.product import Product
 from app.models.store import Store
@@ -403,15 +403,47 @@ def cart_clear(
     response_model=CartSummaryResponse,
 )
 def get_cart(
+    store_id: Optional[int] = Query(
+        default=None,
+        gt=0,
+        description="Return the current cart for this store",
+    ),
     user: User = Depends(
         require_permission("billing:read")
     ),
     db: Session = Depends(get_db),
 ):
+    if store_id is not None:
+        if user.store_id is not None:
+            if user.store_id != store_id:
+                raise ForbiddenException("Access denied: cannot view another store's cart")
+        elif not is_tenant_wide_authorized(user, db):
+            raise ForbiddenException("Access denied: user has no assigned store")
+
+        store = (
+            db.query(Store)
+            .filter(
+                Store.id == store_id,
+                Store.tenant_id == user.tenant_id,
+                Store.is_active.is_(True),
+            )
+            .first()
+        )
+        if not store:
+            raise NotFoundException(f"Store {store_id} not found")
+
     cart = CartService(db).get_cart(
         user.tenant_id,
         user.id,
     )
+
+    cart_store_id = cart.get("store_id")
+    if store_id is not None and cart_store_id and cart_store_id != store_id:
+        raise ConflictException(
+            f"The active cart belongs to store {cart_store_id}, not store {store_id}"
+        )
+    if store_id is not None and not cart_store_id:
+        cart["store_id"] = store_id
 
     return _to_cart_response(cart)
 
