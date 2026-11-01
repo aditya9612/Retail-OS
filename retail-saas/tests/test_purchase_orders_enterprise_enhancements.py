@@ -176,6 +176,14 @@ def test_po_create_with_warehouse_taxes_and_discounts(tenant_fixture):
     assert po["remaining_quantity"] == 15
     assert po["total_received_quantity"] == 0
 
+    for itm in po["items"]:
+        assert "purchase_order_id" in itm
+        assert "po_id" not in itm
+        assert "unit_cost" in itm
+        assert "unit_price" not in itm
+        assert "total_cost" in itm
+        assert "total" not in itm
+
 
 def test_po_list_with_search_filters_and_pagination_headers(tenant_fixture):
     headers = tenant_fixture["headers"]
@@ -456,3 +464,206 @@ def test_po_get_linked_grns(tenant_fixture):
     assert len(grns) == 1
     assert grns[0]["purchase_order_id"] == po_id
 
+
+
+def test_purchase_order_discount_exceeding_subtotal_rejected(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    store_id = tenant_fixture["store_id"]
+    supplier_id = tenant_fixture["supplier_id"]
+    p1 = tenant_fixture["product_1_id"]
+
+    # 1. Discount amount greater than subtotal on create must be rejected (subtotal = 1 * 50 = 50, discount = 100)
+    invalid_resp = client.post(
+        "/api/v1/purchase-orders",
+        json={
+            "supplier_id": supplier_id,
+            "store_id": store_id,
+            "discount_amount": 100.00,
+            "shipping_charges": 20.00,
+            "items": [{"product_id": p1, "quantity": 1, "unit_cost": 50.00}],
+        },
+        headers=headers,
+    )
+    assert invalid_resp.status_code in (400, 409, 422), f"Expected 400/409/422, got {invalid_resp.status_code}: {invalid_resp.text}"
+    assert "cannot exceed" in invalid_resp.text.lower()
+
+    # 2. Valid discount amount <= subtotal must be accepted (subtotal = 50, discount = 20)
+    valid_resp = client.post(
+        "/api/v1/purchase-orders",
+        json={
+            "supplier_id": supplier_id,
+            "store_id": store_id,
+            "discount_amount": 20.00,
+            "shipping_charges": 10.00,
+            "items": [{"product_id": p1, "quantity": 1, "unit_cost": 50.00}],
+        },
+        headers=headers,
+    )
+    assert valid_resp.status_code == 201
+    po_data = valid_resp.json()
+    po_id = po_data["id"]
+    assert float(po_data["discount_amount"]) == 20.00
+    assert float(po_data["subtotal"]) == 50.00
+    assert float(po_data["total_amount"]) == 40.00  # 50 - 20 + 10
+    assert len(po_data["items"]) >= 1
+    item = po_data["items"][0]
+    assert "purchase_order_id" in item
+    assert "po_id" not in item, "po_id should not be duplicated in response item"
+    assert item["purchase_order_id"] == po_id
+
+    # 3. Patching discount greater than subtotal must be rejected (subtotal = 50, patch discount = 90)
+    patch_invalid = client.patch(
+        f"/api/v1/purchase-orders/{po_id}",
+        json={"discount_amount": 90.00},
+        headers=headers,
+    )
+    assert patch_invalid.status_code in (400, 409, 422), f"Expected 400/409/422, got {patch_invalid.status_code}: {patch_invalid.text}"
+    assert "cannot exceed" in patch_invalid.text.lower()
+
+
+
+def test_purchase_order_hsn_code_validation(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    store_id = tenant_fixture["store_id"]
+    supplier_id = tenant_fixture["supplier_id"]
+    p1 = tenant_fixture["product_1_id"]
+
+    # 1. Reject invalid HSN codes: placeholders, non-digits, wrong lengths, repeated digits
+    bad_hsn_codes = ["string", "test", "dummy", "null", "abcd", "12", "123", "12345", "1234567", "123456789", "0000", "111111"]
+    for bad_hsn in bad_hsn_codes:
+        resp = client.post(
+            "/api/v1/purchase-orders",
+            json={
+                "supplier_id": supplier_id,
+                "store_id": store_id,
+                "items": [{"product_id": p1, "quantity": 1, "unit_cost": 50.00, "hsn_code": bad_hsn}],
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 422, f"Expected 422 for invalid HSN '{bad_hsn}', got {resp.status_code}"
+        assert "hsn" in resp.text.lower()
+
+    # 2. Accept valid HSN codes (4, 6, 8 digits)
+    p2 = tenant_fixture["product_2_id"]
+    test_cases = [
+        ("6109", [{"product_id": p1, "quantity": 1, "unit_cost": 50.00, "hsn_code": "6109"}]),
+        ("100630", [{"product_id": p2, "quantity": 1, "unit_cost": 50.00, "hsn_code": "100630"}]),
+        ("85171200", [{"product_id": p1, "quantity": 1, "unit_cost": 50.00, "hsn_code": "85171200"}, {"product_id": p2, "quantity": 1, "unit_cost": 50.00, "hsn_code": "85171200"}]),
+    ]
+    for good_hsn, items_payload in test_cases:
+        resp = client.post(
+            "/api/v1/purchase-orders",
+            json={
+                "supplier_id": supplier_id,
+                "store_id": store_id,
+                "invoice_number": f"INV-HSN-{uuid.uuid4().hex[:6].upper()}",
+                "items": items_payload,
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 201, f"Expected 201 for valid HSN '{good_hsn}', got {resp.status_code}: {resp.text}"
+        assert resp.json()["items"][0]["hsn_code"] == good_hsn
+
+
+
+def test_purchase_order_tax_rate_validation(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    store_id = tenant_fixture["store_id"]
+    supplier_id = tenant_fixture["supplier_id"]
+    p1 = tenant_fixture["product_1_id"]
+
+    # 1. Create a draft PO with 0 tax
+    create_resp = client.post(
+        "/api/v1/purchase-orders",
+        json={
+            "supplier_id": supplier_id,
+            "store_id": store_id,
+            "invoice_number": f"INV-TAX-{uuid.uuid4().hex[:6].upper()}",
+            "items": [{"product_id": p1, "quantity": 2, "unit_cost": 100.00, "tax_rate": 0.00}],
+        },
+        headers=headers,
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    po_id = create_resp.json()["id"]
+
+    # 2. PATCH with invalid tax rates (100, -5, 50, "abc") must be rejected with 422
+    for bad_rate in [100, -5, 50, 99.99]:
+        patch_resp = client.patch(
+            f"/api/v1/purchase-orders/{po_id}",
+            json={"tax_rate": bad_rate},
+            headers=headers,
+        )
+        assert patch_resp.status_code == 422, f"Expected 422 for tax_rate={bad_rate}, got {patch_resp.status_code}: {patch_resp.text}"
+        assert "tax rate" in patch_resp.text.lower()
+
+    # 3. PATCH with valid tax rate (18%) must succeed and update tax_amount (2 * 100 = 200 * 18% = 36.00)
+    patch_valid = client.patch(
+        f"/api/v1/purchase-orders/{po_id}",
+        json={"tax_rate": 18.00},
+        headers=headers,
+    )
+    assert patch_valid.status_code == 200, patch_valid.text
+    po_updated = patch_valid.json()
+    assert Decimal(str(po_updated["tax_amount"])) == Decimal("36.00")
+    assert Decimal(str(po_updated["total_amount"])) == Decimal("236.00")
+    assert Decimal(str(po_updated["items"][0]["tax_rate"])) == Decimal("18.00")
+
+    # 4. Item-level invalid tax rate on create must also be rejected with 422
+    invalid_item_resp = client.post(
+        "/api/v1/purchase-orders",
+        json={
+            "supplier_id": supplier_id,
+            "store_id": store_id,
+            "items": [{"product_id": p1, "quantity": 1, "unit_cost": 50.00, "tax_rate": 100}],
+        },
+        headers=headers,
+    )
+    assert invalid_item_resp.status_code == 422, f"Expected 422, got {invalid_item_resp.status_code}: {invalid_item_resp.text}"
+    assert "tax rate" in invalid_item_resp.text.lower()
+
+
+
+def test_purchase_order_pdf_preview_and_download_modes(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    store_id = tenant_fixture["store_id"]
+    supplier_id = tenant_fixture["supplier_id"]
+    p1 = tenant_fixture["product_1_id"]
+
+    create_resp = client.post(
+        "/api/v1/purchase-orders",
+        json={
+            "supplier_id": supplier_id,
+            "store_id": store_id,
+            "invoice_number": f"INV-PREV-{uuid.uuid4().hex[:6].upper()}",
+            "items": [{"product_id": p1, "quantity": 1, "unit_cost": 50.00, "tax_rate": 5.00}],
+        },
+        headers=headers,
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    po_id = create_resp.json()["id"]
+
+    # 1. Default (when no mode is passed or '--' selected): returns visual inline preview
+    resp_default = client.get(
+        f"/api/v1/purchase-orders/{po_id}/pdf",
+        headers=headers,
+    )
+    assert resp_default.status_code == 200, resp_default.text
+    assert resp_default.headers["content-type"] in ("image/png", "application/pdf")
+    assert "inline" in resp_default.headers.get("content-disposition", "")
+
+    # 2. mode=preview: returns visual preview
+    resp_prev = client.get(
+        f"/api/v1/purchase-orders/{po_id}/pdf?mode=preview",
+        headers=headers,
+    )
+    assert resp_prev.status_code == 200
+    assert "inline" in resp_prev.headers.get("content-disposition", "")
+
+    # 3. mode=download: returns application/pdf attachment
+    resp_dl = client.get(
+        f"/api/v1/purchase-orders/{po_id}/pdf?mode=download",
+        headers=headers,
+    )
+    assert resp_dl.status_code == 200
+    assert resp_dl.headers["content-type"] == "application/pdf"
+    assert "attachment" in resp_dl.headers.get("content-disposition", "")

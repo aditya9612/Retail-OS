@@ -190,8 +190,8 @@ def test_supplier_multiple_purchase_orders_and_items(tenant_fixture):
             assert "id" in item
             assert item["product_id"] in (prod1_id, prod2_id)
             assert item["quantity"] > 0
-            assert Decimal(str(item["unit_price"])) > 0
-            assert Decimal(str(item["total"])) > 0
+            assert Decimal(str(item.get("unit_cost", item.get("unit_price")))) > 0
+            assert Decimal(str(item.get("total_cost", item.get("total")))) > 0
 
 
 def test_supplier_cross_tenant_isolation(tenant_fixture):
