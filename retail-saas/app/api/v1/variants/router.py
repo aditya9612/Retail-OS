@@ -363,3 +363,58 @@ def get_product_variant(
         product_id=product_id,
     )
 
+@router.put(
+    "/products/{product_id}/variants/{variant_id}",
+    response_model=ProductVariantResponse,
+    dependencies=[Depends(require_operational_write)],
+    description="Update a product variant by product ID and variant ID",
+)
+def update_product_variant(
+    data: ProductVariantUpdate,
+    product_id: int = Path(
+        ...,
+        gt=0,
+        description="Parent product ID",
+    ),
+    variant_id: int = Path(
+        ...,
+        gt=0,
+        description="Variant ID",
+    ),
+    user: User = Depends(require_permission("products:write")),
+    db: Session = Depends(get_db),
+):
+    return ProductVariantService(db).update_variant(
+        tenant_id=user.tenant_id,
+        variant_id=variant_id,
+        data=data,
+    )
+
+
+@router.patch(
+    "/products/{product_id}/variants/{variant_id}",
+    response_model=ProductVariantResponse,
+    dependencies=[Depends(require_operational_write)],
+    description="Partially update a product variant by product ID and variant ID",
+)
+def patch_product_variant(
+    data: ProductVariantUpdate,
+    product_id: int = Path(
+        ...,
+        gt=0,
+        description="Parent product ID",
+    ),
+    variant_id: int = Path(
+        ...,
+        gt=0,
+        description="Variant ID",
+    ),
+    user: User = Depends(require_permission("products:write")),
+    db: Session = Depends(get_db),
+):
+    return ProductVariantService(db).update_variant(
+        tenant_id=user.tenant_id,
+        variant_id=variant_id,
+        data=data,
+    )
+

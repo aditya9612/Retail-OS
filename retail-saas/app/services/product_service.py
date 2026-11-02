@@ -695,14 +695,14 @@ class ProductService:
             product_id,
         )
 
+        # If product already has a barcode and overwrite is false,
+        # safely and idempotently return the existing barcode instead of raising 409
         if product.barcode and not overwrite:
-            raise ConflictException(
-                f"Product already has barcode '{product.barcode}'. To overwrite, pass overwrite=true."
-            )
+            return product
 
-        for _ in range(10):
+        for _ in range(15):
             candidate = generate_ean13_barcode(tenant_id)
-            if not self.repo.is_barcode_taken(candidate, tenant_id):
+            if not self.repo.is_barcode_taken(candidate, tenant_id, exclude_product_id=product.id):
                 product.barcode = candidate
                 self.db.commit()
                 self.db.refresh(product)
