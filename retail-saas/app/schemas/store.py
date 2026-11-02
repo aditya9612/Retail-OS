@@ -96,6 +96,9 @@ class StoreCreate(BaseModel):
         if value is None:
             return None
         value = value.strip()
+        if not value:
+            raise ValueError("Store name is required")
+
         if value.lower() in {
             "string",
             "test",
@@ -109,14 +112,14 @@ class StoreCreate(BaseModel):
         }:
             raise ValueError("Please enter a valid store name")
 
-        if not value:
-            raise ValueError("Store name is required")
-
         if len(value) < 2:
             raise ValueError("Store name must contain at least 2 characters")
 
         if len(value) > 100:
             raise ValueError("Store name must not exceed 100 characters")
+
+        if value.upper() == "AB" or (len(value) == 2 and value.isupper()):
+            raise ValueError("Store name cannot be an abbreviation")
 
         # Must contain at least one alphabetic character
         if not re.search(r"[A-Za-z]", value):
@@ -124,9 +127,9 @@ class StoreCreate(BaseModel):
                 "Store name must contain at least one letter"
             )
 
-        # Allow letters, numbers, spaces and common name characters
+        # Allow only letters and normal spaces between words
         if not re.fullmatch(
-            r"[A-Za-z0-9][A-Za-z0-9\s.&'()_-]*",
+            r"^[A-Za-z]+(?:\s+[A-Za-z]+)*$",
             value
         ):
             raise ValueError(
@@ -185,7 +188,7 @@ class StoreCreate(BaseModel):
             raise ValueError("Invalid address")
 
         # Allow normal address characters
-        if not re.fullmatch(r"[A-Za-z0-9\s,./#&'()\-]+", value):
+        if not re.fullmatch(r"[A-Za-z0-9\s,./#&'():\-]+", value):
             raise ValueError("Address contains invalid characters")
 
         return value
@@ -360,6 +363,9 @@ class StoreUpdate(BaseModel):
         if value is None:
             return None
         value = value.strip()
+        if not value:
+            raise ValueError("Store name is required")
+
         if value.lower() in {
             "string",
             "test",
@@ -372,8 +378,6 @@ class StoreUpdate(BaseModel):
             "na",
         }:
             raise ValueError("Please enter a valid store name")
-        if not value:
-            raise ValueError("Store name is required")
 
         if len(value) < 2:
             raise ValueError("Store name must contain at least 2 characters")
@@ -381,10 +385,17 @@ class StoreUpdate(BaseModel):
         if len(value) > 100:
             raise ValueError("Store name must not exceed 100 characters")
 
+        if value.upper() == "AB" or (len(value) == 2 and value.isupper()):
+            raise ValueError("Store name cannot be an abbreviation")
+
         if not re.search(r"[A-Za-z]", value):
             raise ValueError("Store name must contain at least one letter")
 
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9\s.&'()_-]*", value):
+        # Allow only letters and normal spaces between words
+        if not re.fullmatch(
+            r"^[A-Za-z]+(?:\s+[A-Za-z]+)*$",
+            value
+        ):
             raise ValueError(
                 "Store name contains invalid characters"
             )
@@ -417,16 +428,10 @@ class StoreUpdate(BaseModel):
 
         # Allow normal address characters
         if not re.fullmatch(
-            r"[A-Za-z0-9\s,./#&'()\-]+",
+            r"[A-Za-z0-9\s,./#&'():\-]+",
             value
         ):
             raise ValueError("Address contains invalid characters")
-
-        # Require at least one number
-        if not any(char.isdigit() for char in value):
-            raise ValueError(
-                "Address must include a building number or other location number"
-            )
 
         return value
 

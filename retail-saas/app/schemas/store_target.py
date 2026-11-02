@@ -10,17 +10,30 @@ from pydantic import (
     Field,
     field_validator,
     model_validator,
+    field_serializer,
 )
 
 
 ALLOWED_PERIODS = {
+    "all",
+    "daily",
+    "weekly",
+    "15_days",
+    "15 days",
+    "monthly",
+    "quarterly",
+    "yearly",
+}
+
+ORDERED_PERIODS = [
+    "all",
     "daily",
     "weekly",
     "15_days",
     "monthly",
     "quarterly",
     "yearly",
-}
+]
 
 ALLOWED_STATUSES = {
     "active",
@@ -74,7 +87,7 @@ class StoreTargetCreate(BaseModel):
         ...,
         min_length=1,
         max_length=20,
-        description="Target period: daily, weekly, 15_days, monthly, quarterly, yearly",
+        description="Target period: all, daily, weekly, 15_days, monthly, quarterly, yearly",
         examples=["monthly"],
     )
 
@@ -113,6 +126,17 @@ class StoreTargetCreate(BaseModel):
             raise ValueError(
                 "Target type must contain only letters with a single space between words"
             )
+        words = set(cleaned.lower().split())
+        allowed_keywords = (
+            {t.value.lower() for t in TargetType}
+            | {w.lower() for t in TargetType for w in t.value.split()}
+            | {"target"}
+        )
+        if not (words & allowed_keywords or any(t.value.lower() in cleaned.lower() for t in TargetType)):
+            allowed = ", ".join(sorted(ALLOWED_TARGET_TYPES))
+            raise ValueError(
+                f"Target type must be or include a supported target type: {allowed}"
+            )
         return cleaned
 
     @field_validator("target_value")
@@ -139,8 +163,11 @@ class StoreTargetCreate(BaseModel):
     def validate_period(cls, value: str) -> str:
         cleaned = value.strip().lower()
 
+        if cleaned in ("15_days", "15 days"):
+            return "15_days"
+
         if cleaned not in ALLOWED_PERIODS:
-            allowed = ", ".join(sorted(ALLOWED_PERIODS))
+            allowed = ", ".join(ORDERED_PERIODS)
             raise ValueError(f"Period must be one of: {allowed}")
 
         return cleaned
@@ -188,7 +215,7 @@ class StoreTargetUpdate(BaseModel):
         default=None,
         min_length=1,
         max_length=20,
-        description="Updated period: daily, weekly, 15_days, monthly, quarterly, yearly",
+        description="Updated period: all, daily, weekly, 15_days, monthly, quarterly, yearly",
         examples=["monthly"],
     )
 
@@ -261,8 +288,11 @@ class StoreTargetUpdate(BaseModel):
 
         cleaned = value.strip().lower()
 
+        if cleaned in ("15_days", "15 days"):
+            return "15_days"
+
         if cleaned not in ALLOWED_PERIODS:
-            allowed = ", ".join(sorted(ALLOWED_PERIODS))
+            allowed = ", ".join(ORDERED_PERIODS)
             raise ValueError(f"Period must be one of: {allowed}")
 
         return cleaned
@@ -300,12 +330,16 @@ class StoreTargetResponse(BaseModel):
     store_code: Optional[str] = Field(None, description="Target Store Code", examples=["STR-MUM-01"])
     target_type: str = Field(..., description="Target Type", examples=["Sales Target"])
     target_value: Decimal = Field(..., description="Target Goal Value", examples=[Decimal("50000.00")])
-    period: str = Field(..., description="Target Period (daily, weekly, 15_days, monthly, quarterly, yearly)", examples=["monthly"])
+    period: str = Field(..., description="Target Period (all, daily, weekly, 15_days, monthly, quarterly, yearly)", examples=["monthly"])
     start_date: datetime = Field(..., description="Start Date and Time")
     end_date: datetime = Field(..., description="End Date and Time")
     status: str = Field(..., description="Target Status (active, inactive, completed, cancelled)", examples=["active"])
     created_at: datetime = Field(..., description="Creation Timestamp")
     updated_at: datetime = Field(..., description="Last Update Timestamp")
+
+    @field_serializer("target_value", mode="plain")
+    def serialize_target_value(self, v: Decimal) -> float:
+        return round(float(v), 2)
 
     model_config = ConfigDict(from_attributes=True)
 

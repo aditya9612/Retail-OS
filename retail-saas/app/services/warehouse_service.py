@@ -231,6 +231,12 @@ class WarehouseService:
                     detail=f"Warehouse name '{new_name}' already exists",
                 )
 
+        # If warehouse_name is present, map it to name
+        if 'warehouse_name' in update_data:
+            if 'name' not in update_data or not update_data['name']:
+                update_data['name'] = update_data['warehouse_name']
+            del update_data['warehouse_name']
+
         for field, value in update_data.items():
             setattr(
                 warehouse,

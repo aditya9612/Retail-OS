@@ -51,6 +51,9 @@ class DashboardResponse(BaseModel):
     products_target: float = 0.0
     products_achievement_percentage: float = 0.0
 
+    gross_profit: float = 0.0
+    gross_margin_percentage: float = 0.0
+
     recent_transactions: List[RecentTransaction] = []
 
     model_config = ConfigDict(from_attributes=True)
@@ -69,12 +72,20 @@ class DashboardOverviewResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MonthlyRevCost(BaseModel):
+    month: str
+    revenue: float = 0.0
+    cost: float = 0.0
+    gross_profit: float = 0.0
+
+
 class RevenueVsCostResponse(BaseModel):
     period: str
     revenue: float
     cost: float
     gross_profit: float = 0.0
     gross_margin_percentage: float = 0.0
+    monthly: Optional[List[MonthlyRevCost]] = None
 
     model_config = ConfigDict(from_attributes=True)
 

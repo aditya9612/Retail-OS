@@ -59,7 +59,7 @@ def get_targets(
     ),
     period: Optional[str] = Query(
         default=None,
-        description="Filter targets by period (daily, weekly, monthly, quarterly, yearly)",
+        description="Filter targets by period (all, daily, weekly, 15_days, monthly, quarterly, yearly)",
     ),
     target_type: Optional[str] = Query(
         default=None,
@@ -122,7 +122,7 @@ def get_targets(
 def get_store_targets_leaderboard(
     period: Optional[str] = Query(
         default=None,
-        description="Filter leaderboard by period (daily, weekly, monthly, quarterly, yearly)",
+        description="Filter leaderboard by period (all, daily, weekly, 15_days, monthly, quarterly, yearly)",
     ),
     target_type: Optional[str] = Query(
         default=None,
@@ -150,7 +150,7 @@ def get_store_targets_leaderboard(
 def get_store_targets_summary(
     period: Optional[str] = Query(
         default=None,
-        description="Filter summary by period (e.g. monthly, quarterly, yearly)",
+        description="Filter summary by period (all, daily, weekly, 15_days, monthly, quarterly, yearly)",
     ),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("stores:read")),

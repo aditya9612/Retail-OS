@@ -139,6 +139,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         "pos:shift_manage",
         "reviews:read",
         "reviews:write",
+        "suppliers:read",
+        "suppliers:write",
     ],
 
     UserRole.MANAGER: [
@@ -160,6 +162,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         "pos:shift_manage",
         "reviews:read",
         "reviews:write",
+        "suppliers:read",
+        "suppliers:write",
     ],
 
     UserRole.ACCOUNTANT: [

@@ -1,15 +1,100 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
     field_validator,
     model_validator,
 )
+
+
+DISALLOWED_PO_PLACEHOLDERS = {
+    "string",
+    "test",
+    "null",
+    "none",
+    "undefined",
+    "n/a",
+    "na",
+    "unknown",
+    "placeholder",
+    "dummy",
+    "sample",
+    "null value",
+    "notes",
+    "remarks",
+    "invoice",
+}
+
+DISALLOWED_INVOICE_PLACEHOLDERS = DISALLOWED_PO_PLACEHOLDERS
+
+
+def validate_po_hsn_code(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("HSN code must be a string")
+
+    v = value.strip()
+    if not v:
+        return None
+
+    if v.lower() in DISALLOWED_PO_PLACEHOLDERS:
+        raise ValueError(f"HSN code cannot be placeholder '{value}'")
+
+    if not v.isdigit():
+        raise ValueError("HSN code must contain digits only")
+
+    if len(v) not in (4, 6, 8):
+        raise ValueError("HSN code must contain exactly 4, 6, or 8 digits")
+
+    if len(set(v)) == 1:
+        raise ValueError("HSN code cannot consist of a single repeated digit")
+
+    return v
+
+
+VALID_PO_GST_RATES = {
+    Decimal("0"),
+    Decimal("0.00"),
+    Decimal("0.25"),
+    Decimal("1.5"),
+    Decimal("1.50"),
+    Decimal("3"),
+    Decimal("3.00"),
+    Decimal("5"),
+    Decimal("5.00"),
+    Decimal("12"),
+    Decimal("12.00"),
+    Decimal("18"),
+    Decimal("18.00"),
+    Decimal("28"),
+    Decimal("28.00"),
+}
+
+
+def validate_po_tax_rate(value: Optional[Any]) -> Optional[Decimal]:
+    if value is None:
+        return None
+    try:
+        d = Decimal(str(value))
+    except Exception:
+        raise ValueError("Tax rate must be a valid numeric value")
+
+    if d < Decimal("0.00"):
+        raise ValueError("Tax rate cannot be negative")
+
+    if d not in VALID_PO_GST_RATES:
+        raise ValueError(
+            "Tax rate must be a valid GST slab: 0, 0.25, 1.5, 3, 5, 12, 18, or 28"
+        )
+    return d
 
 
 class PurchaseOrderItemCreate(BaseModel):
@@ -67,26 +152,16 @@ class PurchaseOrderItemCreate(BaseModel):
                 data["unit_price"] = data["unit_cost"]
         return data
 
+    @field_validator("hsn_code")
+    @classmethod
+    def validate_hsn_code(cls, value: Optional[str]) -> Optional[str]:
+        return validate_po_hsn_code(value)
 
-DISALLOWED_PO_PLACEHOLDERS = {
-    "string",
-    "test",
-    "null",
-    "none",
-    "undefined",
-    "n/a",
-    "na",
-    "unknown",
-    "placeholder",
-    "dummy",
-    "sample",
-    "null value",
-    "notes",
-    "remarks",
-    "invoice",
-}
+    @field_validator("tax_rate")
+    @classmethod
+    def validate_tax_rate(cls, value: Optional[Decimal]) -> Optional[Decimal]:
+        return validate_po_tax_rate(value)
 
-DISALLOWED_INVOICE_PLACEHOLDERS = DISALLOWED_PO_PLACEHOLDERS
 
 
 def validate_po_notes(value: Optional[str], field_name: str = "Notes") -> Optional[str]:
@@ -277,6 +352,21 @@ class PurchaseOrderCreate(BaseModel):
             )
         return value
 
+    @model_validator(mode="after")
+    def validate_discount_not_exceed_subtotal(self):
+        if self.discount_amount is not None and self.discount_amount > Decimal("0.00") and self.items:
+            if all((it.unit_cost is not None or it.unit_price is not None) for it in self.items):
+                computed_subtotal = sum(
+                    Decimal(str(it.quantity)) * (it.unit_cost if it.unit_cost is not None else it.unit_price)
+                    for it in self.items
+                )
+                if self.discount_amount > computed_subtotal:
+                    raise ValueError(
+                        f"Discount amount ({self.discount_amount}) cannot exceed items subtotal ({computed_subtotal})"
+                    )
+        return self
+
+
 
 class PurchaseOrderUpdate(BaseModel):
     supplier_id: Optional[int] = Field(
@@ -316,6 +406,11 @@ class PurchaseOrderUpdate(BaseModel):
         ge=Decimal("0.00"),
     )
 
+    tax_rate: Optional[Decimal] = Field(
+        default=None,
+        description="Optional updated tax rate percentage for purchase order items",
+    )
+
     items: Optional[list[PurchaseOrderItemCreate]] = Field(
         default=None,
         description="Optional updated list of items (allowed for draft purchase orders)",
@@ -335,6 +430,26 @@ class PurchaseOrderUpdate(BaseModel):
     @classmethod
     def validate_delivery_date(cls, value: Optional[datetime]) -> Optional[datetime]:
         return validate_po_delivery_date(value)
+
+    @field_validator("tax_rate")
+    @classmethod
+    def validate_tax_rate(cls, value: Optional[Decimal]) -> Optional[Decimal]:
+        return validate_po_tax_rate(value)
+
+    @model_validator(mode="after")
+    def validate_discount_not_exceed_subtotal(self):
+        if self.discount_amount is not None and self.discount_amount > Decimal("0.00") and self.items:
+            if all((it.unit_cost is not None or it.unit_price is not None) for it in self.items):
+                computed_subtotal = sum(
+                    Decimal(str(it.quantity)) * (it.unit_cost if it.unit_cost is not None else it.unit_price)
+                    for it in self.items
+                )
+                if self.discount_amount > computed_subtotal:
+                    raise ValueError(
+                        f"Discount amount ({self.discount_amount}) cannot exceed items subtotal ({computed_subtotal})"
+                    )
+        return self
+
 
 
 class PurchaseOrderReceiveItem(BaseModel):
@@ -420,16 +535,25 @@ class PurchaseOrderCancelRequest(BaseModel):
 
 class PurchaseOrderItemResponse(BaseModel):
     id: int
-    po_id: Optional[int] = None
-    purchase_order_id: Optional[int] = None
+    purchase_order_id: Optional[int] = Field(
+        default=None,
+        validation_alias=AliasChoices("purchase_order_id", "po_id"),
+        description="Purchase Order ID",
+    )
     product_id: int
     product_name: Optional[str] = None
     product_sku: Optional[str] = None
     quantity: int
-    unit_cost: Decimal = Decimal("0.00")
-    unit_price: Optional[Decimal] = None
-    total_cost: Decimal = Decimal("0.00")
-    total: Optional[Decimal] = None
+    unit_cost: Decimal = Field(
+        default=Decimal("0.00"),
+        validation_alias=AliasChoices("unit_cost", "unit_price"),
+        description="Unit purchase cost",
+    )
+    total_cost: Decimal = Field(
+        default=Decimal("0.00"),
+        validation_alias=AliasChoices("total_cost", "total"),
+        description="Total line cost",
+    )
     tax_rate: Decimal = Decimal("0.00")
     tax_amount: Decimal = Decimal("0.00")
     hsn_code: Optional[str] = None
@@ -439,17 +563,11 @@ class PurchaseOrderItemResponse(BaseModel):
 
     @model_validator(mode="after")
     def sync_aliases(self):
-        if self.po_id is not None and self.purchase_order_id is None:
-            self.purchase_order_id = self.po_id
-        if self.unit_cost is not None and self.unit_price is None:
-            self.unit_price = self.unit_cost
-        if self.total_cost is not None and self.total is None:
-            self.total = self.total_cost
         if self.quantity is not None and self.received_quantity is not None:
             self.remaining_quantity = max(0, self.quantity - self.received_quantity)
         return self
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class PurchaseOrderResponse(BaseModel):
