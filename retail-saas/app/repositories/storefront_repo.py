@@ -158,9 +158,15 @@ class StorefrontRepository:
             setting = self.get_settings(tenant_id, store_id)
 
         update_dict = data.model_dump(exclude_unset=True)
-        # Handle keywords alias
+        # Handle aliases
         if "keywords" in update_dict and "meta_keywords" not in update_dict:
             update_dict["meta_keywords"] = update_dict["keywords"]
+        if "maintenance_mode" in update_dict and "is_maintenance_mode" not in update_dict:
+            update_dict["is_maintenance_mode"] = update_dict["maintenance_mode"]
+        if "terms_and_conditions" in update_dict and "terms_conditions" not in update_dict:
+            update_dict["terms_conditions"] = update_dict["terms_and_conditions"]
+        if "refund_policy" in update_dict and "return_policy" not in update_dict:
+            update_dict["return_policy"] = update_dict["refund_policy"]
 
         for key, val in update_dict.items():
             if hasattr(setting, key) and val is not None:
@@ -258,8 +264,13 @@ class StorefrontRepository:
                 (StorefrontSetting.subdomain == clean_sub) |
                 (StorefrontSetting.url_slug == clean_sub)
             )
+        elif store_id is not None:
+            query = query.filter(StorefrontSetting.store_id == store_id)
+            if tenant_id is not None:
+                query = query.filter(StorefrontSetting.tenant_id == tenant_id)
         elif tenant_id is not None:
             query = query.filter(StorefrontSetting.tenant_id == tenant_id)
-            if store_id is not None:
-                query = query.filter(StorefrontSetting.store_id == store_id)
+            query = query.filter(StorefrontSetting.store_id.is_(None))
+        else:
+            return None
         return query.first()

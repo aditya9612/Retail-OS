@@ -423,3 +423,43 @@ def test_tab_advanced_settings_endpoints():
     assert updated["guest_checkout"] is True
     assert updated["show_out_of_stock"] is False
     assert updated["enable_product_reviews"] is True
+
+def test_storefront_aliases_and_compatibility():
+    data = create_storefront_tenant("aliases")
+    headers = data["headers"]
+
+    # 1. Test updating with maintenance_mode alias in PUT /storefront/settings
+    put_resp = client.put(
+        "/api/v1/ecommerce/storefront/settings",
+        json={"maintenance_mode": True},
+        headers=headers,
+    )
+    assert put_resp.status_code == 200, put_resp.text
+    res = put_resp.json()
+    assert res["is_maintenance_mode"] is True
+    assert res["maintenance_mode"] is True
+
+    # 2. Test updating with terms_and_conditions & refund_policy alias in PUT /storefront/pages
+    pages_resp = client.put(
+        "/api/v1/ecommerce/storefront/pages",
+        json={
+            "terms_and_conditions": "Special terms and conditions via alias",
+            "refund_policy": "Special refund policy via alias",
+        },
+        headers=headers,
+    )
+    assert pages_resp.status_code == 200, pages_resp.text
+    p_data = pages_resp.json()
+    assert p_data["terms_conditions"] == "Special terms and conditions via alias"
+    assert p_data["terms_and_conditions"] == "Special terms and conditions via alias"
+    assert p_data["return_policy"] == "Special refund policy via alias"
+    assert p_data["refund_policy"] == "Special refund policy via alias"
+
+    # 3. Test public storefront with store_id
+    pub_store = client.get(f"/api/v1/ecommerce/storefront/public?store_id={data['store1_id']}")
+    # If store1 hasn't overridden storefront yet, it returns None or default
+    assert pub_store.status_code in (200, 404)
+
+    # 4. Test public storefront with no query params returns 404 instead of random tenant
+    pub_none = client.get("/api/v1/ecommerce/storefront/public")
+    assert pub_none.status_code == 404

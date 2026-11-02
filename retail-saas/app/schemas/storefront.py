@@ -70,9 +70,17 @@ class StorefrontPagesResponse(BaseModel):
         default="By using our store, you agree to our terms of service and return policy.",
         description="Terms and conditions text",
     )
+    terms_and_conditions: Optional[str] = Field(
+        default="By using our store, you agree to our terms of service and return policy.",
+        description="Terms and conditions text (alias)",
+    )
     return_policy: Optional[str] = Field(
         default="Returns are accepted within 7 days of delivery for damaged or incorrect items.",
         description="Return & refund policy text",
+    )
+    refund_policy: Optional[str] = Field(
+        default="Returns are accepted within 7 days of delivery for damaged or incorrect items.",
+        description="Return & refund policy text (alias)",
     )
 
     class Config:
@@ -84,7 +92,9 @@ class StorefrontPagesUpdate(BaseModel):
     contact_us: Optional[str] = None
     privacy_policy: Optional[str] = None
     terms_conditions: Optional[str] = None
+    terms_and_conditions: Optional[str] = None
     return_policy: Optional[str] = None
+    refund_policy: Optional[str] = None
 
 
 # ============================================================
@@ -139,6 +149,8 @@ class StorefrontAdvancedSettingsUpdate(BaseModel):
     auto_sync_inventory: Optional[bool] = None
     enable_coupons: Optional[bool] = None
     gst_invoice_enabled: Optional[bool] = None
+    is_maintenance_mode: Optional[bool] = None
+    maintenance_mode: Optional[bool] = None
 
 
 # ============================================================
@@ -205,6 +217,9 @@ class StorefrontSettingUpdate(BaseModel):
     custom_css: Optional[str] = None
     custom_js: Optional[str] = None
     is_maintenance_mode: Optional[bool] = None
+    maintenance_mode: Optional[bool] = None
+    terms_and_conditions: Optional[str] = None
+    refund_policy: Optional[str] = None
 
 
 class StorefrontSettingResponse(BaseModel):
@@ -266,6 +281,9 @@ class StorefrontSettingResponse(BaseModel):
     custom_css: Optional[str] = None
     custom_js: Optional[str] = None
     is_maintenance_mode: bool = False
+    maintenance_mode: bool = False
+    terms_and_conditions: Optional[str] = None
+    refund_policy: Optional[str] = None
 
     class Config:
         from_attributes = True
