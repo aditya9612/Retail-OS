@@ -134,6 +134,11 @@ class LoyaltyPoint(Base, TimestampMixin):
         nullable=True
     )
 
+    reason: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True
+    )
+
     customer: Mapped["Customer"] = relationship(
         "Customer",
         back_populates="loyalty"

@@ -626,13 +626,9 @@ def test_grn_stats_and_by_number_lookup(tenant_a):
     grn = create_resp.json()
     grn_number = grn["grn_number"]
 
+    # Duplicate by-number endpoint removed, returns 404
     by_num_resp = client.get(f"/api/v1/grn/by-number/{grn_number}", headers=headers)
-    assert by_num_resp.status_code == 200, by_num_resp.text
-    assert by_num_resp.json()["id"] == grn["id"]
-
-    # Non-existent number returns 404
-    missing_resp = client.get("/api/v1/grn/by-number/GRN-DOES-NOT-EXIST", headers=headers)
-    assert missing_resp.status_code == 404
+    assert by_num_resp.status_code == 404
 
 
 def test_grn_export_and_print_slip(tenant_a):

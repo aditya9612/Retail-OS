@@ -622,3 +622,68 @@ def test_birthday_and_subresource_pagination_analytics(tenant_a):
     )
     assert analytics_res.status_code == 200
     assert "average_rating" in analytics_res.json()
+
+
+def test_customer_creation_outstanding_balance_and_payment_ledger_entry(tenant_a):
+    headers, _ = tenant_a
+
+    # 1. Create customer with opening outstanding balance
+    c_res = client.post(
+        "/api/v1/customers",
+        headers=headers,
+        json={
+            "name": "Rahul Sharma",
+            "phone": random_phone(),
+            "email": random_email("rahul"),
+            "credit_limit": 10000.00,
+            "outstanding_balance": 5000.00,
+        },
+    )
+    assert c_res.status_code == 201, c_res.text
+    cust_id = c_res.json()["id"]
+
+    # 2. Verify ledger has auditable OPENING-BALANCE debit entry
+    l_res = client.get(
+        f"/api/v1/customers/{cust_id}/ledger",
+        headers=headers,
+    )
+    assert l_res.status_code == 200, l_res.text
+    ledger = l_res.json()
+    assert float(ledger["outstanding_balance"]) == 5000.00
+    assert float(ledger["total_debit"]) == 5000.00
+    assert float(ledger["total_credit"]) == 0.00
+    assert len(ledger["entries"]) == 1
+    ob_entry = ledger["entries"][0]
+    assert ob_entry["entry_type"] == "DEBIT"
+    assert float(ob_entry["amount"]) == 5000.00
+    assert float(ob_entry["balance_after"]) == 5000.00
+    assert ob_entry["reference_no"] == "OPENING-BALANCE"
+
+    # 3. Require payment operation: settle partial dues
+    p_res = client.post(
+        f"/api/v1/customers/{cust_id}/ledger/payment",
+        headers=headers,
+        json={
+            "amount": 2000.00,
+            "payment_method": "cash",
+            "reference_no": "CASH-REC-001",
+            "notes": "Partial settlement of opening dues",
+        },
+    )
+    assert p_res.status_code == 201, p_res.text
+    payment = p_res.json()
+    assert payment["entry_type"] == "CREDIT"
+    assert float(payment["amount"]) == 2000.00
+    assert float(payment["balance_after"]) == 3000.00
+
+    # 4. Check updated ledger: total debit 5000, total credit 2000, outstanding 3000
+    l2_res = client.get(
+        f"/api/v1/customers/{cust_id}/ledger",
+        headers=headers,
+    )
+    assert l2_res.status_code == 200
+    ledger2 = l2_res.json()
+    assert float(ledger2["outstanding_balance"]) == 3000.00
+    assert float(ledger2["total_debit"]) == 5000.00
+    assert float(ledger2["total_credit"]) == 2000.00
+    assert len(ledger2["entries"]) == 2

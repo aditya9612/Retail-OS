@@ -97,6 +97,10 @@ class GRN(Base, TimestampMixin):
         nullable=True,
     )
 
+    @property
+    def reason(self) -> str | None:
+        return self.rejection_reason
+
     items = relationship(
         "GRNItem",
         back_populates="grn",
@@ -185,10 +189,16 @@ class GRN(Base, TimestampMixin):
     def total_accepted_quantity(self) -> int:
         if not self.items:
             return 0
-        return sum(
-            item.accepted_quantity if getattr(item, "accepted_quantity", None) is not None else item.received_quantity
-            for item in self.items
-        )
+        total = 0
+        for item in self.items:
+            acc = getattr(item, "accepted_quantity", None)
+            rec = getattr(item, "received_quantity", 0) or 0
+            rej = getattr(item, "rejected_quantity", 0) or 0
+            if acc is not None and not (acc == 0 and rej == 0 and rec > 0):
+                total += acc
+            else:
+                total += rec
+        return total
 
     @property
     def total_rejected_quantity(self) -> int:
@@ -203,9 +213,13 @@ class GRN(Base, TimestampMixin):
         total = Decimal("0.00")
         for item in self.items:
             cost = getattr(item, "unit_cost", None) or Decimal("0.00")
-            qty = getattr(item, "accepted_quantity", None)
-            if qty is None:
-                qty = item.received_quantity
+            acc = getattr(item, "accepted_quantity", None)
+            rec = getattr(item, "received_quantity", 0) or 0
+            rej = getattr(item, "rejected_quantity", 0) or 0
+            if acc is not None and not (acc == 0 and rej == 0 and rec > 0):
+                qty = acc
+            else:
+                qty = rec
             total += Decimal(str(cost)) * Decimal(str(qty))
         return total.quantize(Decimal("0.01"))
 
@@ -265,6 +279,10 @@ class GRNItem(Base):
         nullable=True,
     )
 
+    @property
+    def reason(self) -> str | None:
+        return self.damage_reason
+
     unit_cost_col: Mapped[Decimal | None] = mapped_column(
         "unit_cost",
         Numeric(12, 2),
@@ -308,4 +326,4 @@ class GRNItem(Base):
     @unit_cost.setter
     def unit_cost(self, val):
         self.unit_cost_col = val
-        self._unit_cost = val
+        self._unit_cost = val

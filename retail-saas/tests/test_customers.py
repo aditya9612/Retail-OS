@@ -1007,6 +1007,7 @@ def test_loyalty_earn_and_null_points(tenant_a, tenant_b):
     ldata = resp.json()
     assert ldata["points_earned"] == 150
     assert ldata["balance_points"] == 150
+    assert ldata["reason"] == "Purchase reward" 
 
     # Cross tenant customer earn rejected
     cross_resp = client.post(
@@ -1472,6 +1473,7 @@ def test_loyalty_earn_reason_validation(tenant_a):
             headers=headers,
         )
         assert res_good.status_code == 200, f"Failed for good reason: {good_reason}"
+        assert res_good.json()["reason"] == good_reason
 
 
 def test_list_customers_status_pagination_and_legacy_serialization(tenant_a, tenant_b):

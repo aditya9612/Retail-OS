@@ -664,6 +664,11 @@ class CouponRedemptionResponse(BaseModel):
         "from_attributes": True
     }
 
+class CouponRedemptionEmptyResponse(BaseModel):
+    success: bool = True
+    message: str = "No redemptions found for this coupon"
+    data: list[CouponRedemptionResponse] = Field(default_factory=list)
+
 
 class BulkGenerateCouponsRequest(BaseModel):
     prefix: str = Field(..., min_length=2, max_length=20, description="Code prefix, e.g. FEST")

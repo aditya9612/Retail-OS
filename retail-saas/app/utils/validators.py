@@ -1162,11 +1162,14 @@ def validate_email_address(
     if not any(c.isalpha() for c in local_part):
         raise ValueError("Email username must contain at least one letter")
 
-    if local_part.startswith(".") or local_part.endswith("."):
-        raise ValueError("Email username cannot start or end with a dot")
+    if local_part.startswith((".", "-", "_")) or local_part.endswith((".", "-", "_")):
+        raise ValueError("Email username cannot start or end with special characters like '.', '-', or '_'")
 
-    if ".." in local_part:
-        raise ValueError("Email username cannot contain consecutive dots")
+    if re.search(r"[-._]{2,}", local_part):
+        raise ValueError("Email username cannot contain consecutive special characters")
+
+    if sum(1 for c in local_part if c.isalnum()) < 2:
+        raise ValueError("Email username must contain at least 2 alphanumeric characters")
 
     if not re.fullmatch(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$", local_part):
         raise ValueError("Email username contains invalid characters")

@@ -271,6 +271,18 @@ def ensure_schema_compatibility() -> None:
                 except Exception as exc:
                     logger.warning("Could not add customer_feedback.feedback: %s", exc)
 
+        if "loyalty_points" in existing_cols:
+            lp_cols = existing_cols["loyalty_points"]
+            if "reason" not in lp_cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text("ALTER TABLE `loyalty_points` ADD COLUMN `reason` VARCHAR(500) NULL")
+                        )
+                    lp_cols.add("reason")
+                except Exception as exc:
+                    logger.warning("Could not add loyalty_points.reason: %s", exc)
+
         if "products" in existing_cols:
             prod_cols = existing_cols["products"]
             if "selling_price" not in prod_cols and "price" in prod_cols:

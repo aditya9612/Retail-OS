@@ -647,3 +647,56 @@ def test_warehouse_patch_invalid_json_expected_value_message(tenant_fixture):
     assert good_patch.status_code == 200
     assert good_patch.json()["name"] == "Renamed Coast Warehouse"
     assert good_patch.json()["is_active"] is False
+
+
+
+def test_warehouse_address_112gg_blocked_and_warehouse_name_field(tenant_fixture):
+    """Bug fix:
+    1. Warehouse API Accepts an Invalid Address (e.g. '112gg')
+    2. The warehouse name field is displayed as 'Name' instead of 'Warehouse Name'
+    """
+    headers = tenant_fixture["headers"]
+
+    # 1. Invalid address '112gg' must be rejected with 422
+    bad_payload = {
+        "name": "Titanium Market Warehouse",
+        "code": f"WH-{uuid.uuid4().hex[:4].upper()}",
+        "address": "112gg",
+    }
+    bad_res = client.post("/api/v1/warehouses", json=bad_payload, headers=headers)
+    assert bad_res.status_code == 422, f"Expected 422 for '112gg', got {bad_res.status_code}: {bad_res.text}"
+    assert "warehouse address" in bad_res.text.lower() or "address" in bad_res.text.lower()
+
+    # 2. Valid complete address succeeds (201)
+    good_code = f"WH-{uuid.uuid4().hex[:4].upper()}"
+    good_payload = {
+        "name": "Titanium Market Warehouse",
+        "code": good_code,
+        "address": "Plot 112, GG Market Road, Pune, Maharashtra",
+    }
+    good_res = client.post("/api/v1/warehouses", json=good_payload, headers=headers)
+    assert good_res.status_code == 201, good_res.text
+    data = good_res.json()
+    assert data["name"] == "Titanium Market Warehouse"
+    assert data["warehouse_name"] == "Titanium Market Warehouse"
+    assert data["address"] == "Plot 112, GG Market Road, Pune, Maharashtra"
+
+    # 3. Create using warehouse_name field directly also succeeds
+    alt_code = f"WH-{uuid.uuid4().hex[:4].upper()}"
+    alt_payload = {
+        "warehouse_name": "Platinum Logistics Hub",
+        "code": alt_code,
+        "address": "Sector 18, MIDC Bhosari, Pune",
+    }
+    alt_res = client.post("/api/v1/warehouses", json=alt_payload, headers=headers)
+    assert alt_res.status_code == 201, alt_res.text
+    alt_data = alt_res.json()
+    assert alt_data["name"] == "Platinum Logistics Hub"
+    assert alt_data["warehouse_name"] == "Platinum Logistics Hub"
+
+    # 4. OpenAPI schema check: field 'name' has title 'Warehouse Name'
+    openapi_res = client.get("/openapi.json")
+    assert openapi_res.status_code == 200
+    openapi = openapi_res.json()
+    wh_create_props = openapi["components"]["schemas"]["WarehouseCreate"]["properties"]
+    assert wh_create_props["name"]["title"] == "Warehouse Name"

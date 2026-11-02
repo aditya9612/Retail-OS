@@ -138,6 +138,28 @@ class CustomerService:
             self.db.add(customer)
             self.db.commit()
             self.db.refresh(customer)
+
+            # Auditable opening balance ledger entry if initial dues exist
+            opening_balance = Decimal(str(customer.outstanding_balance or Decimal("0.00")))
+            if opening_balance != Decimal("0.00"):
+                entry_type = "DEBIT" if opening_balance > Decimal("0.00") else "CREDIT"
+                notes = (
+                    "Opening balance recorded during customer creation"
+                    if opening_balance > Decimal("0.00")
+                    else "Opening advance credit recorded during customer creation"
+                )
+                ledger_entry = CustomerLedgerEntry(
+                    tenant_id=tenant_id,
+                    customer_id=customer.id,
+                    entry_type=entry_type,
+                    amount=abs(opening_balance),
+                    balance_after=opening_balance,
+                    reference_no="OPENING-BALANCE",
+                    notes=notes,
+                )
+                self.db.add(ledger_entry)
+                self.db.commit()
+                self.db.refresh(customer)
         except IntegrityError as exc:
             self.db.rollback()
             err_msg = str(exc).lower()
@@ -280,6 +302,7 @@ class CustomerService:
             points_earned=points,
             points_redeemed=0,
             balance_points=new_balance,
+            reason="Admin adjustment",
         )
 
         self.db.add(loyalty)
@@ -350,6 +373,7 @@ class CustomerService:
             rating=data.rating,
             comments=data.comments,
             suggestions=data.suggestions,
+            feedback=data.feedback,
         )
 
         try:
@@ -609,6 +633,7 @@ class CustomerService:
             points_earned=data.points,
             points_redeemed=0,
             balance_points=new_balance,
+            reason=data.reason,
         )
 
         try:
@@ -640,6 +665,7 @@ class CustomerService:
             points_earned=0,
             points_redeemed=data.points,
             balance_points=new_balance,
+            reason=getattr(data, "reason", None) or "Redemption",
         )
 
         try:
@@ -1207,6 +1233,34 @@ class CustomerService:
         new_balance = current_balance - payment_amount
         customer.outstanding_balance = new_balance
 
+        # Ensure auditable opening balance entry exists if customer started with non-zero dues
+        existing_entries_count = (
+            self.db.query(CustomerLedgerEntry)
+            .filter(
+                CustomerLedgerEntry.tenant_id == tenant_id,
+                CustomerLedgerEntry.customer_id == customer.id,
+            )
+            .count()
+        )
+        if existing_entries_count == 0 and current_balance != Decimal("0.00"):
+            ob_type = "DEBIT" if current_balance > Decimal("0.00") else "CREDIT"
+            ob_notes = (
+                "Opening balance recorded during customer creation"
+                if current_balance > Decimal("0.00")
+                else "Opening advance credit recorded during customer creation"
+            )
+            ob_entry = CustomerLedgerEntry(
+                tenant_id=tenant_id,
+                customer_id=customer.id,
+                entry_type=ob_type,
+                amount=abs(current_balance),
+                balance_after=current_balance,
+                reference_no="OPENING-BALANCE",
+                notes=ob_notes,
+            )
+            self.db.add(ob_entry)
+            self.db.flush()
+
         notes = data.notes or f"Payment received via {data.payment_method}"
         ledger_entry = CustomerLedgerEntry(
             tenant_id=tenant_id,
@@ -1281,6 +1335,27 @@ class CustomerService:
             query = query.filter(CustomerLedgerEntry.created_at <= datetime.combine(to_date, datetime.max.time()))
 
         entries = query.order_by(CustomerLedgerEntry.created_at.asc()).all()
+
+        if not entries and customer.outstanding_balance and customer.outstanding_balance != Decimal("0.00"):
+            ob_balance = Decimal(str(customer.outstanding_balance))
+            ob_type = "DEBIT" if ob_balance > Decimal("0.00") else "CREDIT"
+            ob_notes = (
+                "Opening balance recorded during customer creation"
+                if ob_balance > Decimal("0.00")
+                else "Opening advance credit recorded during customer creation"
+            )
+            ob_entry = CustomerLedgerEntry(
+                tenant_id=tenant_id,
+                customer_id=customer.id,
+                entry_type=ob_type,
+                amount=abs(ob_balance),
+                balance_after=ob_balance,
+                reference_no="OPENING-BALANCE",
+                notes=ob_notes,
+            )
+            self.db.add(ob_entry)
+            self.db.commit()
+            entries = [ob_entry]
 
         total_debit = sum((e.amount for e in entries if e.entry_type == "DEBIT"), Decimal("0.00"))
         total_credit = sum((e.amount for e in entries if e.entry_type == "CREDIT"), Decimal("0.00"))

@@ -180,10 +180,14 @@ def get_purchase_order_grns(
 def get_purchase_order_pdf(
     purchase_order_id: int,
     format: Literal["pdf", "excel", "csv"] = Query(default="pdf", description="Export format: 'pdf', 'excel', or 'csv'"),
-    mode: Literal["download", "preview"] = Query(default="download", description="'preview' for browser inline view, 'download' for file attachment"),
+    mode: Optional[Literal["preview", "download"]] = Query(
+        default="preview",
+        description="'preview' for browser inline view, 'download' for file attachment",
+    ),
     user: User = Depends(require_permission("purchase_orders:read")),
     db: Session = Depends(get_db),
 ):
+    effective_mode = "download" if mode == "download" else "preview"
     po = PurchaseOrderService(db).get_purchase_order(
         tenant_id=user.tenant_id,
         purchase_order_id=purchase_order_id,
@@ -197,7 +201,7 @@ def get_purchase_order_pdf(
         return render_pdf_or_preview(
             pdf_content=file_bytes,
             filename_base=f"PO-{po.order_number}",
-            mode=mode,
+            mode=effective_mode,
         )
     elif format == "excel":
         file_bytes = PurchaseOrderService(db).generate_excel(

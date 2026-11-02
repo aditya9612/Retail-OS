@@ -29,6 +29,14 @@ class Warehouse(Base, TimestampMixin):
         nullable=False,
     )
 
+    @property
+    def warehouse_name(self) -> str:
+        return self.name
+
+    @warehouse_name.setter
+    def warehouse_name(self, value: str):
+        self.name = value
+
     code: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
@@ -53,4 +61,4 @@ class Warehouse(Base, TimestampMixin):
 
     @store_name.setter
     def store_name(self, val: str | None) -> None:
-        self._store_name = val
+        self._store_name = val

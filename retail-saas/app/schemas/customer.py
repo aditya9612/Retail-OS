@@ -1175,6 +1175,11 @@ class LoyaltyRedeemRequest(BaseModel):
         gt=0
     )
 
+    reason: Optional[str] = Field(
+        default=None,
+        max_length=500
+    )
+
 
 class LoyaltyResponse(BaseModel):
 
@@ -1185,6 +1190,7 @@ class LoyaltyResponse(BaseModel):
     points_redeemed: Optional[int] = None
     balance_points: Optional[int] = None
     points: Optional[int] = None
+    reason: Optional[str] = None
     expiry_date: Optional[date] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

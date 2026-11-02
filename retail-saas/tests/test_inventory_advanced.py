@@ -248,6 +248,29 @@ def test_bulk_adjust_inventory_api(inv_advanced_context):
     inv2 = client.get(f"/api/v1/inventory/{p2}?store_id={s1}", headers=headers).json()
     assert inv2["quantity"] == 15
 
+    # Extremely high stock quantity (e.g. 100000) must be rejected with 422
+    high_qty_payload = {
+        "store_id": s1,
+        "audit_reference": "AUDIT-2026-Q4",
+        "items": [
+            {"product_id": p1, "counted_quantity": 100000, "reason": "Audit adjustment"},
+        ],
+    }
+    high_resp = client.post("/api/v1/inventory/bulk-adjust", json=high_qty_payload, headers=headers)
+    assert high_resp.status_code == 422
+    assert "counted_quantity" in high_resp.text.lower() or "quantity" in high_resp.text.lower()
+
+    # Placeholder reason ('string') must be rejected with 422
+    placeholder_payload = {
+        "store_id": s1,
+        "audit_reference": "string",
+        "items": [
+            {"product_id": p1, "counted_quantity": 50, "reason": "string"},
+        ],
+    }
+    ph_resp = client.post("/api/v1/inventory/bulk-adjust", json=placeholder_payload, headers=headers)
+    assert ph_resp.status_code == 422
+
 
 def test_enhanced_list_and_filters(inv_advanced_context):
     headers = inv_advanced_context["headers"]
