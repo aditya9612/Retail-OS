@@ -407,7 +407,7 @@ def get_current_super_admin(
     return super_admin
 
 
-def require_permission(permission: str):
+def require_permission(*permissions: str):
     def checker(
         user: User = Depends(get_current_user),
     ) -> User:
@@ -417,19 +417,29 @@ def require_permission(permission: str):
             else []
         )
 
-        if "*" in perms or permission in perms:
+        if "*" in perms or any(p in perms for p in permissions):
             return user
 
         # Backward compatibility for existing owner and admin roles in DB
-        if user.role and user.role.name in ["admin", "owner"] and (permission.startswith("dashboard:") or permission.startswith("ecommerce:") or permission.startswith("reviews:")):
+        if user.role and user.role.name in ["admin", "owner"] and any(
+            p.startswith("dashboard:") or p.startswith("ecommerce:") or p.startswith("reviews:") or p.startswith("suppliers:")
+            for p in permissions
+        ):
+            return user
+
+        # Fallback for suppliers permissions to inventory permissions for backward compatibility
+        if any(p == "suppliers:write" for p in permissions) and "inventory:write" in perms:
+            return user
+        if any(p == "suppliers:read" for p in permissions) and "inventory:read" in perms:
             return user
 
         # Backward compatibility for pos:shift_manage for existing cashier, manager, owner roles in DB
-        if user.role and user.role.name in ["admin", "owner", "manager", "cashier"] and permission == "pos:shift_manage":
+        if user.role and user.role.name in ["admin", "owner", "manager", "cashier"] and "pos:shift_manage" in permissions:
             return user
 
+        primary_perm = permissions[0] if permissions else ""
         raise ForbiddenException(
-            f"Missing permission: {permission}"
+            f"Missing permission: {primary_perm}"
         )
 
     return checker

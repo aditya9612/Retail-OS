@@ -418,6 +418,10 @@ def test_supplier_create_invalid_email(tenant_fixture):
         "0@gmail.com",
         "12345@domain.com",
         "a@example.com",
+        "r--@gmail.com",
+        "--user@example.com",
+        "user_@example.com",
+        "u-@example.com",
     ]
 
     for em in invalid_emails:

@@ -35,7 +35,7 @@ router = APIRouter(
 def create_supplier(
     data: SupplierCreate,
     user: User = Depends(
-        require_permission("suppliers:write")
+        require_permission("suppliers:write", "inventory:write")
     ),
     db: Session = Depends(get_db),
 ):
@@ -55,7 +55,7 @@ def list_suppliers(
     page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_size: Optional[int] = Query(None, ge=1, le=100, description="Items per page"),
     user: User = Depends(
-        require_permission("suppliers:read")
+        require_permission("suppliers:read", "inventory:read")
     ),
     db: Session = Depends(get_db),
 ):
@@ -80,7 +80,7 @@ def search_suppliers(
         description="Search supplier by name, phone, contact person, or GSTIN",
     ),
     user: User = Depends(
-        require_permission("suppliers:read")
+        require_permission("suppliers:read", "inventory:read")
     ),
     db: Session = Depends(get_db),
 ):
@@ -104,7 +104,7 @@ def search_suppliers(
 )
 def suppliers_summary(
     user: User = Depends(
-        require_permission("suppliers:read")
+        require_permission("suppliers:read", "inventory:read")
     ),
     db: Session = Depends(get_db),
 ):
@@ -127,7 +127,7 @@ def get_supplier_purchase_history(
     page: Optional[int] = Query(None, ge=1, description="Page number"),
     page_size: Optional[int] = Query(None, ge=1, le=100, description="Items per page"),
     user: User = Depends(
-        require_permission("suppliers:read")
+        require_permission("suppliers:read", "inventory:read")
     ),
     db: Session = Depends(get_db),
 ):
@@ -151,7 +151,7 @@ def get_supplier_products(
         description="Supplier ID must be greater than zero",
     ),
     user: User = Depends(
-        require_permission("suppliers:read")
+        require_permission("suppliers:read", "inventory:read")
     ),
     db: Session = Depends(get_db),
 ):
@@ -172,7 +172,7 @@ def get_supplier(
         description="Supplier ID must be greater than zero",
     ),
     user: User = Depends(
-        require_permission("suppliers:read")
+        require_permission("suppliers:read", "inventory:read")
     ),
     db: Session = Depends(get_db),
 ):
@@ -194,7 +194,7 @@ def update_supplier(
     ),
     data: SupplierUpdate = ...,
     user: User = Depends(
-        require_permission("suppliers:write")
+        require_permission("suppliers:write", "inventory:write")
     ),
     db: Session = Depends(get_db),
 ):
@@ -217,7 +217,7 @@ def update_supplier_status(
     ),
     data: SupplierStatusUpdate = ...,
     user: User = Depends(
-        require_permission("suppliers:write")
+        require_permission("suppliers:write", "inventory:write")
     ),
     db: Session = Depends(get_db),
 ):
@@ -239,7 +239,7 @@ def delete_supplier(
         description="Supplier ID must be greater than zero",
     ),
     user: User = Depends(
-        require_permission("suppliers:write")
+        require_permission("suppliers:write", "inventory:write")
     ),
     db: Session = Depends(get_db),
 ):

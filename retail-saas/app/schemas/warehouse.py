@@ -110,18 +110,26 @@ def validate_warehouse_address(value: str | None, required: bool = False) -> str
     if v.lower() in DISALLOWED_WAREHOUSE_PLACEHOLDERS:
         raise ValueError("Please provide a valid warehouse address")
 
-    if len(v) < 5 or len(v) > 500:
-        raise ValueError("Warehouse address must be between 5 and 500 characters")
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_WAREHOUSE_PLACEHOLDERS or clean_norm in DISALLOWED_WAREHOUSE_PLACEHOLDERS:
+        raise ValueError("Please provide a valid warehouse address")
+
+    if len(v) < 6 or len(v) > 500:
+        raise ValueError("Warehouse address must be between 6 and 500 characters")
 
     if v.isdigit():
         raise ValueError("Warehouse address cannot contain only numbers")
 
-    if not re.search(r"[A-Za-z]", v):
-        raise ValueError("Warehouse address must contain at least one letter")
+    alpha_chars = [c.lower() for c in v if c.isalpha()]
+    if len(alpha_chars) < 3:
+        raise ValueError("Warehouse address must contain meaningful address text with letters")
 
-    alnum_chars = [c.lower() for c in v if c.isalnum()]
-    if len(set(alnum_chars)) < 2:
+    if len(set(alpha_chars)) < 2:
         raise ValueError("Warehouse address cannot consist of repeating characters")
+
+    # Rejects random single-token values without spaces or address delimiters (e.g., "112gg")
+    if " " not in v and "," not in v and len(v) < 12:
+        raise ValueError("Please provide a valid complete warehouse address")
 
     if not re.fullmatch(r"[A-Za-z0-9\s,./#&'()\-]+", v):
         raise ValueError("Warehouse address contains invalid characters")
@@ -141,20 +149,49 @@ class WarehouseCreate(BaseModel):
     )
 
     name: str = Field(
+        ...,
+        title="Warehouse Name",
+        description="Warehouse Name (e.g. Central Logistics Warehouse)",
+        min_length=2,
+        max_length=100,
+        examples=["Central Logistics Warehouse"],
+    )
+
+    warehouse_name: Optional[str] = Field(
+        default=None,
+        title="Warehouse Name",
+        description="Warehouse Name (alias for name)",
         min_length=2,
         max_length=100,
     )
 
     code: str = Field(
+        ...,
+        title="Warehouse Code",
+        description="Warehouse Code (unique alphanumeric identifier)",
         min_length=2,
         max_length=50,
     )
 
     address: str | None = Field(
         default=None,
-        min_length=5,
+        title="Warehouse Address",
+        description="Warehouse Address",
+        min_length=6,
         max_length=500,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def sync_name_and_warehouse_name(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "name" not in data or not data.get("name"):
+                if "warehouse_name" in data and data.get("warehouse_name"):
+                    data["name"] = data["warehouse_name"]
+            elif "warehouse_name" not in data or not data.get("warehouse_name"):
+                if "name" in data and data.get("name"):
+                    data["warehouse_name"] = data["name"]
+        return data
 
     @field_validator("name")
     @classmethod
@@ -185,9 +222,29 @@ class WarehouseUpdate(BaseModel):
 
     name: str | None = Field(
         default=None,
+        title="Warehouse Name",
+        description="Warehouse Name",
         min_length=2,
         max_length=100,
     )
+
+    warehouse_name: Optional[str] = Field(
+        default=None,
+        title="Warehouse Name",
+        description="Warehouse Name (alias for name)",
+        min_length=2,
+        max_length=100,
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def sync_update_warehouse_name(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if ("name" not in data or not data.get("name")) and "warehouse_name" in data and data.get("warehouse_name"):
+                data["name"] = data["warehouse_name"]
+            elif ("warehouse_name" not in data or not data.get("warehouse_name")) and "name" in data and data.get("name"):
+                data["warehouse_name"] = data["name"]
+        return data
 
     code: str | None = Field(
         default=None,
@@ -281,7 +338,8 @@ class WarehouseResponse(BaseModel):
     tenant_id: int = Field(gt=0)
     store_id: int | None
     store_name: Optional[str] = None
-    name: str
+    name: str = Field(..., title="Warehouse Name", description="Warehouse Name")
+    warehouse_name: Optional[str] = Field(default=None, title="Warehouse Name", description="Warehouse Name")
     code: str
     address: str | None
     is_active: bool

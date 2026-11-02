@@ -138,25 +138,6 @@ class GRNRepository:
         if grn:
             return grn
 
-        # 2. Fallback: if user passed integer ID instead of string GRN number
-        if trimmed.isdigit():
-            return (
-                self.db.query(GRN)
-                .options(
-                    joinedload(GRN.items),
-                    joinedload(GRN.purchase_order),
-                    joinedload(GRN.warehouse),
-                    joinedload(GRN.store),
-                    joinedload(GRN.created_by),
-                    joinedload(GRN.received_by),
-                )
-                .filter(
-                    GRN.id == int(trimmed),
-                    GRN.tenant_id == tenant_id,
-                )
-                .first()
-            )
-
         return None
 
     def get_stats(self, tenant_id: int, store_id: Optional[int] = None) -> dict:
@@ -185,7 +166,7 @@ class GRNRepository:
         received_list = rec_q.all()
         total_inward_value = sum(g.total_cost_value for g in received_list) if received_list else Decimal("0.00")
 
-        recent = (
+        recent_q = (
             self.db.query(GRN)
             .options(
                 joinedload(GRN.items),
@@ -194,6 +175,12 @@ class GRNRepository:
                 joinedload(GRN.store),
             )
             .filter(GRN.tenant_id == tenant_id)
+        )
+        if store_id is not None:
+            recent_q = recent_q.filter(GRN.store_id == store_id)
+
+        recent = (
+            recent_q
             .order_by(GRN.created_at.desc())
             .limit(5)
             .all()

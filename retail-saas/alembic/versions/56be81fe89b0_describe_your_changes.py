@@ -49,6 +49,7 @@ def upgrade() -> None:
             sa.Column("points_redeemed", sa.Integer(), server_default=sa.text("'0'"), nullable=False),
             sa.Column("balance_points", sa.Integer(), server_default=sa.text("'0'"), nullable=False),
             sa.Column("expiry_date", sa.Date(), nullable=True),
+            sa.Column("reason", sa.String(500), nullable=True),
             sa.Column("created_at", sa.DateTime(), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
             sa.Column("updated_at", sa.DateTime(), server_default=sa.text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"), nullable=False),
         )
@@ -196,6 +197,9 @@ def upgrade() -> None:
         op.create_foreign_key(None, 'customer_wallets', 'customers', ['customer_id'], ['id'])
 
     if "loyalty_points" in existing_tables:
+        lp_cols = {col['name'] for col in inspector.get_columns('loyalty_points')}
+        if 'reason' not in lp_cols:
+            op.add_column('loyalty_points', sa.Column('reason', sa.String(500), nullable=True))
         op.alter_column('loyalty_points', 'points_earned',
                    existing_type=mysql.INTEGER(),
                    nullable=False,

@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO, StringIO
 import secrets
-from typing import Optional
+from typing import Union, Optional
 
 from fastapi import status
 from reportlab.lib import colors
@@ -25,6 +25,7 @@ from app.schemas.coupon import (
     BulkGenerateCouponsRequest,
     BulkGenerateCouponsResponse,
     CouponCreate,
+    CouponRedemptionEmptyResponse,
     CouponResponse,
     CouponUpdate,
 )
@@ -540,16 +541,23 @@ class CouponService:
         coupon_id: int,
         page: int = 1,
         page_size: int = 20,
-    ) -> list[CouponRedemption]:
+    ) -> Union[list[CouponRedemption], CouponRedemptionEmptyResponse]:
         # Ensure coupon exists
         self.get_coupon(tenant_id, coupon_id)
         skip = (page - 1) * page_size
-        return self.repo.list_redemptions(
+        redemptions = self.repo.list_redemptions(
             tenant_id=tenant_id,
             coupon_id=coupon_id,
             skip=skip,
             limit=page_size,
         )
+        if not redemptions:
+            return CouponRedemptionEmptyResponse(
+                success=True,
+                message="No redemptions found for this coupon",
+                data=[],
+            )
+        return redemptions
 
     def bulk_generate(
         self,

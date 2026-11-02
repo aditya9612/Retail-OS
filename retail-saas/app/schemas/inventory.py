@@ -166,8 +166,8 @@ class StockInRequest(BaseModel):
     @field_validator("expiry_date")
     @classmethod
     def validate_expiry_date(cls, v: Optional[date]) -> Optional[date]:
-        if v is not None and v < date.today():
-            raise ValueError("Expiry date cannot be in the past")
+        if v is not None and v <= date.today():
+            raise ValueError("Expiry date cannot be in the past or today (must be a future date)")
         return v
 
     @field_validator("unit_cost", mode="before")
@@ -451,14 +451,43 @@ class InventoryValuationBreakdownResponse(BaseModel):
 
 class BulkAdjustmentItem(BaseModel):
     product_id: int = Field(gt=0, description="Product ID must be positive")
-    counted_quantity: int = Field(ge=0, le=100000, description="Counted physical stock quantity")
+    counted_quantity: int = Field(ge=0, le=10000, description="Counted physical stock quantity must be between 0 and 10000")
     reason: Optional[str] = Field(default=None, max_length=255)
+
+    @field_validator("counted_quantity")
+    @classmethod
+    def validate_counted_quantity(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("Counted quantity cannot be negative")
+        if v > 10000:
+            raise ValueError("Counted quantity cannot exceed 10,000 (extremely high stock quantity)")
+        return v
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            return None
+        return _validate_semantic_text(cleaned, "reason", min_len=3)
 
 
 class BulkInventoryAdjustmentRequest(BaseModel):
     store_id: int = Field(gt=0, description="Store ID must be positive")
     items: list[BulkAdjustmentItem] = Field(min_length=1, max_length=100, description="List of items to adjust")
     audit_reference: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("audit_reference")
+    @classmethod
+    def validate_audit_reference(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            return None
+        return _validate_semantic_text(cleaned, "audit_reference", min_len=3)
 
 
 class BulkAdjustmentProcessedItem(BaseModel):

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import HTMLResponse
 
 from sqlalchemy.orm import Session
@@ -20,6 +20,7 @@ from app.schemas.grn import (
     GRNRejectRequest,
     GRNResponse,
     GRNStatsResponse,
+    validate_damage_reason,
 )
 from app.services.grn_service import GRNService
 
@@ -95,21 +96,6 @@ def grn_stats(
     db: Session = Depends(get_db),
 ):
     return GRNService(db).stats(tenant_id=user.tenant_id, store_id=store_id)
-
-
-@router.get(
-    "/by-number/{grn_number}",
-    response_model=GRNResponse,
-)
-def get_grn_by_number(
-    grn_number: str,
-    user: User = Depends(require_permission("inventory:read")),
-    db: Session = Depends(get_db),
-):
-    return GRNService(db).get_by_number(
-        tenant_id=user.tenant_id,
-        grn_number=grn_number,
-    )
 
 
 @router.get(
@@ -198,7 +184,19 @@ def reject_grn(
     user: User = Depends(require_permission("inventory:write")),
     db: Session = Depends(get_db),
 ):
-    rejection_reason = (data.reason if data and data.reason else None) or reason or "Shipment rejected during receipt"
+    if reason is not None:
+        cleaned_q = reason.strip()
+        if not cleaned_q:
+            raise AppException("Rejection reason cannot be empty or whitespace", status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        try:
+            validate_damage_reason(cleaned_q)
+        except ValueError as e:
+            raise AppException(str(e), status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        rejection_reason = cleaned_q
+    elif data and data.reason:
+        rejection_reason = data.reason
+    else:
+        rejection_reason = "Shipment rejected during receipt"
     return GRNService(db).reject(
         tenant_id=user.tenant_id,
         grn_id=grn_id,
