@@ -124,8 +124,8 @@ class StorefrontService:
             about_us=data.about_us,
             contact_us=data.contact_us,
             privacy_policy=data.privacy_policy,
-            terms_conditions=data.terms_conditions,
-            return_policy=data.return_policy,
+            terms_conditions=data.terms_conditions if data.terms_conditions is not None else data.terms_and_conditions,
+            return_policy=data.return_policy if data.return_policy is not None else data.refund_policy,
         )
         setting = self.repo.update_settings(tenant_id, store_id, update_data)
         return StorefrontPagesResponse.model_validate(setting)
@@ -172,6 +172,7 @@ class StorefrontService:
         store_id: Optional[int],
         data: StorefrontAdvancedSettingsUpdate,
     ) -> StorefrontAdvancedSettingsResponse:
+        m_mode = data.is_maintenance_mode if data.is_maintenance_mode is not None else data.maintenance_mode
         update_data = StorefrontSettingUpdate(
             enable_product_reviews=data.enable_product_reviews,
             show_out_of_stock=data.show_out_of_stock,
@@ -180,6 +181,7 @@ class StorefrontService:
             auto_sync_inventory=data.auto_sync_inventory,
             enable_coupons=data.enable_coupons,
             gst_invoice_enabled=data.gst_invoice_enabled,
+            is_maintenance_mode=m_mode,
         )
         setting = self.repo.update_settings(tenant_id, store_id, update_data)
         return StorefrontAdvancedSettingsResponse.model_validate(setting)

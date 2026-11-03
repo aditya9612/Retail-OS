@@ -466,3 +466,31 @@ def void_invoice(
         reason=payload.reason,
         user=user,
     )
+
+
+
+@router.post(
+    "/{invoice_id}/whatsapp",
+    summary="Send Invoice PDF Receipt via WhatsApp",
+    description="Queues a background job to send this tax invoice PDF to the customer's WhatsApp number via Meta Cloud API.",
+)
+def send_invoice_whatsapp(
+    invoice_id: int,
+    user: User = Depends(require_permission("billing:read")),
+    db: Session = Depends(get_db),
+):
+    invoice = BillingService(db).get_invoice(
+        user.tenant_id,
+        invoice_id,
+        user=user,
+    )
+    from app.tasks.whatsapp_tasks import send_whatsapp_invoice_task
+    task = send_whatsapp_invoice_task.delay(
+        tenant_id=user.tenant_id,
+        invoice_id=invoice.id,
+    )
+    return {
+        "message": f"Invoice {invoice.invoice_number} WhatsApp dispatch queued",
+        "task_id": task.id,
+        "invoice_id": invoice.id,
+    }

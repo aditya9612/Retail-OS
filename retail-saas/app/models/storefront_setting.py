@@ -152,6 +152,31 @@ class StorefrontSetting(Base, TimestampMixin):
     custom_js: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_maintenance_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Backward-compatibility aliases
+    @property
+    def maintenance_mode(self) -> bool:
+        return self.is_maintenance_mode
+
+    @maintenance_mode.setter
+    def maintenance_mode(self, val: bool) -> None:
+        self.is_maintenance_mode = val
+
+    @property
+    def terms_and_conditions(self) -> Optional[str]:
+        return self.terms_conditions
+
+    @terms_and_conditions.setter
+    def terms_and_conditions(self, val: Optional[str]) -> None:
+        self.terms_conditions = val
+
+    @property
+    def refund_policy(self) -> Optional[str]:
+        return self.return_policy
+
+    @refund_policy.setter
+    def refund_policy(self, val: Optional[str]) -> None:
+        self.return_policy = val
+
     # Relationships
     tenant: Mapped["Tenant"] = relationship("Tenant")
     store: Mapped[Optional["Store"]] = relationship("Store")
