@@ -4,6 +4,7 @@ import re
 from typing import Any, Optional
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -148,21 +149,13 @@ class WarehouseCreate(BaseModel):
         gt=0,
     )
 
-    name: str = Field(
+    warehouse_name: str = Field(
         ...,
         title="Warehouse Name",
         description="Warehouse Name (e.g. Central Logistics Warehouse)",
         min_length=2,
         max_length=100,
-        examples=["Central Logistics Warehouse"],
-    )
-
-    warehouse_name: Optional[str] = Field(
-        default=None,
-        title="Warehouse Name",
-        description="Warehouse Name (alias for name)",
-        min_length=2,
-        max_length=100,
+        validation_alias=AliasChoices("warehouse_name", "name"),
     )
 
     code: str = Field(
@@ -181,21 +174,13 @@ class WarehouseCreate(BaseModel):
         max_length=500,
     )
 
-    @model_validator(mode="before")
-    @classmethod
-    def sync_name_and_warehouse_name(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "name" not in data or not data.get("name"):
-                if "warehouse_name" in data and data.get("warehouse_name"):
-                    data["name"] = data["warehouse_name"]
-            elif "warehouse_name" not in data or not data.get("warehouse_name"):
-                if "name" in data and data.get("name"):
-                    data["warehouse_name"] = data["name"]
-        return data
+    @property
+    def name(self) -> str:
+        return self.warehouse_name
 
-    @field_validator("name")
+    @field_validator("warehouse_name")
     @classmethod
-    def validate_name(cls, value: str) -> str:
+    def validate_warehouse_name_field(cls, value: str) -> str:
         return validate_warehouse_name(value, required=True)
 
     @field_validator("code")
@@ -220,31 +205,18 @@ class WarehouseUpdate(BaseModel):
         gt=0,
     )
 
-    name: str | None = Field(
+    warehouse_name: str | None = Field(
         default=None,
         title="Warehouse Name",
         description="Warehouse Name",
         min_length=2,
         max_length=100,
+        validation_alias=AliasChoices("warehouse_name", "name"),
     )
 
-    warehouse_name: Optional[str] = Field(
-        default=None,
-        title="Warehouse Name",
-        description="Warehouse Name (alias for name)",
-        min_length=2,
-        max_length=100,
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def sync_update_warehouse_name(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if ("name" not in data or not data.get("name")) and "warehouse_name" in data and data.get("warehouse_name"):
-                data["name"] = data["warehouse_name"]
-            elif ("warehouse_name" not in data or not data.get("warehouse_name")) and "name" in data and data.get("name"):
-                data["warehouse_name"] = data["name"]
-        return data
+    @property
+    def name(self) -> str | None:
+        return self.warehouse_name
 
     code: str | None = Field(
         default=None,
@@ -275,9 +247,9 @@ class WarehouseUpdate(BaseModel):
             raise ValueError("Store ID cannot be null")
         return value
 
-    @field_validator("name")
+    @field_validator("warehouse_name")
     @classmethod
-    def validate_name(cls, value: str | None) -> str | None:
+    def validate_warehouse_name_field(cls, value: str | None) -> str | None:
         return validate_warehouse_name(value, required=True)
 
     @field_validator("code")
@@ -338,13 +310,16 @@ class WarehouseResponse(BaseModel):
     tenant_id: int = Field(gt=0)
     store_id: int | None
     store_name: Optional[str] = None
-    name: str = Field(..., title="Warehouse Name", description="Warehouse Name")
-    warehouse_name: Optional[str] = Field(default=None, title="Warehouse Name", description="Warehouse Name")
+    warehouse_name: str = Field(..., title="Warehouse Name", description="Warehouse Name")
     code: str
     address: str | None
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+    @property
+    def name(self) -> str:
+        return self.warehouse_name
 
 
 class WarehouseDashboardResponse(BaseModel):

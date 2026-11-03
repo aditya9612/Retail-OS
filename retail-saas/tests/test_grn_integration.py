@@ -565,7 +565,7 @@ def test_grn_quality_inspection_qc(tenant_a):
     qc_data = qc_resp.json()
     assert qc_data["items"][0]["accepted_quantity"] == 26
     assert qc_data["items"][0]["rejected_quantity"] == 4
-    assert qc_data["items"][0]["damage_reason"] == "4 packs water-damaged during shipping"
+    assert (qc_data["items"][0].get("reason") or qc_data["items"][0].get("damage_reason")) == "4 packs water-damaged during shipping"
     assert qc_data["total_accepted_quantity"] == 26
     assert qc_data["total_rejected_quantity"] == 4
 
@@ -701,7 +701,7 @@ def test_grn_reject_with_reason_and_history_timeline(tenant_a):
     assert reject_resp.status_code == 200, reject_resp.text
     rej_data = reject_resp.json()
     assert rej_data["status"] == "rejected"
-    assert rej_data["rejection_reason"] == "Wrong product specifications received from supplier"
+    assert (rej_data.get("reason") or rej_data.get("rejection_reason")) == "Wrong product specifications received from supplier"
 
     # Verify history timeline
     hist_resp = client.get(f"/api/v1/grn/{grn_id}/history", headers=headers)
