@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.exceptions import AppException, ForbiddenException, NotFoundException
 from app.core.pdf_utils import render_pdf_or_preview
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_roles
 from app.models.user import User
 from app.schemas.saas_invoice import (
     SaaSInvoiceListResponse,
@@ -51,7 +51,7 @@ def get_billing_history(
     status: Optional[str] = Query(None, description="Filter by invoice status: unpaid, paid, void, cancelled"),
     from_date: Optional[datetime] = Query(None, description="Filter invoices created on or after date"),
     to_date: Optional[datetime] = Query(None, description="Filter invoices created on or before date"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """
@@ -78,7 +78,7 @@ def get_billing_history(
 )
 def get_invoice_detail(
     invoice_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """
@@ -102,7 +102,7 @@ def get_invoice_detail(
 def get_saas_invoice_pdf(
     invoice_id: int,
     mode: Literal["download", "preview"] = Query(default="download"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """
@@ -130,7 +130,7 @@ def get_saas_invoice_pdf(
     summary="Get SaaS UPI Checkout Preview",
 )
 def get_checkout_preview(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """
@@ -154,7 +154,7 @@ def get_checkout_preview(
 def initiate_checkout(
     payload: Optional[SaaSUPIInitiateRequest] = None,
     invoice_id: Optional[int] = Query(None, description="Invoice ID to pay (query param for backward compatibility)"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """
@@ -187,7 +187,7 @@ def initiate_checkout(
 )
 def get_qr_code(
     reference: str = Query(..., description="UPI transaction reference"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """
@@ -215,7 +215,7 @@ def get_qr_code(
 )
 def get_qr_image(
     reference: str = Query(..., description="UPI transaction reference"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """
@@ -240,7 +240,7 @@ def get_qr_image(
 )
 def submit_utr(
     data: UPISubmitRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """
@@ -266,7 +266,7 @@ def submit_utr(
 )
 def get_transaction_status(
     reference: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """
@@ -289,7 +289,7 @@ def get_transaction_status(
 )
 def cancel_subscription(
     data: SaaSSubscriptionCancelRequest = SaaSSubscriptionCancelRequest(),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """
@@ -320,7 +320,7 @@ def cancel_subscription(
     summary="Get Tenant Active Subscription",
 )
 def get_subscription(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """
@@ -345,7 +345,7 @@ def get_subscription(
     summary="List Active SaaS Plans",
 )
 def list_active_plans(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """
@@ -371,7 +371,7 @@ def list_active_plans(
 )
 def change_subscription_plan(
     data: SaaSPlanChangeRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """
@@ -399,7 +399,7 @@ def change_subscription_plan(
     summary="Cancel Pending or Scheduled Plan Change",
 )
 def cancel_subscription_plan_change(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     """

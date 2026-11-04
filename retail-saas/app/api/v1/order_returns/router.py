@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import get_current_user, require_operational_write
+from app.core.security import get_current_user, require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.order_return import (
     OrderReturnCreate,
@@ -36,7 +36,7 @@ router = APIRouter(
 def create_return(
     data: OrderReturnCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("orders:write", "billing:refund", "billing:write")),
 ):
     return OrderReturnService.create_return(
         db=db,
@@ -69,7 +69,7 @@ def list_returns(
     order_id: Optional[int] = Query(None, gt=0, description="Filter by order ID"),
     search: Optional[str] = Query(None, description="Search by RMA number, reason, remarks"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("orders:read", "billing:read")),
 ):
     return OrderReturnService.list_returns(
         db=db,
@@ -92,7 +92,7 @@ def list_returns(
 def get_order_returns_stats(
     store_id: Optional[int] = Query(None, gt=0, description="Filter stats by store ID"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("orders:read", "billing:read", "analytics:read")),
 ):
     return OrderReturnService.get_stats(
         db=db,
@@ -113,7 +113,7 @@ def get_return(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("orders:read", "billing:read")),
 ):
     return OrderReturnService.get_return(
         db=db,
@@ -136,7 +136,7 @@ def update_return(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("orders:write", "billing:refund")),
 ):
     return OrderReturnService.update_return(
         db=db,
@@ -160,7 +160,7 @@ def update_return_status(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("orders:write", "billing:refund")),
 ):
     return OrderReturnService.update_status(
         db=db,
@@ -184,7 +184,7 @@ def approve_return(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("orders:write", "billing:refund")),
 ):
     return OrderReturnService.approve_return(
         db=db,

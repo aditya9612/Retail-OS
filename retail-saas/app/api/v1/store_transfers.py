@@ -4,7 +4,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import get_current_user, require_operational_write
+from app.core.security import get_current_user, require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.store_transfer import (
     StoreTransferCreate,
@@ -33,7 +33,7 @@ router = APIRouter(
 def create_transfer(
     data: StoreTransferCreate = Body(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("inventory:write", "stores:write")),
 ):
     try:
         return StoreTransferService.create_transfer(
@@ -90,7 +90,7 @@ def list_transfers(
         description="Search transfers by transfer number",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("inventory:read", "stores:read")),
 ):
     try:
         status_value = status.value if hasattr(status, "value") else (str(status) if status is not None else None)
@@ -129,7 +129,7 @@ def get_transfer_summary(
         description="Filter analytics by store ID (source or destination)",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("inventory:read", "stores:read", "analytics:read")),
 ):
     try:
         return StoreTransferService.get_summary(
@@ -160,7 +160,7 @@ def get_transfer(
         description="Store transfer ID must be a positive integer greater than 0",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("inventory:read", "stores:read")),
 ):
     try:
         return StoreTransferService.get_transfer(
@@ -195,7 +195,7 @@ def approve_transfer(
         description="Enter the ID of the store transfer you want to approve.",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("inventory:write", "stores:write")),
 ):
     try:
         return StoreTransferService.approve_transfer(
@@ -229,7 +229,7 @@ def reject_transfer(
     ),
     data: Optional[StoreTransferReject] = Body(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("inventory:write", "stores:write")),
 ):
     try:
         rejection_reason = data.rejection_reason if data else None
@@ -263,7 +263,7 @@ def dispatch_transfer(
         description="Store transfer ID must be a positive integer greater than 0",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("inventory:write", "stores:write")),
 ):
     try:
         return StoreTransferService.dispatch_transfer(
@@ -295,7 +295,7 @@ def receive_transfer(
         description="Store transfer ID must be a positive integer greater than 0",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("inventory:write", "stores:write")),
 ):
     try:
         return StoreTransferService.receive_transfer(
@@ -330,7 +330,7 @@ def receive_transfer_with_discrepancy(
     ),
     data: StoreTransferDiscrepancyRequest = Body(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("inventory:write", "stores:write")),
 ):
     try:
         return StoreTransferService.receive_with_discrepancy(

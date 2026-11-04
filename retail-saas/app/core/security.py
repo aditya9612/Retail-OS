@@ -449,11 +449,15 @@ def require_roles(*roles: str):
     def checker(
         user: User = Depends(get_current_user),
     ) -> User:
-        if (
-            user.role
-            and user.role.name in roles
-        ):
-            return user
+        if user.role:
+            user_role_lower = user.role.name.lower()
+            allowed_roles_lower = [r.lower() for r in roles]
+            if (
+                user_role_lower in allowed_roles_lower
+                or user_role_lower == "superadmin"
+                or (user.role.permissions and "*" in user.role.permissions)
+            ):
+                return user
 
         raise ForbiddenException(
             "Insufficient role"
