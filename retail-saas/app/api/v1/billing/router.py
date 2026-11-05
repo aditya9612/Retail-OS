@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, File, Form, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -15,6 +15,8 @@ from app.schemas.billing import (
     ReturnItemRequest,
     TenderChangeRequest,
     TenderChangeResponse,
+    VoiceBillingCommandRequest,
+    VoiceBillingResponse,
 )
 from app.schemas.order import InvoiceResponse
 from app.schemas.cart import (
@@ -36,6 +38,7 @@ from app.schemas.pos_held_cart import (
 from app.services.billing_service import BillingService
 from app.services.cart_service import CartService
 from app.services.pos_held_cart_service import POSHeldCartService
+from app.services.voice_pos_service import VoicePOSService
 
 
 router = APIRouter(
@@ -736,3 +739,70 @@ def calculate_tender_change(
         denominations=denominations,
         status="success",
     )
+
+
+# ==============================================================================
+# VOICE-ASSISTED POS BILLING (Voice AI)
+# ==============================================================================
+
+@router.post(
+    "/voice-command",
+    response_model=VoiceBillingResponse,
+    dependencies=[Depends(require_operational_write)],
+    summary="Voice-Assisted POS Billing (Text/Transcript)",
+    description="Processes natural language cashier voice commands (e.g. '२ किलो बासमती तांदूळ, १ लिटर फॉर्च्युन तेल, रोख ५००'), adds matched items to active cart, calculates tender change, and returns spoken feedback.",
+)
+def process_voice_command(
+    payload: VoiceBillingCommandRequest,
+    user: User = Depends(require_permission("billing:write")),
+    db: Session = Depends(get_db),
+):
+    effective_store_id = payload.store_id or user.store_id
+    service = VoicePOSService(db)
+    result = service.process_voice_billing(
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        command=payload.command,
+        store_id=effective_store_id,
+        same_state=payload.same_state if payload.same_state is not None else True,
+        language=payload.language or "mr",
+    )
+    result["cart"] = _to_cart_response(result["cart"]).model_dump()
+    return result
+
+
+@router.post(
+    "/voice-command/audio",
+    response_model=VoiceBillingResponse,
+    dependencies=[Depends(require_operational_write)],
+    summary="Voice-Assisted POS Billing (Microphone Audio Upload)",
+    description="Uploads cashier spoken microphone audio recording (WAV, MP3, WebM), transcribes via Gemini 1.5 Flash speech-to-text, and executes POS cart billing.",
+)
+async def process_voice_audio(
+    file: UploadFile = File(..., description="Audio recording file from browser microphone"),
+    store_id: Optional[int] = Form(default=None),
+    same_state: Optional[bool] = Form(default=True),
+    language: Optional[str] = Form(default="mr"),
+    user: User = Depends(require_permission("billing:write")),
+    db: Session = Depends(get_db),
+):
+    audio_bytes = await file.read()
+    if not audio_bytes:
+        raise AppException("Empty audio file uploaded")
+
+    service = VoicePOSService(db)
+    transcription = service.transcribe_audio_bytes(audio_bytes, mime_type=file.content_type or "audio/webm")
+    if not transcription:
+        raise AppException("Could not transcribe speech from audio. Please verify microphone input or provide command text.")
+
+    effective_store_id = store_id or user.store_id
+    result = service.process_voice_billing(
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        command=transcription,
+        store_id=effective_store_id,
+        same_state=same_state if same_state is not None else True,
+        language=language or "mr",
+    )
+    result["cart"] = _to_cart_response(result["cart"]).model_dump()
+    return result

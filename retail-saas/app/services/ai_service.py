@@ -1,11 +1,15 @@
+import json
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
+import httpx
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.exceptions import NotFoundException
+from app.core.logger import logger
 from app.models.category import Category
 from app.models.customer import Customer
 from app.models.inventory import Inventory
@@ -15,6 +19,7 @@ from app.models.product import Product
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
 from app.utils.constants import OrderStatus
 
+settings = get_settings()
 
 class AIService:
     def __init__(self, db: Session):
@@ -660,64 +665,312 @@ class AIService:
         slow_items.sort(key=lambda x: x["stock_value"], reverse=True)
         return slow_items[:limit]
 
-    def chat_query(self, tenant_id: int, query_str: str, store_id: Optional[int] = None) -> dict:
-        """
-        AI Natural Language Retail Assistant: interprets questions about sales,
-        inventory, products, and customers to provide instant live insights.
-        """
+
+    # --------------------------------------------------------------------------
+    # Retail Copilot: Gemini GenAI & Rich Multilingual Intelligence
+    # --------------------------------------------------------------------------
+
+    def _get_copilot_context(self, tenant_id: int, store_id: Optional[int] = None) -> dict:
+        now = datetime.utcnow()
+        today_start = datetime(now.year, now.month, now.day)
+        seven_days_ago = now - timedelta(days=7)
+        fourteen_days_ago = now - timedelta(days=14)
+        month_start = datetime(now.year, now.month, 1)
+
+        def _get_sales(start_date, end_date=None):
+            q = (
+                self.db.query(
+                    func.coalesce(func.sum(Order.total_amount), 0),
+                    func.count(Order.id),
+                )
+                .filter(
+                    Order.tenant_id == tenant_id,
+                    Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.DELIVERED.value]),
+                    Order.created_at >= start_date,
+                )
+            )
+            if end_date:
+                q = q.filter(Order.created_at < end_date)
+            if store_id is not None:
+                q = q.filter(Order.store_id == store_id)
+            row = q.first()
+            return {"revenue": round(float(row[0]), 2), "orders": int(row[1])}
+
+        sales_today = _get_sales(today_start)
+        sales_this_week = _get_sales(seven_days_ago)
+        sales_prev_week = _get_sales(fourteen_days_ago, seven_days_ago)
+        sales_this_month = _get_sales(month_start)
+
+        def _get_category_sales(start_date, end_date=None):
+            q = (
+                self.db.query(
+                    Category.name,
+                    func.coalesce(func.sum(OrderItem.total_amount), 0).label("cat_revenue"),
+                    func.coalesce(func.sum(OrderItem.quantity), 0).label("cat_qty"),
+                )
+                .join(Product, Product.id == OrderItem.product_id)
+                .join(Category, Category.id == Product.category_id)
+                .join(Order, Order.id == OrderItem.order_id)
+                .filter(
+                    Order.tenant_id == tenant_id,
+                    Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.DELIVERED.value]),
+                    Order.created_at >= start_date,
+                )
+            )
+            if end_date:
+                q = q.filter(Order.created_at < end_date)
+            if store_id is not None:
+                q = q.filter(Order.store_id == store_id)
+            return {row[0]: {"revenue": round(float(row[1]), 2), "qty": int(row[2])} for row in q.group_by(Category.name).all()}
+
+        cat_this_week = _get_category_sales(seven_days_ago)
+        cat_prev_week = _get_category_sales(fourteen_days_ago, seven_days_ago)
+
+        category_comparison = []
+        all_cats = set(cat_this_week.keys()).union(set(cat_prev_week.keys()))
+        for cname in all_cats:
+            rev_curr = cat_this_week.get(cname, {}).get("revenue", 0.0)
+            rev_prev = cat_prev_week.get(cname, {}).get("revenue", 0.0)
+            diff = round(rev_curr - rev_prev, 2)
+            pct_change = round(((diff / rev_prev) * 100), 1) if rev_prev > 0 else (100.0 if rev_curr > 0 else 0.0)
+            category_comparison.append({
+                "category_name": cname,
+                "revenue_this_week": rev_curr,
+                "revenue_prev_week": rev_prev,
+                "diff": diff,
+                "percent_change": pct_change,
+                "status": "dropped" if diff < 0 else ("grown" if diff > 0 else "stable"),
+            })
+        category_comparison.sort(key=lambda x: x["diff"])
+
+        top_products = self.best_selling_products(tenant_id, limit=5, store_id=store_id)
+
+        low_stock_count = (
+            self.db.query(func.count(Inventory.id))
+            .filter(Inventory.tenant_id == tenant_id, Inventory.quantity <= Inventory.min_stock_level)
+            .scalar() or 0
+        )
+        out_of_stock_count = (
+            self.db.query(func.count(Inventory.id))
+            .filter(Inventory.tenant_id == tenant_id, Inventory.quantity <= 0)
+            .scalar() or 0
+        )
+        reorders = self.reorder_prediction(tenant_id, store_id)[:5]
+
+        credit_cust_q = (
+            self.db.query(
+                Customer.id,
+                Customer.name,
+                Customer.phone,
+                Customer.outstanding_balance,
+                Customer.credit_limit,
+            )
+            .filter(
+                Customer.tenant_id == tenant_id,
+                Customer.outstanding_balance > 0,
+            )
+            .order_by(Customer.outstanding_balance.desc())
+        )
+        credit_customers = [
+            {
+                "id": c[0],
+                "name": c[1],
+                "phone": c[2],
+                "outstanding_balance": float(c[3]),
+                "credit_limit": float(c[4]),
+            }
+            for c in credit_cust_q.all()
+        ]
+        credit_over_1000 = [c for c in credit_customers if c["outstanding_balance"] >= 1000.0]
+
+        total_customers = (
+            self.db.query(func.count(Customer.id))
+            .filter(Customer.tenant_id == tenant_id)
+            .scalar() or 0
+        )
+
+        return {
+            "sales_today": sales_today,
+            "sales_this_week": sales_this_week,
+            "sales_prev_week": sales_prev_week,
+            "sales_this_month": sales_this_month,
+            "category_comparison": category_comparison,
+            "top_products": top_products,
+            "low_stock_count": low_stock_count,
+            "out_of_stock_count": out_of_stock_count,
+            "reorders": reorders,
+            "credit_customers": credit_customers,
+            "credit_over_1000": credit_over_1000,
+            "total_customers": total_customers,
+        }
+
+    def _call_gemini_copilot(self, query_str: str, context: dict) -> Optional[dict]:
+        api_key = settings.GEMINI_API_KEY
+        if not api_key:
+            return None
+
+        system_instruction = (
+            "You are Retail-OS AI Copilot (स्मार्ट रिटेल असिस्टंट), an expert Indian retail business intelligence engine. "
+            "Follow these rules:\n"
+            "1. Language Matching: Detect user language (Marathi, Hindi, English) and answer in the SAME language.\n"
+            "2. Ground all answers strictly in Live Retail Store Context data.\n"
+            "3. When asked about dropping categories, explain which dropped, by how much (₹ and %), reasons (stockout/seasonal), and 2-3 corrective steps.\n"
+            "4. When asked about festival/Diwali stocking, list the top 5 essential products to stock up, why, and recommend a 30-50% safety stock buffer.\n"
+            "5. When asked about credit/khata > ₹1000, list customer names, phone numbers, and balances, and recommend sending WhatsApp payment reminders.\n"
+            "6. Output MUST be valid JSON adhering to: {\"intent\": \"...\", \"answer\": \"markdown string\", \"data\": {}, \"suggested_actions\": []}"
+        )
+
+        user_content = f"User Question:\n\"{query_str}\"\n\nLive Retail Store Context Data:\n{json.dumps(context, indent=2, default=str)}"
+        url = f"{settings.GEMINI_API_URL}/models/{settings.GEMINI_MODEL}:generateContent?key={api_key}"
+        payload = {
+            "contents": [{"parts": [{"text": user_content}]}],
+            "systemInstruction": {"parts": [{"text": system_instruction}]},
+            "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"},
+        }
+
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.post(url, json=payload)
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    parsed = json.loads(raw_text)
+                    if isinstance(parsed, dict) and "answer" in parsed:
+                        return {
+                            "query": query_str,
+                            "intent": parsed.get("intent", "copilot_insight"),
+                            "answer": parsed["answer"],
+                            "data": parsed.get("data", {}),
+                            "suggested_actions": parsed.get("suggested_actions", []),
+                        }
+        except Exception as exc:
+            logger.warning("Gemini Copilot API call failed, falling back to rule engine: %s", exc)
+
+        return None
+
+    def _rule_based_chat_query(self, tenant_id: int, query_str: str, store_id: Optional[int] = None, context: Optional[dict] = None) -> dict:
         q_clean = query_str.lower().strip()
         now = datetime.utcnow()
         today_start = datetime(now.year, now.month, now.day)
-        actions = []
-        data = {}
+        month_start = datetime(now.year, now.month, 1)
 
-        if any(w in q_clean for w in ["today", "aaj"]) and any(w in q_clean for w in ["sale", "revenue", "collection", "turnover", "income"]):
-            sales_q = (
-                self.db.query(
-                    func.coalesce(func.sum(Order.total_amount), 0),
-                    func.count(Order.id),
+        ctx = context or self._get_copilot_context(tenant_id, store_id)
+
+        # 1. CATEGORY COMPARISON / DROP ANALYSIS (e.g. 'मागच्या आठवड्यापेक्षा या आठवड्यात कोणत्या कॅटेगरीचा सेल कमी झाला आणि का?')
+        if any(w in q_clean for w in ["कॅटेगरी", "category", "कमी", "drop", "घट", "विक्री कमी", "sale down", "sales drop", "decreased"]):
+            cat_drops = [c for c in ctx["category_comparison"] if c["diff"] < 0]
+            intent = "category_drop_analysis"
+            if cat_drops:
+                lines = []
+                for idx, c in enumerate(cat_drops[:3], 1):
+                    lines.append(f"{idx}. *{c['category_name']}*: विक्रीत ₹{abs(c['diff']):,.2f} ({c['percent_change']}%) ची घट झाली आहे.")
+                cat_summary = "\n".join(lines)
+                answer = (
+                    f"📊 *कॅटेगरी विक्री विश्लेषण (Category Performance)*\n\n"
+                    f"मागच्या आठवड्याच्या तुलनेत या आठवड्यात खालील कॅटेगरींच्या विक्रीमध्ये घट (Drop) झाली आहे:\n\n"
+                    f"{cat_summary}\n\n"
+                    f"🔍 *संभाव्य कारणे:*\n"
+                    f"१. संबंधित कॅटेगरीतील लोकप्रिय उत्पादनांचा स्टॉक संपणे (Stockout).\n"
+                    f"२. ग्राहकांची आठवड्याची खरेदी प्राधान्ये बदलणे.\n\n"
+                    f"💡 *उपाय व शिफारसी:*\n"
+                    f"• कमी झालेल्या कॅटेगरीतील टॉप प्रॉडक्ट्सचा तातडीने री-ऑर्डर करा.\n"
+                    f"• ग्राहकांना आकर्षित करण्यासाठी विशेष सवलत (Discount) किंवा कॉम्बो ऑफर्स सुरू करा."
                 )
-                .filter(
-                    Order.tenant_id == tenant_id,
-                    Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.DELIVERED.value]),
-                    Order.created_at >= today_start,
+                data = {"dropped_categories": cat_drops, "all_categories": ctx["category_comparison"]}
+            else:
+                answer = (
+                    "मागच्या आठवड्याशी तुलना करता सर्व कॅटेगरींची विक्री समाधानकारक व स्थिर आहे. "
+                    "कोणत्याही मुख्य कॅटेगरीत लक्षणीय घट नोंदवली गेलेली नाही."
                 )
+                data = {"category_comparison": ctx["category_comparison"]}
+            actions = ["Check category inventory", "Create promotional discount coupon", "Review supplier purchase orders"]
+            return {"query": query_str, "intent": intent, "answer": answer, "data": data, "suggested_actions": actions}
+
+        # 2. FESTIVAL / DIWALI STOCKING PREDICTIONS (e.g. 'दिवाळीसाठी मला कोणत्या ५ प्रॉडक्ट्सचा स्टॉक जास्त मागवावा लागेल?')
+        elif any(w in q_clean for w in ["दिवाळी", "diwali", "festival", "सण", "जास्त स्टॉक", "stock जास्त", "फेस्टिव्हल", "तयारी"]):
+            intent = "festival_reorder_recommendation"
+            top_prods = ctx["top_products"]
+
+            rec_list = []
+            if top_prods:
+                for idx, p in enumerate(top_prods[:5], 1):
+                    sold = p.get("quantity_sold", 10)
+                    rec_buffer = max(15, int(sold * 1.5))
+                    rec_list.append(f"{idx}. *{p['product_name']}* — अपेक्षित मागणी: {rec_buffer} युनिट्स (सध्याची विक्री: {sold})")
+            else:
+                rec_list = [
+                    "1. *साखर (Sugar)* — अपेक्षित सण मागणी: 100 kg",
+                    "2. *खाद्यतेल (Cooking Oil)* — अपेक्षित सण मागणी: 50 Ltr",
+                    "3. *बेसन व मैदा (Flour)* — अपेक्षित सण मागणी: 40 kg",
+                    "4. *ड्रायफ्रूट्स (Dry Fruits)* — अपेक्षित सण मागणी: 25 Boxes",
+                    "5. *दूध व दुग्धजन्य उत्पादने (Milk & Dairy)* — अपेक्षित सण मागणी: 80 Ltr",
+                ]
+
+            rec_text = "\n".join(rec_list)
+            answer = (
+                f"🪔 *दिवाळी / सण विशेष स्टॉक शिफारस (Festival Reorder Advisory)*\n\n"
+                f"दिवाळी व सणासुदीच्या काळात किराणा आणि मिठाईच्या वस्तूंना ३०% ते ५०% जादा मागणी असते. "
+                f"दुकानात स्टॉक तुटवडा टाळण्यासाठी खालील ५ प्रमुख उत्पादनांचा जास्तीचा स्टॉक आगाऊ मागवणे आवश्यक आहे:\n\n"
+                f"{rec_text}\n\n"
+                f"📦 *सल्ला:* सप्लायर्सकडून सणाच्या आधीच बल्क डिस्काउंट मिळवण्यासाठी आजच परचेस ऑर्डर (PO) जनरेट करा."
             )
-            if store_id is not None:
-                sales_q = sales_q.filter(Order.store_id == store_id)
-            row = sales_q.first()
-            total_rev = round(float(row[0]), 2)
-            orders_cnt = int(row[1])
+            actions = ["Generate bulk purchase orders", "Contact primary FMCG distributors", "Create Diwali festive bundles"]
+            data = {"recommended_festive_items": top_prods[:5] if top_prods else []}
+            return {"query": query_str, "intent": intent, "answer": answer, "data": data, "suggested_actions": actions}
+
+        # 3. CUSTOMER CREDIT / KHATA > 1000 (e.g. '१००० रुपयांपेक्षा जास्त उधारी बाकी असलेल्या ग्राहकांची यादी दाखव आणि त्यांना रिमाइंडर्स पाठव')
+        elif any(w in q_clean for w in ["उधारी", "khata", "credit", "1000", "१०००", "बाकी", "थकीत", "remind", "रिमाइंडर"]):
+            intent = "credit_khata_reminders"
+            over_1000 = ctx["credit_over_1000"]
+            total_pending = sum(c["outstanding_balance"] for c in over_1000)
+
+            if over_1000:
+                cust_lines = []
+                for idx, c in enumerate(over_1000[:5], 1):
+                    cust_lines.append(f"{idx}. *{c['name']}* — थकीत: ₹{c['outstanding_balance']:,.2f} (फोन: {c['phone']})")
+                cust_str = "\n".join(cust_lines)
+                answer = (
+                    f"📋 *उधारी खातेदार अहवाल (Customer Credit Ledger)*\n\n"
+                    f"तुमच्या दुकानात ₹१००० पेक्षा जास्त उधारी बाकी असलेले एकूण *{len(over_1000)} ग्राहक* आहेत.\n"
+                    f"एकूण थकीत रक्कम: *₹{total_pending:,.2f}*\n\n"
+                    f"प्रमुख ग्राहकांची यादी:\n"
+                    f"{cust_str}\n\n"
+                    f"📲 *कृती:* तुम्ही खालील बटण वापरून या सर्व ग्राहकांना त्यांच्या व्हॉट्सॲपवर अधिकृत पेमेंट रिमाइंडर व UPI लिंक पाठवू शकता."
+                )
+                data = {"credit_over_1000_customers": over_1000, "total_outstanding": total_pending}
+            else:
+                answer = (
+                    "🎉 उत्कृष्ट! तुमच्या दुकानात सध्या कोणत्याही ग्राहकाकडे ₹१००० पेक्षा जास्त उधारी बाकी नाही. "
+                    "सर्व उधारी खाती नियंत्रणात आहेत."
+                )
+                data = {"credit_over_1000_customers": []}
+
+            actions = ["Send WhatsApp payment reminders to all", "View customer credit ledger", "Set customer credit limits"]
+            return {"query": query_str, "intent": intent, "answer": answer, "data": data, "suggested_actions": actions}
+
+        # 4. TODAY'S SALES
+        elif any(w in q_clean for w in ["today", "aaj"]) and any(w in q_clean for w in ["sale", "revenue", "collection", "turnover", "income"]):
+            tot = ctx["sales_today"]["revenue"]
+            cnt = ctx["sales_today"]["orders"]
             intent = "today_sales"
-            answer = f"Today's total sales are ₹{total_rev:,.2f} across {orders_cnt} completed orders."
-            data = {"sales_amount": total_rev, "order_count": orders_cnt, "date": today_start.strftime("%Y-%m-%d")}
+            answer = f"Today's total sales are ₹{tot:,.2f} across {cnt} completed orders."
+            data = {"sales_amount": tot, "order_count": cnt, "date": today_start.strftime("%Y-%m-%d")}
             actions = ["View daily sales report", "Check cashier drawer closing status", "View active shifts"]
+            return {"query": query_str, "intent": intent, "answer": answer, "data": data, "suggested_actions": actions}
 
+        # 5. MONTHLY SALES
         elif any(w in q_clean for w in ["month", "monthly", "this month"]):
-            month_start = datetime(now.year, now.month, 1)
-            sales_q = (
-                self.db.query(
-                    func.coalesce(func.sum(Order.total_amount), 0),
-                    func.count(Order.id),
-                )
-                .filter(
-                    Order.tenant_id == tenant_id,
-                    Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.DELIVERED.value]),
-                    Order.created_at >= month_start,
-                )
-            )
-            if store_id is not None:
-                sales_q = sales_q.filter(Order.store_id == store_id)
-            row = sales_q.first()
-            total_rev = round(float(row[0]), 2)
-            orders_cnt = int(row[1])
+            tot = ctx["sales_this_month"]["revenue"]
+            cnt = ctx["sales_this_month"]["orders"]
             intent = "monthly_sales"
-            answer = f"This month's revenue is ₹{total_rev:,.2f} from {orders_cnt} orders."
-            data = {"month": month_start.strftime("%B %Y"), "revenue": total_rev, "orders": orders_cnt}
+            answer = f"This month's revenue is ₹{tot:,.2f} from {cnt} orders."
+            data = {"month": month_start.strftime("%B %Y"), "revenue": tot, "orders": cnt}
             actions = ["View monthly P&L", "Export tax report", "Check best sellers"]
+            return {"query": query_str, "intent": intent, "answer": answer, "data": data, "suggested_actions": actions}
 
+        # 6. BEST SELLERS
         elif any(w in q_clean for w in ["best seller", "top product", "most sold", "popular"]):
-            top = self.best_selling_products(tenant_id, limit=3, store_id=store_id)
+            top = ctx["top_products"][:3]
             intent = "best_sellers"
             if top:
                 names = ", ".join([f"'{p['product_name']}' ({p['quantity_sold']} units)" for p in top])
@@ -725,47 +978,56 @@ class AIService:
                 data = {"top_products": top}
             else:
                 answer = "No sales recorded yet to determine best sellers."
+                data = {}
             actions = ["View inventory for top sellers", "Generate purchase orders", "Create promotional bundle"]
+            return {"query": query_str, "intent": intent, "answer": answer, "data": data, "suggested_actions": actions}
 
+        # 7. STOCK ALERTS
         elif any(w in q_clean for w in ["stock", "out of stock", "low stock", "inventory"]):
-            low_q = (
-                self.db.query(func.count(Inventory.id))
-                .filter(Inventory.tenant_id == tenant_id, Inventory.quantity <= Inventory.min_stock_level)
-            )
-            out_q = (
-                self.db.query(func.count(Inventory.id))
-                .filter(Inventory.tenant_id == tenant_id, Inventory.quantity <= 0)
-            )
-            if store_id is not None:
-                low_q = low_q.filter(Inventory.store_id == store_id)
-                out_q = out_q.filter(Inventory.store_id == store_id)
-            low_cnt = low_q.scalar() or 0
-            out_cnt = out_q.scalar() or 0
+            low_cnt = ctx["low_stock_count"]
+            out_cnt = ctx["out_of_stock_count"]
             intent = "stock_alerts"
             answer = f"You have {low_cnt} items running below minimum stock level, including {out_cnt} completely out of stock."
             data = {"low_stock_count": low_cnt, "out_of_stock_count": out_cnt}
             actions = ["Open reorder prediction", "Create purchase order", "Check supplier catalog"]
+            return {"query": query_str, "intent": intent, "answer": answer, "data": data, "suggested_actions": actions}
 
+        # 8. CUSTOMER STATS
         elif any(w in q_clean for w in ["customer", "clients", "members"]):
-            cust_cnt = self.db.query(func.count(Customer.id)).filter(Customer.tenant_id == tenant_id).scalar() or 0
+            cust_cnt = ctx["total_customers"]
             intent = "customer_stats"
             answer = f"Your store has {cust_cnt} registered customers."
             data = {"total_customers": cust_cnt}
             actions = ["View customer churn risk", "Launch promotional offer campaign", "Send loyalty points update"]
+            return {"query": query_str, "intent": intent, "answer": answer, "data": data, "suggested_actions": actions}
 
+        # 9. GENERAL SUMMARY
         else:
             intent = "general_summary"
             answer = (
-                "I am Retail-OS AI Assistant. I can help you with sales figures, inventory alerts, best sellers, "
-                "customer insights, and reorders. Try asking: 'What are today's sales?', 'Show best sellers', "
-                "'How many items are low on stock?', or 'Which customers are at churn risk?'"
+                "I am Retail-OS AI Assistant (स्मार्ट रिटेल सल्लागार). I can help you with sales figures, category trends, "
+                "festival stocking, customer khata balances, inventory alerts, and best sellers. "
+                "Try asking:\n"
+                "• 'मागच्या आठवड्यापेक्षा या आठवड्यात कोणत्या कॅटेगरीचा सेल कमी झाला आणि का?'\n"
+                "• 'दिवाळीसाठी मला कोणत्या ५ प्रॉडक्ट्सचा स्टॉक जास्त मागवावा लागेल?'\n"
+                "• '१००० रुपयांपेक्षा जास्त उधारी बाकी असलेल्या ग्राहकांची यादी दाखव आणि त्यांना रिमाइंडर्स पाठव.'\n"
+                "• 'What are today\'s sales?' or 'Show best sellers'"
             )
-            actions = ["Check today's sales", "Check low stock alerts", "View top selling products", "Customer churn analysis"]
+            actions = ["Check today's sales", "Check low stock alerts", "View top selling products", "Customer credit analysis"]
+            return {"query": query_str, "intent": intent, "answer": answer, "data": {}, "suggested_actions": actions}
 
-        return {
-            "query": query_str,
-            "intent": intent,
-            "answer": answer,
-            "data": data,
-            "suggested_actions": actions,
-        }
+    def chat_query(self, tenant_id: int, query_str: str, store_id: Optional[int] = None) -> dict:
+        """
+        AI Natural Language Retail Assistant: interprets natural language business questions
+        using Gemini 1.5 GenAI with robust contextual rule-based fallback.
+        """
+        context = self._get_copilot_context(tenant_id, store_id)
+
+        # Attempt Gemini GenAI Copilot
+        if settings.GEMINI_API_KEY:
+            ai_res = self._call_gemini_copilot(query_str, context)
+            if ai_res:
+                return ai_res
+
+        # Fallback to enhanced multilingual deterministic engine
+        return self._rule_based_chat_query(tenant_id, query_str, store_id, context)

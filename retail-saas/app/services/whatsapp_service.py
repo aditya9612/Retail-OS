@@ -478,6 +478,8 @@ class WhatsAppService:
         """Processes incoming Meta Cloud API delivery updates and inbound customer messages."""
         entries = payload.get("entry", [])
         updated_count = 0
+        processed_messages = 0
+        order_results = []
 
         if not self.db:
             return {"status": "received", "entries_count": len(entries)}
@@ -486,7 +488,10 @@ class WhatsAppService:
             for entry in entries:
                 for change in entry.get("changes", []):
                     value = change.get("value", {})
-                    # Delivery Status Updates: sent, delivered, read, failed
+                    metadata = value.get("metadata", {})
+                    phone_number_id = metadata.get("phone_number_id")
+
+                    # 1. Delivery Status Updates: sent, delivered, read, failed
                     for status_item in value.get("statuses", []):
                         meta_id = status_item.get("id")
                         new_status = status_item.get("status")
@@ -502,13 +507,47 @@ class WhatsAppService:
                                     log_entry.error_message = json.dumps(status_item["errors"])
                                 updated_count += 1
 
+                    # 2. Inbound Customer Messages (Conversational AI Ordering)
+                    contacts = value.get("contacts", [])
+                    sender_name_map = {}
+                    for c in contacts:
+                        wa_id = c.get("wa_id")
+                        profile_name = c.get("profile", {}).get("name")
+                        if wa_id and profile_name:
+                            sender_name_map[wa_id] = profile_name
+
+                    for msg in value.get("messages", []):
+                        from_phone = msg.get("from")
+                        msg_type = msg.get("type")
+                        msg_body = ""
+                        if msg_type == "text":
+                            msg_body = msg.get("text", {}).get("body", "")
+
+                        if from_phone and msg_body:
+                            from app.services.whatsapp_ordering_service import WhatsAppOrderingService
+                            ordering_svc = WhatsAppOrderingService(self.db)
+                            sender_name = sender_name_map.get(from_phone)
+                            res = ordering_svc.process_inbound_message(
+                                from_phone=from_phone,
+                                message_body=msg_body,
+                                sender_name=sender_name,
+                                phone_number_id=phone_number_id,
+                            )
+                            order_results.append(res)
+                            processed_messages += 1
+
             if updated_count > 0:
                 self.db.commit()
         except Exception as exc:
             logger.error("Error processing Meta WhatsApp webhook: %s", exc)
             self.db.rollback()
 
-        return {"status": "success", "updated_statuses": updated_count}
+        return {
+            "status": "success",
+            "updated_statuses": updated_count,
+            "processed_messages": processed_messages,
+            "results": order_results,
+        }
 
     # -------------------------------------------------------------
     # Internal Helper: Logging

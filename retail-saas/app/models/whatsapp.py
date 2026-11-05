@@ -28,6 +28,12 @@ class WhatsAppSetting(Base, TimestampMixin):
     template_order_confirm: Mapped[str] = mapped_column(String(100), default="order_confirmation", nullable=False)
     template_language: Mapped[str] = mapped_column(String(20), default="en_US", nullable=False)
 
+    # WhatsApp AI Conversational Ordering & Payment
+    ai_ordering_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    upi_vpa: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    upi_payee_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    ai_welcome_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     tenant = relationship("Tenant")
     store = relationship("Store")
 
@@ -55,4 +61,3 @@ class WhatsAppLog(Base, TimestampMixin):
     store = relationship("Store")
     invoice = relationship("Invoice")
     order = relationship("Order")
-

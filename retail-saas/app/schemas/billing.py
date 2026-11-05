@@ -582,3 +582,57 @@ class ThermalPrintResponse(BaseModel):
     encoding: str
     payload: str
     byte_payload: str
+
+
+
+# ==============================================================================
+# Voice AI (Voice-Assisted POS) Schemas
+# ==============================================================================
+
+class VoiceBillingCommandRequest(BaseModel):
+    command: str = Field(
+        ...,
+        min_length=2,
+        max_length=1000,
+        description="Spoken cashier voice command (e.g. '२ किलो बासमती तांदूळ, १ लिटर फॉर्च्युन तेल, रोख ५००')",
+    )
+    store_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Optional Store ID context",
+    )
+    same_state: Optional[bool] = Field(
+        default=True,
+        description="Intra-state GST transaction flag",
+    )
+    language: Optional[str] = Field(
+        default="mr",
+        description="Spoken language code: mr (Marathi), hi (Hindi), en (English)",
+    )
+
+
+class VoiceBillingItemResponse(BaseModel):
+    product_id: int
+    product_name: str
+    sku: str
+    quantity: Decimal
+    unit: str
+    unit_price: Decimal
+    tax_amount: Decimal
+    total_amount: Decimal
+
+
+class VoiceBillingTenderResponse(BaseModel):
+    payment_mode: str
+    tendered_amount: Decimal
+    grand_total: Decimal
+    change_due: Decimal
+
+
+class VoiceBillingResponse(BaseModel):
+    recognized_command: str
+    items_added: list[VoiceBillingItemResponse]
+    unmatched_items: list[str] = []
+    tender: Optional[VoiceBillingTenderResponse] = None
+    cart: dict
+    voice_feedback: str

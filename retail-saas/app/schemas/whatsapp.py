@@ -14,6 +14,12 @@ class WhatsAppSettingBase(BaseModel):
     template_language: str = Field(default="en_US", max_length=20)
     webhook_verify_token: Optional[str] = Field(default=None, max_length=100)
 
+    # Conversational AI Ordering & Payments
+    ai_ordering_enabled: bool = Field(default=True, description="Enable AI conversational ordering via WhatsApp")
+    upi_vpa: Optional[str] = Field(default=None, max_length=100, description="Store UPI ID for receiving payments (e.g. store@upi)")
+    upi_payee_name: Optional[str] = Field(default=None, max_length=100, description="Merchant / Store Name shown on UPI apps")
+    ai_welcome_message: Optional[str] = Field(default=None, description="Custom greeting / catalog message sent to customers")
+
 
 class WhatsAppSettingUpdate(BaseModel):
     phone_number_id: Optional[str] = None
@@ -26,6 +32,10 @@ class WhatsAppSettingUpdate(BaseModel):
     template_order_confirm: Optional[str] = None
     template_language: Optional[str] = None
     webhook_verify_token: Optional[str] = None
+    ai_ordering_enabled: Optional[bool] = None
+    upi_vpa: Optional[str] = None
+    upi_payee_name: Optional[str] = None
+    ai_welcome_message: Optional[str] = None
 
 
 class WhatsAppSettingResponse(WhatsAppSettingBase):
@@ -85,4 +95,3 @@ class WhatsAppLogListResponse(BaseModel):
     total: int
     page: int
     page_size: int
-

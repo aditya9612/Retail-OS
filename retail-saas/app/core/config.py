@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     WHATSAPP_WEBHOOK_VERIFY_TOKEN: str = "retail_os_webhook_verify_token"
     APP_BASE_URL: str = "https://testing.myretailos.com"
 
+    # Gemini GenAI configuration
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_API_URL: str = "https://generativelanguage.googleapis.com/v1beta"
+
     CORS_ORIGINS: List[str] = [
         "https://testing.myretailos.com",
         "https://retail-os.netlify.app",
