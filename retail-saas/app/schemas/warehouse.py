@@ -4,6 +4,7 @@ import re
 from typing import Any, Optional
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -110,18 +111,26 @@ def validate_warehouse_address(value: str | None, required: bool = False) -> str
     if v.lower() in DISALLOWED_WAREHOUSE_PLACEHOLDERS:
         raise ValueError("Please provide a valid warehouse address")
 
-    if len(v) < 5 or len(v) > 500:
-        raise ValueError("Warehouse address must be between 5 and 500 characters")
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_WAREHOUSE_PLACEHOLDERS or clean_norm in DISALLOWED_WAREHOUSE_PLACEHOLDERS:
+        raise ValueError("Please provide a valid warehouse address")
+
+    if len(v) < 6 or len(v) > 500:
+        raise ValueError("Warehouse address must be between 6 and 500 characters")
 
     if v.isdigit():
         raise ValueError("Warehouse address cannot contain only numbers")
 
-    if not re.search(r"[A-Za-z]", v):
-        raise ValueError("Warehouse address must contain at least one letter")
+    alpha_chars = [c.lower() for c in v if c.isalpha()]
+    if len(alpha_chars) < 3:
+        raise ValueError("Warehouse address must contain meaningful address text with letters")
 
-    alnum_chars = [c.lower() for c in v if c.isalnum()]
-    if len(set(alnum_chars)) < 2:
+    if len(set(alpha_chars)) < 2:
         raise ValueError("Warehouse address cannot consist of repeating characters")
+
+    # Rejects random single-token values without spaces or address delimiters (e.g., "112gg")
+    if " " not in v and "," not in v and len(v) < 12:
+        raise ValueError("Please provide a valid complete warehouse address")
 
     if not re.fullmatch(r"[A-Za-z0-9\s,./#&'()\-]+", v):
         raise ValueError("Warehouse address contains invalid characters")
@@ -140,25 +149,38 @@ class WarehouseCreate(BaseModel):
         gt=0,
     )
 
-    name: str = Field(
+    warehouse_name: str = Field(
+        ...,
+        title="Warehouse Name",
+        description="Warehouse Name (e.g. Central Logistics Warehouse)",
         min_length=2,
         max_length=100,
+        validation_alias=AliasChoices("warehouse_name", "name"),
     )
 
     code: str = Field(
+        ...,
+        title="Warehouse Code",
+        description="Warehouse Code (unique alphanumeric identifier)",
         min_length=2,
         max_length=50,
     )
 
     address: str | None = Field(
         default=None,
-        min_length=5,
+        title="Warehouse Address",
+        description="Warehouse Address",
+        min_length=6,
         max_length=500,
     )
 
-    @field_validator("name")
+    @property
+    def name(self) -> str:
+        return self.warehouse_name
+
+    @field_validator("warehouse_name")
     @classmethod
-    def validate_name(cls, value: str) -> str:
+    def validate_warehouse_name_field(cls, value: str) -> str:
         return validate_warehouse_name(value, required=True)
 
     @field_validator("code")
@@ -183,11 +205,18 @@ class WarehouseUpdate(BaseModel):
         gt=0,
     )
 
-    name: str | None = Field(
+    warehouse_name: str | None = Field(
         default=None,
+        title="Warehouse Name",
+        description="Warehouse Name",
         min_length=2,
         max_length=100,
+        validation_alias=AliasChoices("warehouse_name", "name"),
     )
+
+    @property
+    def name(self) -> str | None:
+        return self.warehouse_name
 
     code: str | None = Field(
         default=None,
@@ -218,9 +247,9 @@ class WarehouseUpdate(BaseModel):
             raise ValueError("Store ID cannot be null")
         return value
 
-    @field_validator("name")
+    @field_validator("warehouse_name")
     @classmethod
-    def validate_name(cls, value: str | None) -> str | None:
+    def validate_warehouse_name_field(cls, value: str | None) -> str | None:
         return validate_warehouse_name(value, required=True)
 
     @field_validator("code")
@@ -281,12 +310,16 @@ class WarehouseResponse(BaseModel):
     tenant_id: int = Field(gt=0)
     store_id: int | None
     store_name: Optional[str] = None
-    name: str
+    warehouse_name: str = Field(..., title="Warehouse Name", description="Warehouse Name")
     code: str
     address: str | None
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+    @property
+    def name(self) -> str:
+        return self.warehouse_name
 
 
 class WarehouseDashboardResponse(BaseModel):

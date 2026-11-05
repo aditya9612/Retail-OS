@@ -1306,6 +1306,25 @@ class ProductResponse(BaseModel):
         default_factory=list
     )
 
+    @model_validator(mode="after")
+    def adjust_expired_status(self) -> "ProductResponse":
+        if self.expiry_date and self.expiry_date < date.today():
+            self.is_active = False
+        return self
+
+    @field_serializer(
+        "is_active",
+        mode="plain",
+        check_fields=False,
+    )
+    def serialize_is_active(
+        self,
+        v: bool,
+    ) -> bool:
+        if self.expiry_date and self.expiry_date < date.today():
+            return False
+        return bool(v)
+
     @field_serializer(
         "selling_price",
         "cost_price",

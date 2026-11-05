@@ -464,10 +464,10 @@ class ProductVariantService:
         overwrite: bool = False,
     ) -> ProductVariant:
         variant = self.get_variant(tenant_id, variant_id)
+        # If variant already has a barcode and overwrite is false,
+        # safely and idempotently return the existing barcode instead of raising 409
         if variant.barcode and not overwrite:
-            raise ConflictException(
-                f"Variant already has barcode '{variant.barcode}'. Pass overwrite=true to replace."
-            )
+            return variant
 
         for _ in range(15):
             candidate = generate_ean13_barcode(tenant_id)

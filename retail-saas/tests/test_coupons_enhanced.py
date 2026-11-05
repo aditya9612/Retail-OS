@@ -254,6 +254,17 @@ def test_coupon_redemption_and_per_customer_limit(tenant):
     assert create_resp.status_code == 201
     coupon_id = create_resp.json()["id"]
 
+    # When no redemptions exist, endpoint returns structured empty response instead of bare []
+    empty_resp = client.get(
+        f"/api/v1/coupons/{coupon_id}/redemptions",
+        headers=tenant["headers"],
+    )
+    assert empty_resp.status_code == 200
+    empty_data = empty_resp.json()
+    assert empty_data["success"] is True
+    assert "no redemptions found" in empty_data["message"].lower()
+    assert empty_data["data"] == []
+
     # First validation with customer_id=999 succeeds
     val_resp1 = client.post(
         "/api/v1/coupons/validate",

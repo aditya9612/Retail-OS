@@ -160,8 +160,8 @@ class InventoryService:
         if data.unit_cost is not None and data.unit_cost < Decimal("1.00"):
             raise AppException("unit_cost must be at least 1.00")
 
-        if data.expiry_date and data.expiry_date < date.today():
-            raise AppException("Expiry date cannot be in the past")
+        if data.expiry_date and data.expiry_date <= date.today():
+            raise AppException("Expiry date cannot be in the past or today (must be a future date)")
 
         supplier = None
         if data.supplier_id:
@@ -1058,6 +1058,10 @@ class InventoryService:
 
             prev_stock = int(inventory.quantity)
             counted = item.counted_quantity
+            if counted < 0:
+                raise AppException("Counted quantity cannot be negative")
+            if counted > 10000:
+                raise AppException("Counted quantity cannot exceed 10,000 (extremely high stock quantity)")
             diff = counted - prev_stock
 
             if diff == 0:

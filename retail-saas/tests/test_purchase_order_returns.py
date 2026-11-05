@@ -708,4 +708,110 @@ def test_purchase_order_returns_invalid_random_values_rejected(tenant_a):
         )
         assert resp_dn.status_code == 422, f"Expected 422 for debit_note_number '{val}', got {resp_dn.status_code}: {resp_dn.text}"
 
+def test_delete_purchase_order_return_lifecycle(tenant_a, tenant_b):
+    headers_a = tenant_a["headers"]
+    headers_b = tenant_b["headers"]
+    supplier_id = tenant_a["supplier_id"]
+    store_id = tenant_a["store_id"]
+    product_id = tenant_a["product_id"]
+
+    # 1. Invalid ID validation (0, -1, string)
+    resp_zero = client.delete("/api/v1/purchase-order-returns/0", headers=headers_a)
+    assert resp_zero.status_code == 422
+
+    resp_neg = client.delete("/api/v1/purchase-order-returns/-5", headers=headers_a)
+    assert resp_neg.status_code == 422
+
+    resp_str = client.delete("/api/v1/purchase-order-returns/abc", headers=headers_a)
+    assert resp_str.status_code == 422
+
+    # 2. Non-existent ID returns 404
+    resp_404 = client.delete("/api/v1/purchase-order-returns/999999", headers=headers_a)
+    assert resp_404.status_code == 404
+
+    # 3. Create PO and return for testing successful deletion
+    po_resp = client.post(
+        "/api/v1/purchase-orders",
+        json={
+            "supplier_id": supplier_id,
+            "store_id": store_id,
+            "items": [{"product_id": product_id, "quantity": 10, "unit_cost": 100.00}],
+        },
+        headers=headers_a,
+    )
+    po_id = po_resp.json()["id"]
+    po_item_id = po_resp.json()["items"][0]["id"]
+    client.post(f"/api/v1/purchase-orders/{po_id}/receive", json={}, headers=headers_a)
+
+    # Create Return 1 (status: requested)
+    ret_resp1 = client.post(
+        "/api/v1/purchase-order-returns",
+        json={
+            "purchase_order_id": po_id,
+            "reason": "Test return requested for delete",
+            "items": [{"purchase_order_item_id": po_item_id, "quantity": 1}],
+        },
+        headers=headers_a,
+    )
+    assert ret_resp1.status_code == 201
+    ret1_id = ret_resp1.json()["id"]
+    ret1_number = ret_resp1.json()["return_number"]
+
+    # Tenant B cannot delete Tenant A's return (Cross-tenant isolation -> 404)
+    resp_cross = client.delete(f"/api/v1/purchase-order-returns/{ret1_id}", headers=headers_b)
+    assert resp_cross.status_code == 404
+
+    # Successfully delete Return 1 (requested status)
+    del_resp1 = client.delete(f"/api/v1/purchase-order-returns/{ret1_id}", headers=headers_a)
+    assert del_resp1.status_code == 200
+    assert del_resp1.json()["success"] is True
+    assert del_resp1.json()["message"] == "Purchase order return deleted successfully"
+    assert del_resp1.json()["data"]["id"] == ret1_id
+    assert del_resp1.json()["data"]["return_number"] == ret1_number
+
+    # Verify Return 1 no longer exists (404)
+    get_del = client.get(f"/api/v1/purchase-order-returns/{ret1_id}", headers=headers_a)
+    assert get_del.status_code == 404
+
+    # Create Return 2 (status: rejected)
+    ret_resp2 = client.post(
+        "/api/v1/purchase-order-returns",
+        json={
+            "purchase_order_id": po_id,
+            "reason": "Test return to be rejected then deleted",
+            "items": [{"purchase_order_item_id": po_item_id, "quantity": 1}],
+        },
+        headers=headers_a,
+    )
+    ret2_id = ret_resp2.json()["id"]
+    client.post(f"/api/v1/purchase-order-returns/{ret2_id}/reject", json={"reason": "Vendor rejected return request"}, headers=headers_a)
+
+    # Delete rejected return -> 200 OK
+    del_resp2 = client.delete(f"/api/v1/purchase-order-returns/{ret2_id}", headers=headers_a)
+    assert del_resp2.status_code == 200
+    assert del_resp2.json()["success"] is True
+
+    # Create Return 3 (status: approved)
+    ret_resp3 = client.post(
+        "/api/v1/purchase-order-returns",
+        json={
+            "purchase_order_id": po_id,
+            "reason": "Test return approved delete blocked",
+            "items": [{"purchase_order_item_id": po_item_id, "quantity": 1}],
+        },
+        headers=headers_a,
+    )
+    ret3_id = ret_resp3.json()["id"]
+    client.post(f"/api/v1/purchase-order-returns/{ret3_id}/approve", headers=headers_a)
+
+    # Delete approved return -> 409 Conflict
+    del_resp3 = client.delete(f"/api/v1/purchase-order-returns/{ret3_id}", headers=headers_a)
+    assert del_resp3.status_code == 409
+
+    # Complete Return 3 (status: completed)
+    client.post(f"/api/v1/purchase-order-returns/{ret3_id}/complete", headers=headers_a)
+
+    # Delete completed return -> 409 Conflict
+    del_resp3_comp = client.delete(f"/api/v1/purchase-order-returns/{ret3_id}", headers=headers_a)
+    assert del_resp3_comp.status_code == 409
 

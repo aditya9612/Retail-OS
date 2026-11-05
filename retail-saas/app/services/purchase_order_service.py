@@ -265,6 +265,10 @@ class PurchaseOrderService:
             total_tax += line_tax
 
         discount = data.discount_amount or Decimal("0.00")
+        if discount > subtotal:
+            raise ConflictException(
+                f"Discount amount ({discount}) cannot exceed subtotal ({subtotal})"
+            )
         shipping = data.shipping_charges or Decimal("0.00")
         total_amount = max(Decimal("0.00"), subtotal + total_tax + shipping - discount)
 
@@ -478,7 +482,7 @@ class PurchaseOrderService:
                     cost = prod.cost_price or Decimal("0.00")
 
                 line_cost = Decimal(str(item.quantity)) * cost
-                rate = item.tax_rate if item.tax_rate is not None else Decimal("0.00")
+                rate = item.tax_rate if item.tax_rate is not None else (getattr(data, "tax_rate", None) or Decimal("0.00"))
                 line_tax = (line_cost * rate / Decimal("100.00")).quantize(Decimal("0.01"))
                 line_tot = line_cost + line_tax
 
@@ -501,7 +505,35 @@ class PurchaseOrderService:
             purchase_order.subtotal = subtotal
             purchase_order.tax_amount = total_tax
             discount = purchase_order.discount_amount or Decimal("0.00")
+            if discount > subtotal:
+                raise ConflictException(
+                    f"Discount amount ({discount}) cannot exceed subtotal ({subtotal})"
+                )
             shipping = purchase_order.shipping_charges or Decimal("0.00")
+            purchase_order.total_amount = max(Decimal("0.00"), subtotal + total_tax + shipping - discount)
+        else:
+            if getattr(data, "tax_rate", None) is not None:
+                if purchase_order.status != "draft":
+                    raise ConflictException("Cannot update tax rate on non-draft purchase order")
+                new_rate = data.tax_rate
+                total_tax = Decimal("0.00")
+                for itm in purchase_order.items:
+                    itm.tax_rate = new_rate
+                    line_cost = Decimal(str(itm.quantity)) * Decimal(str(itm.unit_cost))
+                    line_tax = (line_cost * new_rate / Decimal("100.00")).quantize(Decimal("0.01"))
+                    itm.tax_amount = line_tax
+                    itm.total_cost = line_cost + line_tax
+                    total_tax += line_tax
+                purchase_order.tax_amount = total_tax
+
+            discount = purchase_order.discount_amount or Decimal("0.00")
+            subtotal = purchase_order.subtotal or Decimal("0.00")
+            if discount > subtotal:
+                raise ConflictException(
+                    f"Discount amount ({discount}) cannot exceed subtotal ({subtotal})"
+                )
+            shipping = purchase_order.shipping_charges or Decimal("0.00")
+            total_tax = purchase_order.tax_amount or Decimal("0.00")
             purchase_order.total_amount = max(Decimal("0.00"), subtotal + total_tax + shipping - discount)
 
         return self.repo.update(purchase_order)

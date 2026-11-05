@@ -511,6 +511,32 @@ class PurchaseOrderReturnService:
 
         return self.repo.update(por)
 
+    def delete_return(
+        self,
+        tenant_id: int,
+        return_id: int,
+    ) -> dict:
+        por = self._get_return(tenant_id, return_id)
+
+        if por.status == "completed":
+            raise ConflictException(
+                "Cannot delete a completed return as inventory stock-out has already been processed"
+            )
+
+        if por.status == "approved":
+            raise ConflictException(
+                "Cannot delete an approved return. Please reject the return before deleting."
+            )
+
+        return_data = {
+            "id": por.id,
+            "return_number": por.return_number,
+        }
+
+        self.repo.delete(por)
+
+        return return_data
+
     def get_stats(self, tenant_id: int, store_id: Optional[int] = None) -> dict:
         """Computes summary statistics and KPIs for vendor returns."""
         base_q = self.db.query(PurchaseOrderReturn).filter(PurchaseOrderReturn.tenant_id == tenant_id)

@@ -1,6 +1,6 @@
 from datetime import date
 from typing import Literal, Optional
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Path, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -9,6 +9,7 @@ from app.core.security import require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.purchase_order_return import (
     PurchaseOrderReturnCreate,
+    PurchaseOrderReturnDeleteResponse,
     PurchaseOrderReturnRejectRequest,
     PurchaseOrderReturnResponse,
     PurchaseOrderReturnStatsResponse,
@@ -328,3 +329,29 @@ def complete_purchase_order_return(
         tenant_id=user.tenant_id,
         return_id=return_id,
     )
+
+@router.delete(
+    "/{return_id}",
+    response_model=PurchaseOrderReturnDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_operational_write)],
+)
+def delete_purchase_order_return(
+    return_id: int = Path(..., gt=0, description="Purchase Order Return ID must be a positive integer"),
+    user: User = Depends(
+        require_permission("purchase_orders:write")
+    ),
+    db: Session = Depends(get_db),
+):
+    data = PurchaseOrderReturnService(
+        db
+    ).delete_return(
+        tenant_id=user.tenant_id,
+        return_id=return_id,
+    )
+    return PurchaseOrderReturnDeleteResponse(
+        success=True,
+        message="Purchase order return deleted successfully",
+        data=data,
+    )
+

@@ -10,7 +10,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import AppException, ConflictException, NotFoundException
+from app.core.exceptions import AppException, BadRequestException, ConflictException, NotFoundException
 
 from app.models.grn import GRN, GRNItem
 from app.models.product import Product
@@ -304,8 +304,24 @@ class GRNService:
                     raise NotFoundException(f"Product #{item.product_id} not found")
 
                 ordered_qty = item.ordered_quantity if item.ordered_quantity is not None else item.received_quantity
-                accepted_qty = item.accepted_quantity if item.accepted_quantity is not None else item.received_quantity
                 rejected_qty = item.rejected_quantity if item.rejected_quantity is not None else 0
+                if item.accepted_quantity is not None and not (item.accepted_quantity == 0 and rejected_qty == 0 and item.received_quantity > 0):
+                    accepted_qty = item.accepted_quantity
+                else:
+                    accepted_qty = max(0, item.received_quantity - rejected_qty)
+
+                # Resolve unit cost from request, PO, or product catalog
+                cost = None
+                if item.unit_cost is not None and Decimal(str(item.unit_cost)) > Decimal("0.00"):
+                    cost = item.unit_cost
+                elif po and po.items:
+                    po_match = next((pi for pi in po.items if pi.product_id == item.product_id), None)
+                    if po_match and po_match.unit_cost:
+                        cost = po_match.unit_cost
+                if (cost is None or Decimal(str(cost)) == Decimal("0.00")) and product and product.cost_price:
+                    cost = product.cost_price
+                if cost is None and item.unit_cost is not None:
+                    cost = item.unit_cost
 
                 grn_item = GRNItem(
                     product_id=item.product_id,
@@ -318,8 +334,8 @@ class GRNService:
                     expiry_date=item.expiry_date,
                     remarks=item.remarks,
                 )
-                if item.unit_cost is not None:
-                    grn_item.unit_cost = item.unit_cost
+                if cost is not None:
+                    grn_item.unit_cost = cost
                 grn.items.append(grn_item)
 
         elif po and po.items:
@@ -408,6 +424,17 @@ class GRNService:
         tenant_id: int,
         store_id: Optional[int] = None,
     ) -> dict:
+        if store_id is not None:
+            store = (
+                self.db.query(Store)
+                .filter(
+                    Store.id == store_id,
+                    Store.tenant_id == tenant_id,
+                )
+                .first()
+            )
+            if not store:
+                raise NotFoundException("Store not found")
         return self.repo.get_stats(tenant_id, store_id=store_id)
 
     def receive(
@@ -549,6 +576,12 @@ class GRNService:
         if user_id:
             grn.received_by_id = user_id
 
+        for item in grn.items:
+            item.rejected_quantity = item.received_quantity
+            item.accepted_quantity = 0
+            if reason:
+                item.damage_reason = reason
+
         return self.repo.update(grn)
 
     def quality_check(
@@ -570,6 +603,17 @@ class GRNService:
             if qc_item.item_id not in item_map:
                 raise NotFoundException(f"Item #{qc_item.item_id} does not belong to this GRN")
             item = item_map[qc_item.item_id]
+
+            total_inspected = qc_item.accepted_quantity + qc_item.rejected_quantity
+            if item.received_quantity > 0 and total_inspected == 0:
+                raise BadRequestException(
+                    f"Item #{item.id}: Received quantity ({item.received_quantity}) cannot be left without acceptance or rejection"
+                )
+            if total_inspected != item.received_quantity:
+                raise BadRequestException(
+                    f"Item #{item.id}: Sum of accepted quantity ({qc_item.accepted_quantity}) and rejected quantity ({qc_item.rejected_quantity}) must equal received quantity ({item.received_quantity})"
+                )
+
             item.accepted_quantity = qc_item.accepted_quantity
             item.rejected_quantity = qc_item.rejected_quantity
             if qc_item.damage_reason:
@@ -577,6 +621,16 @@ class GRNService:
             if qc_item.batch_number:
                 item.batch_number = qc_item.batch_number
             if qc_item.expiry_date:
+                receiving_date = (
+                    grn.received_at.date()
+                    if grn.received_at
+                    else (grn.invoice_date if grn.invoice_date else (grn.created_at.date() if grn.created_at else date.today()))
+                )
+                ref_date = max(receiving_date, date.today())
+                if qc_item.expiry_date <= ref_date:
+                    raise BadRequestException(
+                        f"Product expiry date ({qc_item.expiry_date}) cannot be equal to or earlier than receiving date ({ref_date})"
+                    )
                 item.expiry_date = qc_item.expiry_date
             if qc_item.remarks:
                 item.remarks = qc_item.remarks

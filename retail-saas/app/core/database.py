@@ -271,6 +271,18 @@ def ensure_schema_compatibility() -> None:
                 except Exception as exc:
                     logger.warning("Could not add customer_feedback.feedback: %s", exc)
 
+        if "loyalty_points" in existing_cols:
+            lp_cols = existing_cols["loyalty_points"]
+            if "reason" not in lp_cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text("ALTER TABLE `loyalty_points` ADD COLUMN `reason` VARCHAR(500) NULL")
+                        )
+                    lp_cols.add("reason")
+                except Exception as exc:
+                    logger.warning("Could not add loyalty_points.reason: %s", exc)
+
         if "products" in existing_cols:
             prod_cols = existing_cols["products"]
             if "selling_price" not in prod_cols and "price" in prod_cols:
@@ -364,6 +376,65 @@ def ensure_schema_compatibility() -> None:
                     existing_cols["order_items"].add("variant_id")
                 except Exception as exc:
                     logger.warning("Could not add order_items.variant_id: %s", exc)
+
+        if "storefront_settings" in existing_cols:
+            sf_cols = existing_cols["storefront_settings"]
+            if "maintenance_mode" in sf_cols and "is_maintenance_mode" not in sf_cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text("ALTER TABLE `storefront_settings` CHANGE COLUMN `maintenance_mode` `is_maintenance_mode` TINYINT(1) NOT NULL DEFAULT 0")
+                        )
+                    sf_cols.discard("maintenance_mode")
+                    sf_cols.add("is_maintenance_mode")
+                except Exception as exc:
+                    logger.warning("Could not rename storefront_settings.maintenance_mode: %s", exc)
+            elif "maintenance_mode" in sf_cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text("ALTER TABLE `storefront_settings` MODIFY COLUMN `maintenance_mode` TINYINT(1) NULL DEFAULT 0")
+                        )
+                except Exception as exc:
+                    logger.warning("Could not set default for storefront_settings.maintenance_mode: %s", exc)
+
+            if "terms_and_conditions" in sf_cols and "terms_conditions" not in sf_cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text("ALTER TABLE `storefront_settings` CHANGE COLUMN `terms_and_conditions` `terms_conditions` TEXT NULL")
+                        )
+                    sf_cols.discard("terms_and_conditions")
+                    sf_cols.add("terms_conditions")
+                except Exception as exc:
+                    logger.warning("Could not rename storefront_settings.terms_and_conditions: %s", exc)
+            elif "terms_and_conditions" in sf_cols and "terms_conditions" in sf_cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text("UPDATE `storefront_settings` SET `terms_conditions` = `terms_and_conditions` WHERE `terms_conditions` IS NULL AND `terms_and_conditions` IS NOT NULL")
+                        )
+                except Exception as exc:
+                    logger.warning("Could not sync terms_conditions: %s", exc)
+
+            if "refund_policy" in sf_cols and "return_policy" not in sf_cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text("ALTER TABLE `storefront_settings` CHANGE COLUMN `refund_policy` `return_policy` TEXT NULL")
+                        )
+                    sf_cols.discard("refund_policy")
+                    sf_cols.add("return_policy")
+                except Exception as exc:
+                    logger.warning("Could not rename storefront_settings.refund_policy: %s", exc)
+            elif "refund_policy" in sf_cols and "return_policy" in sf_cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text("UPDATE `storefront_settings` SET `return_policy` = `refund_policy` WHERE `return_policy` IS NULL AND `refund_policy` IS NOT NULL")
+                        )
+                except Exception as exc:
+                    logger.warning("Could not sync return_policy: %s", exc)
 
         # 3. UNIVERSAL AUTO-SYNC: Automatically detect and add ANY missing column across ALL models
         for table_name, table in Base.metadata.tables.items():

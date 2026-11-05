@@ -154,6 +154,12 @@ def validate_email_value(value: Optional[Any]) -> Optional[Any]:
         raise ValueError("Email username cannot be purely numeric")
     if not any(c.isalpha() for c in local_part):
         raise ValueError("Email username must contain at least one letter")
+    if local_part.startswith((".", "-", "_")) or local_part.endswith((".", "-", "_")):
+        raise ValueError("Email username cannot start or end with special characters like '.', '-', or '_'")
+    if re.search(r"[-._]{2,}", local_part):
+        raise ValueError("Email username cannot contain consecutive special characters")
+    if sum(1 for c in local_part if c.isalnum()) < 2:
+        raise ValueError("Email username must contain at least 2 alphanumeric characters")
     if local_part in DISALLOWED_PLACEHOLDERS:
         raise ValueError("Email username cannot be a placeholder")
     validate_email_address(str(value), field_name="Supplier email", required=True)

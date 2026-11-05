@@ -213,6 +213,12 @@ class WarehouseService:
                     detail=f"Warehouse code '{new_code}' already exists",
                 )
 
+        # If warehouse_name is present, map it to name
+        if 'warehouse_name' in update_data:
+            if 'name' not in update_data or not update_data['name']:
+                update_data['name'] = update_data['warehouse_name']
+            del update_data['warehouse_name']
+
         # 2b. Duplicate name check for this tenant
         if "name" in update_data and update_data["name"] is not None:
             new_name = update_data["name"].strip()

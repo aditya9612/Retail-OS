@@ -265,6 +265,29 @@ def test_stock_in_rejects_invalid_expiry(auth_context, invalid_expiry):
     assert resp.status_code == 422
 
 
+def test_stock_in_rejects_same_day_expiry(auth_context):
+    headers = auth_context["headers"]
+    store_id = auth_context["store1"]["id"]
+    product_id = auth_context["product"]["id"]
+
+    # Stock-in with same-day expiry (date.today()) must be rejected with 422
+    resp = client.post(
+        "/api/v1/inventory/stock-in",
+        json={
+            "store_id": store_id,
+            "product_id": product_id,
+            "quantity": 10,
+            "batch_number": "BATCH-SAME-01",
+            "expiry_date": date.today().isoformat(),
+            "unit_cost": "10.00",
+            "notes": "Same day expiry batch",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    assert "expiry date" in resp.text.lower()
+
+
 @pytest.mark.parametrize(
     "invalid_notes",
     ["", "   ", "string", "test", "----", "!@#$", "70", "12345", "pp", "xxxx", "aaaaa", "0pp@00", "*"],

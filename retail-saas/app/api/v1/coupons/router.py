@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Union
 
 from fastapi import (
     APIRouter,
@@ -21,6 +21,7 @@ from app.schemas.coupon import (
     BulkGenerateCouponsRequest,
     BulkGenerateCouponsResponse,
     CouponCreate,
+    CouponRedemptionEmptyResponse,
     CouponRedemptionResponse,
     CouponResponse,
     CouponStatsResponse,
@@ -222,7 +223,7 @@ def apply_coupon(
 
 @router.get(
     "/{coupon_id}/redemptions",
-    response_model=list[CouponRedemptionResponse],
+    response_model=Union[list[CouponRedemptionResponse], CouponRedemptionEmptyResponse],
     summary="List customer redemptions for a specific coupon",
 )
 def list_coupon_redemptions(
