@@ -33,6 +33,11 @@ class StoreTransfer(Base):
         nullable=False
     )
 
+    rejection_reason = Column(
+        String(500),
+        nullable=True
+    )
+
     approved_by = Column(
         Integer,
         ForeignKey("users.id"),

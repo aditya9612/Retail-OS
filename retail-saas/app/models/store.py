@@ -31,14 +31,8 @@ class Store(Base, TimestampMixin):
     email: Mapped[str | None] = mapped_column(String(255))
     is_main: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-
-    @property
-    def is_warehouse(self) -> bool:
-        return not self.is_main
-
-    @is_warehouse.setter
-    def is_warehouse(self, val: bool) -> None:
-        self.is_main = not val
+    is_warehouse: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    reference_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     @property
     def gstin(self) -> str | None:
