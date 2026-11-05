@@ -77,6 +77,38 @@ NON_CITY_LOCATION_NAMES.update(
     {state.lower() for state in INDIAN_STATES_AND_UTS}
 )
 
+
+def validate_reference_number(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+
+    if isinstance(value, bool) or not isinstance(value, str):
+        raise ValueError("Reference number must be a text value.")
+
+    value = value.strip()
+
+    if not value:
+        return None
+
+    if value.lower() == "string":
+        raise ValueError("Reference number cannot be the placeholder 'string'.")
+
+    if len(value) < 3:
+        raise ValueError("Reference number must contain at least 3 characters.")
+
+    if len(value) > 100:
+        raise ValueError("Reference number cannot exceed 100 characters.")
+
+    if not re.search(r"[A-Za-z]", value):
+        raise ValueError("Reference number must contain at least one letter.")
+
+    if not re.fullmatch(r"[A-Za-z0-9]+(?:[-/_][A-Za-z0-9]+)*", value):
+        raise ValueError(
+            "Reference number can contain only letters, numbers, hyphens, underscores, and slashes."
+        )
+
+    return value
+
 class StoreCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
     code: Optional[str] = Field(default=None, max_length=20)
@@ -88,7 +120,13 @@ class StoreCreate(BaseModel):
     email: Optional[str] = None
     is_main: bool = False
     gstin: Optional[str] = Field(default=None, max_length=15)
-    is_warehouse: Optional[bool] = False
+    is_warehouse: Optional[bool] = None
+    reference_number: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("reference_number", mode="before")
+    @classmethod
+    def validate_reference_number_create(cls, value):
+        return validate_reference_number(value)
 
     @field_validator("name")
     @classmethod
@@ -356,6 +394,12 @@ class StoreUpdate(BaseModel):
     gstin: Optional[str] = None
     is_active: Optional[bool] = None
     is_warehouse: Optional[bool] = None
+    reference_number: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("reference_number", mode="before")
+    @classmethod
+    def validate_reference_number_update(cls, value):
+        return validate_reference_number(value)
 
     @field_validator("name")
     @classmethod
@@ -609,6 +653,7 @@ class StoreResponse(BaseModel):
     gstin: str | None = Field(None, description="GSTIN Number", examples=["27AAPFU0939F1ZV"])
     is_active: bool = Field(True, description="Active status of the store", examples=[True])
     is_warehouse: bool = Field(False, description="Whether this is a warehouse location", examples=[False])
+    reference_number: str | None = Field(None, description="Store reference number", examples=["REF-STR-01"])
 
     model_config = ConfigDict(from_attributes=True)
 
