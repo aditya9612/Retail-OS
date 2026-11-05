@@ -496,12 +496,14 @@ def ensure_standard_roles(db=None) -> None:
             for role_enum in RoleEnum:
                 role_name = role_enum.value
                 if role_name not in existing_roles:
+                    from app.utils.constants import DEFAULT_ROLE_DESCRIPTIONS
                     perms = DEFAULT_ROLE_PERMISSIONS.get(role_name, [])
                     new_role = Role(
                         tenant_id=tenant.id,
                         name=role_name,
+                        description=DEFAULT_ROLE_DESCRIPTIONS.get(role_name, None),
                         permissions=perms,
-                        is_system=False,
+                        is_system=True,
                     )
                     db.add(new_role)
                     existing_roles.add(role_name)

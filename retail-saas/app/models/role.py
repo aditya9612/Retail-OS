@@ -32,15 +32,17 @@ class Role(Base, TimestampMixin):
         nullable=False,
     )
 
+    description: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        default=None,
+    )
+
     is_system: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
         nullable=False,
     )
-
-    @property
-    def description(self) -> str | None:
-        return None
 
     permissions: Mapped[list | None] = mapped_column(
         JSON,

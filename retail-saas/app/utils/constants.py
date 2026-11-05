@@ -126,3 +126,24 @@ DEFAULT_ROLE_PERMISSIONS = {
 for _r, _p in list(DEFAULT_ROLE_PERMISSIONS.items()):
     if isinstance(_r, UserRole):
         DEFAULT_ROLE_PERMISSIONS[_r.value] = _p
+
+DEFAULT_ROLE_DESCRIPTIONS = {
+    UserRole.SUPERADMIN: "Platform super administrator with unrestricted global system access.",
+    UserRole.ADMIN: "Tenant administrator with full control over store settings, users, and organization.",
+    UserRole.OWNER: "Store business owner with full management access across all retail operations.",
+    UserRole.MANAGER: "Store branch manager overseeing daily store operations, billing, and staff.",
+    UserRole.CASHIER: "POS cashier responsible for fast checkout, scanning barcodes, and collecting payments.",
+    UserRole.ACCOUNTANT: "Financial accountant managing invoices, tax GST filings, credit notes, and ledgers.",
+    UserRole.INVENTORY_MANAGER: "Inventory controller managing stock levels, audits, batches, and purchase orders.",
+    UserRole.WAREHOUSE_STAFF: "Warehouse handler managing stock movements, bin locations, and dispatch.",
+    UserRole.PURCHASE_MANAGER: "Procurement manager handling vendor relations, purchase orders, and GRN receipts.",
+    UserRole.SALES_EXECUTIVE: "Store sales associate handling counter sales, customer quotes, and discounts.",
+    UserRole.CRM_SUPPORT: "Customer relationship specialist managing reviews, loyalty, and customer feedback.",
+    UserRole.STAFF: "General retail staff handling front-desk store tasks and orders.",
+}
+
+# Ensure DEFAULT_ROLE_DESCRIPTIONS is also indexable by string role name
+for _r, _d in list(DEFAULT_ROLE_DESCRIPTIONS.items()):
+    if isinstance(_r, UserRole):
+        DEFAULT_ROLE_DESCRIPTIONS[_r.value] = _d
+

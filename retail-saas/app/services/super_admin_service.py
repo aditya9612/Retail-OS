@@ -80,7 +80,7 @@ from app.schemas.super_admin import (
 from app.services.audit_service import AuditService
 from app.services.saas_entitlement_service import SaaSEntitlementService
 from app.services.saas_subscription_service import SaaSSubscriptionService
-from app.utils.constants import DEFAULT_ROLE_PERMISSIONS, UserRole
+from app.utils.constants import DEFAULT_ROLE_PERMISSIONS, DEFAULT_ROLE_DESCRIPTIONS, UserRole
 from app.repositories.user_repo import UserRepository
 
 _IN_MEMORY_OTP_STORE: Dict[str, Tuple[str, datetime]] = {}
@@ -998,8 +998,9 @@ class SuperAdminService:
                 role = Role(
                     tenant_id=tenant.id,
                     name=role_name.value,
+                    description=DEFAULT_ROLE_DESCRIPTIONS.get(role_name, None),
                     permissions=DEFAULT_ROLE_PERMISSIONS[role_name],
-                    is_system=False,
+                    is_system=True,
                 )
                 self.db.add(role)
             self.db.flush()

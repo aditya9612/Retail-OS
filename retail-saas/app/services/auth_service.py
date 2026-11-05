@@ -52,6 +52,7 @@ from app.schemas.auth import (
 )
 from app.utils.constants import (
     DEFAULT_ROLE_PERMISSIONS,
+    DEFAULT_ROLE_DESCRIPTIONS,
     UserRole,
 )
 from app.utils.phone import normalize_phone_number
@@ -563,10 +564,11 @@ class AuthService:
                 role = Role(
                     tenant_id=tenant.id,
                     name=role_name.value,
+                    description=DEFAULT_ROLE_DESCRIPTIONS.get(role_name, None),
                     permissions=DEFAULT_ROLE_PERMISSIONS[
                         role_name
                     ],
-                    is_system=False,
+                    is_system=True,
                 )
 
                 self.db.add(role)

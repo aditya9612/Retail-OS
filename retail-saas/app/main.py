@@ -50,9 +50,13 @@ from app.api.v1.pos.router import router as pos_router
 from app.api.v1.variants.router import router as variants_router
 
 from app.core.config import get_settings
-from app.core.database import init_db
+from app.core.database import init_db, SessionLocal
 from app.core.logger import logger
 from app.core.middleware import TenantMiddleware
+from fastapi.openapi.docs import (
+    get_swagger_ui_html,
+    get_swagger_ui_oauth2_redirect_html,
+)
 
 from app.models import *
 
@@ -277,9 +281,36 @@ openapi_tags = [
 app = FastAPI(
     title=settings.APP_NAME,
     version="1.0.0",
+    openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
+    docs_url=None,
+    redoc_url="/redoc",
     lifespan=lifespan,
     openapi_tags=openapi_tags,
 )
+
+app.state.db_factory = SessionLocal
+
+
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=f"{app.title} - Swagger UI",
+        oauth2_redirect_url="/docs/oauth2-redirect",
+        swagger_js_url=(
+            "https://cdn.jsdelivr.net/npm/"
+            "swagger-ui-dist@5.32.15/swagger-ui-bundle.js"
+        ),
+        swagger_css_url=(
+            "https://cdn.jsdelivr.net/npm/"
+            "swagger-ui-dist@5.32.15/swagger-ui.css"
+        ),
+    )
+
+
+@app.get("/docs/oauth2-redirect", include_in_schema=False)
+async def swagger_ui_redirect():
+    return get_swagger_ui_oauth2_redirect_html()
 
 from app.core.exceptions import register_exception_handlers
 

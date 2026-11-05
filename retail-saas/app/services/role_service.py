@@ -19,7 +19,7 @@ from app.schemas.role import (
     RoleUserItem,
     RoleUsersResponse,
 )
-from app.utils.constants import DEFAULT_ROLE_PERMISSIONS
+from app.utils.constants import DEFAULT_ROLE_PERMISSIONS, DEFAULT_ROLE_DESCRIPTIONS
 
 PROTECTED_CORE_ROLES = {
     "superadmin",
@@ -56,19 +56,25 @@ class RoleService:
             search_clean = search.strip().lower()
             roles = [r for r in roles if search_clean in (r.name or "").lower()]
         if is_system is not None:
-            roles = [r for r in roles if bool(r.is_system) is is_system]
+            roles = [
+                r for r in roles
+                if bool(r.is_system or (r.name or "").lower() in PROTECTED_CORE_ROLES) is is_system
+            ]
 
         user_counts = self.repo.count_users_for_roles(tenant_id)
 
         result: list[RoleDetailResponse] = []
         for role in roles:
+            role_name_clean = (role.name or "").lower()
+            is_core_sys = bool(role.is_system or role_name_clean in PROTECTED_CORE_ROLES)
+            desc = getattr(role, "description", None) or DEFAULT_ROLE_DESCRIPTIONS.get(role_name_clean, None)
             result.append(
                 RoleDetailResponse(
                     id=role.id,
                     tenant_id=role.tenant_id,
                     name=role.name,
-                    description=getattr(role, "description", None),
-                    is_system=role.is_system,
+                    description=desc,
+                    is_system=is_core_sys,
                     permissions=role.permissions or [],
                     user_count=user_counts.get(role.id, 0),
                     created_at=role.created_at,
@@ -86,12 +92,16 @@ class RoleService:
 
         user_count = self.repo.count_users_by_role(role_id=role.id, tenant_id=tenant_id)
 
+        role_name_clean = (role.name or "").lower()
+        is_core_sys = bool(role.is_system or role_name_clean in PROTECTED_CORE_ROLES)
+        desc = getattr(role, "description", None) or DEFAULT_ROLE_DESCRIPTIONS.get(role_name_clean, None)
+
         return RoleDetailResponse(
             id=role.id,
             tenant_id=role.tenant_id,
             name=role.name,
-            description=getattr(role, "description", None),
-            is_system=role.is_system,
+            description=desc,
+            is_system=is_core_sys,
             permissions=role.permissions or [],
             user_count=user_count,
             created_at=role.created_at,
@@ -172,6 +182,7 @@ class RoleService:
         role = Role(
             tenant_id=tenant_id,
             name=clean_name,
+            description=data.description,
             permissions=clean_perms,
             is_system=False,
         )
@@ -218,6 +229,9 @@ class RoleService:
                 if existing and existing.id != role.id:
                     raise ConflictException(f"Role '{new_name}' already exists in your organization")
                 role.name = new_name
+
+        if data.description is not None:
+            role.description = data.description
 
         if data.permissions is not None:
             role.permissions = data.permissions
@@ -303,6 +317,8 @@ class RoleService:
 
         default_perms = list(DEFAULT_ROLE_PERMISSIONS[role_name_clean])
         role.permissions = default_perms
+        role.is_system = True
+        role.description = DEFAULT_ROLE_DESCRIPTIONS.get(role_name_clean, getattr(role, "description", None))
         role = self.repo.update(role)
         self.db.commit()
         self.db.refresh(role)
@@ -329,7 +345,11 @@ class RoleService:
 
         roles = self.repo.list_by_tenant(tenant_id)
         columns = [
-            RoleMatrixColumn(id=r.id, name=r.name, is_system=bool(r.is_system))
+            RoleMatrixColumn(
+                id=r.id,
+                name=r.name,
+                is_system=bool(r.is_system or (r.name or "").lower() in PROTECTED_CORE_ROLES),
+            )
             for r in roles
         ]
 
