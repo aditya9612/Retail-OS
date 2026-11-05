@@ -217,7 +217,7 @@ class ProductVariantUpdate(BaseModel):
     )
     cost_price: Optional[Decimal] = Field(
         default=None,
-        gt=0,
+        ge=0,
         le=PRICE_MAX,
     )
     is_active: Optional[bool] = None
@@ -497,4 +497,3 @@ class VariantMissingBarcodesResponse(BaseModel):
     message: str
     updated_count: int
     variants: List[Dict[str, Any]]
-
