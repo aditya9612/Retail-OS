@@ -32,7 +32,7 @@ router = APIRouter(
 def create_warehouse(
     data: WarehouseCreate,
     user: User = Depends(
-        require_permission("inventory:write")
+        require_permission("warehouses:write", "inventory:write")
     ),
     db: Session = Depends(get_db),
 ):
@@ -72,7 +72,7 @@ def list_warehouses(
         description="Items per page",
     ),
     user: User = Depends(
-        require_permission("inventory:read")
+        require_permission("warehouses:read", "inventory:read")
     ),
     db: Session = Depends(get_db),
 ):
@@ -92,7 +92,7 @@ def list_warehouses(
 )
 def warehouse_dashboard(
     user: User = Depends(
-        require_permission("inventory:read")
+        require_permission("warehouses:read", "inventory:read")
     ),
     db: Session = Depends(get_db),
 ):
@@ -112,7 +112,7 @@ def get_warehouse(
         description="Warehouse ID must be a positive integer",
     ),
     user: User = Depends(
-        require_permission("inventory:read")
+        require_permission("warehouses:read", "inventory:read")
     ),
     db: Session = Depends(get_db),
 ):
@@ -134,7 +134,7 @@ def update_warehouse(
         description="Warehouse ID must be a positive integer",
     ),
     user: User = Depends(
-        require_permission("inventory:write")
+        require_permission("warehouses:write", "inventory:write")
     ),
     db: Session = Depends(get_db),
 ):
@@ -157,7 +157,7 @@ def update_warehouse_status(
         description="Warehouse ID must be a positive integer",
     ),
     user: User = Depends(
-        require_permission("inventory:write")
+        require_permission("warehouses:write", "inventory:write")
     ),
     db: Session = Depends(get_db),
 ):
@@ -194,7 +194,7 @@ def get_warehouse_stock(
         description="Items per page",
     ),
     user: User = Depends(
-        require_permission("inventory:read")
+        require_permission("warehouses:read", "inventory:read")
     ),
     db: Session = Depends(get_db),
 ):
@@ -224,7 +224,7 @@ def get_warehouse_transfers(
         description="Maximum transfers to return",
     ),
     user: User = Depends(
-        require_permission("inventory:read")
+        require_permission("warehouses:read", "inventory:read")
     ),
     db: Session = Depends(get_db),
 ):
@@ -246,7 +246,7 @@ def delete_warehouse(
         description="Warehouse ID must be a positive integer",
     ),
     user: User = Depends(
-        require_permission("inventory:write")
+        require_permission("warehouses:write", "inventory:write")
     ),
     db: Session = Depends(get_db),
 ):

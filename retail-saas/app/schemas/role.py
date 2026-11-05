@@ -43,6 +43,8 @@ AVAILABLE_PERMISSIONS: list[dict] = [
             {"code": "inventory:write", "label": "Manage Stock", "description": "Adjust inventory quantities and store transfers"},
             {"code": "batches:read", "label": "View Batches", "description": "View product batch allocations and expiry dates"},
             {"code": "batches:write", "label": "Manage Batches", "description": "Create and manage product batch stock"},
+            {"code": "warehouses:read", "label": "View Warehouses", "description": "View warehouse facilities and storage hub stock"},
+            {"code": "warehouses:write", "label": "Manage Warehouses", "description": "Create, update, and manage warehouse holding hubs"},
         ],
     },
     {
@@ -56,6 +58,14 @@ AVAILABLE_PERMISSIONS: list[dict] = [
         ],
     },
     {
+        "module": "delivery",
+        "label": "Delivery & Logistics",
+        "permissions": [
+            {"code": "delivery:read", "label": "View Deliveries", "description": "View delivery orders, dispatch schedules, and tracking"},
+            {"code": "delivery:write", "label": "Manage Deliveries", "description": "Assign couriers, update delivery status, and reconcile COD"},
+        ],
+    },
+    {
         "module": "customers",
         "label": "Customers & Loyalty",
         "permissions": [
@@ -65,6 +75,30 @@ AVAILABLE_PERMISSIONS: list[dict] = [
             {"code": "coupons:write", "label": "Manage Coupons", "description": "Create and manage promotional coupons"},
             {"code": "reviews:read", "label": "View Reviews", "description": "View customer feedback and product reviews"},
             {"code": "reviews:write", "label": "Manage Reviews", "description": "Respond to and moderate customer reviews"},
+        ],
+    },
+    {
+        "module": "ecommerce",
+        "label": "E-Commerce Storefront",
+        "permissions": [
+            {"code": "ecommerce:read", "label": "View E-Commerce", "description": "View online store catalog, web analytics, and storefront orders"},
+            {"code": "ecommerce:write", "label": "Manage E-Commerce", "description": "Configure digital storefront, banners, theme, and website settings"},
+        ],
+    },
+    {
+        "module": "whatsapp",
+        "label": "WhatsApp Integration",
+        "permissions": [
+            {"code": "whatsapp:read", "label": "View WhatsApp Settings", "description": "View WhatsApp Cloud API configuration and message logs"},
+            {"code": "whatsapp:write", "label": "Manage WhatsApp Settings", "description": "Configure Meta Cloud API credentials, templates, and phone numbers"},
+            {"code": "whatsapp:send", "label": "Send WhatsApp Messages", "description": "Dispatch digital invoices, receipts, and customer notifications"},
+        ],
+    },
+    {
+        "module": "ai",
+        "label": "AI Assistant & Predictions",
+        "permissions": [
+            {"code": "ai:read", "label": "Access AI Assistant", "description": "Query AI assistant for stock reorder forecasts, churn analysis, and sales trends"},
         ],
     },
     {
@@ -85,6 +119,14 @@ AVAILABLE_PERMISSIONS: list[dict] = [
             {"code": "users:write", "label": "Manage Users", "description": "Create, edit, assign, and deactivate staff users"},
             {"code": "store_expenses:read", "label": "View Store Expenses", "description": "View petty cash and daily store operating expenses"},
             {"code": "store_expenses:write", "label": "Manage Store Expenses", "description": "Record and manage store operating expenses"},
+        ],
+    },
+    {
+        "module": "settings",
+        "label": "Settings & Branding",
+        "permissions": [
+            {"code": "settings:read", "label": "View Document Settings", "description": "View invoice branding, print templates, and gateway settings"},
+            {"code": "settings:write", "label": "Manage Document Settings", "description": "Configure invoice headers, print styling, numbering rules, and payment gateways"},
         ],
     },
     {

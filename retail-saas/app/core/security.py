@@ -427,14 +427,30 @@ def require_permission(*permissions: str):
         ):
             return user
 
-        # Fallback for suppliers permissions to inventory permissions for backward compatibility
-        if any(p == "suppliers:write" for p in permissions) and "inventory:write" in perms:
+        # Fallbacks for modular permissions to broader operational permissions for backward compatibility
+        if any(p in ("suppliers:write", "warehouses:write") for p in permissions) and "inventory:write" in perms:
             return user
-        if any(p == "suppliers:read" for p in permissions) and "inventory:read" in perms:
+        if any(p in ("suppliers:read", "warehouses:read") for p in permissions) and "inventory:read" in perms:
+            return user
+        if any(p == "delivery:write" for p in permissions) and "orders:write" in perms:
+            return user
+        if any(p == "delivery:read" for p in permissions) and "orders:read" in perms:
+            return user
+        if any(p == "ai:read" for p in permissions) and "analytics:read" in perms:
+            return user
+        if any(p == "settings:write" for p in permissions) and ("stores:write" in perms or "billing:write" in perms):
+            return user
+        if any(p == "settings:read" for p in permissions) and ("stores:read" in perms or "billing:read" in perms):
+            return user
+        if any(p == "whatsapp:write" for p in permissions) and "stores:write" in perms:
+            return user
+        if any(p == "whatsapp:read" for p in permissions) and ("stores:read" in perms or "reports:read" in perms):
+            return user
+        if any(p == "whatsapp:send" for p in permissions) and ("billing:read" in perms or "orders:write" in perms):
             return user
 
-        # Backward compatibility for pos:shift_manage for existing cashier, manager, owner roles in DB
-        if user.role and user.role.name in ["admin", "owner", "manager", "cashier"] and "pos:shift_manage" in permissions:
+        # Backward compatibility for pos:shift_manage for existing owner and admin roles in DB
+        if user.role and user.role.name in ["admin", "owner"] and "pos:shift_manage" in permissions:
             return user
 
         primary_perm = permissions[0] if permissions else ""

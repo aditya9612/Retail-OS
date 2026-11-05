@@ -37,7 +37,7 @@ router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
     description="Retrieves the Meta WhatsApp Cloud API credentials and automations for the current organization.",
 )
 def get_whatsapp_settings(
-    user: User = Depends(require_permission("stores:read")),
+    user: User = Depends(require_permission("whatsapp:read", "settings:read", "stores:read")),
     db: Session = Depends(get_db),
 ):
     setting = (
@@ -74,7 +74,7 @@ def get_whatsapp_settings(
 )
 def update_whatsapp_settings(
     payload: WhatsAppSettingUpdate,
-    user: User = Depends(require_permission("stores:write")),
+    user: User = Depends(require_permission("whatsapp:write", "settings:write", "stores:write")),
     db: Session = Depends(get_db),
 ):
     setting = (
@@ -115,7 +115,7 @@ def update_whatsapp_settings(
 )
 def test_whatsapp_connection(
     payload: WhatsAppTestRequest,
-    user: User = Depends(require_permission("stores:write")),
+    user: User = Depends(require_permission("whatsapp:write", "settings:write", "stores:write")),
     db: Session = Depends(get_db),
 ):
     service = WhatsAppService(db=db, tenant_id=user.tenant_id)
@@ -151,7 +151,7 @@ def test_whatsapp_connection(
 def send_invoice_via_whatsapp(
     invoice_id: int,
     payload: Optional[WhatsAppSendInvoiceRequest] = None,
-    user: User = Depends(require_permission("billing:read")),
+    user: User = Depends(require_permission("whatsapp:send", "billing:read")),
     db: Session = Depends(get_db),
 ):
     invoice = (
@@ -186,7 +186,7 @@ def send_invoice_via_whatsapp(
 )
 def send_message(
     data: WhatsAppSendCustomRequest,
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("whatsapp:send", "orders:write")),
 ):
     task = send_whatsapp_message_task.delay(
         phone=data.phone,
@@ -214,7 +214,7 @@ def list_whatsapp_logs(
     date_to: Optional[datetime] = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
-    user: User = Depends(require_permission("billing:read")),
+    user: User = Depends(require_permission("whatsapp:read", "billing:read", "reports:read")),
     db: Session = Depends(get_db),
 ):
     query = db.query(WhatsAppLog).filter(WhatsAppLog.tenant_id == user.tenant_id)

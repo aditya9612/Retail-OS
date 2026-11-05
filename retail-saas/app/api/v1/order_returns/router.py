@@ -208,7 +208,7 @@ def reject_return(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("orders:write", "billing:refund")),
 ):
     return OrderReturnService.reject_return(
         db=db,
@@ -232,7 +232,7 @@ def complete_return(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("orders:write", "billing:refund")),
 ):
     return OrderReturnService.complete_return(
         db=db,
@@ -256,7 +256,7 @@ def exchange_return(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("orders:write", "billing:refund", "billing:write")),
 ):
     return OrderReturnService.process_exchange(
         db=db,
@@ -308,7 +308,7 @@ def get_return_slip(
         description="Select output mode from dropdown: 'preview' (renders image directly in Swagger UI), 'view' (inline browser preview), 'download' (HTML download), or 'json' (structured payload)",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("orders:read", "billing:read")),
 ):
     selected_mode = mode.value if hasattr(mode, "value") else str(mode)
 

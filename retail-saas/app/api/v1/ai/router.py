@@ -30,7 +30,7 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 )
 def reorder_prediction(
     store_id: Optional[int] = Query(None, gt=0, description="Filter predictions by store ID"),
-    user: User = Depends(require_permission("analytics:read")),
+    user: User = Depends(require_permission("ai:read", "analytics:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).reorder_prediction(user.tenant_id, store_id)
@@ -46,7 +46,7 @@ def demand_forecast(
     product_id: int,
     days: int = Query(default=30, gt=0, le=365, description="Historical analysis window in days"),
     store_id: Optional[int] = Query(None, gt=0, description="Filter demand forecast by store ID"),
-    user: User = Depends(require_permission("analytics:read")),
+    user: User = Depends(require_permission("ai:read", "analytics:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).demand_forecast(user.tenant_id, product_id, days=days, store_id=store_id)
@@ -65,7 +65,7 @@ def best_sellers(
     ),
     sort_by: Literal["quantity", "revenue"] = Query(default="quantity", description="Sort criteria"),
     store_id: Optional[int] = Query(None, gt=0, description="Filter best sellers by store ID"),
-    user: User = Depends(require_permission("analytics:read")),
+    user: User = Depends(require_permission("ai:read", "analytics:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).best_selling_products(
@@ -81,7 +81,7 @@ def best_sellers(
 )
 def customer_patterns(
     customer_id: int,
-    user: User = Depends(require_permission("analytics:read")),
+    user: User = Depends(require_permission("ai:read", "analytics:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).customer_purchase_patterns(user.tenant_id, customer_id)
@@ -95,7 +95,7 @@ def customer_patterns(
 )
 def offer_recommendations(
     customer_id: int,
-    user: User = Depends(require_permission("analytics:read")),
+    user: User = Depends(require_permission("ai:read", "analytics:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).smart_offer_recommendations(user.tenant_id, customer_id)
@@ -111,7 +111,7 @@ def frequently_bought_together(
     product_id: int,
     limit: int = Query(default=5, gt=0, le=20),
     store_id: Optional[int] = Query(None, gt=0, description="Filter by store ID"),
-    user: User = Depends(require_permission("analytics:read")),
+    user: User = Depends(require_permission("ai:read", "analytics:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).frequently_bought_together(user.tenant_id, product_id, limit=limit, store_id=store_id)
@@ -127,7 +127,7 @@ def customer_churn_risk(
     inactive_days: int = Query(default=45, ge=7, le=365, description="Days of inactivity threshold"),
     limit: int = Query(default=50, gt=0, le=200),
     store_id: Optional[int] = Query(None, gt=0, description="Filter by store ID"),
-    user: User = Depends(require_permission("analytics:read")),
+    user: User = Depends(require_permission("ai:read", "analytics:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).customer_churn_risk(
@@ -146,7 +146,7 @@ def slow_moving_stock(
     threshold_sales: int = Query(default=2, ge=0, le=50, description="Max units sold to qualify as slow moving"),
     store_id: Optional[int] = Query(None, gt=0, description="Filter by store ID"),
     limit: int = Query(default=50, gt=0, le=200),
-    user: User = Depends(require_permission("analytics:read")),
+    user: User = Depends(require_permission("ai:read", "analytics:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).slow_moving_stock(
@@ -162,7 +162,7 @@ def slow_moving_stock(
 )
 def chat_query(
     payload: AIChatQueryRequest,
-    user: User = Depends(require_permission("analytics:read")),
+    user: User = Depends(require_permission("ai:read", "analytics:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).chat_query(user.tenant_id, payload.query, store_id=payload.store_id)
