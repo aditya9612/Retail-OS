@@ -315,7 +315,7 @@ def test_activate_deactivate_nonexistent(advanced_tenant_fixture):
 # 5. PATCH /api/v1/categories/{category_id} (Partial update)
 # =====================================================================
 
-def test_patch_category_partial(advanced_tenant_fixture):
+def test_put_category_partial(advanced_tenant_fixture):
     headers = advanced_tenant_fixture["headers"]
 
     cat = client.post(
@@ -324,16 +324,24 @@ def test_patch_category_partial(advanced_tenant_fixture):
         headers=headers,
     ).json()
 
-    # Update only description via PATCH
-    patch_resp = client.patch(
+    # Update only description via PUT
+    put_resp = client.put(
         f"/api/v1/categories/{cat['id']}",
         json={"description": "Updated book description only"},
         headers=headers,
     )
-    assert patch_resp.status_code == 200
-    data = patch_resp.json()
+    assert put_resp.status_code == 200
+    data = put_resp.json()
     assert data["name"] == "Books & Stationery"
     assert data["description"] == "Updated book description only"
+
+    # Verify PATCH /{category_id} is removed and returns 405 Method Not Allowed
+    patch_resp = client.patch(
+        f"/api/v1/categories/{cat['id']}",
+        json={"description": "Should fail with 405"},
+        headers=headers,
+    )
+    assert patch_resp.status_code == 405
 
 
 # =====================================================================

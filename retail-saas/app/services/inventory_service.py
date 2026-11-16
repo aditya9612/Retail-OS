@@ -427,9 +427,20 @@ class InventoryService:
                 f"Store with ID {store_id} not found",
             )
 
-        query = self.db.query(Inventory).filter(
-            Inventory.tenant_id == tenant_id,
-            Inventory.quantity <= Inventory.min_stock_level,
+        threshold_expr = func.coalesce(
+            func.nullif(Inventory.min_stock_level, 0),
+            func.nullif(Inventory.reorder_point, 0),
+            Product.min_stock_alert,
+            5,
+        )
+
+        query = (
+            self.db.query(Inventory)
+            .join(Product, Inventory.product_id == Product.id)
+            .filter(
+                Inventory.tenant_id == tenant_id,
+                Inventory.quantity <= threshold_expr,
+            )
         )
 
         if store_id is not None:
@@ -480,11 +491,10 @@ class InventoryService:
         if product_id is not None:
             query = query.filter(Inventory.product_id == product_id)
 
-        if low_stock_only:
-            query = query.filter(Inventory.quantity <= Inventory.min_stock_level)
-
+        product_joined = False
         if category_id is not None or search:
             query = query.join(Product, Inventory.product_id == Product.id)
+            product_joined = True
             if category_id is not None:
                 query = query.filter(Product.category_id == category_id)
             if search:
@@ -492,6 +502,17 @@ class InventoryService:
                 query = query.filter(
                     Product.name.ilike(s) | Product.sku.ilike(s)
                 )
+
+        if low_stock_only:
+            if not product_joined:
+                query = query.join(Product, Inventory.product_id == Product.id)
+            threshold_expr = func.coalesce(
+                func.nullif(Inventory.min_stock_level, 0),
+                func.nullif(Inventory.reorder_point, 0),
+                Product.min_stock_alert,
+                5,
+            )
+            query = query.filter(Inventory.quantity <= threshold_expr)
 
         items = query.all()
         if not items:
@@ -743,9 +764,19 @@ class InventoryService:
             stock_query = stock_query.filter(Inventory.store_id == store_id)
         total_stock = stock_query.scalar() or 0
 
-        low_stock_query = self.db.query(func.count(Inventory.id)).filter(
-            Inventory.tenant_id == tenant_id,
-            Inventory.quantity <= Inventory.min_stock_level,
+        low_stock_threshold_expr = func.coalesce(
+            func.nullif(Inventory.min_stock_level, 0),
+            func.nullif(Inventory.reorder_point, 0),
+            Product.min_stock_alert,
+            5,
+        )
+        low_stock_query = (
+            self.db.query(func.count(distinct(Inventory.product_id)))
+            .join(Product, Inventory.product_id == Product.id)
+            .filter(
+                Inventory.tenant_id == tenant_id,
+                Inventory.quantity <= low_stock_threshold_expr,
+            )
         )
         if store_id is not None:
             low_stock_query = low_stock_query.filter(Inventory.store_id == store_id)
