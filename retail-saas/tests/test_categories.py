@@ -852,3 +852,19 @@ def test_create_category_invalid_json_specifies_expected_value(tenant_fixture):
     data = resp.json()
     assert "parent_id" in str(data)
     assert "Expected an integer" in str(data)
+
+def test_list_categories_descending_order_newest_first(tenant_fixture):
+    headers = tenant_fixture["headers"]
+
+    # Create categories sequentially
+    cat1 = client.post("/api/v1/categories", json={"name": "Alpha Cat Order Test"}, headers=headers).json()
+    cat2 = client.post("/api/v1/categories", json={"name": "Beta Cat Order Test"}, headers=headers).json()
+    cat3 = client.post("/api/v1/categories", json={"name": "Gamma Cat Order Test"}, headers=headers).json()
+
+    resp = client.get("/api/v1/categories", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+
+    ids = [c["id"] for c in data if c["id"] in {cat1["id"], cat2["id"], cat3["id"]}]
+    assert ids == [cat3["id"], cat2["id"], cat1["id"]], f"Expected newest first [cat3, cat2, cat1], got {ids}"
+

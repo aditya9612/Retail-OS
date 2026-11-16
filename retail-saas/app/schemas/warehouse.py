@@ -28,6 +28,7 @@ DISALLOWED_WAREHOUSE_PLACEHOLDERS = {
     "dummy",
     "sample",
     "address",
+    "random",
 }
 
 
@@ -115,11 +116,14 @@ def validate_warehouse_address(value: str | None, required: bool = False) -> str
     if v.lower() in DISALLOWED_WAREHOUSE_PLACEHOLDERS or clean_norm in DISALLOWED_WAREHOUSE_PLACEHOLDERS:
         raise ValueError("Please provide a valid warehouse address")
 
-    if len(v) < 6 or len(v) > 500:
-        raise ValueError("Warehouse address must be between 6 and 500 characters")
+    if len(v) < 3 or len(v) > 500:
+        raise ValueError("Warehouse address must be between 3 and 500 characters")
 
     if v.isdigit():
         raise ValueError("Warehouse address cannot contain only numbers")
+
+    if not re.fullmatch(r"[A-Za-z0-9\s,./#&'()\-]+", v):
+        raise ValueError("Warehouse address contains invalid characters")
 
     alpha_chars = [c.lower() for c in v if c.isalpha()]
     if len(alpha_chars) < 3:
@@ -128,12 +132,17 @@ def validate_warehouse_address(value: str | None, required: bool = False) -> str
     if len(set(alpha_chars)) < 2:
         raise ValueError("Warehouse address cannot consist of repeating characters")
 
-    # Rejects random single-token values without spaces or address delimiters (e.g., "112gg")
-    if " " not in v and "," not in v and len(v) < 12:
-        raise ValueError("Please provide a valid complete warehouse address")
+    if re.search(r"(.)\1{2,}", v.lower()):
+        raise ValueError("Warehouse address cannot contain excessive repeating characters")
 
-    if not re.fullmatch(r"[A-Za-z0-9\s,./#&'()\-]+", v):
-        raise ValueError("Warehouse address contains invalid characters")
+    # For single-token input (no spaces or delimiters, e.g. city name)
+    if " " not in v and "," not in v and "/" not in v and "-" not in v:
+        if not v.isalpha():
+            raise ValueError("Please provide a valid complete warehouse address")
+        if not any(c in "aeiou" for c in v.lower()):
+            raise ValueError("Please provide a valid complete warehouse address")
+        if len(v) >= 4 and len(set(alpha_chars)) < 3:
+            raise ValueError("Please provide a valid complete warehouse address")
 
     return v
 
@@ -278,24 +287,14 @@ class WarehouseStatusUpdateRequest(BaseModel):
         extra="forbid",
     )
 
-    is_active: Optional[StrictBool] = Field(default=None, description="Active status as boolean")
-    status: Optional[str] = Field(default=None, description="Active status as string ('active' or 'inactive')")
+    is_active: StrictBool = Field(..., description="Active status as boolean (true or false)")
 
-    @model_validator(mode="after")
-    def validate_status_input(self):
-        if self.is_active is None and self.status is None:
-            raise ValueError("Either 'is_active' (bool) or 'status' (str) must be provided")
-
-        if self.status is not None:
-            clean_s = self.status.strip().lower()
-            if clean_s in ("active", "true", "enabled", "1"):
-                self.is_active = True
-            elif clean_s in ("inactive", "false", "disabled", "0"):
-                self.is_active = False
-            else:
-                raise ValueError("Status string must be 'active' or 'inactive'")
-
-        return self
+    @field_validator("is_active")
+    @classmethod
+    def validate_is_active(cls, value: bool | None) -> bool:
+        if value is None:
+            raise ValueError("is_active cannot be null")
+        return value
 
 
 WarehouseStatusUpdate = WarehouseStatusUpdateRequest

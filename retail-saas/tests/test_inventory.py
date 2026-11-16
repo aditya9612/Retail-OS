@@ -1129,3 +1129,28 @@ def test_all_7_get_apis_tenant_isolation(auth_context, unique_slug):
     r7 = client.get("/api/v1/inventory/valuation", headers=headers_b)
     assert r7.status_code == 200
     assert Decimal(str(r7.json()["total_inventory_value"])) == Decimal("0.00")
+
+def test_inventory_dashboard_low_stock_matches_alert_level(auth_context):
+    headers = auth_context["headers"]
+    s1 = auth_context["store1"]["id"]
+    p = auth_context["product"]["id"]
+
+    # Stock in 2 items (product min_stock_alert defaults to 5, so 2 is low stock)
+    client.post(
+        "/api/v1/inventory/stock-in",
+        json={"store_id": s1, "product_id": p, "quantity": 2},
+        headers=headers,
+    )
+
+    # Dashboard should count this product in low_stock_items
+    dash_resp = client.get("/api/v1/inventory/dashboard", params={"store_id": s1}, headers=headers)
+    assert dash_resp.status_code == 200
+    dash = dash_resp.json()
+    assert dash["low_stock_items"] == 1
+
+    # low-stock endpoint should also return this item
+    low_resp = client.get("/api/v1/inventory/low-stock", params={"store_id": s1}, headers=headers)
+    assert low_resp.status_code == 200
+    assert low_resp.json()["count"] == 1
+    assert any(item["product_id"] == p for item in low_resp.json()["data"])
+

@@ -306,14 +306,18 @@ def test_update_warehouse_status_toggle(tenant_fixture):
     assert res1.status_code == 200
     assert res1.json()["is_active"] is False
 
-    # 2. Activate via string "active"
-    res2 = client.patch(f"/api/v1/warehouses/{w['id']}/status", json={"status": "active"}, headers=headers)
+    # 2. Activate via boolean
+    res2 = client.patch(f"/api/v1/warehouses/{w['id']}/status", json={"is_active": True}, headers=headers)
     assert res2.status_code == 200
     assert res2.json()["is_active"] is True
 
-    # 3. Invalid status -> 422
-    res3 = client.patch(f"/api/v1/warehouses/{w['id']}/status", json={"status": "invalid"}, headers=headers)
+    # 3. Status string field is removed -> passing "status" returns 422
+    res3 = client.patch(f"/api/v1/warehouses/{w['id']}/status", json={"status": "active"}, headers=headers)
     assert res3.status_code == 422
+
+    # 4. Null / invalid is_active -> 422
+    res4 = client.patch(f"/api/v1/warehouses/{w['id']}/status", json={"is_active": None}, headers=headers)
+    assert res4.status_code == 422
 
 
 def test_warehouse_dashboard(tenant_fixture):
@@ -743,3 +747,36 @@ def test_warehouse_name_strict_validations(tenant_fixture):
         headers=headers,
     )
     assert res_str.status_code == 422, res_str.text
+
+def test_warehouse_address_city_name_allowed_and_garbage_rejected(tenant_fixture):
+    headers = tenant_fixture["headers"]
+
+    # 1. Create a warehouse with city name BARAMATI
+    create_payload = {
+        "warehouse_name": "Baramati Logistics Hub",
+        "code": f"WH-{uuid.uuid4().hex[:4].upper()}",
+        "address": "BARAMATI",
+    }
+    create_res = client.post("/api/v1/warehouses", json=create_payload, headers=headers)
+    assert create_res.status_code == 201, create_res.text
+    wh_id = create_res.json()["id"]
+    assert create_res.json()["address"] == "BARAMATI"
+
+    # 2. PATCH warehouse with valid city name PUNE
+    patch_res = client.patch(
+        f"/api/v1/warehouses/{wh_id}",
+        json={"address": "PUNE"},
+        headers=headers,
+    )
+    assert patch_res.status_code == 200, patch_res.text
+    assert patch_res.json()["address"] == "PUNE"
+
+    # 3. PATCH warehouse with invalid values: 'pppp', '1234', '@#', 'random', '112gg'
+    for bad_addr in ["pppp", "1234", "@#", "random", "112gg"]:
+        bad_res = client.patch(
+            f"/api/v1/warehouses/{wh_id}",
+            json={"address": bad_addr},
+            headers=headers,
+        )
+        assert bad_res.status_code == 422, f"Expected 422 for address '{bad_addr}', got {bad_res.status_code}"
+
