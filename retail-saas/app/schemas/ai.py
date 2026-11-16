@@ -119,8 +119,30 @@ class AIChatQueryResponse(BaseModel):
     query: str
     intent: str
     answer: str
+    speech_text: Optional[str] = Field(None, description="Clean spoken text formatted specifically for Text-to-Speech (TTS)")
     data: Optional[Dict[str, Any]] = None
     suggested_actions: List[str] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AIVoiceQueryRequest(BaseModel):
+    query: Optional[str] = Field(None, max_length=1000, description="Speech text recognized from microphone or typed query")
+    audio_base64: Optional[str] = Field(None, description="Optional raw Base64 audio recorded directly from microphone")
+    audio_mime_type: Optional[str] = Field(default="audio/webm", description="MIME type of recorded audio (e.g. audio/webm, audio/wav, audio/mp4)")
+    store_id: Optional[int] = Field(None, gt=0, description="Optional store context")
+    language: Optional[str] = Field(default="mr-IN", description="Preferred spoken language code (e.g. mr-IN, hi-IN, en-IN)")
+
+
+class AIVoiceQueryResponse(BaseModel):
+    query: str
+    intent: str
+    answer: str
+    speech_text: str = Field(..., description="Clean, natural voice speech script ready for speaker playback")
+    language: str = Field(default="mr-IN", description="Language used for speech response")
+    data: Optional[Dict[str, Any]] = None
+    suggested_actions: List[str] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
 

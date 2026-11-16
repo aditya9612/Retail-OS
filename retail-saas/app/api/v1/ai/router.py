@@ -1,5 +1,6 @@
 from typing import List, Literal, Optional
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -8,6 +9,8 @@ from app.models.user import User
 from app.schemas.ai import (
     AIChatQueryRequest,
     AIChatQueryResponse,
+    AIVoiceQueryRequest,
+    AIVoiceQueryResponse,
     BestSellerItem,
     CustomerChurnRiskItem,
     CustomerPatternResponse,
@@ -17,6 +20,7 @@ from app.schemas.ai import (
     ReorderPredictionItem,
     SlowMovingStockItem,
 )
+from app.api.v1.ai.voice_ui import get_voice_assistant_html
 from app.services.ai_service import AIService
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -166,3 +170,42 @@ def chat_query(
     db: Session = Depends(get_db),
 ):
     return AIService(db).chat_query(user.tenant_id, payload.query, store_id=payload.store_id)
+
+
+@router.post(
+    "/voice-query",
+    response_model=AIVoiceQueryResponse,
+    summary="Retail-OS AI Real-Time Voice Assistant",
+    description=(
+        "Processes natural spoken voice queries via microphone (speech text or raw audio) using Gemini 3.5 Flash-Lite "
+        "and returns spoken speech_text ready for immediate speaker playback.\n\n"
+        "👉 **मायक्रोफोन वापरून बोलण्यासाठी (Live Microphone UI):**\n"
+        "Swagger UI मध्ये ब्राऊझर मायक्रोफोन बटण सपोर्ट नसते (फक्त JSON इनपुट असते). "
+        "थेट मायक्रोफोन बटण दाबून बोलण्यासाठी आमचे रिअल-टाईम व्हॉईस पोर्टल उघडा: "
+        "[http://127.0.0.1:8000/api/v1/ai/voice-assistant](/api/v1/ai/voice-assistant) (किंवा खालील `GET /api/v1/ai/voice-assistant` उघडा)."
+    ),
+)
+def voice_query(
+    payload: AIVoiceQueryRequest,
+    user: User = Depends(require_permission("ai:read", "analytics:read")),
+    db: Session = Depends(get_db),
+):
+    return AIService(db).voice_query(
+        tenant_id=user.tenant_id,
+        query_str=payload.query,
+        audio_base64=payload.audio_base64,
+        audio_mime_type=payload.audio_mime_type,
+        store_id=payload.store_id,
+        language=payload.language,
+    )
+
+
+@router.get(
+    "/voice-assistant",
+    response_class=HTMLResponse,
+    summary="Interactive Voice AI Assistant Web Application",
+    description="Loads the real-time Voice AI Copilot interactive web interface with mic recording and speaker playback.",
+)
+def voice_assistant_page():
+    return HTMLResponse(content=get_voice_assistant_html())
+

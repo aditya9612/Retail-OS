@@ -550,3 +550,10 @@ def health_check():
         "app": settings.APP_NAME,
         "database": db_status,
     }
+
+
+@app.get("/voice-assistant", include_in_schema=False)
+def voice_assistant_root():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/api/v1/ai/voice-assistant")
+
