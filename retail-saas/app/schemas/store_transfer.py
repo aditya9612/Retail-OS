@@ -505,6 +505,7 @@ class RecentTransferStat(BaseModel):
     source_store_name: Optional[str] = None
     destination_store_name: Optional[str] = None
     status: str
+    rejection_reason: Optional[str] = None
     created_at: datetime
     total_items: int
 
@@ -552,6 +553,7 @@ class StoreTransferResponse(BaseModel):
     destination_store_id: int = Field(..., description="Destination store ID")
     destination_store_name: Optional[str] = Field(default=None, description="Destination store name")
     status: str = Field(..., description="Transfer status")
+    rejection_reason: Optional[str] = Field(default=None, description="Reason for rejection if transfer was rejected")
     approved_by: Optional[int] = Field(default=None, description="Approver user ID")
     approved_by_name: Optional[str] = Field(default=None, description="Approver user full name")
     created_at: datetime = Field(

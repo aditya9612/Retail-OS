@@ -57,7 +57,7 @@ class CategoryRepository:
         elif parent_id is not None:
             query = query.filter(Category.parent_id == parent_id)
 
-        query = query.order_by(Category.name.asc())
+        query = query.order_by(Category.id.desc())
 
         if page is not None and page_size is not None:
             query = query.offset((page - 1) * page_size).limit(page_size)
@@ -215,4 +215,4 @@ class CategoryRepository:
             .all()
         )
 
-        return products, total
+        return products, total

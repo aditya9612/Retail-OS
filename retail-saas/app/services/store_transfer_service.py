@@ -245,6 +245,7 @@ class StoreTransferService:
             )
 
         transfer.status = "Rejected"
+        transfer.rejection_reason = rejection_reason
 
         StoreTransferRepository.update(
             db,

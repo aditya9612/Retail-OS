@@ -28,6 +28,10 @@ class PaymentMethod(str, Enum):
 # ============================================================
 
 def validate_store_id(value) -> int:
+    if value is None:
+        raise ValueError("Store ID is required.")
+    if value == "" or (isinstance(value, str) and not value.strip()):
+        raise ValueError("Store ID cannot be empty.")
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(
             "Store ID must contain only whole numbers. "
@@ -45,6 +49,10 @@ def validate_store_id(value) -> int:
 # ============================================================
 
 def validate_amount(value) -> Decimal:
+    if value is None:
+        raise ValueError("Amount is required.")
+    if value == "" or (isinstance(value, str) and not value.strip()):
+        raise ValueError("Amount cannot be empty.")
     if isinstance(value, bool) or not isinstance(
         value, (int, float, Decimal)
     ):
@@ -100,6 +108,8 @@ CATEGORY_ALIASES = {
 
 
 def validate_category(value: str) -> str:
+    if value is None:
+        raise ValueError("Expense category is required.")
     if not isinstance(value, str):
         raise ValueError("Category must contain only letters and spaces.")
 
@@ -147,7 +157,7 @@ def validate_description(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
 
-    if not isinstance(value, str):
+    if isinstance(value, bool) or not isinstance(value, str):
         raise ValueError("Description must be a valid text value.")
 
     value = value.strip()
@@ -185,6 +195,10 @@ def validate_description(value: Optional[str]) -> Optional[str]:
 # ============================================================
 
 def validate_expense_date(value):
+    if value is None:
+        raise ValueError("Expense date is required.")
+    if value == "" or (isinstance(value, str) and not value.strip()):
+        raise ValueError("Expense date cannot be empty.")
     if isinstance(value, datetime):
         raise ValueError("Expense date must be in YYYY-MM-DD format.")
 
@@ -219,6 +233,10 @@ def validate_expense_date(value):
 # ============================================================
 
 def validate_payment_method(value) -> str:
+    if value is None:
+        raise ValueError("Payment method is required.")
+    if value == "" or (isinstance(value, str) and not value.strip()):
+        raise ValueError("Payment method cannot be empty.")
     if not isinstance(value, str):
         raise ValueError(
             "Payment method must be one of: cash, card, upi, "
@@ -249,7 +267,7 @@ def validate_reference_number(
     if value is None:
         return None
 
-    if not isinstance(value, str):
+    if isinstance(value, bool) or not isinstance(value, str):
         raise ValueError("Reference number must be a text value.")
 
     value = value.strip()

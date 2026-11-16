@@ -59,6 +59,29 @@ def validate_damage_reason(value: str | None) -> str | None:
     return v
 
 
+def validate_rejection_reason_strict(value: str | None) -> str:
+    if value is None:
+        raise ValueError("Rejection reason cannot be null")
+    if not isinstance(value, str):
+        raise ValueError("Rejection reason must be a string")
+    v = value.strip()
+    if not v:
+        raise ValueError("Rejection reason cannot be empty or whitespace")
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_DAMAGE_REASON_PLACEHOLDERS or clean_norm in DISALLOWED_DAMAGE_REASON_PLACEHOLDERS:
+        raise ValueError(f"Rejection reason cannot be generic placeholder '{value}'")
+    if len(v) < 3 or len(v) > 1000:
+        raise ValueError("Rejection reason must be between 3 and 1000 characters")
+    if v.isdigit():
+        raise ValueError("Rejection reason cannot contain only numbers")
+    if not re.search(r"[A-Za-z]", v):
+        raise ValueError("Rejection reason must contain at least one alphabetic character")
+    alpha_chars = [c.lower() for c in v if c.isalpha()]
+    if len(set(alpha_chars)) < 2:
+        raise ValueError("Rejection reason cannot consist of repeating characters")
+    return v
+
+
 FORBIDDEN_VEHICLE_NUMBER_PLACEHOLDERS = {
     "string",
     "test",
@@ -382,12 +405,15 @@ class GRNItemResponse(BaseModel):
     received_quantity: int
     accepted_quantity: Optional[int] = None
     rejected_quantity: Optional[int] = 0
-    damage_reason: Optional[str] = None
     reason: Optional[str] = None
     batch_number: Optional[str] = None
     expiry_date: Optional[date] = None
     unit_cost: Optional[Decimal] = None
     remarks: Optional[str] = None
+
+    @property
+    def damage_reason(self) -> Optional[str]:
+        return self.reason
 
     @model_validator(mode="before")
     @classmethod
@@ -395,8 +421,6 @@ class GRNItemResponse(BaseModel):
         if isinstance(data, dict):
             if "reason" not in data or data.get("reason") is None:
                 data["reason"] = data.get("damage_reason")
-            if "damage_reason" not in data or data.get("damage_reason") is None:
-                data["damage_reason"] = data.get("reason")
         return data
 
 
@@ -420,7 +444,6 @@ class GRNResponse(BaseModel):
     vehicle_number: Optional[str] = None
     transporter_name: Optional[str] = None
     remarks: Optional[str] = None
-    rejection_reason: Optional[str] = None
     reason: Optional[str] = None
     received_at: Optional[datetime] = None
     created_by_id: Optional[int] = None
@@ -441,14 +464,16 @@ class GRNResponse(BaseModel):
 
     items: list[GRNItemResponse] = []
 
+    @property
+    def rejection_reason(self) -> Optional[str]:
+        return self.reason
+
     @model_validator(mode="before")
     @classmethod
     def sync_reason_fields(cls, data: Any) -> Any:
         if isinstance(data, dict):
             if "reason" not in data or data.get("reason") is None:
                 data["reason"] = data.get("rejection_reason")
-            if "rejection_reason" not in data or data.get("rejection_reason") is None:
-                data["rejection_reason"] = data.get("reason")
         return data
 
 
@@ -504,17 +529,20 @@ class GRNQualityCheckRequest(BaseModel):
 
 
 class GRNRejectRequest(BaseModel):
-    reason: Optional[str] = Field(default="Shipment rejected during receipt", max_length=1000)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    reason: str = Field(
+        ...,
+        min_length=3,
+        max_length=1000,
+        title="Rejection Reason",
+        description="Reason for GRN rejection",
+    )
 
     @field_validator("reason")
     @classmethod
-    def validate_reject_reason(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return "Shipment rejected during receipt"
-        cleaned = v.strip()
-        if not cleaned:
-            raise ValueError("Rejection reason cannot be empty or whitespace")
-        return validate_damage_reason(cleaned)
+    def validate_reject_reason(cls, v: str | None) -> str:
+        return validate_rejection_reason_strict(v)
 
 
 class GRNHistoryEvent(BaseModel):
@@ -569,7 +597,6 @@ class GRNPrintResponse(BaseModel):
     transporter_name: Optional[str] = None
     status: str
     remarks: Optional[str] = None
-    rejection_reason: Optional[str] = None
     reason: Optional[str] = None
     received_at: Optional[datetime] = None
     created_by_name: Optional[str] = None

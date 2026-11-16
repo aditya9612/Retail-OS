@@ -191,27 +191,6 @@ def update_category(
 
 
 @router.patch(
-    "/{category_id}",
-    response_model=CategoryResponse,
-)
-def patch_category(
-    data: CategoryUpdate,
-    category_id: int = Path(
-        ...,
-        gt=0,
-        description="Category ID must be greater than 0",
-    ),
-    user: User = Depends(require_permission("products:write")),
-    db: Session = Depends(get_db),
-):
-    return CategoryService(db).update_category(
-        tenant_id=user.tenant_id,
-        category_id=category_id,
-        data=data,
-    )
-
-
-@router.patch(
     "/{category_id}/activate",
     response_model=CategoryResponse,
 )
@@ -272,4 +251,4 @@ def delete_category(
         "success": True,
         "message": "Category deleted successfully",
         "data": result,
-    }
+    }

@@ -101,6 +101,10 @@ class GRN(Base, TimestampMixin):
     def reason(self) -> str | None:
         return self.rejection_reason
 
+    @reason.setter
+    def reason(self, value: str | None) -> None:
+        self.rejection_reason = value
+
     items = relationship(
         "GRNItem",
         back_populates="grn",
@@ -282,6 +286,10 @@ class GRNItem(Base):
     @property
     def reason(self) -> str | None:
         return self.damage_reason
+
+    @reason.setter
+    def reason(self, value: str | None) -> None:
+        self.damage_reason = value
 
     unit_cost_col: Mapped[Decimal | None] = mapped_column(
         "unit_cost",

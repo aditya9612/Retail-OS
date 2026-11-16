@@ -353,3 +353,14 @@ class PurchaseOrderReturnStatsResponse(BaseModel):
     rejected_count: int
     total_debit_amount: Decimal
     top_reasons: list[TopReturnReasonItem] = []
+
+class PurchaseOrderReturnDeleteData(BaseModel):
+    id: int
+    return_number: str
+
+
+class PurchaseOrderReturnDeleteResponse(BaseModel):
+    success: bool = True
+    message: str = "Purchase order return deleted successfully"
+    data: PurchaseOrderReturnDeleteData
+

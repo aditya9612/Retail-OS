@@ -57,8 +57,9 @@ class StoreService:
             self._unset_other_main_stores(tenant_id)
 
         store_data = data.model_dump()
-        # Prevent is_warehouse property setter from overriding is_main
-        store_data.pop("is_warehouse", None)
+        # Respect explicitly provided is_warehouse boolean, or fallback to not is_main if omitted
+        if store_data.get("is_warehouse") is None:
+            store_data["is_warehouse"] = not data.is_main
 
         store = Store(
             tenant_id=tenant_id,
@@ -137,9 +138,9 @@ class StoreService:
                 raise ConflictException("Store code already exists")
 
         if "is_warehouse" in update_data:
-            wh_val = update_data.pop("is_warehouse")
-            if "is_main" not in update_data and wh_val is not None:
-                update_data["is_main"] = not wh_val
+            wh_val = update_data.get("is_warehouse")
+            if wh_val is not None:
+                store.is_warehouse = wh_val
 
         if update_data.get("is_main") is True:
             self._unset_other_main_stores(tenant_id, exclude_store_id=store_id)

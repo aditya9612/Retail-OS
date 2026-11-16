@@ -869,6 +869,32 @@ def test_update_variant_same_barcode_no_conflict(setup_fixture):
     assert patch_res.json()["size"] == "XL"
 
 
+def test_update_variant_allows_zero_cost_price(setup_fixture):
+    headers = setup_fixture["owner_headers"]
+    product_id = setup_fixture["parent_product"]["id"]
+    suffix = setup_fixture["suffix"]
+
+    create_res = client.post(
+        f"/api/v1/products/{product_id}/variants",
+        headers=headers,
+        json={
+            "variant_name": "Zero Cost Variant",
+            "sku": f"ZERO-COST-{suffix}",
+            "cost_price": "10.00",
+        },
+    )
+    assert create_res.status_code == 201, create_res.text
+
+    update_res = client.patch(
+        f"/api/v1/variants/{create_res.json()['id']}",
+        headers=headers,
+        json={"cost_price": "0.00"},
+    )
+    assert update_res.status_code == 200, update_res.text
+    assert Decimal(str(update_res.json()["cost_price"])) == Decimal("0.00")
+    assert Decimal(str(update_res.json()["effective_cost_price"])) == Decimal("0.00")
+
+
 # ============================================================================
 # 6. SOFT DELETION / LIFECYCLE TESTS
 # ============================================================================

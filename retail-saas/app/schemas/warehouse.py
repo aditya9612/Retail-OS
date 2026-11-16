@@ -4,6 +4,7 @@ import re
 from typing import Any, Optional
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -27,6 +28,7 @@ DISALLOWED_WAREHOUSE_PLACEHOLDERS = {
     "dummy",
     "sample",
     "address",
+    "random",
 }
 
 
@@ -114,11 +116,14 @@ def validate_warehouse_address(value: str | None, required: bool = False) -> str
     if v.lower() in DISALLOWED_WAREHOUSE_PLACEHOLDERS or clean_norm in DISALLOWED_WAREHOUSE_PLACEHOLDERS:
         raise ValueError("Please provide a valid warehouse address")
 
-    if len(v) < 6 or len(v) > 500:
-        raise ValueError("Warehouse address must be between 6 and 500 characters")
+    if len(v) < 3 or len(v) > 500:
+        raise ValueError("Warehouse address must be between 3 and 500 characters")
 
     if v.isdigit():
         raise ValueError("Warehouse address cannot contain only numbers")
+
+    if not re.fullmatch(r"[A-Za-z0-9\s,./#&'()\-]+", v):
+        raise ValueError("Warehouse address contains invalid characters")
 
     alpha_chars = [c.lower() for c in v if c.isalpha()]
     if len(alpha_chars) < 3:
@@ -127,12 +132,17 @@ def validate_warehouse_address(value: str | None, required: bool = False) -> str
     if len(set(alpha_chars)) < 2:
         raise ValueError("Warehouse address cannot consist of repeating characters")
 
-    # Rejects random single-token values without spaces or address delimiters (e.g., "112gg")
-    if " " not in v and "," not in v and len(v) < 12:
-        raise ValueError("Please provide a valid complete warehouse address")
+    if re.search(r"(.)\1{2,}", v.lower()):
+        raise ValueError("Warehouse address cannot contain excessive repeating characters")
 
-    if not re.fullmatch(r"[A-Za-z0-9\s,./#&'()\-]+", v):
-        raise ValueError("Warehouse address contains invalid characters")
+    # For single-token input (no spaces or delimiters, e.g. city name)
+    if " " not in v and "," not in v and "/" not in v and "-" not in v:
+        if not v.isalpha():
+            raise ValueError("Please provide a valid complete warehouse address")
+        if not any(c in "aeiou" for c in v.lower()):
+            raise ValueError("Please provide a valid complete warehouse address")
+        if len(v) >= 4 and len(set(alpha_chars)) < 3:
+            raise ValueError("Please provide a valid complete warehouse address")
 
     return v
 
@@ -148,21 +158,13 @@ class WarehouseCreate(BaseModel):
         gt=0,
     )
 
-    name: str = Field(
+    warehouse_name: str = Field(
         ...,
         title="Warehouse Name",
         description="Warehouse Name (e.g. Central Logistics Warehouse)",
         min_length=2,
         max_length=100,
-        examples=["Central Logistics Warehouse"],
-    )
-
-    warehouse_name: Optional[str] = Field(
-        default=None,
-        title="Warehouse Name",
-        description="Warehouse Name (alias for name)",
-        min_length=2,
-        max_length=100,
+        validation_alias=AliasChoices("warehouse_name", "name"),
     )
 
     code: str = Field(
@@ -181,21 +183,13 @@ class WarehouseCreate(BaseModel):
         max_length=500,
     )
 
-    @model_validator(mode="before")
-    @classmethod
-    def sync_name_and_warehouse_name(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "name" not in data or not data.get("name"):
-                if "warehouse_name" in data and data.get("warehouse_name"):
-                    data["name"] = data["warehouse_name"]
-            elif "warehouse_name" not in data or not data.get("warehouse_name"):
-                if "name" in data and data.get("name"):
-                    data["warehouse_name"] = data["name"]
-        return data
+    @property
+    def name(self) -> str:
+        return self.warehouse_name
 
-    @field_validator("name")
+    @field_validator("warehouse_name")
     @classmethod
-    def validate_name(cls, value: str) -> str:
+    def validate_warehouse_name_field(cls, value: str) -> str:
         return validate_warehouse_name(value, required=True)
 
     @field_validator("code")
@@ -220,31 +214,18 @@ class WarehouseUpdate(BaseModel):
         gt=0,
     )
 
-    name: str | None = Field(
+    warehouse_name: str | None = Field(
         default=None,
         title="Warehouse Name",
         description="Warehouse Name",
         min_length=2,
         max_length=100,
+        validation_alias=AliasChoices("warehouse_name", "name"),
     )
 
-    warehouse_name: Optional[str] = Field(
-        default=None,
-        title="Warehouse Name",
-        description="Warehouse Name (alias for name)",
-        min_length=2,
-        max_length=100,
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def sync_update_warehouse_name(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if ("name" not in data or not data.get("name")) and "warehouse_name" in data and data.get("warehouse_name"):
-                data["name"] = data["warehouse_name"]
-            elif ("warehouse_name" not in data or not data.get("warehouse_name")) and "name" in data and data.get("name"):
-                data["warehouse_name"] = data["name"]
-        return data
+    @property
+    def name(self) -> str | None:
+        return self.warehouse_name
 
     code: str | None = Field(
         default=None,
@@ -275,9 +256,9 @@ class WarehouseUpdate(BaseModel):
             raise ValueError("Store ID cannot be null")
         return value
 
-    @field_validator("name")
+    @field_validator("warehouse_name")
     @classmethod
-    def validate_name(cls, value: str | None) -> str | None:
+    def validate_warehouse_name_field(cls, value: str | None) -> str | None:
         return validate_warehouse_name(value, required=True)
 
     @field_validator("code")
@@ -306,24 +287,14 @@ class WarehouseStatusUpdateRequest(BaseModel):
         extra="forbid",
     )
 
-    is_active: Optional[StrictBool] = Field(default=None, description="Active status as boolean")
-    status: Optional[str] = Field(default=None, description="Active status as string ('active' or 'inactive')")
+    is_active: StrictBool = Field(..., description="Active status as boolean (true or false)")
 
-    @model_validator(mode="after")
-    def validate_status_input(self):
-        if self.is_active is None and self.status is None:
-            raise ValueError("Either 'is_active' (bool) or 'status' (str) must be provided")
-
-        if self.status is not None:
-            clean_s = self.status.strip().lower()
-            if clean_s in ("active", "true", "enabled", "1"):
-                self.is_active = True
-            elif clean_s in ("inactive", "false", "disabled", "0"):
-                self.is_active = False
-            else:
-                raise ValueError("Status string must be 'active' or 'inactive'")
-
-        return self
+    @field_validator("is_active")
+    @classmethod
+    def validate_is_active(cls, value: bool | None) -> bool:
+        if value is None:
+            raise ValueError("is_active cannot be null")
+        return value
 
 
 WarehouseStatusUpdate = WarehouseStatusUpdateRequest
@@ -338,13 +309,16 @@ class WarehouseResponse(BaseModel):
     tenant_id: int = Field(gt=0)
     store_id: int | None
     store_name: Optional[str] = None
-    name: str = Field(..., title="Warehouse Name", description="Warehouse Name")
-    warehouse_name: Optional[str] = Field(default=None, title="Warehouse Name", description="Warehouse Name")
+    warehouse_name: str = Field(..., title="Warehouse Name", description="Warehouse Name")
     code: str
     address: str | None
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+    @property
+    def name(self) -> str:
+        return self.warehouse_name
 
 
 class WarehouseDashboardResponse(BaseModel):

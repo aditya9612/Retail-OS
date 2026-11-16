@@ -46,8 +46,7 @@ class StoreRepository:
             )
 
         if is_warehouse is not None:
-            # is_warehouse maps to `not is_main`
-            query = query.filter(Store.is_main == (not is_warehouse))
+            query = query.filter(Store.is_warehouse == is_warehouse)
 
         return query.order_by(Store.id.asc()).all()
 

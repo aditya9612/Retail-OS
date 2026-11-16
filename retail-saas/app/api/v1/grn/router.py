@@ -20,7 +20,7 @@ from app.schemas.grn import (
     GRNRejectRequest,
     GRNResponse,
     GRNStatsResponse,
-    validate_damage_reason,
+    validate_damage_reason, validate_rejection_reason_strict,
 )
 from app.services.grn_service import GRNService
 
@@ -189,14 +189,14 @@ def reject_grn(
         if not cleaned_q:
             raise AppException("Rejection reason cannot be empty or whitespace", status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
         try:
-            validate_damage_reason(cleaned_q)
+            validate_rejection_reason_strict(cleaned_q)
         except ValueError as e:
             raise AppException(str(e), status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
         rejection_reason = cleaned_q
     elif data and data.reason:
         rejection_reason = data.reason
     else:
-        rejection_reason = "Shipment rejected during receipt"
+        raise AppException("Rejection reason is required", status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
     return GRNService(db).reject(
         tenant_id=user.tenant_id,
         grn_id=grn_id,
