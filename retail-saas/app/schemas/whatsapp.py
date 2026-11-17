@@ -1,5 +1,6 @@
-from datetime import datetime
-from typing import Optional, List
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, ConfigDict
 
 
@@ -16,6 +17,10 @@ class WhatsAppSettingBase(BaseModel):
 
     # Conversational AI Ordering & Payments
     ai_ordering_enabled: bool = Field(default=True, description="Enable AI conversational ordering via WhatsApp")
+    ai_ocr_grocery_enabled: bool = Field(default=True, description="Enable handwritten grocery list OCR to cart/order")
+    ai_khata_reminders_enabled: bool = Field(default=True, description="Enable AI smart Khata (credit) recovery reminders")
+    khata_min_balance: Decimal = Field(default=Decimal("100.00"), description="Minimum credit balance threshold to trigger reminders")
+
     upi_vpa: Optional[str] = Field(default=None, max_length=100, description="Store UPI ID for receiving payments (e.g. store@upi)")
     upi_payee_name: Optional[str] = Field(default=None, max_length=100, description="Merchant / Store Name shown on UPI apps")
     ai_welcome_message: Optional[str] = Field(default=None, description="Custom greeting / catalog message sent to customers")
@@ -33,6 +38,9 @@ class WhatsAppSettingUpdate(BaseModel):
     template_language: Optional[str] = None
     webhook_verify_token: Optional[str] = None
     ai_ordering_enabled: Optional[bool] = None
+    ai_ocr_grocery_enabled: Optional[bool] = None
+    ai_khata_reminders_enabled: Optional[bool] = None
+    khata_min_balance: Optional[Decimal] = None
     upi_vpa: Optional[str] = None
     upi_payee_name: Optional[str] = None
     ai_welcome_message: Optional[str] = None
@@ -95,3 +103,125 @@ class WhatsAppLogListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# ==============================================================================
+# 1. OCR HANDWRITTEN GROCERY LIST SCHEMAS
+# ==============================================================================
+
+class ExtractedGroceryItem(BaseModel):
+    raw_text: str = Field(..., description="Raw text snippet read from handwritten list")
+    item_name: str = Field(..., description="Normalized item name (e.g. बासमती तांदूळ, साखर)")
+    quantity: float = Field(default=1.0, description="Requested quantity number (supports decimals like 0.5, 1.5)")
+    unit: str = Field(default="pcs", description="Unit of measurement (kg, g, l, ml, pcs, pack)")
+    confidence: float = Field(default=0.9, description="Recognition confidence score")
+
+
+class MappedOrderItemDetail(BaseModel):
+    product_id: int
+    product_name: str
+    sku: str
+    quantity: float
+    unit: str
+    unit_price: float
+    tax_amount: float
+    total_amount: float
+
+
+class HandwrittenGroceryOcrRequest(BaseModel):
+    image_base64: str = Field(..., description="Base64 encoded photo of the handwritten grocery list")
+    mime_type: str = Field(default="image/jpeg", description="MIME type (image/jpeg, image/png, image/webp)")
+    recipient_phone: Optional[str] = Field(default=None, description="Customer phone number to link cart/order")
+    sender_name: Optional[str] = Field(default=None, description="Customer name if known")
+    auto_create_order: bool = Field(default=True, description="Whether to automatically create an order in Retail-OS")
+    store_id: Optional[int] = Field(default=None, description="Target store outlet ID")
+
+
+class HandwrittenGroceryOcrResponse(BaseModel):
+    status: str
+    extracted_items: List[ExtractedGroceryItem]
+    matched_items: List[MappedOrderItemDetail]
+    unmatched_items: List[str]
+    order_id: Optional[int] = None
+    order_number: Optional[str] = None
+    subtotal: float
+    tax_amount: float
+    total_amount: float
+    upi_payment_link: Optional[str] = None
+    reply_message: str
+
+
+# ==============================================================================
+# 2. CONVERSATIONAL ORDERING SCHEMAS
+# ==============================================================================
+
+class WhatsAppChatOrderRequest(BaseModel):
+    phone: str = Field(..., min_length=5, max_length=20, description="Customer phone number")
+    message: str = Field(..., min_length=1, max_length=2000, description="Customer grocery order text in Marathi/English")
+    sender_name: Optional[str] = Field(default=None, description="Customer display name")
+    store_id: Optional[int] = Field(default=None, description="Store ID (optional)")
+
+
+class WhatsAppChatOrderResponse(BaseModel):
+    status: str
+    intent: str
+    order_id: Optional[int] = None
+    order_number: Optional[str] = None
+    total_amount: Optional[float] = None
+    upi_link: Optional[str] = None
+    reply: str
+
+
+# ==============================================================================
+# 3. SMART KHATA (उधारी) RECOVERY SCHEMAS
+# ==============================================================================
+
+class KhataPendingCustomerItem(BaseModel):
+    customer_id: int
+    customer_name: str
+    phone: str
+    outstanding_balance: float
+    credit_limit: float
+    total_spend: float
+    last_reminder_at: Optional[datetime] = None
+    last_promised_date: Optional[date] = None
+    recovery_status: str # pending, reminder_sent, promised, paid, disputed
+
+
+class KhataReminderRequest(BaseModel):
+    customer_id: Optional[int] = Field(default=None, description="Optional customer ID override")
+    custom_note: Optional[str] = Field(default=None, description="Optional custom note to include in reminder")
+
+
+class KhataReminderBroadcastRequest(BaseModel):
+    min_balance: float = Field(default=100.0, ge=1.0, description="Minimum overdue balance threshold")
+    store_id: Optional[int] = Field(default=None, description="Optional store filter")
+
+
+class KhataProcessReplyRequest(BaseModel):
+    customer_id: int = Field(..., description="Customer ID")
+    reply_message: str = Field(..., description="Customer's WhatsApp reply message (e.g. 'मी उद्या देतो', 'after 2 days')")
+
+
+class KhataFollowupResponse(BaseModel):
+    id: int
+    tenant_id: int
+    store_id: Optional[int] = None
+    customer_id: int
+    customer_name: Optional[str] = None
+    phone: Optional[str] = None
+    outstanding_amount: float
+    reminder_sent_at: datetime
+    reminder_message: Optional[str] = None
+    customer_reply: Optional[str] = None
+    detected_intent: Optional[str] = None
+    promised_date: Optional[date] = None
+    status: str
+    notes: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class KhataFollowupListResponse(BaseModel):
+    items: List[KhataFollowupResponse]
+    total: int

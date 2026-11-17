@@ -60,6 +60,7 @@ from app.models.saas_plan_entitlement import (
 from app.models.whatsapp import (
     WhatsAppSetting,
     WhatsAppLog,
+    KhataFollowup,
 )
 
 
@@ -128,4 +129,5 @@ __all__ = [
     "OrderItemBatchAllocation",
     "WhatsAppSetting",
     "WhatsAppLog",
+    "KhataFollowup",
 ]
