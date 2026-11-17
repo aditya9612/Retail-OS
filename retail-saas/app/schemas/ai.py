@@ -130,8 +130,18 @@ class AIVoiceQueryRequest(BaseModel):
     query: Optional[str] = Field(None, max_length=1000, description="Speech text recognized from microphone or typed query")
     audio_base64: Optional[str] = Field(None, description="Optional raw Base64 audio recorded directly from microphone")
     audio_mime_type: Optional[str] = Field(default="audio/webm", description="MIME type of recorded audio (e.g. audio/webm, audio/wav, audio/mp4)")
-    store_id: Optional[int] = Field(None, gt=0, description="Optional store context")
+    store_id: Optional[int] = Field(None, ge=1, description="Optional store context")
     language: Optional[str] = Field(default="mr-IN", description="Preferred spoken language code (e.g. mr-IN, hi-IN, en-IN)")
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "query": "आजचा एकूण गल्ला किती झाला?",
+                "language": "mr-IN"
+            }
+        }
+    )
 
 
 class AIVoiceQueryResponse(BaseModel):
@@ -143,6 +153,25 @@ class AIVoiceQueryResponse(BaseModel):
     data: Optional[Dict[str, Any]] = None
     suggested_actions: List[str] = []
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "query": "आजचा एकूण गल्ला किती झाला?",
+                "intent": "today_sales",
+                "answer": "💸 **आजचा गल्ला व विक्री अहवाल:**\n\n• आजचा एकूण गल्ला: **₹0.00**\n• एकूण पूर्ण झालेल्या ऑर्डर्स: **0 ऑर्डर्स**",
+                "speech_text": "आजचा एकूण गल्ला शून्य रुपये झाला असून एकूण शून्य ऑर्डर्स पूर्ण झाल्या आहेत.",
+                "language": "mr-IN",
+                "data": {
+                    "sales_amount": 0.0,
+                    "order_count": 0
+                },
+                "suggested_actions": [
+                    "View daily sales report",
+                    "Check cashier drawer closing status"
+                ]
+            }
+        }
+    )
 
 

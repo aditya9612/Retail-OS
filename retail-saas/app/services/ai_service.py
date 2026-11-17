@@ -895,14 +895,30 @@ class AIService:
         categories_list = [{"id": c[0], "name": c[1], "product_count": c[2]} for c in categories_q]
 
         prods_sample_q = (
-            self.db.query(Product.id, Product.name, Product.sku, Product.selling_price, Product.mrp)
+            self.db.query(
+                Product.id,
+                Product.name,
+                Product.sku,
+                Product.selling_price,
+                Product.mrp,
+                func.coalesce(func.sum(Inventory.quantity), 0).label("stock"),
+            )
+            .outerjoin(Inventory, (Inventory.product_id == Product.id) & (Inventory.tenant_id == tenant_id))
             .filter(Product.tenant_id == tenant_id, Product.is_active.is_(True))
+            .group_by(Product.id, Product.name, Product.sku, Product.selling_price, Product.mrp)
             .order_by(Product.selling_price.desc())
-            .limit(20)
+            .limit(50)
             .all()
         )
         products_sample = [
-            {"id": p[0], "name": p[1], "sku": p[2], "selling_price": float(p[3] or 0), "mrp": float(p[4] or 0)}
+            {
+                "id": p[0],
+                "name": p[1],
+                "sku": p[2],
+                "selling_price": float(p[3] or 0),
+                "mrp": float(p[4] or 0),
+                "stock": int(p[5] or 0),
+            }
             for p in prods_sample_q
         ]
 
@@ -1266,6 +1282,7 @@ class AIService:
 
         # Dynamic store matching using database store attributes and generic phonetic transliteration
         q_translit = self._transliterate_devanagari(q_clean)
+        generic_store_words = {"store", "shop", "retail", "mart", "branch", "dokan", "shakha", "outlet", "main"}
         matching_stores = []
         for s in all_stores:
             s_name = (s.get("name") or "").lower()
@@ -1279,8 +1296,17 @@ class AIService:
                 matching_stores.append(s)
             elif (s_code and s_code in q_clean):
                 matching_stores.append(s)
-            elif any(part in q_clean or part in q_translit for part in s_name.split() if len(part) > 3):
+            elif any(part in q_clean or part in q_translit for part in s_name.split() if len(part) > 3 and part.lower() not in generic_store_words):
                 matching_stores.append(s)
+
+        # Prioritize exact store name matches or store_id if multiple matches occur
+        exact_stores = [s for s in matching_stores if (s.get("name") or "").lower() in q_clean]
+        if exact_stores:
+            matching_stores = exact_stores
+        elif store_id is not None:
+            id_matched = [s for s in matching_stores if s.get("id") == store_id]
+            if id_matched:
+                matching_stores = id_matched
 
         # A. SPECIFIC BRANCH QUERY (e.g. 'कोल्हापूर शॉपबद्दलची सर्व डीटेल सांग', 'कोल्हापूर स्टोअरचा गल्ला सांग')
         if matching_stores:
@@ -1304,7 +1330,11 @@ class AIService:
                         f"• **शाखा प्रकार:** {branch_type}\n"
                         f"• **ठिकाण:** {target_store.get('address') or st_city}"
                     )
-                    speech_text = f"{st_name} चा आजचा एकूण गल्ला {int(rev)} रुपये असून आज {ords} ऑर्डर्स पूर्ण झाल्या आहेत."
+                    is_english = any(w in q_clean for w in ["today", "sales", "revenue", "figure", "what", "how"]) and not any('ऀ' <= char <= 'ॿ' for char in query_str)
+                    if is_english:
+                        speech_text = f"Today's total sales for {st_name} are {int(rev)} rupees across {ords} completed orders."
+                    else:
+                        speech_text = f"{st_name} चा आजचा एकूण गल्ला {int(rev)} रुपये असून आज {ords} ऑर्डर्स पूर्ण झाल्या आहेत."
                     return {"query": query_str, "intent": "today_sales", "answer": answer, "speech_text": speech_text, "data": st_data, "suggested_actions": ["View branch sales report", "Check stock at branch"]}
 
                 # Address / Contact for specific branch
@@ -1487,7 +1517,11 @@ class AIService:
                 f"एकूण पूर्ण झालेल्या ऑर्डर्स: **{cnt} ऑर्डर्स**\n\n"
                 f"तारीख: {today_start.strftime('%d %B %Y')}"
             )
-            speech_text = f"आजचा एकूण गल्ला {int(tot)} रुपये झाला असून एकूण {cnt} ऑर्डर्स पूर्ण झाल्या आहेत."
+            is_english = any(w in q_clean for w in ["today", "sales", "revenue", "figure", "figures", "how much", "what is", "what are"]) and not any('ऀ' <= char <= 'ॿ' for char in query_str)
+            if is_english:
+                speech_text = f"Today's total sales are {int(tot)} rupees across {cnt} completed orders."
+            else:
+                speech_text = f"आजचा एकूण गल्ला {int(tot)} रुपये झाला असून एकूण {cnt} ऑर्डर्स पूर्ण झाल्या आहेत."
             data = {"sales_amount": tot, "order_count": cnt, "date": today_start.strftime("%Y-%m-%d")}
             actions = ["View daily sales report", "Check cashier drawer closing status", "View active shifts"]
             return {"query": query_str, "intent": intent, "answer": answer, "speech_text": speech_text, "data": data, "suggested_actions": actions}
@@ -1683,7 +1717,7 @@ class AIService:
         context = self._get_copilot_context(tenant_id, store_id)
 
         # 1. Direct Multimodal Audio Input via Gemini (if raw audio bytes provided)
-        if audio_base64:
+        if audio_base64 and audio_base64.strip() and audio_base64.strip() != "string" and len(audio_base64.strip()) > 30:
             audio_res = self._call_gemini_audio_copilot(
                 audio_base64=audio_base64,
                 mime_type=audio_mime_type or "audio/webm",
@@ -1698,7 +1732,7 @@ class AIService:
 
         # 2. Text-based query from browser SpeechRecognition or fallback
         effective_query = (query_str or "").strip()
-        if not effective_query:
+        if not effective_query or effective_query == "string":
             effective_query = "आजचा एकूण गल्ला किती झाला?"
 
         base_res = self.chat_query(tenant_id, effective_query, store_id=store_id)

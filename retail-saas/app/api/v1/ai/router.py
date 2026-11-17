@@ -204,7 +204,13 @@ def voice_query(
     "/voice-assistant",
     response_class=HTMLResponse,
     summary="Interactive Voice AI Assistant Web Application",
-    description="Loads the real-time Voice AI Copilot interactive web interface with mic recording and speaker playback.",
+    description=(
+        "⚠️ **महत्त्वाचे (Please Note):** हा JSON डेटा API नसून हे **संपूर्ण वेब ॲप्लिकेशन (Interactive Web Page)** आहे.\n\n"
+        "Swagger UI मध्ये 'Execute' केल्यास फक्त कच्चा HTML कोड (Raw HTML Code) दिसेल.\n\n"
+        "👉 **मायक्रोफोन बटण दाबून बोलण्यासाठी ही लिंक थेट ब्राऊझरच्या नवीन टॅबमध्ये उघडा:**\n\n"
+        "🔗 **[http://127.0.0.1:8000/api/v1/ai/voice-assistant](http://127.0.0.1:8000/api/v1/ai/voice-assistant)**\n\n"
+        "*(किंवा शॉर्ट लिंक: [http://127.0.0.1:8000/voice-assistant](http://127.0.0.1:8000/voice-assistant))*"
+    ),
 )
 def voice_assistant_page():
     return HTMLResponse(content=get_voice_assistant_html())
