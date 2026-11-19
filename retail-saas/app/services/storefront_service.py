@@ -297,15 +297,39 @@ class StorefrontService:
         if not cart.items:
             raise AppException("Your cart is empty. Please add items before checkout.")
 
-        # Find store for this tenant (main store or first active store)
-        store = (
-            self.db.query(Store)
-            .filter(Store.tenant_id == tenant_id, Store.is_active.is_(True))
-            .order_by(Store.is_main.desc(), Store.id.asc())
-            .first()
-        )
+        # Find store for this tenant (specified in payload, or main store, or first active store)
+        store = None
+        if getattr(payload, "store_id", None):
+            store = (
+                self.db.query(Store)
+                .filter(Store.id == payload.store_id, Store.tenant_id == tenant_id, Store.is_active.is_(True))
+                .first()
+            )
+        if not store:
+            store = (
+                self.db.query(Store)
+                .filter(Store.tenant_id == tenant_id, Store.is_active.is_(True))
+                .order_by(Store.is_main.desc(), Store.id.asc())
+                .first()
+            )
         if not store:
             raise NotFoundException("Store outlet not available for checkout")
+
+        # Validate stock availability in the store before placing order
+        for item in cart.items:
+            inv = (
+                self.db.query(Inventory)
+                .filter(
+                    Inventory.tenant_id == tenant_id,
+                    Inventory.store_id == store.id,
+                    Inventory.product_id == item.product_id,
+                )
+                .first()
+            )
+            if inv is not None and inv.quantity < item.quantity:
+                raise AppException(
+                    f"Product '{item.name}' has insufficient stock in {store.name} (Available: {inv.quantity}, Requested: {item.quantity})"
+                )
 
         # Resolve delivery address
         final_address = payload.delivery_address or customer.address or "Store Pickup Counter"
@@ -367,6 +391,44 @@ class StorefrontService:
                 notes=f"Online item: {item.name}",
             )
             self.db.add(order_item)
+
+        # Create Delivery and Tracking records
+        try:
+            from app.models.delivery import Delivery
+            from app.models.order import OrderTracking
+            delivery = Delivery(
+                tenant_id=tenant_id,
+                order_id=order.id,
+                status="pending",
+            )
+            self.db.add(delivery)
+
+            tracking = OrderTracking(
+                order_id=order.id,
+                status="pending",
+                remarks=f"Online order placed via Storefront ({payload.delivery_type.capitalize()})",
+            )
+            self.db.add(tracking)
+        except Exception as e:
+            logger.warning(f"Delivery/Tracking record creation skipped: {e}")
+
+        # Deduct inventory stock for the store
+        try:
+            from app.schemas.inventory import StockOutRequest
+            from app.services.inventory_service import InventoryService
+            inv_service = InventoryService(self.db)
+            for item in cart.items:
+                inv_service.stock_out(
+                    tenant_id=tenant_id,
+                    data=StockOutRequest(
+                        store_id=store.id,
+                        product_id=item.product_id,
+                        quantity=item.quantity,
+                    ),
+                    commit=False,
+                )
+        except Exception as e:
+            logger.warning(f"Stock deduction skipped or unmanaged for storefront items: {e}")
 
         # Clear cart upon order creation
         self.clear_cart(tenant_id, customer.id)

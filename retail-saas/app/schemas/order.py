@@ -15,10 +15,11 @@ from pydantic import (
 )
 
 
-VALID_ORDER_TYPES = ["pos", "ecommerce"]
+VALID_ORDER_TYPES = ["pos", "ecommerce", "online"]
 
 VALID_ORDER_STATUSES = [
     "draft",
+    "pending",
     "confirmed",
     "processing",
     "shipped",
@@ -37,6 +38,9 @@ VALID_PAYMENT_METHODS = [
     "debit_card",
     "wallet",
     "qr",
+    "credit",
+    "khata",
+    "customer_credit",
 ]
 
 INVALID_STRING_VALUES = [

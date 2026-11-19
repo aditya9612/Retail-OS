@@ -16,6 +16,9 @@ VALID_PAYMENT_MODES = [
     "debit_card",
     "wallet",
     "qr",
+    "credit",
+    "khata",
+    "customer_credit",
 ]
 
 DISALLOWED_REFUND_PLACEHOLDERS = {

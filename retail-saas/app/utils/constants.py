@@ -34,6 +34,7 @@ OFFICIAL_ROLES = [r.value for r in RoleEnum]
 
 class OrderStatus(str, Enum):
     DRAFT = "draft"
+    PENDING = "pending"
     CONFIRMED = "confirmed"
     PROCESSING = "processing"
     SHIPPED = "shipped"
@@ -46,6 +47,7 @@ class OrderStatus(str, Enum):
 class OrderType(str, Enum):
     POS = "pos"
     ECOMMERCE = "ecommerce"
+    ONLINE = "online"
 
 
 class PaymentMethod(str, Enum):

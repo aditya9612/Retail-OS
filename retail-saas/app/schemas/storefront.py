@@ -365,6 +365,10 @@ class StorefrontCartResponse(BaseModel):
 
 
 class StorefrontCheckoutRequest(BaseModel):
+    store_id: Optional[int] = Field(
+        default=None,
+        description="Preferred store branch outlet ID for fulfillment (defaults to main store)",
+    )
     delivery_type: Literal["delivery", "pickup"] = Field(
         default="delivery",
         description="Delivery type: 'delivery' (Home Delivery) or 'pickup' (Store Pickup)",

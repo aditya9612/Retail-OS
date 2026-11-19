@@ -1066,6 +1066,11 @@ class OrderService:
                 OrderStatus.CONFIRMED.value,
                 OrderStatus.CANCELLED.value,
             },
+            OrderStatus.PENDING.value: {
+                OrderStatus.CONFIRMED.value,
+                OrderStatus.PROCESSING.value,
+                OrderStatus.CANCELLED.value,
+            },
             OrderStatus.CONFIRMED.value: {
                 OrderStatus.PROCESSING.value,
                 OrderStatus.SHIPPED.value,
@@ -1120,6 +1125,23 @@ class OrderService:
                 coupon.used_count += 1
 
         order.status = status
+
+        if status == OrderStatus.DELIVERED.value and order.customer_id is not None:
+            try:
+                from app.models.customer import Customer, LoyaltyPoint
+                customer = self.db.query(Customer).filter(Customer.id == order.customer_id, Customer.tenant_id == tenant_id).first()
+                if customer:
+                    pts = int(order.total_amount // Decimal("100"))
+                    if pts > 0:
+                        customer.loyalty_points = (customer.loyalty_points or 0) + pts
+                        loyalty_entry = LoyaltyPoint(
+                            customer_id=customer.id,
+                            points_earned=pts,
+                            points_redeemed=0,
+                        )
+                        self.db.add(loyalty_entry)
+            except Exception:
+                pass
 
         tracking = OrderTracking(
             order_id=order.id,
