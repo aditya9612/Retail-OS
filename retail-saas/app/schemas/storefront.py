@@ -293,3 +293,153 @@ class StorefrontUploadResponse(BaseModel):
     asset_type: str
     url: str
     message: str = "Asset uploaded successfully"
+
+
+# ============================================================
+# CUSTOMER STOREFRONT & SHOPPING SCHEMAS
+# ============================================================
+
+from datetime import datetime
+from decimal import Decimal
+from typing import List, Literal
+from pydantic import ConfigDict
+
+
+class StorefrontCategoryItem(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StorefrontProductItem(BaseModel):
+    id: int
+    name: str
+    sku: str
+    price: Decimal
+    mrp: Decimal
+    unit: str = "pcs"
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
+    in_stock: bool = True
+    stock_quantity: int = 0
+    image_url: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StorefrontProductListResponse(BaseModel):
+    items: List[StorefrontProductItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class StorefrontCartItemRequest(BaseModel):
+    product_id: int = Field(..., gt=0, description="Product ID to add")
+    quantity: int = Field(default=1, ge=1, le=100, description="Quantity")
+
+
+class StorefrontCartItemUpdate(BaseModel):
+    quantity: int = Field(..., ge=0, le=100, description="New quantity (0 removes item)")
+
+
+class StorefrontCartItemResponse(BaseModel):
+    product_id: int
+    name: str
+    unit_price: Decimal
+    quantity: int
+    total_price: Decimal
+    unit: str = "pcs"
+    image_url: Optional[str] = None
+
+
+class StorefrontCartResponse(BaseModel):
+    items: List[StorefrontCartItemResponse] = []
+    subtotal: Decimal = Decimal("0.00")
+    discount_amount: Decimal = Decimal("0.00")
+    tax_amount: Decimal = Decimal("0.00")
+    total_amount: Decimal = Decimal("0.00")
+    total_items: int = 0
+
+
+class StorefrontCheckoutRequest(BaseModel):
+    delivery_type: Literal["delivery", "pickup"] = Field(
+        default="delivery",
+        description="Delivery type: 'delivery' (Home Delivery) or 'pickup' (Store Pickup)",
+    )
+    delivery_address: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Delivery address (defaults to customer address if omitted)",
+    )
+    payment_method: Literal["cod", "upi", "wallet"] = Field(
+        default="cod",
+        description="Payment mode: 'cod' (Cash on Delivery), 'upi' (UPI payment), 'wallet' (Customer wallet)",
+    )
+    notes: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Special instructions or notes for the store",
+    )
+
+
+class StorefrontCheckoutResponse(BaseModel):
+    order_id: int
+    order_number: str
+    status: str
+    total_amount: Decimal
+    delivery_type: str
+    payment_method: str
+    payment_status: str
+    message: str
+    created_at: datetime
+
+
+class StorefrontOrderSummary(BaseModel):
+    id: int
+    order_number: str
+    status: str
+    order_type: str
+    total_amount: Decimal
+    payment_method: Optional[str] = None
+    payment_status: str
+    items_count: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StorefrontOrderDetailResponse(BaseModel):
+    id: int
+    order_number: str
+    status: str
+    subtotal: Decimal
+    tax_amount: Decimal
+    discount_amount: Decimal = Decimal("0.00")
+    total_amount: Decimal
+    payment_method: Optional[str] = None
+    payment_status: str
+    notes: Optional[str] = None
+    delivery_address: Optional[str] = None
+    created_at: datetime
+    items: List[dict] = []
+    invoice_url: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StorefrontCustomerProfileResponse(BaseModel):
+    customer_id: int
+    name: str
+    phone: str
+    email: Optional[str] = None
+    address: Optional[str] = None
+    loyalty_points: int = 0
+    wallet_balance: Decimal = Decimal("0.00")
+    outstanding_balance: Decimal = Decimal("0.00")
+    credit_limit: Decimal = Decimal("0.00")
+    status: str = "active"
+
+    model_config = ConfigDict(from_attributes=True)

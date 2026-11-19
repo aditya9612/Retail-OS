@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import (
+    get_authenticated_entity,
     get_current_user,
     security_scheme,
 )
@@ -326,10 +327,10 @@ def mobile_pin_login(
 )
 def pin_setup(
     data: PINSetupRequest,
-    current_user: User = Depends(get_current_user),
+    current_entity = Depends(get_authenticated_entity),
     db: Session = Depends(get_db),
 ):
-    message = AuthService(db).pin_setup(current_user, data)
+    message = AuthService(db).pin_setup(current_entity, data)
     return {
         "success": True,
         "message": message,
@@ -344,10 +345,10 @@ def pin_setup(
 )
 def pin_change(
     data: PINChangeRequest,
-    current_user: User = Depends(get_current_user),
+    current_entity = Depends(get_authenticated_entity),
     db: Session = Depends(get_db),
 ):
-    message = AuthService(db).pin_change(current_user, data)
+    message = AuthService(db).pin_change(current_entity, data)
     return {
         "success": True,
         "message": message,

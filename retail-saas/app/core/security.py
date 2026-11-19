@@ -257,6 +257,9 @@ def get_current_user(
             "Token has been revoked"
         )
 
+    if payload.get("role") == "customer":
+        raise ForbiddenException("Customer accounts cannot access staff operations")
+
     user_id = payload.get("sub")
     tenant_id = payload.get("tenant_id")
 
@@ -520,3 +523,99 @@ def is_tenant_wide_authorized(user: Optional[User], db: Optional[Session] = None
         if "*" in permissions:
             return True
     return False
+
+
+def get_current_customer(
+    request: Request = None,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
+    db: Session = Depends(get_db),
+):
+    from app.models.customer import Customer
+
+    token = credentials.credentials if credentials else None
+    if not token and request is not None:
+        token = request.query_params.get("token")
+
+    if not token:
+        raise UnauthorizedException("Authentication token required")
+
+    payload = decode_token(token)
+
+    if payload.get("type") != "access":
+        raise UnauthorizedException("Invalid token type")
+
+    if is_token_blacklisted(token):
+        raise UnauthorizedException("Token has been revoked")
+
+    role = payload.get("role")
+    if role != "customer":
+        raise ForbiddenException("Access restricted to customers")
+
+    customer_id = payload.get("customer_id") or payload.get("sub")
+    tenant_id = payload.get("tenant_id")
+
+    if not customer_id:
+        raise UnauthorizedException("Invalid customer ID")
+
+    try:
+        customer_id = int(customer_id)
+    except (TypeError, ValueError) as exc:
+        raise UnauthorizedException("Invalid customer ID") from exc
+
+    customer = (
+        db.query(Customer)
+        .filter(
+            Customer.id == customer_id,
+            Customer.tenant_id == tenant_id,
+            Customer.status == "active",
+        )
+        .first()
+    )
+
+    if not customer:
+        raise UnauthorizedException("Customer account not found or inactive")
+
+    return customer
+
+
+def get_authenticated_entity(
+    request: Request = None,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
+    db: Session = Depends(get_db),
+):
+    """Returns either authenticated User or Customer based on token role."""
+    token = credentials.credentials if credentials else None
+    if not token and request is not None:
+        token = request.query_params.get("token")
+
+    if not token:
+        raise UnauthorizedException("Authentication token required")
+
+    payload = decode_token(token)
+    if payload.get("type") != "access":
+        raise UnauthorizedException("Invalid token type")
+
+    if is_token_blacklisted(token):
+        raise UnauthorizedException("Token has been revoked")
+
+    role = payload.get("role")
+    if role == "customer":
+        customer_id = payload.get("customer_id") or payload.get("sub")
+        tenant_id = payload.get("tenant_id")
+        from app.models.customer import Customer
+        customer = (
+            db.query(Customer)
+            .filter(
+                Customer.id == int(customer_id),
+                Customer.tenant_id == int(tenant_id),
+                Customer.status == "active",
+            )
+            .first()
+        )
+        if not customer:
+            raise UnauthorizedException("Customer account not found or inactive")
+        if customer.tenant_id:
+            set_current_tenant_id(customer.tenant_id)
+        return customer
+    else:
+        return get_current_user(request=request, credentials=credentials, db=db)

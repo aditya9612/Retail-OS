@@ -49,6 +49,7 @@ from app.api.v1.document_settings.router import router as document_settings_rout
 from app.api.v1.pos.router import router as pos_router
 from app.api.v1.variants.router import router as variants_router
 from app.api.v1.customer_support.router import router as customer_support_router
+from app.api.v1.storefront.router import router as storefront_router
 
 from app.core.config import get_settings
 from app.core.database import init_db, SessionLocal
@@ -533,6 +534,7 @@ app.include_router(variants_router, prefix=API_PREFIX)
 
 # Customer Support & Returns AI Chatbot APIs
 app.include_router(customer_support_router, prefix=API_PREFIX)
+app.include_router(storefront_router, prefix=API_PREFIX)
 
 
 # =========================
