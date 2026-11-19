@@ -162,7 +162,7 @@ def process_webhook(
 @router.post("/webhooks", response_model=PaymentWebhookLogResponse, status_code=status.HTTP_201_CREATED)
 def create_webhook_log(
     data: PaymentWebhookLogCreate,
-    user: User = Depends(require_permission("payments:write")),
+    user: User = Depends(require_permission("payments:create")),
     service: PaymentService = Depends(get_payment_service),
 ):
     return service.create_webhook_log(data)
@@ -202,7 +202,7 @@ def get_webhook_log(log_id: int, user: User = Depends(require_permission("paymen
 )
 def create_payment_gateway(
     data: PaymentGatewayCreate,
-    user: User = Depends(require_permission("payments:write")),
+    user: User = Depends(require_permission("payments:create")),
     service: PaymentService = Depends(get_payment_service),
 ):
     return service.create_gateway(data)
@@ -222,12 +222,12 @@ def get_payment_gateway(gateway_id: int, user: User = Depends(require_permission
 
 
 @router.put("/payment-gateways/{gateway_id}", response_model=PaymentGatewayResponse)
-def update_payment_gateway(gateway_id: int, data: PaymentGatewayUpdate, user: User = Depends(require_permission("payments:write")), service: PaymentService = Depends(get_payment_service)):
+def update_payment_gateway(gateway_id: int, data: PaymentGatewayUpdate, user: User = Depends(require_permission("payments:update")), service: PaymentService = Depends(get_payment_service)):
     return service.update_gateway(gateway_id, data)
 
 
 @router.delete("/payment-gateways/{gateway_id}")
-def delete_payment_gateway(gateway_id: int, user: User = Depends(require_permission("payments:write")), service: PaymentService = Depends(get_payment_service)):
+def delete_payment_gateway(gateway_id: int, user: User = Depends(require_permission("payments:delete")), service: PaymentService = Depends(get_payment_service)):
     return service.delete_gateway(gateway_id)
 
 
@@ -238,7 +238,7 @@ def delete_payment_gateway(gateway_id: int, user: User = Depends(require_permiss
 )
 def create_payment_split(
     data: PaymentSplitCreate,
-    user: User = Depends(require_permission("payments:write")),
+    user: User = Depends(require_permission("payments:create")),
     service: PaymentService = Depends(get_payment_service),
 ):
     return service.create_payment_split(data)
@@ -264,7 +264,7 @@ def get_payment_split(split_id: int, user: User = Depends(require_permission("pa
 )
 def create_settlement(
     data: SettlementCreate,
-    user: User = Depends(require_permission("payments:write")),
+    user: User = Depends(require_permission("payments:create")),
     service: PaymentService = Depends(get_payment_service),
 ):
     return service.create_settlement(data)
@@ -311,5 +311,5 @@ def get_payment(payment_id: int, user: User = Depends(require_permission("paymen
 
 
 @router.post("/{payment_id}/verify", response_model=PaymentResponse)
-def verify_payment(payment_id: int, data: PaymentVerify, user: User = Depends(require_permission("payments:write")), service: PaymentService = Depends(get_payment_service)):
+def verify_payment(payment_id: int, data: PaymentVerify, user: User = Depends(require_permission("payments:create")), service: PaymentService = Depends(get_payment_service)):
     return service.verify_payment_service(payment_id, data)

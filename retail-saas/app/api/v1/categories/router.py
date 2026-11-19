@@ -29,7 +29,7 @@ router = APIRouter(prefix="/categories", tags=["categories"])
 )
 def create_category(
     data: CategoryCreate,
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:create")),
     db: Session = Depends(get_db),
 ):
     return CategoryService(db).create_category(
@@ -180,7 +180,7 @@ def update_category(
         gt=0,
         description="Category ID must be greater than 0",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return CategoryService(db).update_category(
@@ -200,7 +200,7 @@ def activate_category(
         gt=0,
         description="Category ID must be greater than 0",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return CategoryService(db).set_category_active(
@@ -220,7 +220,7 @@ def deactivate_category(
         gt=0,
         description="Category ID must be greater than 0",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return CategoryService(db).set_category_active(
@@ -240,7 +240,7 @@ def delete_category(
         gt=0,
         description="Category ID must be greater than 0",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:delete")),
     db: Session = Depends(get_db),
 ):
     result = CategoryService(db).delete_category(

@@ -30,7 +30,7 @@ router = APIRouter(
 def create_target(
     data: StoreTargetCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("stores:write")),
+    current_user: User = Depends(require_permission("stores:create")),
 ):
     return StoreTargetService.create_target(
         db=db,
@@ -194,7 +194,7 @@ def update_target(
     target_id: int = Path(..., gt=0, description="The ID of the store target to update"),
     data: StoreTargetUpdate = ...,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("stores:write")),
+    current_user: User = Depends(require_permission("stores:update")),
 ):
     return StoreTargetService.update_target(
         db=db,
@@ -216,7 +216,7 @@ def patch_target(
     target_id: int = Path(..., gt=0, description="The ID of the store target to update"),
     data: StoreTargetUpdate = ...,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("stores:write")),
+    current_user: User = Depends(require_permission("stores:update")),
 ):
     return StoreTargetService.update_target(
         db=db,
@@ -236,7 +236,7 @@ def patch_target(
 def delete_target(
     target_id: int = Path(..., gt=0, description="The ID of the store target to delete"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("stores:write")),
+    current_user: User = Depends(require_permission("stores:delete")),
 ):
     StoreTargetService.delete_target(
         db=db,

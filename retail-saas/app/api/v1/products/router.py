@@ -619,7 +619,7 @@ def _raise_validation_error(val_err: ValidationError) -> None:
 )
 async def create_product(
     request: Request,
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:create")),
     db: Session = Depends(get_db),
 ):
     ct = request.headers.get("content-type", "")
@@ -778,7 +778,7 @@ async def create_product(
     dependencies=[Depends(require_operational_write)],
 )
 def generate_missing_barcodes(
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:create")),
     db: Session = Depends(get_db),
 ):
     return ProductService(db).generate_missing_barcodes(
@@ -817,7 +817,7 @@ def get_catalog_summary(
 )
 def bulk_create_products(
     payload: ProductBulkCreateRequest,
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:create")),
     db: Session = Depends(get_db),
 ):
     return ProductService(db).bulk_create_products(
@@ -1068,7 +1068,7 @@ async def update_product(
     product_id: int,
     request: Request,
     user: User = Depends(
-        require_permission("products:write")
+        require_permission("products:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -1211,7 +1211,7 @@ async def update_product(
 def toggle_product_status(
     product_id: int,
     user: User = Depends(
-        require_permission("products:write")
+        require_permission("products:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -1448,7 +1448,7 @@ def generate_product_barcode(
         default=False,
         description="Set to true to explicitly overwrite an existing barcode",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:create")),
     db: Session = Depends(get_db),
 ):
     return ProductService(db).generate_barcode_for_product(
@@ -1471,7 +1471,7 @@ def generate_product_barcode(
 def delete_product(
     product_id: int,
     user: User = Depends(
-        require_permission("products:write")
+        require_permission("products:delete")
     ),
     db: Session = Depends(get_db),
 ):
@@ -1556,7 +1556,7 @@ async def add_product_image(
     product_id: int,
     request: Request,
     user: User = Depends(
-        require_permission("products:write")
+        require_permission("products:create")
     ),
     db: Session = Depends(get_db),
 ):
@@ -1715,7 +1715,7 @@ def delete_product_image(
     product_id: int,
     image_id: int,
     user: User = Depends(
-        require_permission("products:write")
+        require_permission("products:delete")
     ),
     db: Session = Depends(get_db),
 ):

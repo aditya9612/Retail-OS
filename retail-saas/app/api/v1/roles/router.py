@@ -122,7 +122,7 @@ def list_role_users(
 )
 def create_role(
     data: RoleCreate,
-    current_user: User = Depends(require_permission("users:write")),
+    current_user: User = Depends(require_permission("users:create")),
     db: Session = Depends(get_db),
 ):
     if current_user.store_id is not None:
@@ -140,7 +140,7 @@ def create_role(
 def reassign_role_users(
     role_id: Annotated[int, Path(gt=0, le=999999, description="Source Role ID")],
     data: RoleReassignUsersRequest,
-    current_user: User = Depends(require_permission("users:write")),
+    current_user: User = Depends(require_permission("users:create")),
     db: Session = Depends(get_db),
 ):
     if current_user.store_id is not None:
@@ -161,7 +161,7 @@ def reassign_role_users(
 )
 def reset_role_to_default(
     role_id: Annotated[int, Path(gt=0, le=999999, description="Role ID to reset")],
-    current_user: User = Depends(require_permission("users:write")),
+    current_user: User = Depends(require_permission("users:create")),
     db: Session = Depends(get_db),
 ):
     if current_user.store_id is not None:
@@ -187,7 +187,7 @@ def reset_role_to_default(
 def update_role(
     role_id: Annotated[int, Path(gt=0, le=999999, description="Role ID must be a positive integer up to 999999")],
     data: RoleUpdate,
-    current_user: User = Depends(require_permission("users:write")),
+    current_user: User = Depends(require_permission("users:update")),
     db: Session = Depends(get_db),
 ):
     if current_user.store_id is not None:
@@ -208,7 +208,7 @@ def update_role(
 )
 def delete_role(
     role_id: Annotated[int, Path(gt=0, le=999999, description="Role ID must be a positive integer up to 999999")],
-    current_user: User = Depends(require_permission("users:write")),
+    current_user: User = Depends(require_permission("users:delete")),
     db: Session = Depends(get_db),
 ):
     if current_user.store_id is not None:

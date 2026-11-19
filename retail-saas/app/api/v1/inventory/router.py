@@ -77,7 +77,7 @@ def low_stock(
 @router.post("/stock-in", response_model=StockInResponse, status_code=201, dependencies=[Depends(require_operational_write)])
 def stock_in(
     data: StockInRequest,
-    user: User = Depends(require_permission("inventory:write")),
+    user: User = Depends(require_permission("inventory:create")),
     db: Session = Depends(get_db),
 ):
     return InventoryService(db).stock_in(user.tenant_id, data)
@@ -86,7 +86,7 @@ def stock_in(
 @router.post("/stock-out", response_model=StockMovementResponse, status_code=201, dependencies=[Depends(require_operational_write)])
 def stock_out(
     data: StockOutRequest,
-    user: User = Depends(require_permission("inventory:write")),
+    user: User = Depends(require_permission("inventory:create")),
     db: Session = Depends(get_db),
 ):
     return InventoryService(db).stock_out(user.tenant_id, data)
@@ -95,7 +95,7 @@ def stock_out(
 @router.post("/transfer", response_model=StockMovementResponse, status_code=201, dependencies=[Depends(require_operational_write)])
 def transfer_stock(
     data: StockTransferRequest,
-    user: User = Depends(require_permission("inventory:write")),
+    user: User = Depends(require_permission("inventory:create")),
     db: Session = Depends(get_db),
 ):
     return InventoryService(db).transfer_stock(user.tenant_id, data)
@@ -104,7 +104,7 @@ def transfer_stock(
 @router.post("/bulk-adjust", response_model=BulkInventoryAdjustmentResponse, status_code=201, dependencies=[Depends(require_operational_write)])
 def bulk_adjust_inventory(
     data: BulkInventoryAdjustmentRequest,
-    user: User = Depends(require_permission("inventory:write")),
+    user: User = Depends(require_permission("inventory:create")),
     db: Session = Depends(get_db),
 ):
     return InventoryService(db).bulk_adjust_inventory(
@@ -170,7 +170,7 @@ def list_movements(
 @router.post("/adjustment", response_model=StockMovementResponse, status_code=201, dependencies=[Depends(require_operational_write)])
 def adjust_inventory(
     data: InventoryAdjustmentRequest,
-    user: User = Depends(require_permission("inventory:write")),
+    user: User = Depends(require_permission("inventory:create")),
     db: Session = Depends(get_db),
 ):
     return InventoryService(db).adjust_inventory(

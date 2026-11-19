@@ -93,7 +93,7 @@ def get_whatsapp_settings(
 )
 def update_whatsapp_settings(
     payload: WhatsAppSettingUpdate,
-    user: User = Depends(require_permission("stores:write")),
+    user: User = Depends(require_permission("stores:update")),
     db: Session = Depends(get_db),
 ):
     setting = (
@@ -134,7 +134,7 @@ def update_whatsapp_settings(
 )
 def test_whatsapp_connection(
     payload: WhatsAppTestRequest,
-    user: User = Depends(require_permission("stores:write")),
+    user: User = Depends(require_permission("stores:create")),
     db: Session = Depends(get_db),
 ):
     service = WhatsAppService(db=db, tenant_id=user.tenant_id)
@@ -205,7 +205,7 @@ def send_invoice_via_whatsapp(
 )
 def send_message(
     data: WhatsAppSendCustomRequest,
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("orders:create")),
 ):
     task = send_whatsapp_message_task.delay(
         phone=data.phone,
@@ -232,7 +232,7 @@ def send_message(
 )
 def ocr_grocery_list(
     payload: HandwrittenGroceryOcrRequest,
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("orders:create")),
     db: Session = Depends(get_db),
 ):
     service = WhatsAppOrderingService(db=db)
@@ -259,7 +259,7 @@ async def ocr_grocery_list_upload(
     recipient_phone: Optional[str] = Query(default=None),
     auto_create_order: bool = Query(default=True),
     store_id: Optional[int] = Query(default=None),
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("orders:create")),
     db: Session = Depends(get_db),
 ):
     file_bytes = await file.read()
@@ -294,7 +294,7 @@ async def ocr_grocery_list_upload(
 )
 def conversational_order(
     payload: WhatsAppChatOrderRequest,
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("orders:create")),
     db: Session = Depends(get_db),
 ):
     service = WhatsAppOrderingService(db=db)
@@ -344,7 +344,7 @@ def list_pending_khata_customers(
 def send_khata_reminder_endpoint(
     customer_id: int,
     payload: Optional[KhataReminderRequest] = None,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     service = SmartKhataService(db=db, tenant_id=user.tenant_id, store_id=user.store_id)
@@ -359,7 +359,7 @@ def send_khata_reminder_endpoint(
 )
 def broadcast_khata_reminders_endpoint(
     payload: Optional[KhataReminderBroadcastRequest] = None,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     min_bal = payload.min_balance if payload else 100.0
@@ -384,7 +384,7 @@ def broadcast_khata_reminders_endpoint(
 )
 def process_khata_reply_endpoint(
     payload: KhataProcessReplyRequest,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     service = SmartKhataService(db=db, tenant_id=user.tenant_id, store_id=user.store_id)

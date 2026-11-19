@@ -39,7 +39,7 @@ router = APIRouter(
 )
 def create_grn(
     data: GRNCreate,
-    user: User = Depends(require_permission("grn:write")),
+    user: User = Depends(require_permission("grn:create")),
     db: Session = Depends(get_db),
 ):
     return GRNService(db).create(
@@ -145,7 +145,7 @@ def get_grn(
 def quality_check_grn(
     grn_id: int,
     data: GRNQualityCheckRequest,
-    user: User = Depends(require_permission("grn:write")),
+    user: User = Depends(require_permission("grn:create")),
     db: Session = Depends(get_db),
 ):
     return GRNService(db).quality_check(
@@ -162,7 +162,7 @@ def quality_check_grn(
 )
 def receive_grn(
     grn_id: int,
-    user: User = Depends(require_permission("grn:write")),
+    user: User = Depends(require_permission("grn:create")),
     db: Session = Depends(get_db),
 ):
     return GRNService(db).receive(
@@ -181,7 +181,7 @@ def reject_grn(
     grn_id: int,
     data: Optional[GRNRejectRequest] = None,
     reason: Optional[str] = Query(None, description="Optional rejection reason in query"),
-    user: User = Depends(require_permission("grn:write")),
+    user: User = Depends(require_permission("grn:create")),
     db: Session = Depends(get_db),
 ):
     if reason is not None:
@@ -212,7 +212,7 @@ def reject_grn(
 )
 def delete_grn(
     grn_id: int,
-    user: User = Depends(require_permission("grn:write")),
+    user: User = Depends(require_permission("grn:delete")),
     db: Session = Depends(get_db),
 ):
     return GRNService(db).delete(

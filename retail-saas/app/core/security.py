@@ -420,8 +420,18 @@ def require_permission(*permissions: str):
             else []
         )
 
-        if "*" in perms or any(p in perms for p in permissions):
+        if "*" in perms:
             return user
+
+        for p in permissions:
+            if p in perms:
+                return user
+            # Backward compatibility: if user has broad "module:write" and endpoint requires "module:create", "module:update", or "module:delete"
+            parts = p.split(":")
+            if len(parts) == 2 and parts[1] in ("create", "update", "delete"):
+                broad_write = f"{parts[0]}:write"
+                if broad_write in perms:
+                    return user
 
         # Backward compatibility for existing owner and admin roles in DB
         if user.role and user.role.name in ["admin", "owner"] and any(

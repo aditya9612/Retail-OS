@@ -36,7 +36,7 @@ router = APIRouter(
 def create_purchase_order_return(
     data: PurchaseOrderReturnCreate,
     user: User = Depends(
-        require_permission("purchase_orders:write")
+        require_permission("purchase_orders:create")
     ),
     db: Session = Depends(get_db),
 ):
@@ -231,7 +231,7 @@ def update_purchase_order_return(
     return_id: int,
     data: PurchaseOrderReturnUpdate,
     user: User = Depends(
-        require_permission("purchase_orders:write")
+        require_permission("purchase_orders:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -253,7 +253,7 @@ def update_purchase_order_return_status(
     return_id: int,
     data: PurchaseOrderReturnStatusUpdate,
     user: User = Depends(
-        require_permission("purchase_orders:write")
+        require_permission("purchase_orders:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -275,7 +275,7 @@ def update_purchase_order_return_status(
 def approve_purchase_order_return(
     return_id: int,
     user: User = Depends(
-        require_permission("purchase_orders:write")
+        require_permission("purchase_orders:create")
     ),
     db: Session = Depends(get_db),
 ):
@@ -297,7 +297,7 @@ def reject_purchase_order_return(
     return_id: int,
     data: Optional[PurchaseOrderReturnRejectRequest] = None,
     user: User = Depends(
-        require_permission("purchase_orders:write")
+        require_permission("purchase_orders:create")
     ),
     db: Session = Depends(get_db),
 ):
@@ -319,7 +319,7 @@ def reject_purchase_order_return(
 def complete_purchase_order_return(
     return_id: int,
     user: User = Depends(
-        require_permission("purchase_orders:write")
+        require_permission("purchase_orders:create")
     ),
     db: Session = Depends(get_db),
 ):
@@ -339,7 +339,7 @@ def complete_purchase_order_return(
 def delete_purchase_order_return(
     return_id: int = Path(..., gt=0, description="Purchase Order Return ID must be a positive integer"),
     user: User = Depends(
-        require_permission("purchase_orders:write")
+        require_permission("purchase_orders:delete")
     ),
     db: Session = Depends(get_db),
 ):

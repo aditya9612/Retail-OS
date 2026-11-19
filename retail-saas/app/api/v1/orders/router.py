@@ -59,7 +59,7 @@ def list_orders(
 @router.post("", response_model=OrderResponse, status_code=201, dependencies=[Depends(require_operational_write)])
 def create_order(
     data: OrderCreate,
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("orders:create")),
     db: Session = Depends(get_db),
 ):
     if user.store_id is not None and data.store_id != user.store_id:
@@ -72,7 +72,7 @@ def create_order(
 @router.post("/pos-checkout", response_model=POSCheckoutResponse, status_code=201, dependencies=[Depends(require_operational_write)])
 def pos_checkout(
     data: POSCheckoutRequest,
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("orders:create")),
     db: Session = Depends(get_db),
 ):
     return OrderService(db).pos_checkout(user.tenant_id, user.id, data)
@@ -146,7 +146,7 @@ def get_order(
 def update_order(
     order_id: int,
     data: OrderUpdate,
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("orders:update")),
     db: Session = Depends(get_db),
 ):
     return OrderService(db).update_order(user.tenant_id, order_id, data)
@@ -156,7 +156,7 @@ def update_order(
 def add_order_items(
     order_id: int,
     data: OrderAddItemsRequest,
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("orders:create")),
     db: Session = Depends(get_db),
 ):
     return OrderService(db).add_order_items(user.tenant_id, order_id, data.items)
@@ -249,7 +249,7 @@ def get_order_receipt(
 @router.post("/{order_id}/confirm", response_model=OrderResponse, dependencies=[Depends(require_operational_write)])
 def confirm_order(
     order_id: int,
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("orders:create")),
     db: Session = Depends(get_db),
 ):
     return OrderService(db).confirm_order(user.tenant_id, order_id)
@@ -259,7 +259,7 @@ def confirm_order(
 def cancel_order(
     order_id: int,
     restore_stock: bool = Query(False, description="Restore reserved inventory back to stock upon cancellation"),
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("orders:create")),
     db: Session = Depends(get_db),
 ):
     return OrderService(db).cancel_order(user.tenant_id, order_id, restore_stock=restore_stock)
@@ -269,7 +269,7 @@ def cancel_order(
 def update_order_status(
     order_id: int,
     data: OrderStatusUpdateRequest,
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("orders:update")),
     db: Session = Depends(get_db),
 ):
     return OrderService(db).update_order_status(

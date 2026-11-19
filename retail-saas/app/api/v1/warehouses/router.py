@@ -32,7 +32,7 @@ router = APIRouter(
 def create_warehouse(
     data: WarehouseCreate,
     user: User = Depends(
-        require_permission("warehouses:write")
+        require_permission("warehouses:create")
     ),
     db: Session = Depends(get_db),
 ):
@@ -134,7 +134,7 @@ def update_warehouse(
         description="Warehouse ID must be a positive integer",
     ),
     user: User = Depends(
-        require_permission("warehouses:write")
+        require_permission("warehouses:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -157,7 +157,7 @@ def update_warehouse_status(
         description="Warehouse ID must be a positive integer",
     ),
     user: User = Depends(
-        require_permission("warehouses:write")
+        require_permission("warehouses:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -246,7 +246,7 @@ def delete_warehouse(
         description="Warehouse ID must be a positive integer",
     ),
     user: User = Depends(
-        require_permission("warehouses:write")
+        require_permission("warehouses:delete")
     ),
     db: Session = Depends(get_db),
 ):

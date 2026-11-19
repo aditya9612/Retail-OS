@@ -31,7 +31,7 @@ router = APIRouter(
 )
 def create_sale(
     data: SaleCreate,
-    user: User = Depends(require_permission("sales:write")),
+    user: User = Depends(require_permission("sales:create")),
     db: Session = Depends(get_db)
 ):
     try:
@@ -296,7 +296,7 @@ def update_sale(
         gt=0,
         description="Sale ID must be a positive whole number"
     ),
-    user: User = Depends(require_permission("sales:write")),
+    user: User = Depends(require_permission("sales:update")),
     db: Session = Depends(get_db)
 ):
     try:
@@ -334,7 +334,7 @@ def void_sale(
         description="Sale ID must be a positive integer",
     ),
     payload: SaleVoidRequest = SaleVoidRequest(),
-    user: User = Depends(require_permission("sales:write")),
+    user: User = Depends(require_permission("sales:create")),
     db: Session = Depends(get_db),
 ):
     try:
@@ -374,7 +374,7 @@ def delete_sale(
         gt=0,
         description="Sale ID must be a positive whole number"
     ),
-    user: User = Depends(require_permission("sales:write")),
+    user: User = Depends(require_permission("sales:delete")),
     db: Session = Depends(get_db)
 ):
     try:

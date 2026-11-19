@@ -35,7 +35,7 @@ router = APIRouter(
 def create_supplier(
     data: SupplierCreate,
     user: User = Depends(
-        require_permission("suppliers:write")
+        require_permission("suppliers:create")
     ),
     db: Session = Depends(get_db),
 ):
@@ -194,7 +194,7 @@ def update_supplier(
     ),
     data: SupplierUpdate = ...,
     user: User = Depends(
-        require_permission("suppliers:write")
+        require_permission("suppliers:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -217,7 +217,7 @@ def update_supplier_status(
     ),
     data: SupplierStatusUpdate = ...,
     user: User = Depends(
-        require_permission("suppliers:write")
+        require_permission("suppliers:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -239,7 +239,7 @@ def delete_supplier(
         description="Supplier ID must be greater than zero",
     ),
     user: User = Depends(
-        require_permission("suppliers:write")
+        require_permission("suppliers:delete")
     ),
     db: Session = Depends(get_db),
 ):

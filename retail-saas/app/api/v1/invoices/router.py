@@ -31,7 +31,7 @@ router = APIRouter(prefix="/invoices", tags=["invoices"])
 @router.post("", response_model=InvoiceResponse, status_code=201)
 def create_invoice(
     payload: InvoiceCreate,
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:create")),
     db: Session = Depends(get_db),
 ):
     if user.store_id is not None and payload.store_id != user.store_id:
@@ -373,7 +373,7 @@ def reprint_invoice(
 @router.post("/{invoice_id}/generate-async")
 def generate_invoice_async(
     invoice_id: int,
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:create")),
     db: Session = Depends(get_db),
 ):
     BillingService(db).get_invoice(
@@ -457,7 +457,7 @@ def get_invoice_pdf_status(
 def void_invoice(
     invoice_id: int,
     payload: InvoiceVoidRequest = InvoiceVoidRequest(),
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:create")),
     db: Session = Depends(get_db),
 ):
     return BillingService(db).void_invoice(

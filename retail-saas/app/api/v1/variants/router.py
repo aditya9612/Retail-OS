@@ -63,7 +63,7 @@ def list_variants(
 )
 def create_variant(
     data: ProductVariantDirectCreate,
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:create")),
     db: Session = Depends(get_db),
 ):
     return ProductVariantService(db).create_variant(
@@ -82,7 +82,7 @@ def create_variant(
 )
 def generate_variant_matrix(
     data: VariantMatrixGenerateRequest,
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:create")),
     db: Session = Depends(get_db),
 ):
     return ProductVariantService(db).generate_variant_matrix(
@@ -98,7 +98,7 @@ def generate_variant_matrix(
     description="Auto-generate unique EAN-13 barcodes for all product variants that currently have no barcode",
 )
 def generate_missing_variant_barcodes(
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:create")),
     db: Session = Depends(get_db),
 ):
     return ProductVariantService(db).generate_missing_barcodes(
@@ -172,7 +172,7 @@ def update_variant(
         gt=0,
         description="Variant ID",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return ProductVariantService(db).update_variant(
@@ -195,7 +195,7 @@ def patch_variant(
         gt=0,
         description="Variant ID",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return ProductVariantService(db).update_variant(
@@ -217,7 +217,7 @@ def delete_variant(
         gt=0,
         description="Variant ID",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:delete")),
     db: Session = Depends(get_db),
 ):
     return ProductVariantService(db).delete_variant(
@@ -234,7 +234,7 @@ def delete_variant(
 )
 def activate_variant(
     variant_id: int = Path(..., gt=0, description="Variant ID to activate"),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return ProductVariantService(db).set_variant_active_status(
@@ -252,7 +252,7 @@ def activate_variant(
 )
 def deactivate_variant(
     variant_id: int = Path(..., gt=0, description="Variant ID to deactivate"),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return ProductVariantService(db).set_variant_active_status(
@@ -271,7 +271,7 @@ def deactivate_variant(
 def generate_barcode_for_variant(
     variant_id: int = Path(..., gt=0, description="Variant ID"),
     overwrite: bool = Query(False, description="Overwrite existing barcode if already set"),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:create")),
     db: Session = Depends(get_db),
 ):
     variant = ProductVariantService(db).generate_barcode_for_variant(
@@ -302,7 +302,7 @@ def create_product_variant(
         gt=0,
         description="Parent product ID",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:create")),
     db: Session = Depends(get_db),
 ):
     return ProductVariantService(db).create_variant(
@@ -381,7 +381,7 @@ def update_product_variant(
         gt=0,
         description="Variant ID",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return ProductVariantService(db).update_variant(
@@ -409,7 +409,7 @@ def patch_product_variant(
         gt=0,
         description="Variant ID",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return ProductVariantService(db).update_variant(

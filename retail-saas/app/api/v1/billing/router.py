@@ -223,7 +223,7 @@ def cart_add_item(
     store_id: Optional[int] = Query(default=None, gt=0),
     same_state: Optional[bool] = Query(default=None),
     user: User = Depends(
-        require_permission("billing:write")
+        require_permission("billing:create")
     ),
     db: Session = Depends(get_db),
 ):
@@ -282,7 +282,7 @@ def cart_scan_item(
     payload: CartScanRequest,
     store_id: Optional[int] = Query(default=None, gt=0),
     same_state: Optional[bool] = Query(default=None),
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:create")),
     db: Session = Depends(get_db),
 ):
     """Rapid barcode scanner endpoint: Looks up product by barcode/SKU and adds/increments it in active cart."""
@@ -332,7 +332,7 @@ def cart_scan_item(
 def cart_update_item(
     payload: CartItemUpdate,
     user: User = Depends(
-        require_permission("billing:write")
+        require_permission("billing:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -372,7 +372,7 @@ def cart_update_item(
 def cart_remove_item(
     product_id: int = Query(..., gt=0),
     user: User = Depends(
-        require_permission("billing:write")
+        require_permission("billing:delete")
     ),
     db: Session = Depends(get_db),
 ):
@@ -391,7 +391,7 @@ def cart_remove_item(
     dependencies=[Depends(require_operational_write)],
 )
 def cart_clear(
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:delete")),
     db: Session = Depends(get_db),
 ):
     """Empties/discards the current active cart completely."""
@@ -458,7 +458,7 @@ def get_cart(
 )
 def cart_set_customer(
     payload: CartCustomerSetRequest,
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:create")),
     db: Session = Depends(get_db),
 ):
     """Associates a customer to the active cart by ID or phone number."""
@@ -511,7 +511,7 @@ def cart_set_customer(
     dependencies=[Depends(require_operational_write)],
 )
 def cart_remove_customer(
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:delete")),
     db: Session = Depends(get_db),
 ):
     """Detaches/removes the customer from the active cart."""
@@ -546,7 +546,7 @@ def cart_validate_stock(
 def cart_apply_discount(
     payload: CartDiscountApply,
     user: User = Depends(
-        require_permission("billing:write")
+        require_permission("billing:create")
     ),
     db: Session = Depends(get_db),
 ):
@@ -569,7 +569,7 @@ def cart_apply_discount(
 )
 def billing_checkout(
     payload: InvoiceCreate,
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:create")),
     db: Session = Depends(get_db),
 ):
     """Direct POS Checkout: Finalizes sale directly from active cart or provided line items, creating an invoice and linking payments."""
@@ -612,7 +612,7 @@ def billing_checkout(
 def process_item_return(
     payload: ReturnItemRequest,
     user: User = Depends(
-        require_permission("billing:write")
+        require_permission("billing:refund")
     ),
     db: Session = Depends(get_db),
 ):
@@ -641,7 +641,7 @@ def process_item_return(
 )
 def hold_cart(
     payload: POSHoldCartRequest,
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:create")),
     db: Session = Depends(get_db),
 ):
     """Parks the user's active cart and assigns a unique hold reference."""
@@ -693,7 +693,7 @@ def get_held_cart(
 def recall_held_cart(
     hold_id: int,
     payload: POSRecallCartRequest = POSRecallCartRequest(),
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:create")),
     db: Session = Depends(get_db),
 ):
     """Restores a held cart back into the active cart for checkout."""
@@ -709,7 +709,7 @@ def recall_held_cart(
 def cancel_held_cart(
     hold_id: int,
     reason: Optional[str] = Query(default=None),
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:delete")),
     db: Session = Depends(get_db),
 ):
     """Cancels/discards a held cart."""
@@ -786,7 +786,7 @@ def calculate_tender_change(
 )
 def process_voice_command(
     payload: VoiceBillingCommandRequest,
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:create")),
     db: Session = Depends(get_db),
 ):
     effective_store_id = payload.store_id or user.store_id
@@ -815,7 +815,7 @@ async def process_voice_audio(
     store_id: Optional[int] = Form(default=None),
     same_state: Optional[bool] = Form(default=True),
     language: Optional[str] = Form(default="mr"),
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:create")),
     db: Session = Depends(get_db),
 ):
     audio_bytes = await file.read()

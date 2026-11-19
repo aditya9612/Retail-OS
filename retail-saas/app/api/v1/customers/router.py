@@ -162,7 +162,7 @@ def customer_stats(
 @router.post("", response_model=CustomerResponse, status_code=201)
 def create_customer(
     data: CustomerCreate,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).create_customer(user.tenant_id, data)
@@ -175,7 +175,7 @@ def create_customer(
 )
 def create_feedback(
     data: CustomerFeedbackCreate,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).create_feedback(user.tenant_id, data)
@@ -257,7 +257,7 @@ def get_wallet(
 )
 def credit_wallet(
     data: WalletCreditRequest,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).credit_wallet(
@@ -272,7 +272,7 @@ def credit_wallet(
 )
 def debit_wallet(
     data: WalletDebitRequest,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).debit_wallet(
@@ -331,7 +331,7 @@ def birthday_customers(
 )
 def create_referral(
     data: ReferralCreate,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).create_referral(
@@ -390,7 +390,7 @@ def get_communications(
 )
 def create_note(
     data: CustomerNoteCreate,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).create_note(
@@ -508,7 +508,7 @@ def get_customer(
 def update_customer(
     customer_id: int = Path(..., gt=0),
     data: CustomerUpdate = ...,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:update")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).update_customer(user.tenant_id, customer_id, data)
@@ -520,7 +520,7 @@ def update_customer(
 )
 def delete_customer(
     customer_id: int = Path(..., gt=0),
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:delete")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).delete_customer(user.tenant_id, customer_id)
@@ -542,7 +542,7 @@ def customer_orders(
 def add_loyalty(
     customer_id: int = Path(..., gt=0),
     data: LoyaltyAddPointsRequest = ...,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).add_loyalty_points(user.tenant_id, customer_id, data.points)
@@ -554,7 +554,7 @@ def add_loyalty(
 )
 def earn_loyalty(
     data: LoyaltyEarnRequest,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).earn_loyalty_points(
@@ -569,7 +569,7 @@ def earn_loyalty(
 )
 def redeem_loyalty(
     data: LoyaltyRedeemRequest,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).redeem_loyalty_points(
@@ -619,7 +619,7 @@ def get_loyalty_history(
 def update_customer_status(
     customer_id: int = Path(..., gt=0),
     data: CustomerStatusUpdate = ...,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:update")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).update_customer_status(
@@ -636,7 +636,7 @@ def update_customer_status(
 def update_credit_limit(
     customer_id: int = Path(..., gt=0),
     data: CreditLimitUpdateRequest = ...,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:update")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).update_credit_limit(
@@ -673,7 +673,7 @@ def get_customer_ledger(
 def record_customer_payment(
     customer_id: int = Path(..., gt=0),
     data: CustomerPaymentRequest = ...,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).record_customer_payment(
@@ -725,7 +725,7 @@ def export_customer_ledger_pdf(
 def send_customer_ledger_pdf(
     customer_id: int = Path(..., gt=0),
     channel: str = Query("WHATSAPP", pattern="^(WHATSAPP|SMS|EMAIL)$"),
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).send_ledger_pdf(
@@ -741,7 +741,7 @@ def send_customer_ledger_pdf(
 )
 def send_sms(
     data: CommunicationCreate,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     if data.communication_type != "SMS":
@@ -785,7 +785,7 @@ def get_sms_notifications(
 )
 def send_whatsapp(
     data: CommunicationCreate,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     if data.communication_type != "WHATSAPP":
@@ -829,7 +829,7 @@ def get_whatsapp_notifications(
 )
 def send_campaign(
     data: CampaignSendRequest,
-    user: User = Depends(require_permission("customers:write")),
+    user: User = Depends(require_permission("customers:create")),
     db: Session = Depends(get_db),
 ):
     return CustomerService(db).send_campaign(

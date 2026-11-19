@@ -37,7 +37,7 @@ router = APIRouter(
 )
 def create_purchase_order(
     data: PurchaseOrderCreate,
-    user: User = Depends(require_permission("purchase_orders:write")),
+    user: User = Depends(require_permission("purchase_orders:create")),
     db: Session = Depends(get_db),
 ):
     return PurchaseOrderService(db).create_purchase_order(
@@ -238,7 +238,7 @@ def get_purchase_order_pdf(
 def update_purchase_order(
     purchase_order_id: int,
     data: PurchaseOrderUpdate,
-    user: User = Depends(require_permission("purchase_orders:write")),
+    user: User = Depends(require_permission("purchase_orders:update")),
     db: Session = Depends(get_db),
 ):
     return PurchaseOrderService(db).update_purchase_order(
@@ -256,7 +256,7 @@ def update_purchase_order(
 def receive_purchase_order(
     purchase_order_id: int,
     data: PurchaseOrderReceive,
-    user: User = Depends(require_permission("purchase_orders:write")),
+    user: User = Depends(require_permission("purchase_orders:create")),
     db: Session = Depends(get_db),
 ):
     return PurchaseOrderService(db).receive_purchase_order(
@@ -274,7 +274,7 @@ def receive_purchase_order(
 def update_purchase_order_status(
     purchase_order_id: int,
     data: PurchaseOrderStatusUpdate,
-    user: User = Depends(require_permission("purchase_orders:write")),
+    user: User = Depends(require_permission("purchase_orders:update")),
     db: Session = Depends(get_db),
 ):
     return PurchaseOrderService(db).update_purchase_order_status(
@@ -294,7 +294,7 @@ def update_purchase_order_status(
 def approve_purchase_order(
     purchase_order_id: int,
     data: PurchaseOrderApproveRequest = PurchaseOrderApproveRequest(),
-    user: User = Depends(require_permission("purchase_orders:write")),
+    user: User = Depends(require_permission("purchase_orders:create")),
     db: Session = Depends(get_db),
 ):
     return PurchaseOrderService(db).approve_purchase_order(
@@ -315,7 +315,7 @@ def approve_purchase_order(
 def cancel_purchase_order(
     purchase_order_id: int,
     data: PurchaseOrderCancelRequest,
-    user: User = Depends(require_permission("purchase_orders:write")),
+    user: User = Depends(require_permission("purchase_orders:create")),
     db: Session = Depends(get_db),
 ):
     return PurchaseOrderService(db).cancel_purchase_order(
@@ -332,7 +332,7 @@ def cancel_purchase_order(
 )
 def delete_purchase_order(
     purchase_order_id: int,
-    user: User = Depends(require_permission("purchase_orders:write")),
+    user: User = Depends(require_permission("purchase_orders:delete")),
     db: Session = Depends(get_db),
 ):
     result = PurchaseOrderService(db).delete_purchase_order(

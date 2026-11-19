@@ -65,7 +65,7 @@ router = APIRouter(
 )
 def create_delivery(
     data: DeliveryCreate,
-    user: User = Depends(require_permission("delivery:write")),
+    user: User = Depends(require_permission("delivery:create")),
     db: Session = Depends(get_db),
 ):
     try:
@@ -347,7 +347,7 @@ def list_delivery_methods(
 def create_delivery_method(
     data: DeliveryMethodCreate,
     user: User = Depends(
-        require_permission("delivery:write")
+        require_permission("delivery:create")
     ),
     db: Session = Depends(get_db),
 ):
@@ -380,7 +380,7 @@ def update_delivery_method(
         description="Delivery method ID must be a positive integer",
     ),
     user: User = Depends(
-        require_permission("delivery:write")
+        require_permission("delivery:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -413,7 +413,7 @@ def toggle_delivery_method(
         description="Delivery method ID must be a positive integer",
     ),
     user: User = Depends(
-        require_permission("delivery:write")
+        require_permission("delivery:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -445,7 +445,7 @@ def delete_delivery_method(
         description="Delivery method ID must be a positive integer",
     ),
     user: User = Depends(
-        require_permission("delivery:write")
+        require_permission("delivery:delete")
     ),
     db: Session = Depends(get_db),
 ):
@@ -515,7 +515,7 @@ def list_delivery_zones(
 def create_delivery_zone(
     data: DeliveryZoneCreate,
     user: User = Depends(
-        require_permission("delivery:write")
+        require_permission("delivery:create")
     ),
     db: Session = Depends(get_db),
 ):
@@ -548,7 +548,7 @@ def update_delivery_zone(
         description="Delivery zone ID must be a positive integer",
     ),
     user: User = Depends(
-        require_permission("delivery:write")
+        require_permission("delivery:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -581,7 +581,7 @@ def delete_delivery_zone(
         description="Delivery zone ID must be a positive integer",
     ),
     user: User = Depends(
-        require_permission("delivery:write")
+        require_permission("delivery:delete")
     ),
     db: Session = Depends(get_db),
 ):
@@ -654,7 +654,7 @@ def list_delivery_partners(
 )
 def connect_delivery_partner(
     data: DeliveryPartnerConnect,
-    user: User = Depends(require_permission("delivery:write")),
+    user: User = Depends(require_permission("delivery:create")),
     db: Session = Depends(get_db),
 ):
     try:
@@ -685,7 +685,7 @@ def update_delivery_partner(
         gt=0,
         description="Delivery partner ID must be a positive integer",
     ),
-    user: User = Depends(require_permission("delivery:write")),
+    user: User = Depends(require_permission("delivery:update")),
     db: Session = Depends(get_db),
 ):
     try:
@@ -716,7 +716,7 @@ def delete_delivery_partner(
         gt=0,
         description="Delivery partner ID must be a positive integer",
     ),
-    user: User = Depends(require_permission("delivery:write")),
+    user: User = Depends(require_permission("delivery:delete")),
     db: Session = Depends(get_db),
 ):
     try:
@@ -741,7 +741,7 @@ def delete_delivery_partner(
 )
 async def upload_serviceability(
     file: UploadFile = File(..., description="CSV or XLSX file containing pincode serviceability data"),
-    user: User = Depends(require_permission("delivery:write")),
+    user: User = Depends(require_permission("delivery:create")),
     db: Session = Depends(get_db),
 ):
     try:
@@ -926,7 +926,7 @@ def update_delivery_status(
     ),
     data: DeliveryStatusUpdate = ...,
     user: User = Depends(
-        require_permission("delivery:write")
+        require_permission("delivery:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -957,7 +957,7 @@ def cancel_delivery(
     ),
     data: DeliveryCancelRequest = ...,
     user: User = Depends(
-        require_permission("delivery:write")
+        require_permission("delivery:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -988,7 +988,7 @@ def assign_delivery_partner(
     ),
     data: DeliveryPartnerAssignRequest = ...,
     user: User = Depends(
-        require_permission("delivery:write")
+        require_permission("delivery:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -1021,7 +1021,7 @@ def update_delivery_address(
     ),
     data: DeliveryAddressUpdateRequest = ...,
     user: User = Depends(
-        require_permission("delivery:write")
+        require_permission("delivery:update")
     ),
     db: Session = Depends(get_db),
 ):
@@ -1177,7 +1177,7 @@ def record_failed_delivery_attempt(
         description="Delivery ID must be a positive integer",
     ),
     data: DeliveryFailedAttemptRequest = ...,
-    user: User = Depends(require_permission("delivery:write")),
+    user: User = Depends(require_permission("delivery:create")),
     db: Session = Depends(get_db),
 ):
     try:
@@ -1208,7 +1208,7 @@ def collect_delivery_cod(
         description="Delivery ID must be a positive integer",
     ),
     data: Optional[CODCollectRequest] = None,
-    user: User = Depends(require_permission("delivery:write")),
+    user: User = Depends(require_permission("delivery:update")),
     db: Session = Depends(get_db),
 ):
     try:

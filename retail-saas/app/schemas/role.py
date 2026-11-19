@@ -8,26 +8,36 @@ AVAILABLE_PERMISSIONS: list[dict] = [
         "module": "billing",
         "label": "Billing & Invoicing",
         "permissions": [
+            {"code": "billing:create", "label": "Create Bills", "description": "Create invoices, checkout POS cart, and accept payments"},
             {"code": "billing:read", "label": "View Bills", "description": "View bills, invoices, and billing history"},
-            {"code": "billing:write", "label": "Create Bills", "description": "Create invoices, checkout POS cart, and accept payments"},
+            {"code": "billing:update", "label": "Edit Bills", "description": "Modify cart items, apply discounts, and update billing notes"},
+            {"code": "billing:delete", "label": "Void / Cancel Bills", "description": "Cancel or clear cart, remove items, and void invoices"},
             {"code": "billing:refund", "label": "Process Refunds", "description": "Process invoice returns and issue refunds"},
             {"code": "billing:price_override", "label": "Price Override", "description": "Override item prices or discounts during checkout"},
             {"code": "billing:gst_config", "label": "GST Configuration", "description": "Manage GST settings and tax slabs"},
             {"code": "invoices:read", "label": "View Invoices", "description": "View generated tax invoices"},
+            {"code": "credit_notes:create", "label": "Issue Credit Notes", "description": "Generate and issue credit notes"},
             {"code": "credit_notes:read", "label": "View Credit Notes", "description": "View issued credit notes"},
-            {"code": "credit_notes:write", "label": "Issue Credit Notes", "description": "Generate and issue credit notes"},
+            {"code": "credit_notes:update", "label": "Edit Credit Notes", "description": "Update or adjust credit note details"},
+            {"code": "credit_notes:delete", "label": "Void Credit Notes", "description": "Cancel or void issued credit notes"},
+            {"code": "payments:create", "label": "Collect Payments", "description": "Accept and record customer payments"},
             {"code": "payments:read", "label": "View Payments", "description": "View payment transactions and tender records"},
-            {"code": "payments:write", "label": "Collect Payments", "description": "Accept and record customer payments"},
+            {"code": "payments:update", "label": "Edit Payments", "description": "Modify payment records and reconcile tender"},
+            {"code": "payments:delete", "label": "Void Payments", "description": "Void or delete payment transactions"},
         ],
     },
     {
         "module": "orders",
         "label": "Orders & POS Sales",
         "permissions": [
+            {"code": "orders:create", "label": "Create Orders", "description": "Create new online and offline sales orders"},
             {"code": "orders:read", "label": "View Orders", "description": "View online and offline sales orders"},
-            {"code": "orders:write", "label": "Manage Orders", "description": "Create, update, and cancel sales orders"},
+            {"code": "orders:update", "label": "Update Orders", "description": "Update order status, delivery, or details"},
+            {"code": "orders:delete", "label": "Cancel / Delete Orders", "description": "Cancel or delete sales orders"},
+            {"code": "sales:create", "label": "Record Sales", "description": "Record sales transactions"},
             {"code": "sales:read", "label": "View Sales Records", "description": "View sales transactions"},
-            {"code": "sales:write", "label": "Process Sales", "description": "Record sales transactions"},
+            {"code": "sales:update", "label": "Edit Sales", "description": "Modify recorded sales"},
+            {"code": "sales:delete", "label": "Void Sales", "description": "Void sales transactions"},
             {"code": "pos:shift_manage", "label": "Manage POS Shifts", "description": "Open, reconcile, and close register shifts"},
         ],
     },
@@ -35,70 +45,98 @@ AVAILABLE_PERMISSIONS: list[dict] = [
         "module": "inventory",
         "label": "Inventory & Stock",
         "permissions": [
+            {"code": "inventory:create", "label": "Add Stock Adjustments", "description": "Record stock-in and initiate store transfers"},
             {"code": "inventory:read", "label": "View Stock", "description": "View real-time stock levels across stores"},
-            {"code": "inventory:write", "label": "Manage Stock", "description": "Adjust inventory quantities and store transfers"},
+            {"code": "inventory:update", "label": "Update Stock", "description": "Adjust stock quantities, approve/dispatch transfers"},
+            {"code": "inventory:delete", "label": "Void Stock Adjustments", "description": "Cancel or delete stock adjustment entries"},
+            {"code": "batches:create", "label": "Create Batches", "description": "Create new product batch records"},
             {"code": "batches:read", "label": "View Batches", "description": "View product batch allocations and expiry dates"},
-            {"code": "batches:write", "label": "Manage Batches", "description": "Create and manage product batch stock"},
+            {"code": "batches:update", "label": "Edit Batches", "description": "Update batch quantities, MRP, and expiry dates"},
+            {"code": "batches:delete", "label": "Delete Batches", "description": "Remove or archive expired batches"},
+            {"code": "warehouses:create", "label": "Create Warehouses", "description": "Add new warehouse facilities and storage locations"},
             {"code": "warehouses:read", "label": "View Warehouses", "description": "View warehouse facilities and storage hub stock"},
-            {"code": "warehouses:write", "label": "Manage Warehouses", "description": "Create, update, and manage warehouse holding hubs"},
+            {"code": "warehouses:update", "label": "Edit Warehouses", "description": "Update warehouse facility details and status"},
+            {"code": "warehouses:delete", "label": "Delete Warehouses", "description": "Remove or deactivate warehouse facilities"},
         ],
     },
     {
         "module": "products",
         "label": "Products & Categories",
         "permissions": [
+            {"code": "products:create", "label": "Create Products", "description": "Add new products to the catalog"},
             {"code": "products:read", "label": "View Products", "description": "View product catalog, pricing, and barcodes"},
-            {"code": "products:write", "label": "Manage Products", "description": "Create, edit, or delete products and categories"},
+            {"code": "products:update", "label": "Edit Products", "description": "Update product details, pricing, barcodes, and variants"},
+            {"code": "products:delete", "label": "Delete Products", "description": "Remove or deactivate products and variants"},
+            {"code": "categories:create", "label": "Create Categories", "description": "Add new product categories"},
             {"code": "categories:read", "label": "View Categories", "description": "View product categories"},
-            {"code": "categories:write", "label": "Manage Categories", "description": "Create and edit product categories"},
+            {"code": "categories:update", "label": "Edit Categories", "description": "Update product category details"},
+            {"code": "categories:delete", "label": "Delete Categories", "description": "Remove product categories"},
         ],
     },
     {
         "module": "purchases",
         "label": "Purchases & Suppliers",
         "permissions": [
+            {"code": "purchase_orders:create", "label": "Create Purchases", "description": "Create new vendor purchase orders"},
             {"code": "purchase_orders:read", "label": "View Purchases", "description": "View vendor purchase orders"},
-            {"code": "purchase_orders:write", "label": "Manage Purchases", "description": "Create, approve, and manage purchase orders"},
+            {"code": "purchase_orders:update", "label": "Edit Purchases", "description": "Approve, update, or edit purchase orders"},
+            {"code": "purchase_orders:delete", "label": "Cancel / Delete Purchases", "description": "Cancel or delete purchase orders"},
+            {"code": "grn:create", "label": "Create GRN Receipts", "description": "Create, inspect, and receive inward goods receipt notes"},
             {"code": "grn:read", "label": "View GRN Receipts", "description": "View inward goods receipt notes, shipments, and batch records"},
-            {"code": "grn:write", "label": "Manage GRN Receipts", "description": "Create, inspect, receive, and approve inward goods receipt notes"},
+            {"code": "grn:update", "label": "Edit GRN Receipts", "description": "Update inspection and approval details for GRN"},
+            {"code": "grn:delete", "label": "Delete GRN Receipts", "description": "Cancel or delete goods receipt notes"},
+            {"code": "suppliers:create", "label": "Create Suppliers", "description": "Add new suppliers to the directory"},
             {"code": "suppliers:read", "label": "View Suppliers", "description": "View supplier contact directory"},
-            {"code": "suppliers:write", "label": "Manage Suppliers", "description": "Add, edit, and deactivate suppliers"},
+            {"code": "suppliers:update", "label": "Edit Suppliers", "description": "Update supplier contact information and status"},
+            {"code": "suppliers:delete", "label": "Delete Suppliers", "description": "Remove or deactivate suppliers"},
         ],
     },
     {
         "module": "delivery",
         "label": "Delivery & Logistics",
         "permissions": [
+            {"code": "delivery:create", "label": "Create Deliveries", "description": "Create delivery orders, methods, and zones"},
             {"code": "delivery:read", "label": "View Deliveries", "description": "View delivery orders, dispatch schedules, and tracking"},
-            {"code": "delivery:write", "label": "Manage Deliveries", "description": "Assign couriers, update delivery status, and reconcile COD"},
+            {"code": "delivery:update", "label": "Update Deliveries", "description": "Assign couriers, update delivery status, and reconcile COD"},
+            {"code": "delivery:delete", "label": "Cancel / Delete Deliveries", "description": "Cancel deliveries, remove delivery methods and zones"},
         ],
     },
     {
         "module": "customers",
         "label": "Customers & Loyalty",
         "permissions": [
+            {"code": "customers:create", "label": "Create Customers", "description": "Add customer profiles, referrals, notes, and loyalty records"},
             {"code": "customers:read", "label": "View Customers", "description": "View customer profiles and purchase history"},
-            {"code": "customers:write", "label": "Manage Customers", "description": "Add or update customer profiles"},
+            {"code": "customers:update", "label": "Edit Customers", "description": "Update customer details, credit limits, and status"},
+            {"code": "customers:delete", "label": "Delete Customers", "description": "Remove customer profiles"},
+            {"code": "coupons:create", "label": "Create Coupons", "description": "Create and bulk-generate promotional coupons"},
             {"code": "coupons:read", "label": "View Coupons", "description": "View discount coupons and promo codes"},
-            {"code": "coupons:write", "label": "Manage Coupons", "description": "Create and manage promotional coupons"},
+            {"code": "coupons:update", "label": "Edit Coupons", "description": "Update coupon rules, expiry, and status"},
+            {"code": "coupons:delete", "label": "Delete Coupons", "description": "Remove promotional coupons"},
+            {"code": "reviews:create", "label": "Create Reviews", "description": "Submit customer feedback and reviews"},
             {"code": "reviews:read", "label": "View Reviews", "description": "View customer feedback and product reviews"},
-            {"code": "reviews:write", "label": "Manage Reviews", "description": "Respond to and moderate customer reviews"},
+            {"code": "reviews:update", "label": "Moderate Reviews", "description": "Edit or moderate customer reviews"},
+            {"code": "reviews:delete", "label": "Delete Reviews", "description": "Remove customer reviews"},
         ],
     },
     {
         "module": "ecommerce",
         "label": "E-Commerce Storefront",
         "permissions": [
+            {"code": "ecommerce:create", "label": "Create Storefront Content", "description": "Create online products, banners, and collections"},
             {"code": "ecommerce:read", "label": "View E-Commerce", "description": "View online store catalog, web analytics, and storefront orders"},
-            {"code": "ecommerce:write", "label": "Manage E-Commerce", "description": "Configure digital storefront, banners, theme, and website settings"},
+            {"code": "ecommerce:update", "label": "Update Storefront", "description": "Configure digital storefront, theme, and website settings"},
+            {"code": "ecommerce:delete", "label": "Delete Storefront Content", "description": "Remove storefront banners, collections, or settings"},
         ],
     },
     {
         "module": "whatsapp",
         "label": "WhatsApp Integration",
         "permissions": [
+            {"code": "whatsapp:create", "label": "Configure WhatsApp", "description": "Set up WhatsApp Cloud API credentials and templates"},
             {"code": "whatsapp:read", "label": "View WhatsApp Settings", "description": "View WhatsApp Cloud API configuration and message logs"},
-            {"code": "whatsapp:write", "label": "Manage WhatsApp Settings", "description": "Configure Meta Cloud API credentials, templates, and phone numbers"},
+            {"code": "whatsapp:update", "label": "Update WhatsApp Settings", "description": "Update WhatsApp configuration, phone numbers, and webhooks"},
+            {"code": "whatsapp:delete", "label": "Delete WhatsApp Config", "description": "Remove WhatsApp API connections and message templates"},
             {"code": "whatsapp:send", "label": "Send WhatsApp Messages", "description": "Dispatch digital invoices, receipts, and customer notifications"},
         ],
     },
@@ -121,26 +159,34 @@ AVAILABLE_PERMISSIONS: list[dict] = [
         "module": "stores",
         "label": "Store Branches & Expenses",
         "permissions": [
+            {"code": "stores:create", "label": "Create Stores", "description": "Add new store branches"},
             {"code": "stores:read", "label": "View Stores", "description": "View store branch details"},
-            {"code": "stores:write", "label": "Manage Stores", "description": "Create and edit store branches"},
+            {"code": "stores:update", "label": "Edit Stores", "description": "Update store branch information and status"},
+            {"code": "stores:delete", "label": "Delete Stores", "description": "Remove or close store branches"},
+            {"code": "store_expenses:create", "label": "Record Store Expenses", "description": "Record new store operating expenses"},
             {"code": "store_expenses:read", "label": "View Store Expenses", "description": "View petty cash and daily store operating expenses"},
-            {"code": "store_expenses:write", "label": "Manage Store Expenses", "description": "Record and manage store operating expenses"},
+            {"code": "store_expenses:update", "label": "Edit Store Expenses", "description": "Update recorded store operating expenses"},
+            {"code": "store_expenses:delete", "label": "Delete Store Expenses", "description": "Remove or void store operating expenses"},
         ],
     },
     {
         "module": "users",
         "label": "Staff Users & Roles",
         "permissions": [
+            {"code": "users:create", "label": "Create Users", "description": "Add new staff user accounts"},
             {"code": "users:read", "label": "View Users", "description": "View staff profiles and role assignments"},
-            {"code": "users:write", "label": "Manage Users", "description": "Create, edit, assign, and deactivate staff users"},
+            {"code": "users:update", "label": "Edit Users", "description": "Update staff profiles, permissions, and status"},
+            {"code": "users:delete", "label": "Delete Users", "description": "Deactivate or remove staff user accounts"},
         ],
     },
     {
         "module": "settings",
         "label": "Settings & Branding",
         "permissions": [
+            {"code": "settings:create", "label": "Create Document Settings", "description": "Initialize document settings, print templates, and configurations"},
             {"code": "settings:read", "label": "View Document Settings", "description": "View invoice branding, print templates, and gateway settings"},
-            {"code": "settings:write", "label": "Manage Document Settings", "description": "Configure invoice headers, print styling, numbering rules, and payment gateways"},
+            {"code": "settings:update", "label": "Update Document Settings", "description": "Configure invoice headers, print styling, numbering rules, and payment gateways"},
+            {"code": "settings:delete", "label": "Delete Document Settings", "description": "Reset or remove document templates and custom branding"},
         ],
     },
     {
@@ -155,11 +201,18 @@ AVAILABLE_PERMISSIONS: list[dict] = [
 
 
 def get_all_valid_permission_codes() -> set[str]:
-    return {
+    valid = {
         p["code"]
         for group in AVAILABLE_PERMISSIONS
         for p in group["permissions"]
     }
+    # Backward compatibility: accept broad :write permissions as valid codes
+    for group in AVAILABLE_PERMISSIONS:
+        for p in group["permissions"]:
+            parts = p["code"].split(":")
+            if len(parts) == 2:
+                valid.add(f"{parts[0]}:write")
+    return valid
 
 
 def validate_role_name_string(value: str) -> str:

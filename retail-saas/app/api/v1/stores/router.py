@@ -84,7 +84,7 @@ def list_stores(
 )
 def create_store(
     data: StoreCreate,
-    user: User = Depends(require_permission("stores:write")),
+    user: User = Depends(require_permission("stores:create")),
     service: StoreService = Depends(get_store_service),
 ):
     if user.store_id is not None:
@@ -146,7 +146,7 @@ def update_store(
         ),
     ],
     data: StoreUpdate,
-    user: User = Depends(require_permission("stores:write")),
+    user: User = Depends(require_permission("stores:update")),
     service: StoreService = Depends(get_store_service),
 ):
     if user.store_id is not None and user.store_id != store_id:
@@ -174,7 +174,7 @@ def delete_store(
             description="Store ID must be a positive integer up to 999999",
         ),
     ],
-    user: User = Depends(require_permission("stores:write")),
+    user: User = Depends(require_permission("stores:delete")),
     service: StoreService = Depends(get_store_service),
 ):
     if user.store_id is not None:
@@ -276,7 +276,7 @@ def set_main_store(
         ),
     ],
     user: User = Depends(
-        require_permission("stores:write")
+        require_permission("stores:create")
     ),
     service: StoreService = Depends(
         get_store_service
@@ -307,7 +307,7 @@ def activate_store(
         ),
     ],
     user: User = Depends(
-        require_permission("stores:write")
+        require_permission("stores:update")
     ),
     service: StoreService = Depends(
         get_store_service
@@ -338,7 +338,7 @@ def deactivate_store(
         ),
     ],
     user: User = Depends(
-        require_permission("stores:write")
+        require_permission("stores:update")
     ),
     service: StoreService = Depends(
         get_store_service
