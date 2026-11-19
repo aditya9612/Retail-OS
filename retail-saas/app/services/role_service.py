@@ -34,6 +34,7 @@ PROTECTED_CORE_ROLES = {
     "crm_support",
     "staff",
     "accountant",
+    "customer",
 }
 
 

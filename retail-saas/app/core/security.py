@@ -257,9 +257,6 @@ def get_current_user(
             "Token has been revoked"
         )
 
-    if payload.get("role") == "customer":
-        raise ForbiddenException("Customer accounts cannot access staff operations")
-
     user_id = payload.get("sub")
     tenant_id = payload.get("tenant_id")
 
@@ -420,7 +417,7 @@ def require_permission(*permissions: str):
             else []
         )
 
-        if "*" in perms:
+        if "*" in perms or (user.role and user.role.name.lower() in ["admin", "owner", "superadmin"]):
             return user
 
         for p in permissions:
