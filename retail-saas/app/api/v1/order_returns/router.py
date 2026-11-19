@@ -36,7 +36,7 @@ router = APIRouter(
 def create_return(
     data: OrderReturnCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("orders:write", "billing:refund", "billing:write")),
+    current_user: User = Depends(require_permission("billing:refund")),
 ):
     return OrderReturnService.create_return(
         db=db,
@@ -69,7 +69,7 @@ def list_returns(
     order_id: Optional[int] = Query(None, gt=0, description="Filter by order ID"),
     search: Optional[str] = Query(None, description="Search by RMA number, reason, remarks"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("orders:read", "billing:read")),
+    current_user: User = Depends(require_permission("orders:read")),
 ):
     return OrderReturnService.list_returns(
         db=db,
@@ -92,7 +92,7 @@ def list_returns(
 def get_order_returns_stats(
     store_id: Optional[int] = Query(None, gt=0, description="Filter stats by store ID"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("orders:read", "billing:read", "analytics:read")),
+    current_user: User = Depends(require_permission("orders:read")),
 ):
     return OrderReturnService.get_stats(
         db=db,
@@ -113,7 +113,7 @@ def get_return(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("orders:read", "billing:read")),
+    current_user: User = Depends(require_permission("orders:read")),
 ):
     return OrderReturnService.get_return(
         db=db,
@@ -136,7 +136,7 @@ def update_return(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("orders:write", "billing:refund")),
+    current_user: User = Depends(require_permission("billing:refund")),
 ):
     return OrderReturnService.update_return(
         db=db,
@@ -160,7 +160,7 @@ def update_return_status(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("orders:write", "billing:refund")),
+    current_user: User = Depends(require_permission("billing:refund")),
 ):
     return OrderReturnService.update_status(
         db=db,
@@ -184,7 +184,7 @@ def approve_return(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("orders:write", "billing:refund")),
+    current_user: User = Depends(require_permission("billing:refund")),
 ):
     return OrderReturnService.approve_return(
         db=db,
@@ -208,7 +208,7 @@ def reject_return(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("orders:write", "billing:refund")),
+    current_user: User = Depends(require_permission("billing:refund")),
 ):
     return OrderReturnService.reject_return(
         db=db,
@@ -232,7 +232,7 @@ def complete_return(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("orders:write", "billing:refund")),
+    current_user: User = Depends(require_permission("billing:refund")),
 ):
     return OrderReturnService.complete_return(
         db=db,
@@ -256,7 +256,7 @@ def exchange_return(
         description="Return ID must be a positive integer",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("orders:write", "billing:refund", "billing:write")),
+    current_user: User = Depends(require_permission("billing:refund")),
 ):
     return OrderReturnService.process_exchange(
         db=db,
@@ -308,7 +308,7 @@ def get_return_slip(
         description="Select output mode from dropdown: 'preview' (renders image directly in Swagger UI), 'view' (inline browser preview), 'download' (HTML download), or 'json' (structured payload)",
     ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("orders:read", "billing:read")),
+    current_user: User = Depends(require_permission("orders:read")),
 ):
     selected_mode = mode.value if hasattr(mode, "value") else str(mode)
 

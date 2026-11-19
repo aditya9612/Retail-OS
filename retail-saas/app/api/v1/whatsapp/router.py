@@ -232,7 +232,7 @@ def send_message(
 )
 def ocr_grocery_list(
     payload: HandwrittenGroceryOcrRequest,
-    user: User = Depends(require_permission("orders:write", "billing:write")),
+    user: User = Depends(require_permission("orders:write")),
     db: Session = Depends(get_db),
 ):
     service = WhatsAppOrderingService(db=db)
@@ -259,7 +259,7 @@ async def ocr_grocery_list_upload(
     recipient_phone: Optional[str] = Query(default=None),
     auto_create_order: bool = Query(default=True),
     store_id: Optional[int] = Query(default=None),
-    user: User = Depends(require_permission("orders:write", "billing:write")),
+    user: User = Depends(require_permission("orders:write")),
     db: Session = Depends(get_db),
 ):
     file_bytes = await file.read()
@@ -294,7 +294,7 @@ async def ocr_grocery_list_upload(
 )
 def conversational_order(
     payload: WhatsAppChatOrderRequest,
-    user: User = Depends(require_permission("orders:write", "billing:write")),
+    user: User = Depends(require_permission("orders:write")),
     db: Session = Depends(get_db),
 ):
     service = WhatsAppOrderingService(db=db)
@@ -329,7 +329,7 @@ def conversational_order(
 def list_pending_khata_customers(
     min_balance: Optional[float] = Query(default=None, description="Minimum credit balance threshold"),
     store_id: Optional[int] = Query(default=None),
-    user: User = Depends(require_permission("customers:read", "billing:read")),
+    user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     service = SmartKhataService(db=db, tenant_id=user.tenant_id, store_id=store_id or user.store_id)
@@ -344,7 +344,7 @@ def list_pending_khata_customers(
 def send_khata_reminder_endpoint(
     customer_id: int,
     payload: Optional[KhataReminderRequest] = None,
-    user: User = Depends(require_permission("customers:write", "billing:write")),
+    user: User = Depends(require_permission("customers:write")),
     db: Session = Depends(get_db),
 ):
     service = SmartKhataService(db=db, tenant_id=user.tenant_id, store_id=user.store_id)
@@ -359,7 +359,7 @@ def send_khata_reminder_endpoint(
 )
 def broadcast_khata_reminders_endpoint(
     payload: Optional[KhataReminderBroadcastRequest] = None,
-    user: User = Depends(require_permission("customers:write", "billing:write")),
+    user: User = Depends(require_permission("customers:write")),
     db: Session = Depends(get_db),
 ):
     min_bal = payload.min_balance if payload else 100.0
@@ -384,7 +384,7 @@ def broadcast_khata_reminders_endpoint(
 )
 def process_khata_reply_endpoint(
     payload: KhataProcessReplyRequest,
-    user: User = Depends(require_permission("customers:write", "billing:write")),
+    user: User = Depends(require_permission("customers:write")),
     db: Session = Depends(get_db),
 ):
     service = SmartKhataService(db=db, tenant_id=user.tenant_id, store_id=user.store_id)
@@ -405,7 +405,7 @@ def list_khata_followups(
     customer_id: Optional[int] = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
-    user: User = Depends(require_permission("customers:read", "billing:read")),
+    user: User = Depends(require_permission("customers:read")),
     db: Session = Depends(get_db),
 ):
     query = db.query(KhataFollowup).filter(KhataFollowup.tenant_id == user.tenant_id)

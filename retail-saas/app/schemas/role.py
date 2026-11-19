@@ -33,12 +33,8 @@ AVAILABLE_PERMISSIONS: list[dict] = [
     },
     {
         "module": "inventory",
-        "label": "Inventory & Catalog",
+        "label": "Inventory & Stock",
         "permissions": [
-            {"code": "products:read", "label": "View Products", "description": "View product catalog, pricing, and barcodes"},
-            {"code": "products:write", "label": "Manage Products", "description": "Create, edit, or delete products and categories"},
-            {"code": "categories:read", "label": "View Categories", "description": "View product categories"},
-            {"code": "categories:write", "label": "Manage Categories", "description": "Create and edit product categories"},
             {"code": "inventory:read", "label": "View Stock", "description": "View real-time stock levels across stores"},
             {"code": "inventory:write", "label": "Manage Stock", "description": "Adjust inventory quantities and store transfers"},
             {"code": "batches:read", "label": "View Batches", "description": "View product batch allocations and expiry dates"},
@@ -48,11 +44,23 @@ AVAILABLE_PERMISSIONS: list[dict] = [
         ],
     },
     {
+        "module": "products",
+        "label": "Products & Categories",
+        "permissions": [
+            {"code": "products:read", "label": "View Products", "description": "View product catalog, pricing, and barcodes"},
+            {"code": "products:write", "label": "Manage Products", "description": "Create, edit, or delete products and categories"},
+            {"code": "categories:read", "label": "View Categories", "description": "View product categories"},
+            {"code": "categories:write", "label": "Manage Categories", "description": "Create and edit product categories"},
+        ],
+    },
+    {
         "module": "purchases",
         "label": "Purchases & Suppliers",
         "permissions": [
-            {"code": "purchase_orders:read", "label": "View Purchases", "description": "View vendor purchase orders and GRN receipts"},
-            {"code": "purchase_orders:write", "label": "Manage Purchases", "description": "Create purchase orders and record GRN receipts"},
+            {"code": "purchase_orders:read", "label": "View Purchases", "description": "View vendor purchase orders"},
+            {"code": "purchase_orders:write", "label": "Manage Purchases", "description": "Create, approve, and manage purchase orders"},
+            {"code": "grn:read", "label": "View GRN Receipts", "description": "View inward goods receipt notes, shipments, and batch records"},
+            {"code": "grn:write", "label": "Manage GRN Receipts", "description": "Create, inspect, receive, and approve inward goods receipt notes"},
             {"code": "suppliers:read", "label": "View Suppliers", "description": "View supplier contact directory"},
             {"code": "suppliers:write", "label": "Manage Suppliers", "description": "Add, edit, and deactivate suppliers"},
         ],
@@ -110,15 +118,21 @@ AVAILABLE_PERMISSIONS: list[dict] = [
         ],
     },
     {
-        "module": "organization",
-        "label": "Stores & Staff Management",
+        "module": "stores",
+        "label": "Store Branches & Expenses",
         "permissions": [
             {"code": "stores:read", "label": "View Stores", "description": "View store branch details"},
             {"code": "stores:write", "label": "Manage Stores", "description": "Create and edit store branches"},
-            {"code": "users:read", "label": "View Users", "description": "View staff profiles and role assignments"},
-            {"code": "users:write", "label": "Manage Users", "description": "Create, edit, assign, and deactivate staff users"},
             {"code": "store_expenses:read", "label": "View Store Expenses", "description": "View petty cash and daily store operating expenses"},
             {"code": "store_expenses:write", "label": "Manage Store Expenses", "description": "Record and manage store operating expenses"},
+        ],
+    },
+    {
+        "module": "users",
+        "label": "Staff Users & Roles",
+        "permissions": [
+            {"code": "users:read", "label": "View Users", "description": "View staff profiles and role assignments"},
+            {"code": "users:write", "label": "Manage Users", "description": "Create, edit, assign, and deactivate staff users"},
         ],
     },
     {

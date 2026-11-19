@@ -39,7 +39,7 @@ router = APIRouter(
 )
 def create_grn(
     data: GRNCreate,
-    user: User = Depends(require_permission("inventory:write")),
+    user: User = Depends(require_permission("grn:write")),
     db: Session = Depends(get_db),
 ):
     return GRNService(db).create(
@@ -66,7 +66,7 @@ def list_grn(
     page_size: Optional[int] = Query(None, ge=1, le=500, description="Items per page"),
     skip: Optional[int] = Query(None, ge=0, description="Skip items"),
     limit: Optional[int] = Query(None, ge=1, le=500, description="Limit items"),
-    user: User = Depends(require_permission("inventory:read")),
+    user: User = Depends(require_permission("grn:read")),
     db: Session = Depends(get_db),
 ):
     return GRNService(db).list(
@@ -92,7 +92,7 @@ def list_grn(
 )
 def grn_stats(
     store_id: Optional[int] = Query(None, gt=0, description="Filter GRN stats by store ID"),
-    user: User = Depends(require_permission("inventory:read")),
+    user: User = Depends(require_permission("grn:read")),
     db: Session = Depends(get_db),
 ):
     return GRNService(db).stats(tenant_id=user.tenant_id, store_id=store_id)
@@ -105,7 +105,7 @@ def export_grn(
     from_date: Optional[date] = Query(None, description="Filter from date (YYYY-MM-DD)"),
     to_date: Optional[date] = Query(None, description="Filter to date (YYYY-MM-DD)"),
     status: Optional[str] = Query(None, description="Filter by status"),
-    user: User = Depends(require_permission("inventory:read")),
+    user: User = Depends(require_permission("grn:read")),
     db: Session = Depends(get_db),
 ):
     csv_content = GRNService(db).export_csv(
@@ -128,7 +128,7 @@ def export_grn(
 )
 def get_grn(
     grn_id: int,
-    user: User = Depends(require_permission("inventory:read")),
+    user: User = Depends(require_permission("grn:read")),
     db: Session = Depends(get_db),
 ):
     return GRNService(db).get(
@@ -145,7 +145,7 @@ def get_grn(
 def quality_check_grn(
     grn_id: int,
     data: GRNQualityCheckRequest,
-    user: User = Depends(require_permission("inventory:write")),
+    user: User = Depends(require_permission("grn:write")),
     db: Session = Depends(get_db),
 ):
     return GRNService(db).quality_check(
@@ -162,7 +162,7 @@ def quality_check_grn(
 )
 def receive_grn(
     grn_id: int,
-    user: User = Depends(require_permission("inventory:write")),
+    user: User = Depends(require_permission("grn:write")),
     db: Session = Depends(get_db),
 ):
     return GRNService(db).receive(
@@ -181,7 +181,7 @@ def reject_grn(
     grn_id: int,
     data: Optional[GRNRejectRequest] = None,
     reason: Optional[str] = Query(None, description="Optional rejection reason in query"),
-    user: User = Depends(require_permission("inventory:write")),
+    user: User = Depends(require_permission("grn:write")),
     db: Session = Depends(get_db),
 ):
     if reason is not None:
@@ -212,7 +212,7 @@ def reject_grn(
 )
 def delete_grn(
     grn_id: int,
-    user: User = Depends(require_permission("inventory:write")),
+    user: User = Depends(require_permission("grn:write")),
     db: Session = Depends(get_db),
 ):
     return GRNService(db).delete(
@@ -227,7 +227,7 @@ def delete_grn(
 )
 def grn_history(
     grn_id: int,
-    user: User = Depends(require_permission("inventory:read")),
+    user: User = Depends(require_permission("grn:read")),
     db: Session = Depends(get_db),
 ):
     return GRNService(db).history(
@@ -251,7 +251,7 @@ def print_grn(
     grn_id: int,
     mode: Literal["download", "preview"] = Query(default="download"),
     user: User = Depends(
-        require_permission("inventory:read")
+        require_permission("grn:read")
     ),
     db: Session = Depends(get_db),
 ):
@@ -278,7 +278,7 @@ def print_grn(
 )
 def print_grn_slip(
     grn_id: int,
-    user: User = Depends(require_permission("inventory:read")),
+    user: User = Depends(require_permission("grn:read")),
     db: Session = Depends(get_db),
 ):
     html_content = GRNService(db).generate_slip_html(
@@ -314,7 +314,7 @@ def download_grn_pdf(
     grn_id: int,
     format: Literal["pdf", "excel", "csv"] = Query(default="pdf", description="Export format: 'pdf', 'excel', or 'csv'"),
     mode: str = Query("download", description="'preview' for browser inline view, 'download' for file attachment"),
-    user: User = Depends(require_permission("inventory:read")),
+    user: User = Depends(require_permission("grn:read")),
     db: Session = Depends(get_db),
 ):
     grn = GRNService(db).get(user.tenant_id, grn_id)

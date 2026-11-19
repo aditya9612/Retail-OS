@@ -47,14 +47,19 @@ def list_roles(
 
 @router.get(
     "/permissions",
-    response_model=list[PermissionGroup],
     summary="List Available Permissions",
-    description="Returns all system permissions organized by module to help Store Owners configure custom roles.",
+    description="Returns all system permissions organized by module. Defaults to a clean, simple module-to-permissions map.",
 )
 def list_permissions(
+    format: Optional[str] = Query(
+        default="simple",
+        description="Format: 'simple' returns clean {module: [permissions]} dictionary, 'detailed' returns full metadata list",
+    ),
     current_user: User = Depends(require_permission("users:read")),
 ):
-    return RoleService.get_available_permissions()
+    if format == "detailed":
+        return RoleService.get_available_permissions()
+    return RoleService.get_simple_permissions_map()
 
 
 @router.get(
