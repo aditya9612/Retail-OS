@@ -39,7 +39,7 @@ def get_payment_service(
     return PaymentService(db, user.tenant_id)
 
 
-@router.post("", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_operational_write), Depends(require_permission("payments:write"))])
+@router.post("", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_operational_write), Depends(require_permission("payments:create", "payments:write"))])
 def create_payment(
     data: PaymentCreate,
     service: PaymentService = Depends(get_payment_service),

@@ -36,9 +36,9 @@ def require_settings_read(user: User = Depends(get_current_user)) -> User:
 
 def require_settings_write(user: User = Depends(get_current_user)) -> User:
     perms = user.role.permissions if user.role else []
-    if any(p in perms for p in ["*", "settings:write"]):
+    if any(p in perms for p in ["*", "settings:write", "settings:create", "settings:update", "settings:delete"]):
         return user
-    raise ForbiddenException("Missing permission: settings:write")
+    raise ForbiddenException("Missing permission: settings:update")
 
 
 def _require_tenant_id(user: User) -> int:
