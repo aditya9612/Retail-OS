@@ -29,8 +29,6 @@ from app.models.user import User
 from app.schemas.product import (
     BarcodeLabelMode,
     ProductBarcodeLabelResponse,
-    ProductBulkCreateRequest,
-    ProductBulkCreateResponse,
     ProductCatalogSummaryResponse,
     ProductCreate,
     ProductImageCreate,
@@ -804,25 +802,6 @@ def get_catalog_summary(
     return ProductService(db).get_catalog_summary(
         tenant_id=user.tenant_id,
         store_id=store_id,
-    )
-
-
-@router.post(
-    "/bulk",
-    response_model=ProductBulkCreateResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Bulk Product Creation / Import",
-    description="Creates multiple products in bulk with validation and entitlement checks in a single atomic transaction.",
-    dependencies=[Depends(require_operational_write)],
-)
-def bulk_create_products(
-    payload: ProductBulkCreateRequest,
-    user: User = Depends(require_permission("products:create")),
-    db: Session = Depends(get_db),
-):
-    return ProductService(db).bulk_create_products(
-        tenant_id=user.tenant_id,
-        items=payload.products,
     )
 
 

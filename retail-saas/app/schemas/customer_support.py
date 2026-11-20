@@ -100,3 +100,15 @@ class CustomerSupportQueryResponse(BaseModel):
     data: Optional[Dict[str, Any]] = None
     suggested_actions: List[str] = []
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class StoreFAQResponse(BaseModel):
+    store_name: str
+    address: str
+    city: str
+    phone: str
+    email: str
+    operating_hours: str
+    payment_methods: str
+    whatsapp_ordering: str
+    return_policy: str

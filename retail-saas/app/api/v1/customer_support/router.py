@@ -11,11 +11,40 @@ from app.schemas.customer_support import (
     CustomerReturnResponse,
     CustomerSupportQueryRequest,
     CustomerSupportQueryResponse,
+    StoreFAQResponse,
 )
 from app.api.v1.customer_support.widget_ui import get_customer_support_widget_html
+from app.models.store import Store
 from app.services.customer_support_service import CustomerSupportService
 
 router = APIRouter(prefix="/support", tags=["Customer Support AI Bot"])
+
+
+@router.get(
+    "/stores",
+    summary="List active stores for customer support widget",
+    description="Returns public list of active retail stores/branches for customers to choose their location.",
+)
+def list_support_stores(
+    tenant_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Store).filter(Store.is_active.is_(True))
+    if tenant_id:
+        q = q.filter(Store.tenant_id == tenant_id)
+    stores = q.order_by(Store.is_main.desc(), Store.id.asc()).all()
+    return [
+        {
+            "id": s.id,
+            "name": s.name,
+            "city": s.city,
+            "address": s.address,
+            "phone": s.phone,
+            "tenant_id": s.tenant_id,
+            "is_main": s.is_main,
+        }
+        for s in stores
+    ]
 
 
 @router.post(
@@ -102,6 +131,7 @@ def initiate_return_direct(
 
 @router.get(
     "/faq",
+    response_model=StoreFAQResponse,
     summary="Store Support FAQ & Operating Information",
     description="Returns store timings, address, phone, WhatsApp order number, payment modes, and return policy.",
 )

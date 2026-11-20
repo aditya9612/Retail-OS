@@ -487,7 +487,7 @@ def get_voice_assistant_html() -> str:
             }
 
             try {
-                const response = await fetch('/api/v1/ai/voice-query', {
+                const response = await fetch('/api/v1/ai/voice', {
                     method: 'POST',
                     headers: headers,
                     body: JSON.stringify({

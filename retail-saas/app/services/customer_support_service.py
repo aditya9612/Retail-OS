@@ -9,15 +9,19 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.exceptions import AppException, NotFoundException
 from app.core.logger import logger
+from app.models.coupon import Coupon
 from app.models.customer import Customer
 from app.models.delivery import Delivery
+from app.models.delivery_method import DeliveryMethod
 from app.models.invoice import Invoice
 from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.order_return import OrderReturn, OrderReturnItem
 from app.models.product import Product
 from app.models.store import Store
+from app.models.storefront_setting import StorefrontSetting
 from app.models.tenant import Tenant
+from app.models.whatsapp import WhatsAppSetting
 from app.schemas.customer_support import (
     CustomerInvoiceDownloadResponse,
     CustomerOrderTrackResponse,
@@ -38,18 +42,39 @@ class CustomerSupportService:
         self.tenant_id = tenant_id or 1
         self.store_id = store_id
 
-    def _resolve_context(self) -> Tuple[Tenant, Optional[Store]]:
-        tenant = self.db.query(Tenant).filter(Tenant.id == self.tenant_id).first()
+    def _resolve_context(self) -> Tuple[Optional[Tenant], Optional[Store]]:
         store = None
         if self.store_id:
-            store = self.db.query(Store).filter(Store.id == self.store_id, Store.tenant_id == self.tenant_id).first()
-        if not store:
-            store = (
-                self.db.query(Store)
-                .filter(Store.tenant_id == self.tenant_id, Store.is_active.is_(True))
-                .order_by(Store.is_main.desc(), Store.id.asc())
-                .first()
-            )
+            store = self.db.query(Store).filter(Store.id == self.store_id).first()
+            if store:
+                tenant = self.db.query(Tenant).filter(Tenant.id == store.tenant_id).first()
+                self.tenant_id = store.tenant_id
+                return tenant, store
+
+        if self.tenant_id and self.tenant_id != 1:
+            tenant = self.db.query(Tenant).filter(Tenant.id == self.tenant_id).first()
+            if tenant:
+                store = (
+                    self.db.query(Store)
+                    .filter(Store.tenant_id == self.tenant_id, Store.is_active.is_(True))
+                    .order_by(Store.is_main.desc(), Store.id.asc())
+                    .first()
+                )
+                if store:
+                    return tenant, store
+
+        # Fallback to the primary active store across the DB
+        store = (
+            self.db.query(Store)
+            .filter(Store.is_active.is_(True))
+            .order_by(Store.is_main.desc(), Store.id.asc())
+            .first()
+        )
+        tenant = None
+        if store:
+            self.store_id = store.id
+            self.tenant_id = store.tenant_id
+            tenant = self.db.query(Tenant).filter(Tenant.id == store.tenant_id).first()
         return tenant, store
 
     # --------------------------------------------------------------------------
@@ -376,29 +401,106 @@ class CustomerSupportService:
     # --------------------------------------------------------------------------
 
     def get_store_faq(self) -> Dict[str, Any]:
-        """Provides dynamic store facts: address, timings, payment modes, contact."""
+        """Provides dynamic store facts: address, timings, payment modes, contact directly from database."""
         tenant, store = self._resolve_context()
-        s_name = store.name if store else (tenant.name if tenant else "Retail Store")
-        s_city = store.city if store else "Maharashtra"
-        s_addr = store.address if store else "Main Market Road"
-        s_phone = store.phone if store else "9876543210"
-        s_email = store.email if store else "support@retailos.com"
+        s_name = store.name if store and store.name else (tenant.name if tenant and tenant.name else "स्टोअर")
+        s_city = store.city if store and store.city else ""
+        s_phone = store.phone if store and store.phone else ""
+        s_email = store.email if store and store.email else ""
+
+        # Build address dynamically from available DB fields only
+        addr_components = [part for part in [store.address, store.city, store.state, store.pincode] if store and part]
+        full_addr = ", ".join(addr_components) if addr_components else (s_name if s_name else "पत्ता नोंदवलेला नाही")
+
+        # Check tenant settings for business hours
+        hours_val = "कामाच्या वेळेबाबत अचूक माहितीसाठी कृपया थेट शाखेशी संपर्क करा."
+        if tenant and tenant.settings and isinstance(tenant.settings, dict):
+            if tenant.settings.get("operating_hours"):
+                hours_val = tenant.settings.get("operating_hours")
+            elif tenant.settings.get("business_hours"):
+                hours_val = tenant.settings.get("business_hours")
+
+        # Payment modes from database settings
+        wa = self.db.query(WhatsAppSetting).filter(WhatsAppSetting.tenant_id == self.tenant_id).first() if self.tenant_id else None
+        pay_modes = ["UPI (QR स्कॅन)", "Cash on Delivery (रोख रक्कम)", "क्रेडिट / डेबिट कार्ड्स"]
+        if wa and wa.upi_vpa:
+            pay_modes[0] = f"UPI ({wa.upi_vpa})"
+
+        # WhatsApp ordering text
+        if s_phone:
+            wa_text = f"होय! आपण {s_phone} या नंबरवर किराणा यादी पाठवून ऑर्डर करू शकता."
+        else:
+            wa_text = "WhatsApp नंबर नोंदवलेला नाही. थेट दुकानातून किंवा ऑनलाइन खरेदी करू शकता."
+
+        # Return policy from StorefrontSetting or default policy
+        sf = self.db.query(StorefrontSetting).filter(StorefrontSetting.tenant_id == self.tenant_id).first() if self.tenant_id else None
+        ret_policy = sf.return_policy if (sf and sf.return_policy) else "खरेदीच्या १४ दिवसांच्या आत बिल पावतीसह सहज रिटर्न किंवा एक्सचेंज सुविधा उपलब्ध आहे."
 
         return {
+            "store_id": store.id if store else self.store_id,
+            "tenant_id": store.tenant_id if store else self.tenant_id,
             "store_name": s_name,
-            "address": f"{s_addr}, {s_city}",
-            "city": s_city,
-            "phone": s_phone,
-            "email": s_email,
-            "operating_hours": "सोमवार ते रविवार: सकाळी ८:०० ते रात्री १०:०० (Daily 8:00 AM - 10:00 PM)",
-            "payment_methods": "UPI (Google Pay, PhonePe, Paytm), Cash on Delivery, Cards, Khata / Store Credit",
-            "whatsapp_ordering": f"होय! आपण {s_phone} या नंबरवर किराणा यादी किंवा चिठ्ठीचा फोटो पाठवून ऑर्डर करू शकता.",
-            "return_policy": "वस्तू मिळाल्यापासून १४ दिवसांच्या आत सहज रिटर्न किंवा एक्सचेंज सुविधा उपलब्ध आहे.",
+            "address": full_addr,
+            "city": s_city or "उपलब्ध नाही",
+            "phone": s_phone or "उपलब्ध नाही",
+            "email": s_email or "उपलब्ध नाही",
+            "operating_hours": hours_val,
+            "payment_methods": ", ".join(pay_modes),
+            "whatsapp_ordering": wa_text,
+            "return_policy": ret_policy,
         }
 
     # --------------------------------------------------------------------------
-    # 5. NATURAL LANGUAGE AI DISPATCHER (MARATHI / HINDI / ENGLISH)
+    # 5. NATURAL LANGUAGE AI DISPATCHER (MARATHI / HINDI / ENGLISH / HINGLISH)
     # --------------------------------------------------------------------------
+
+    def _call_gemini_support(self, query_str: str, store_info: dict, language: str = "mr") -> Optional[CustomerSupportQueryResponse]:
+        api_key = getattr(settings, "GEMINI_API_KEY", "")
+        if not api_key:
+            return None
+
+        import urllib.request
+        import urllib.error
+
+        system_instruction = (
+            "You are Retail-OS AI Customer Care Bot (२४/७ AI ग्राहक सेवा प्रतिनिधी), a helpful and polite virtual assistant for a retail store.\n"
+            "Rules:\n"
+            "1. Language Matching: Answer in the same language or dialect the user asked (Marathi, Hindi, English, or Roman Marathi / Hinglish).\n"
+            "2. Ground your answer strictly in the provided Store Info:\n"
+            f"   - Store Name: {store_info.get('store_name')}\n"
+            f"   - Address: {store_info.get('address')}\n"
+            f"   - Phone: {store_info.get('phone')}\n"
+            f"   - Hours: {store_info.get('operating_hours')}\n"
+            f"   - Payment Options: {store_info.get('payment_methods')}\n"
+            "3. Do not invent fake discounts, phone numbers, or addresses. If information is not provided, advise the user to contact the store directly.\n"
+            "4. Return strict JSON with: {\"intent\": \"general\", \"reply\": \"markdown answer with emojis and formatting\", \"speech_text\": \"clean plain spoken text for speaker without asterisks\", \"suggested_actions\": [\"Action 1\", \"Action 2\"]}"
+        )
+        url = f"{settings.GEMINI_API_URL}/models/{getattr(settings, 'GEMINI_MODEL', 'gemini-1.5-flash')}:generateContent?key={api_key}"
+        payload = {
+            "contents": [{"parts": [{"text": query_str}]}],
+            "systemInstruction": {"parts": [{"text": system_instruction}]},
+            "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"},
+        }
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                res_data = json.loads(response.read().decode("utf-8"))
+                text_content = res_data["candidates"][0]["content"]["parts"][0]["text"]
+                parsed = json.loads(text_content)
+                return CustomerSupportQueryResponse(
+                    intent=parsed.get("intent", "general"),
+                    reply=parsed.get("reply", "मी आपली कशी मदत करू?"),
+                    speech_text=parsed.get("speech_text"),
+                    suggested_actions=parsed.get("suggested_actions", ["Track Order", "Store Timings & Address"]),
+                )
+        except Exception as e:
+            logger.info("Gemini support call failed or skipped: %s", e)
+            return None
 
     def process_query(
         self,
@@ -410,7 +512,17 @@ class CustomerSupportService:
         """Processes customer questions using Gemini GenAI with deterministic fallback."""
         q_clean = query.strip()
         tenant, store = self._resolve_context()
-        store_name = store.name if store else (tenant.name if tenant else "Retail Store")
+        store_name = store.name if store and store.name else (tenant.name if tenant and tenant.name else "स्टोअर")
+        store_phone = store.phone if store and store.phone else None
+        store_addr = store.address if store and store.address else None
+        store_city = store.city if store and store.city else None
+
+        # Check if customer typed a phone number in the query
+        digits_only = re.sub(r"\D", "", q_clean)
+        if len(digits_only) == 10:
+            customer_phone = digits_only
+        elif len(digits_only) == 12 and digits_only.startswith("91"):
+            customer_phone = digits_only[2:]
 
         # Extract explicit order or invoice number if typed in query (e.g. ORD-1001, ORD-SUPP-12345, INV-1001)
         extracted_ord = order_number
@@ -421,14 +533,194 @@ class CustomerSupportService:
 
         q_lower = q_clean.lower()
 
+        # 1. Dynamically resolve specific store from Order or Phone
+        if extracted_ord:
+            clean_ord = extracted_ord.strip().upper()
+            ord_obj = self.db.query(Order).filter(func_upper_order(clean_ord)).first()
+            if ord_obj and ord_obj.store_id:
+                ord_store = self.db.query(Store).filter(Store.id == ord_obj.store_id).first()
+                if ord_store:
+                    store = ord_store
+                    self.store_id = ord_store.id
+                    self.tenant_id = ord_store.tenant_id
+                    tenant = self.db.query(Tenant).filter(Tenant.id == ord_store.tenant_id).first()
+                    store_name = ord_store.name
+                    store_phone = ord_store.phone or store_phone
+                    store_addr = ord_store.address or store_addr
+                    store_city = ord_store.city or store_city
+        elif customer_phone and customer_phone.strip():
+            raw_ph = re.sub(r"\D", "", customer_phone.strip())
+            short_ph = raw_ph[-10:] if len(raw_ph) >= 10 else raw_ph
+            cust_candidates = self.db.query(Customer.id).filter(
+                (Customer.phone == raw_ph) | 
+                (Customer.phone == short_ph) | 
+                (Customer.phone.like(f"%{short_ph}"))
+            ).all()
+            cust_ids = [c[0] for c in cust_candidates]
+            if cust_ids:
+                last_ord = (
+                    self.db.query(Order)
+                    .filter(Order.customer_id.in_(cust_ids))
+                    .order_by(Order.created_at.desc())
+                    .first()
+                )
+                if last_ord and last_ord.store_id:
+                    ord_store = self.db.query(Store).filter(Store.id == last_ord.store_id).first()
+                    if ord_store:
+                        store = ord_store
+                        self.store_id = ord_store.id
+                        self.tenant_id = ord_store.tenant_id
+                        tenant = self.db.query(Tenant).filter(Tenant.id == ord_store.tenant_id).first()
+                        store_name = ord_store.name
+                        store_phone = ord_store.phone or store_phone
+                        store_addr = ord_store.address or store_addr
+                        store_city = ord_store.city or store_city
+
+        # 2. Check if customer specifically mentions a city, code, or branch in their message
+        for s in self.db.query(Store).filter(Store.is_active.is_(True)).all():
+            if (
+                (s.name and s.name.lower() in q_lower) or
+                (s.code and s.code.lower() in q_lower) or
+                (s.city and s.city.lower() in q_lower)
+            ):
+                store = s
+                self.store_id = s.id
+                self.tenant_id = s.tenant_id
+                tenant = self.db.query(Tenant).filter(Tenant.id == s.tenant_id).first()
+                store_name = s.name
+                store_phone = s.phone or store_phone
+                store_addr = s.address or store_addr
+                store_city = s.city or store_city
+                break
+
         # ---------------------------------------------------------
-        # A. INTENT: ORDER TRACKING
+        # PRIORITY 1: PURE PHONE NUMBER ENTERED IN CHAT (e.g. '9960106127')
+        # ---------------------------------------------------------
+        if customer_phone and (len(re.sub(r"[\s+\-()]", "", q_clean)) in [10, 11, 12, 13] or q_clean == customer_phone):
+            phone_val = customer_phone
+            clean_digits = re.sub(r"\D", "", phone_val)
+            short_digits = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
+
+            cust_records = self.db.query(Customer).filter(
+                (Customer.phone == clean_digits) | 
+                (Customer.phone == short_digits) | 
+                (Customer.phone.like(f"%{short_digits}"))
+            ).all()
+            cust_ids = [c.id for c in cust_records]
+
+            cust_orders = []
+            if cust_ids:
+                cust_orders = self.db.query(Order).filter(Order.customer_id.in_(cust_ids)).order_by(Order.created_at.desc()).all()
+            
+            if cust_orders:
+                latest = cust_orders[0]
+                if latest.store_id:
+                    ord_store = self.db.query(Store).filter(Store.id == latest.store_id).first()
+                    if ord_store:
+                        store = ord_store
+                        self.store_id = ord_store.id
+                        self.tenant_id = ord_store.tenant_id
+                        store_name = ord_store.name
+                        store_phone = ord_store.phone or store_phone
+
+                track_data = self.track_order(latest.order_number, phone_val)
+                reply = (
+                    f"📱 *मोबाईल नंबर {phone_val} शी जोडलेली शेवटची ऑर्डर आढळली:*\n\n"
+                    f"📦 *ऑर्डर क्रमांक:* **#{track_data.order_number}**\n"
+                    f"• 🏪 **स्टोअर:** {store_name}\n"
+                    f"• **सध्याची स्थिती:** *{track_data.status.upper()}*\n"
+                    f"• **तपशील:** {track_data.status_description}\n"
+                    f"• **एकूण रक्कम:** ₹{track_data.total_amount:,.2f}\n"
+                    f"• **ऑर्डर दिनांक:** {track_data.order_date.strftime('%d %b %Y, %I:%M %p')}\n"
+                )
+                if track_data.delivery_partner:
+                    reply += f"• **डिलिव्हरी पार्टनर:** {track_data.delivery_partner}\n"
+                if track_data.estimated_delivery:
+                    reply += f"• **अंदाजे वेळ:** {track_data.estimated_delivery}\n"
+                
+                track_dict = track_data.model_dump()
+                track_dict["store_id"] = latest.store_id
+                track_dict["store_name"] = store_name
+
+                return CustomerSupportQueryResponse(
+                    intent="order_tracking",
+                    reply=reply,
+                    speech_text=f"आपल्या {phone_val} नंबरवरील {store_name} ची ऑर्डर {track_data.order_number} सध्या {track_data.status} स्थितीत आहे.",
+                    data=track_dict,
+                    suggested_actions=["जीएसटी बिल डाऊनलोड", "वस्तू रिटर्न व रिफंड", "WhatsApp वरून किराणा ऑर्डर"],
+                )
+            else:
+                order_help = f"🛒 **नवीन किराणा माल मागवण्यासाठी ({store_name}):**\n"
+                if store_phone:
+                    order_help += f"• आपण थेट आमच्या **`{store_phone}`** या अधिकृत WhatsApp नंबरवर किराणा यादी पाठवून घरपोच माल मागवू शकता.\n"
+                else:
+                    order_help += f"• आपण थेट {store_name} शाखेला भेट देऊन किंवा ऑनलाइन ऑर्डर करू शकता.\n"
+                order_help += "• किंवा जर आपल्याकडे आधीचा ऑर्डर नंबर असेल तर तो इथे टाईप करा (उदा. *ORD-1001*)."
+
+                reply = (
+                    f"📱 *मोबाईल नंबर नोंदवला गेला: {phone_val}*\n\n"
+                    f"या नंबरवर सध्या कोणतीही सक्रिय ऑनलाइन ऑर्डर सापडली नाही.\n\n"
+                    f"{order_help}"
+                )
+                return CustomerSupportQueryResponse(
+                    intent="order_tracking",
+                    reply=reply,
+                    speech_text=f"आपल्या {phone_val} नंबरवर कोणतीही चालू ऑर्डर सापडली नाही.",
+                    data={"phone": phone_val, "store_id": store.id if store else self.store_id, "store_name": store_name},
+                    suggested_actions=["saman order karaycha ahe", "WhatsApp वरून किराणा ऑर्डर", "दुकान वेळ व पत्ता", "मॅनेजरशी बोला"],
+                )
+
+        # ---------------------------------------------------------
+        # PRIORITY 2: HOW TO ORDER / PLACE ORDER (SAMAN, GROCERY, BOOKING)
+        # ---------------------------------------------------------
+        new_order_keywords = [
+            "saman order", "order karaych", "order karaycha", "order kashi", "order kasa",
+            "kashi book", "kasa book", "online order", "नवीन ऑर्डर", "ऑर्डर कशी करायची",
+            "ऑर्डर करायची", "माल मागवायचा", "सामान मागवायचे", "किराणा ऑर्डर", "kirana order",
+            "माल कसा मागवायचा", "कशी मागवायची", "order book", "booking", "बुक कशी", "बुक करू",
+            "order dyaychi", "order deychi", "खरेदी कशी", "saman pahije", "kirana pahije", "mal pahije",
+            "whatsapp varun", "whatsapp वरून", "चिठ्ठी", "किराणा यादी", "saman kharedi", "mal kharedi"
+        ]
+        if any(k in q_lower for k in new_order_keywords) and not any(k in q_lower for k in ["track", "status", "कुठे आहे", "kuthe", "कधी येईल", "पोहोचली"]):
+            methods = []
+            if store_phone:
+                methods.append(
+                    f"1. 💬 **WhatsApp द्वारे थेट ऑर्डर:**\n"
+                    f"   • कागदावर किराणा सामानाची यादी लिहा किंवा मेसेज टाईप करा.\n"
+                    f"   • ती यादी थेट आमच्या **`{store_phone}`** या अधिकृत WhatsApp नंबरवर पाठवा.\n"
+                    f"   • आमचा प्रतिनिधी आपले बिल पाठवून माल पोहोचवण्याची व्यवस्था करेल!"
+                )
+            methods.append(
+                f"2. 🌐 **ऑनलाइन स्टोअरफ्रंटवरून:**\n"
+                f"   • आमच्या कॅटलॉगमधून वस्तू निवडून थेट कार्टमध्ये ॲड करा आणि ऑर्डर पूर्ण करा."
+            )
+            methods.append(
+                f"3. 🏪 **थेट दुकानाला भेट देऊन:**\n"
+                f"   • {store_name} शाखेत स्वतः येऊन खात्रीशीर खरेदी करू शकता."
+            )
+            reply = (
+                f"🛒 *किराणा व माल ऑर्डर कसा करावा? ({store_name})*\n\n"
+                + "\n\n".join(methods)
+                + "\n\n💡 आपण आधी ऑर्डर केली असल्यास थेट **ऑर्डर नंबर** किंवा **फोन नंबर** पाठवून स्टेटस ट्रॅक करू शकता!"
+            )
+            return CustomerSupportQueryResponse(
+                intent="faq_store_info",
+                reply=reply,
+                speech_text=f"{store_name} मध्ये WhatsApp द्वारे, ऑनलाइन किंवा थेट दुकानातून खरेदी करता येते.",
+                data={"whatsapp_number": store_phone, "store_name": store_name},
+                suggested_actions=["WhatsApp वरून किराणा ऑर्डर", "घरपोच डिलिव्हरी माहिती", "पेमेंट पर्याय", "दुकान वेळ व पत्ता"],
+            )
+
+        # ---------------------------------------------------------
+        # PRIORITY 3: INTENT: ORDER TRACKING (Specific Tracking Requests)
         # ---------------------------------------------------------
         track_keywords = [
-            "track", "status", "कुठे आहे", "ऑर्डर", "कधी येईल", "पोहोचली",
-            "पार्सल", "delivery", "कधी मिळणार", "order status", "where is my order",
+            "track", "status", "कुठे आहे", "कधी येईल", "कधी मिळणार", "पोहोचली",
+            "पार्सल", "delivery status", "order status", "where is my order",
+            "kuthe", "kadhi yeil", "order kuthe", "order kadhi", "पार्सल कुठे",
+            "माझी ऑर्डर", "माझे पार्सल", "order chi mahiti"
         ]
-        if any(k in q_lower for k in track_keywords) and not any(k in q_lower for k in ["return", "रिटर्न", "बिल", "invoice"]):
+        if (any(k in q_lower for k in track_keywords) or extracted_ord) and not any(k in q_lower for k in ["return", "रिटर्न", "बिल", "invoice"]):
             if extracted_ord or customer_phone:
                 try:
                     track_data = self.track_order(extracted_ord, customer_phone)
@@ -446,7 +738,7 @@ class CustomerSupportService:
                     if track_data.estimated_delivery:
                         reply += f"• **अंदाजे वेळ:** {track_data.estimated_delivery}\n"
 
-                    actions = ["Download Invoice PDF", "Return / Exchange Item", "Contact Store"]
+                    actions = ["जीएसटी बिल डाऊनलोड", "वस्तू रिटर्न व रिफंड", "मॅनेजरशी बोला"]
                     speech = f"आपली ऑर्डर क्रमांक {track_data.order_number} सध्या {track_data.status} स्थितीत आहे."
                     return CustomerSupportQueryResponse(
                         intent="order_tracking",
@@ -467,13 +759,13 @@ class CustomerSupportService:
                 intent="order_tracking",
                 reply=reply,
                 speech_text="कृपया आपला ऑर्डर क्रमांक किंवा मोबाईल नंबर सांगा.",
-                suggested_actions=["Track latest order with phone", "View my past orders"],
+                suggested_actions=["saman order karaycha ahe", "WhatsApp वरून किराणा ऑर्डर", "दुकान वेळ व पत्ता"],
             )
 
         # ---------------------------------------------------------
-        # B. INTENT: INVOICE / BILL DOWNLOAD
+        # PRIORITY 4: INTENT: INVOICE / BILL DOWNLOAD
         # ---------------------------------------------------------
-        bill_keywords = ["bill", "invoice", "पावती", "बिल", "पावती हवी", "tax invoice", "receipt", "रसीद"]
+        bill_keywords = ["bill", "invoice", "पावती", "बिल", "पावती हवी", "tax invoice", "receipt", "रसीद", "bill dya", "bill pahije", "bill download"]
         if any(k in q_lower for k in bill_keywords):
             target_id = extracted_ord
             if not target_id:
@@ -500,7 +792,7 @@ class CustomerSupportService:
                     reply=reply,
                     speech_text=speech,
                     data=inv_data.model_dump(),
-                    suggested_actions=["Download PDF", "Track Order", "Return Item"],
+                    suggested_actions=["Download PDF", "ऑर्डर ट्रॅक करा", "वस्तू रिटर्न व रिफंड"],
                 )
             except Exception:
                 reply = (
@@ -511,13 +803,13 @@ class CustomerSupportService:
                     intent="invoice_download",
                     reply=reply,
                     speech_text="कृपया आपला बिल क्रमांक किंवा ऑर्डर क्रमांक सांगा.",
-                    suggested_actions=["Find bill by phone number", "Contact Cashier"],
+                    suggested_actions=["फोन नंबरने बिल शोधा", "मॅनेजरशी बोला", "दुकान वेळ व पत्ता"],
                 )
 
         # ---------------------------------------------------------
-        # C. INTENT: RETURN / EXCHANGE REQUEST
+        # PRIORITY 5: INTENT: RETURN / EXCHANGE REQUEST
         # ---------------------------------------------------------
-        return_keywords = ["return", "रिटर्न", "बदलून", "exchange", "खराब", "तक्रार", "damage", "faulty", "परत"]
+        return_keywords = ["return", "रिटर्न", "बदलून", "exchange", "खराब", "तक्रार", "damage", "faulty", "परत", "return karaych", "vapas"]
         if any(k in q_lower for k in return_keywords):
             if extracted_ord and customer_phone:
                 try:
@@ -541,7 +833,7 @@ class CustomerSupportService:
                         reply=reply,
                         speech_text=speech,
                         data=ret_res.model_dump(),
-                        suggested_actions=["Check return status", "Store return policy"],
+                        suggested_actions=["रिटर्न स्थिती तपासा", "रिटर्न पॉलिसी", "मॅनेजरशी बोला"],
                     )
                 except Exception as exc:
                     reply = f"⚠️ रिटर्न विनंतीमध्ये अडचण: {exc}"
@@ -549,7 +841,7 @@ class CustomerSupportService:
                         intent="return_request",
                         reply=reply,
                         speech_text=str(exc),
-                        suggested_actions=["Contact Store Manager", "View return policy"],
+                        suggested_actions=["मॅनेजरशी बोला", "रिटर्न पॉलिसी"],
                     )
 
             reply = (
@@ -563,52 +855,227 @@ class CustomerSupportService:
                 intent="return_request",
                 reply=reply,
                 speech_text="वस्तू रिटर्न करण्यासाठी कृपया आपला ऑर्डर क्रमांक आणि मोबाईल नंबर सांगा.",
-                suggested_actions=["Initiate Return Request", "Read Return Policy", "Contact Support"],
+                suggested_actions=["ऑर्डर ट्रॅक करा", "दुकान वेळ व पत्ता", "मॅनेजरशी बोला"],
             )
 
         # ---------------------------------------------------------
-        # D. INTENT: STORE FAQ & INFORMATION
+        # PRIORITY 6: INTENT: ALL STORES LIST
+        # ---------------------------------------------------------
+        all_store_keywords = ["सर्व शाखा", "सर्व दुकान", "सर्व स्टोअर", "दुकानांची यादी", "all stores", "branches", "इतर शाखा", "इतर दुकान"]
+        if any(k in q_lower for k in all_store_keywords):
+            all_stores = self.db.query(Store).filter(Store.is_active.is_(True)).order_by(Store.is_main.desc(), Store.id.asc()).all()
+            lines = []
+            for idx, s in enumerate(all_stores[:10], 1):
+                b_type = "सेंट्रल वेअरहाउस" if s.is_warehouse else ("मुख्य स्टोअर" if s.is_main else "रिटेल शाखा")
+                s_phone_disp = s.phone if s.phone else "नोंदवलेला नाही"
+                s_addr_disp = s.address if s.address else (s.city if s.city else "पत्ता नोंदवलेला नाही")
+                lines.append(f"{idx}. 🏪 **{s.name}**" + (f" ({s.city})" if s.city else "") + f"\n   • 📍 पत्ता: {s_addr_disp}\n   • 📞 फोन: `{s_phone_disp}`\n   • 🏢 प्रकार: {b_type}")
+            reply = (
+                f"🏢 *आमच्या सर्व शाखांची यादी (एकूण {len(all_stores)})*\n\n"
+                + "\n\n".join(lines)
+                + "\n\n💡 आपण कोणत्याही शाखेचा पत्ता, वेळ किंवा ऑर्डरबद्दल थेट विचारू शकता किंवा खालील बटणावर क्लिक करा!"
+            )
+            store_actions = [s.name for s in all_stores[:6]]
+            return CustomerSupportQueryResponse(
+                intent="faq_store_info",
+                reply=reply,
+                speech_text=f"आमच्याकडे एकूण {len(all_stores)} शाखा उपलब्ध आहेत.",
+                data={"stores": [{"id": s.id, "name": s.name, "city": s.city, "phone": s.phone} for s in all_stores]},
+                suggested_actions=store_actions + ["ऑर्डर ट्रॅक करा", "WhatsApp वरून किराणा ऑर्डर"],
+            )
+
+        # ---------------------------------------------------------
+        # PRIORITY 7: INTENT: DELIVERY / HOME DELIVERY INFO
+        # ---------------------------------------------------------
+        delivery_keywords = ["होम डिलिव्हरी", "home delivery", "घरपोच", "डिलिव्हरी शुल्क", "delivery charges", "किती वेळात डिलिव्हरी", "डिलिव्हरी"]
+        if any(k in q_lower for k in delivery_keywords):
+            del_methods = (
+                self.db.query(DeliveryMethod)
+                .filter(DeliveryMethod.tenant_id == self.tenant_id, DeliveryMethod.is_active.is_(True))
+                .all()
+            )
+            if del_methods:
+                lines = []
+                for dm in del_methods:
+                    charge_str = f"₹{dm.base_charge}" if dm.base_charge else "मोफत"
+                    lines.append(f"• 🚚 **{dm.name}:** दर: {charge_str} | अंदाजे वेळ: {dm.estimated_days or 1} दिवस")
+                reply = (
+                    f"🛵 *घरपोच डिलिव्हरी पर्याय ({store_name})*\n\n"
+                    + "\n".join(lines)
+                    + (f"\n\n📲 **अधिक माहितीसाठी:** `{store_phone}` वर संपर्क करा." if store_phone else "")
+                )
+            else:
+                sf = self.db.query(StorefrontSetting).filter(StorefrontSetting.tenant_id == self.tenant_id).first()
+                if sf and sf.shipping_policy:
+                    reply = f"🛵 *घरपोच डिलिव्हरी माहिती ({store_name})*\n\n{sf.shipping_policy}"
+                else:
+                    contact_hint = f"`{store_phone}` या नंबरवर संपर्क करा." if store_phone else "दुकानाला थेट भेट द्या किंवा संपर्क करा."
+                    reply = (
+                        f"🛵 *घरपोच डिलिव्हरी माहिती ({store_name})*\n\n"
+                        f"डिलिव्हरी सेवा, क्षेत्र आणि शुल्काबाबत तपशीलवार माहितीसाठी कृपया {contact_hint}"
+                    )
+            return CustomerSupportQueryResponse(
+                intent="faq_store_info",
+                reply=reply,
+                speech_text=f"{store_name} डिलिव्हरी माहिती उपलब्ध आहे.",
+                data={"store_name": store_name},
+                suggested_actions=["WhatsApp वरून किराणा ऑर्डर", "पेमेंट पर्याय", "दुकान वेळ व पत्ता"],
+            )
+
+        # ---------------------------------------------------------
+        # PRIORITY 8: INTENT: PAYMENT MODES
+        # ---------------------------------------------------------
+        pay_keywords = ["पेमेंट पर्याय", "payment modes", "payment options", "कसे पैसे", "कार्ड चालते का", "gpay", "phonepe", "उधारी मिळते का", "पेमेंट"]
+        if any(k in q_lower for k in pay_keywords):
+            wa = self.db.query(WhatsAppSetting).filter(WhatsAppSetting.tenant_id == self.tenant_id).first() if self.tenant_id else None
+            pay_lines = [
+                "• 💵 **Cash on Delivery (COD):** माल मिळाल्यावर रोख पैसे देऊ शकता.",
+                "• 💳 **क्रेडिट / डेबिट कार्ड्स:** सर्व प्रमुख बँकांची कार्ड्स स्वीकारली जातात."
+            ]
+            if wa and wa.upi_vpa:
+                pay_lines.insert(0, f"• 📱 **UPI:** QR कोड स्कॅन करून किंवा `{wa.upi_vpa}` द्वारे थेट पेमेंट.")
+            else:
+                pay_lines.insert(0, "• 📱 **UPI:** Google Pay, PhonePe, Paytm द्वारे थेट पेमेंट.")
+            
+            if wa and wa.ai_khata_reminders_enabled:
+                pay_lines.append("• 📓 **खाते / Store Credit:** नियमित ग्राहकांसाठी उधारी खाते सुविधा.")
+
+            reply = (
+                f"💳 *उपलब्ध पेमेंट पर्याय ({store_name})*\n\n"
+                + "\n".join(pay_lines)
+            )
+            return CustomerSupportQueryResponse(
+                intent="faq_store_info",
+                reply=reply,
+                speech_text=f"{store_name} मध्ये UPI, कॅश आणि कार्ड पेमेंट स्वीकारले जाते.",
+                data={"payment_modes": ["UPI", "Cash", "Cards"]},
+                suggested_actions=["ऑर्डर ट्रॅक करा", "WhatsApp वरून किराणा ऑर्डर", "दुकान वेळ व पत्ता"],
+            )
+
+        # ---------------------------------------------------------
+        # PRIORITY 9: INTENT: OFFERS & DISCOUNTS
+        # ---------------------------------------------------------
+        offer_keywords = ["offer", "offers", "discount", "सवलत", "ऑफर", "स्कीम", "किंमत कमी"]
+        if any(k in q_lower for k in offer_keywords):
+            active_coupons = (
+                self.db.query(Coupon)
+                .filter(Coupon.tenant_id == self.tenant_id, Coupon.is_active.is_(True))
+                .all()
+            )
+            if active_coupons:
+                coupon_lines = []
+                for c in active_coupons:
+                    disc_str = f"{c.discount_value}% सूट" if c.discount_type == "percentage" else f"₹{c.discount_value} सूट"
+                    min_str = f" (किमान खरेदी: ₹{c.min_order_amount})" if c.min_order_amount else ""
+                    coupon_lines.append(f"• 🏷️ **कूपन कोड:** `{c.code}` — **{disc_str}**{min_str}\n   {c.description or ''}")
+                reply = (
+                    f"🎁 *आजच्या चालू ऑफर्स व सवलती ({store_name})*\n\n"
+                    + "\n".join(coupon_lines)
+                    + "\n\n💡 खरेदी करताना वरील कूपन कोड वापरून आपण सवलत मिळवू शकता!"
+                )
+                coupon_data = [{"code": c.code, "discount": float(c.discount_value)} for c in active_coupons]
+            else:
+                reply = (
+                    f"🎁 *सवलती व ऑफर्स ({store_name})*\n\n"
+                    f"सध्या {store_name} मध्ये कोणतीही सक्रिय कूपन ऑफर किंवा डिस्काउंट स्कीम उपलब्ध नाही.\n"
+                    f"नवीन ऑफर्स सुरू झाल्यावर आम्ही नक्की कळवू!"
+                )
+                coupon_data = []
+
+            return CustomerSupportQueryResponse(
+                intent="faq_store_info",
+                reply=reply,
+                speech_text=f"{store_name} च्या चालू ऑफर्सची माहिती.",
+                data={"offers": coupon_data},
+                suggested_actions=["WhatsApp वरून किराणा ऑर्डर", "सर्व शाखांची माहिती", "दुकान वेळ व पत्ता"],
+            )
+
+        # ---------------------------------------------------------
+        # PRIORITY 10: INTENT: CONTACT STORE MANAGER
+        # ---------------------------------------------------------
+        manager_keywords = ["मॅनेजर", "manager", "helpline", "कॉल करायचा", "मदतनीस", "थेट बोलायचे", "हेल्पलाईन"]
+        if any(k in q_lower for k in manager_keywords):
+            lines = [f"• 🏪 **शाखा:** {store_name}"]
+            if store_addr:
+                lines.append(f"• 📍 **पत्ता:** {store_addr}" + (f", {store_city}" if store_city and store_city not in store_addr else ""))
+            if store_phone:
+                lines.append(f"• 📱 **मॅनेजर थेट फोन / WhatsApp:** `{store_phone}`")
+            else:
+                lines.append("• 📱 **फोन नंबर:** नोंदवलेला नाही (कृपया दुकानाला थेट भेट द्या)")
+            if store and store.email:
+                lines.append(f"• ✉️ **ईमेल:** `{store.email}`")
+            
+            reply = (
+                f"📞 *स्टोअर व्यवस्थापन संपर्क ({store_name})*\n\n"
+                + "\n".join(lines)
+                + "\n\n💡 विशेष सहाय्य किंवा चौकशीसाठी आपण थेट संपर्क करू शकता."
+            )
+            return CustomerSupportQueryResponse(
+                intent="human_handoff",
+                reply=reply,
+                speech_text=f"आपण {store_name} व्यवस्थापकाशी संपर्क करू शकता.",
+                data={"manager_phone": store_phone},
+                suggested_actions=["WhatsApp वरून किराणा ऑर्डर", "दुकान वेळ व पत्ता", "ऑर्डर ट्रॅक करा"],
+            )
+
+        # ---------------------------------------------------------
+        # PRIORITY 11: INTENT: STORE FAQ & TIMINGS / ADDRESS
         # ---------------------------------------------------------
         faq_keywords = [
             "पत्ता", "address", "वेळ", "timing", "hours", "कधी चालू", "उघडे", "open",
-            "phone", "फोन", "नंबर", "संपर्क", "contact", "location", "कुठे आहे दुकान",
+            "phone", "फोन", "नंबर", "संपर्क", "contact", "location", "कुठे आहे दुकान", "patta", "vel", "kadhi ughadte"
         ]
         if any(k in q_lower for k in faq_keywords):
             faq = self.get_store_faq()
+            lines = [
+                f"• 📍 **पत्ता:** {faq['address']}",
+                f"• ⏰ **दुकान वेळ:** {faq['operating_hours']}"
+            ]
+            if faq.get("phone") and faq["phone"] != "उपलब्ध नाही":
+                lines.append(f"• 📞 **फोन / WhatsApp:** `{faq['phone']}`")
+            if faq.get("email") and faq["email"] != "उपलब्ध नाही":
+                lines.append(f"• ✉️ **ईमेल:** `{faq['email']}`")
+            lines.append(f"• 💳 **पेमेंट पर्याय:** {faq['payment_methods']}")
+            lines.append(f"• 🔄 **रिटर्न पॉलिसी:** {faq['return_policy']}")
+
             reply = (
                 f"🏪 *{faq['store_name']} - माहिती व संपर्क*\n\n"
-                f"• 📍 **पत्ता:** {faq['address']}\n"
-                f"• ⏰ **दुकान वेळ:** {faq['operating_hours']}\n"
-                f"• 📞 **फोन / WhatsApp:** {faq['phone']}\n"
-                f"• 💳 **पेमेंट पर्याय:** {faq['payment_methods']}\n"
-                f"• 🚚 **WhatsApp घरपोच ऑर्डर:** {faq['whatsapp_ordering']}\n"
-                f"• 🔄 **रिटर्न पॉलिसी:** {faq['return_policy']}"
+                + "\n".join(lines)
             )
-            speech = f"{faq['store_name']} चे दुकान रोज सकाळी ८ ते रात्री १० पर्यंत उघडे असते. पत्ता {faq['address']} असा आहे."
+            speech = f"{faq['store_name']} चा पत्ता {faq['address']} असा आहे."
             return CustomerSupportQueryResponse(
                 intent="faq_store_info",
                 reply=reply,
                 speech_text=speech,
                 data=faq,
-                suggested_actions=["Track an order", "Order on WhatsApp", "Get Directions"],
+                suggested_actions=["WhatsApp वरून किराणा ऑर्डर", "सर्व शाखांची माहिती", "ऑर्डर ट्रॅक करा"],
             )
 
         # ---------------------------------------------------------
-        # E. GREETINGS & DEFAULT HELPFUL ASSISTANT
+        # PRIORITY 12: ATTEMPT GEMINI GENAI FOR COMPLEX QUESTIONS
+        # ---------------------------------------------------------
+        faq_data = self.get_store_faq()
+        gemini_res = self._call_gemini_support(q_clean, faq_data, language)
+        if gemini_res:
+            return gemini_res
+
+        # ---------------------------------------------------------
+        # PRIORITY 13: GREETINGS & WARM HELPFUL DISPATCHER
         # ---------------------------------------------------------
         greeting_words = ["hi", "hello", "namaste", "namaskar", "नमस्कार", "नमस्ते", "हेल्प", "help"]
         if any(w in q_lower for w in greeting_words) or len(q_clean) < 4:
             reply = (
-                f"🙏 *नमस्कार! मी {store_name} चा 24/7 AI ग्राहक सहाय्यक (Customer Support Bot) आहे.*\n\n"
-                f"मी तुम्हाला पुढील गोष्टींमध्ये मदत करू शकतो:\n"
-                f"1. 📦 **ऑर्डर ट्रॅक करा** (उदा. *'माझी ऑर्डर ORD-1001 कुठे आहे?'*)\n"
-                f"2. 🧾 **बिल / इनव्हॉइस मिळवा** (उदा. *'माझे बिल डाऊनलोड करायचे आहे'*)\n"
-                f"3. 🔄 **रिटर्न किंवा एक्सचेंज विनंती** (उदा. *'ऑर्डर रिटर्न करायची आहे'*)\n"
-                f"4. 🏪 **दुकान वेळ व पत्ता माहिती** (उदा. *'दुकान कधी उघडे असते?'*)\n\n"
-                f"आपला प्रश्न खाली टाईप करा किंवा सुचवलेले पर्याय निवडा! ✨"
+                f"🙏 *नमस्कार! मी {store_name} चा 24/7 AI ग्राहक सहाय्यक (Customer Care Bot) आहे.*\n\n"
+                f"मी तुम्हाला खालील सर्व सेवांमध्ये मदत करू शकतो:\n"
+                f"1. 🛒 **किराणा माल खरेदी:** (उदा. *'saman order karaycha ahe'*)\n"
+                f"2. 📦 **ऑर्डर ट्रॅकिंग:** (उदा. *'माझी ऑर्डर ORD-1001 कुठे आहे?'*)\n"
+                f"3. 🧾 **जीएसटी बिल डाऊनलोड:** (उदा. *'माझे बिल हवे आहे'*)\n"
+                f"4. 🏪 **दुकान वेळ व पत्ता:** (उदा. *'दुकान कधी उघडे असते?'*)\n"
+                f"5. 🛵 **घरपोच डिलिव्हरी:** (उदा. *'डिलिव्हरी कशी मिळते?'*)\n\n"
+                f"खाली आपला प्रश्न टाईप करा किंवा वरील पर्यायांवर क्लिक करा! ✨"
             )
-            speech = f"नमस्कार! मी {store_name} चा सहाय्यक आहे. मी ऑर्डर ट्रॅक करणे, बिल देणे किंवा रिटर्न करण्यास मदत करू शकतो."
-            actions = ["Track Order", "Download Tax Invoice", "Return / Exchange Item", "Store Timings & Address"]
+            speech = f"नमस्कार! मी {store_name} चा सहाय्यक आहे. मी ऑर्डर करणे, ट्रॅक करणे किंवा बिल देणे यात मदत करू शकतो."
+            actions = ["saman order karaycha ahe", "WhatsApp वरून किराणा ऑर्डर", "ऑर्डर ट्रॅक करा", "दुकान वेळ व पत्ता"]
             return CustomerSupportQueryResponse(
                 intent="greeting",
                 reply=reply,
@@ -616,16 +1083,21 @@ class CustomerSupportService:
                 suggested_actions=actions,
             )
 
-        # General inquiry fallback
+        # Fallback response (Guaranteed valid contact, helpful directions)
+        fallback_contact = f"दुकानाच्या सपोर्ट टीमशी `{store_phone}` या नंबरवर थेट संपर्क साधा." if store_phone else f"{store_name} च्या व्यवस्थापनाशी दुकानात थेट संपर्क साधा."
         reply = (
-            f"धन्यवाद! आपल्या प्रश्नाबाबत मी अधिक माहिती शोधत आहे. "
-            f"आपण खालील पर्यायांपैकी एकावर क्लिक करून थेट माहिती मिळवू शकता किंवा दुकानाच्या सपोर्ट टीमशी `{store.phone if store else 'संपर्क'}` वर संपर्क करू शकता."
+            f"🙏 *{store_name} ग्राहक सेवा मदत केंद्र*\n\n"
+            f"आपल्या प्रश्नाबाबत अचूक माहिती मिळवण्यासाठी कृपया खालीलपैकी एक पर्याय निवडा:\n\n"
+            f"• 🛒 **माल मागवण्यासाठी:** टाइप करा *'saman order karaycha ahe'*\n"
+            f"• 📦 **ऑर्डर ट्रॅक करण्यासाठी:** आपला ऑर्डर नंबर टाइप करा (उदा. *ORD-1001*)\n"
+            f"• 📞 **थेट मदतीसाठी:** {fallback_contact}"
         )
+        speech = f"आपल्या मदतीसाठी आपण {store_phone} वर संपर्क करू शकता किंवा खालील पर्याय निवडू शकता." if store_phone else "आपल्या मदतीसाठी खालील पर्याय निवडू शकता."
         return CustomerSupportQueryResponse(
             intent="general",
             reply=reply,
-            speech_text=reply,
-            suggested_actions=["Track Order", "Download Tax Invoice", "Store Information", "Contact Store Manager"],
+            speech_text=speech,
+            suggested_actions=["saman order karaycha ahe", "WhatsApp वरून किराणा ऑर्डर", "ऑर्डर ट्रॅक करा", "दुकान वेळ व पत्ता"],
         )
 
     def _get_status_description(

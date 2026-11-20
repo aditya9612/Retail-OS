@@ -159,43 +159,54 @@ def slow_moving_stock(
 
 
 @router.post(
+    "/chat",
+    response_model=AIChatQueryResponse,
+    summary="Retail-OS AI Chat Assistant",
+    description="Answers natural language business questions about sales, revenue, low stock, and customer stats.",
+)
+@router.post(
     "/chat-query",
     response_model=AIChatQueryResponse,
-    summary="Retail-OS AI Natural Language Assistant",
-    description="Answers natural language business questions about sales, revenue, low stock, and customer stats.",
+    include_in_schema=False,
 )
 def chat_query(
     payload: AIChatQueryRequest,
     user: User = Depends(require_permission("ai:read")),
     db: Session = Depends(get_db),
 ):
-    return AIService(db).chat_query(user.tenant_id, payload.query, store_id=payload.store_id)
+    effective_store_id = user.store_id if user.store_id is not None else payload.store_id
+    return AIService(db).chat_query(user.tenant_id, payload.query, store_id=effective_store_id)
 
 
 @router.post(
-    "/voice-query",
+    "/voice",
     response_model=AIVoiceQueryResponse,
-    summary="Retail-OS AI Real-Time Voice Assistant",
+    summary="Retail-OS AI Voice Assistant",
     description=(
         "Processes natural spoken voice queries via microphone (speech text or raw audio) using Gemini 3.5 Flash-Lite "
         "and returns spoken speech_text ready for immediate speaker playback.\n\n"
-        "👉 **मायक्रोफोन वापरून बोलण्यासाठी (Live Microphone UI):**\n"
-        "Swagger UI मध्ये ब्राऊझर मायक्रोफोन बटण सपोर्ट नसते (फक्त JSON इनपुट असते). "
+        "👉 **मायक्रोफोन वापरून बोलण्यासाठी (Live Microphone UI):** "
         "थेट मायक्रोफोन बटण दाबून बोलण्यासाठी आमचे रिअल-टाईम व्हॉईस पोर्टल उघडा: "
-        "[http://127.0.0.1:8000/api/v1/ai/voice-assistant](/api/v1/ai/voice-assistant) (किंवा खालील `GET /api/v1/ai/voice-assistant` उघडा)."
+        "[http://127.0.0.1:8000/voice-assistant](/voice-assistant) किंवा `/api/v1/ai/voice-assistant`."
     ),
+)
+@router.post(
+    "/voice-query",
+    response_model=AIVoiceQueryResponse,
+    include_in_schema=False,
 )
 def voice_query(
     payload: AIVoiceQueryRequest,
     user: User = Depends(require_permission("ai:read")),
     db: Session = Depends(get_db),
 ):
+    effective_store_id = user.store_id if user.store_id is not None else payload.store_id
     return AIService(db).voice_query(
         tenant_id=user.tenant_id,
         query_str=payload.query,
         audio_base64=payload.audio_base64,
         audio_mime_type=payload.audio_mime_type,
-        store_id=payload.store_id,
+        store_id=effective_store_id,
         language=payload.language,
     )
 
@@ -203,14 +214,12 @@ def voice_query(
 @router.get(
     "/voice-assistant",
     response_class=HTMLResponse,
-    summary="Interactive Voice AI Assistant Web Application",
-    description=(
-        "⚠️ **महत्त्वाचे (Please Note):** हा JSON डेटा API नसून हे **संपूर्ण वेब ॲप्लिकेशन (Interactive Web Page)** आहे.\n\n"
-        "Swagger UI मध्ये 'Execute' केल्यास फक्त कच्चा HTML कोड (Raw HTML Code) दिसेल.\n\n"
-        "👉 **मायक्रोफोन बटण दाबून बोलण्यासाठी ही लिंक थेट ब्राऊझरच्या नवीन टॅबमध्ये उघडा:**\n\n"
-        "🔗 **[http://127.0.0.1:8000/api/v1/ai/voice-assistant](http://127.0.0.1:8000/api/v1/ai/voice-assistant)**\n\n"
-        "*(किंवा शॉर्ट लिंक: [http://127.0.0.1:8000/voice-assistant](http://127.0.0.1:8000/voice-assistant))*"
-    ),
+    include_in_schema=False,
+)
+@router.get(
+    "/voice",
+    response_class=HTMLResponse,
+    include_in_schema=False,
 )
 def voice_assistant_page():
     return HTMLResponse(content=get_voice_assistant_html())

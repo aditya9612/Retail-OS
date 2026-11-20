@@ -82,9 +82,9 @@ def test_voice_query_text_endpoint(voice_auth_setup):
     assert "*" not in data["speech_text"]
     assert data["language"] in ("mr-IN", "hi-IN", "en-IN")
 
-    # 2. English query
+    # 2. English query via /voice
     res_en = client.post(
-        "/api/v1/ai/voice-query",
+        "/api/v1/ai/voice",
         json={"query": "What are today's sales figures?", "language": "en-IN"},
         headers=headers,
     )
@@ -128,7 +128,7 @@ def test_chat_query_includes_speech_text(voice_auth_setup):
     headers = voice_auth_setup["headers"]
 
     res = client.post(
-        "/api/v1/ai/chat-query",
+        "/api/v1/ai/chat",
         json={"query": "How many items are low in stock?"},
         headers=headers,
     )

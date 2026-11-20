@@ -19,9 +19,11 @@ def get_customer_support_widget_html() -> str:
         .chat-bubble-user {
             background: #0284c7;
         }
-        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
         ::-webkit-scrollbar-track { background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col items-center justify-center p-2 sm:p-4 text-slate-100">
@@ -29,7 +31,7 @@ def get_customer_support_widget_html() -> str:
     <div class="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col h-[92vh] overflow-hidden">
         
         <!-- Widget Header -->
-        <header class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border-b border-slate-800 p-4 flex items-center justify-between">
+        <header class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border-b border-slate-800 p-3.5 flex items-center justify-between gap-2">
             <div class="flex items-center gap-3">
                 <div class="relative">
                     <div class="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-lg">
@@ -41,32 +43,51 @@ def get_customer_support_widget_html() -> str:
                     <h1 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
                         Retail-OS AI Customer Care
                         <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">24/7 Active</span>
+                        <span id="storeBadge" class="hidden text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 flex items-center gap-1">📍 <span id="storeBadgeName"></span></span>
                     </h1>
                     <p class="text-xs text-slate-400">ऑर्डर ट्रॅकिंग • बिल डाऊनलोड • रिटर्न व तक्रार निवारण</p>
                 </div>
             </div>
 
-            <!-- Language & Audio Toggle -->
+            <!-- Audio Toggle Button -->
             <div class="flex items-center gap-2">
-                <button id="voiceToggleBtn" class="px-2.5 py-1 text-xs rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1">
+                <button id="voiceToggleBtn" class="px-2.5 py-1 text-xs rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1 shadow-sm">
                     🔊 <span id="voiceStatus">Audio ON</span>
                 </button>
             </div>
         </header>
 
-        <!-- Quick Action Suggestion Pills -->
-        <div class="bg-slate-950/60 border-b border-slate-800/80 px-3 py-2 flex items-center gap-2 overflow-x-auto text-xs no-scrollbar">
-            <button onclick="sendQuickQuery('माझी ऑर्डर कुठे आहे?')" class="whitespace-nowrap px-3 py-1 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition">
+        <!-- Quick Action Suggestion Pills (10 Questions) -->
+        <div class="bg-slate-950/80 border-b border-slate-800/80 px-3 py-2 flex items-center gap-2 overflow-x-auto text-xs no-scrollbar">
+            <button onclick="sendQuickQuery('माझी ऑर्डर कुठे आहे?')" class="whitespace-nowrap px-3 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white transition flex items-center gap-1.5 shadow-sm">
                 📦 ऑर्डर ट्रॅक करा
             </button>
-            <button onclick="sendQuickQuery('मला टॅक्स इनव्हॉइस बिल डाऊनलोड करायचे आहे')" class="whitespace-nowrap px-3 py-1 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition">
-                🧾 बिल / पावती मिळवा
+            <button onclick="sendQuickQuery('मला टॅक्स इनव्हॉइस बिल डाऊनलोड करायचे आहे')" class="whitespace-nowrap px-3 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white transition flex items-center gap-1.5 shadow-sm">
+                🧾 जीएसटी बिल डाऊनलोड
             </button>
-            <button onclick="sendQuickQuery('वस्तू रिटर्न किंवा बदलून हवी आहे')" class="whitespace-nowrap px-3 py-1 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition">
-                🔄 रिटर्न किंवा तक्रार
+            <button onclick="sendQuickQuery('वस्तू रिटर्न किंवा बदलून हवी आहे')" class="whitespace-nowrap px-3 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white transition flex items-center gap-1.5 shadow-sm">
+                🔄 वस्तू रिटर्न व रिफंड
             </button>
-            <button onclick="sendQuickQuery('दुकान कधी उघडे असते आणि पत्ता काय?')" class="whitespace-nowrap px-3 py-1 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition">
+            <button onclick="sendQuickQuery('दुकान कधी उघडे असते आणि पत्ता काय?')" class="whitespace-nowrap px-3 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white transition flex items-center gap-1.5 shadow-sm">
                 🏪 दुकान वेळ व पत्ता
+            </button>
+            <button onclick="sendQuickQuery('तुमच्या सर्व शाखांची यादी दाखवा')" class="whitespace-nowrap px-3 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white transition flex items-center gap-1.5 shadow-sm">
+                🏢 सर्व शाखांची माहिती
+            </button>
+            <button onclick="sendQuickQuery('होम डिलिव्हरी कधी आणि कशी मिळते?')" class="whitespace-nowrap px-3 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white transition flex items-center gap-1.5 shadow-sm">
+                🛵 घरपोच डिलिव्हरी माहिती
+            </button>
+            <button onclick="sendQuickQuery('WhatsApp वरून किराणा ऑर्डर कशी करायची?')" class="whitespace-nowrap px-3 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white transition flex items-center gap-1.5 shadow-sm">
+                💬 WhatsApp ऑर्डर कशी करावी?
+            </button>
+            <button onclick="sendQuickQuery('पेमेंटचे कोणते पर्याय उपलब्ध आहेत?')" class="whitespace-nowrap px-3 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white transition flex items-center gap-1.5 shadow-sm">
+                💳 पेमेंट पर्याय (UPI/Cash/Khata)
+            </button>
+            <button onclick="sendQuickQuery('आजच्या चालू ऑफर्स आणि डिस्काउंट्स सांगा')" class="whitespace-nowrap px-3 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white transition flex items-center gap-1.5 shadow-sm">
+                🎁 आजच्या ऑफर्स व सवलती
+            </button>
+            <button onclick="sendQuickQuery('थेट स्टोअर मॅनेजरशी संपर्क कसा करायचा?')" class="whitespace-nowrap px-3 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white transition flex items-center gap-1.5 shadow-sm">
+                📞 मॅनेजरशी बोला (हेल्पलाईन)
             </button>
         </div>
 
@@ -146,6 +167,31 @@ def get_customer_support_widget_html() -> str:
 
         let isVoiceEnabled = true;
 
+        // Auto-fill phone & store context from URL params or sessionStorage
+        const urlParams = new URLSearchParams(window.location.search);
+        const prePhone = urlParams.get('phone');
+        if (prePhone) {
+            phoneInput.value = prePhone;
+        }
+
+        let activeStoreId = urlParams.get('store_id') || sessionStorage.getItem('retailos_store_id');
+        let activeTenantId = urlParams.get('tenant_id') || sessionStorage.getItem('retailos_tenant_id');
+        let activeStoreName = sessionStorage.getItem('retailos_store_name');
+
+        function updateStoreBadge(name) {
+            if (!name) return;
+            const badge = document.getElementById('storeBadge');
+            const badgeName = document.getElementById('storeBadgeName');
+            if (badge && badgeName) {
+                badgeName.innerText = name;
+                badge.classList.remove('hidden');
+            }
+        }
+
+        if (activeStoreName) {
+            updateStoreBadge(activeStoreName);
+        }
+
         voiceToggleBtn.addEventListener('click', () => {
             isVoiceEnabled = !isVoiceEnabled;
             voiceStatus.innerText = isVoiceEnabled ? "Audio ON" : "Audio OFF";
@@ -221,12 +267,31 @@ def get_customer_support_widget_html() -> str:
                     body: JSON.stringify({
                         query: query,
                         customer_phone: phone || null,
+                        store_id: activeStoreId ? parseInt(activeStoreId) : null,
+                        tenant_id: activeTenantId ? parseInt(activeTenantId) : null,
                         language: 'mr'
                     })
                 });
 
                 const data = await res.json();
                 typingIndicator.classList.add('hidden');
+
+                if (data.data) {
+                    if (data.data.store_id) {
+                        activeStoreId = data.data.store_id;
+                        sessionStorage.setItem('retailos_store_id', activeStoreId);
+                    }
+                    if (data.data.tenant_id) {
+                        activeTenantId = data.data.tenant_id;
+                        sessionStorage.setItem('retailos_tenant_id', activeTenantId);
+                    }
+                    if (data.data.store_name) {
+                        activeStoreName = data.data.store_name;
+                        sessionStorage.setItem('retailos_store_name', activeStoreName);
+                        updateStoreBadge(activeStoreName);
+                    }
+                }
+
                 appendBotMessage(data);
             } catch (err) {
                 typingIndicator.classList.add('hidden');

@@ -1399,21 +1399,6 @@ class ProductCatalogSummaryResponse(BaseModel):
         return float(v) if v is not None else 0.0
 
 
-class ProductBulkCreateRequest(BaseModel):
-    products: list[ProductCreate] = Field(
-        ...,
-        min_length=1,
-        max_length=500,
-        description="List of products to create in bulk (1-500)",
-    )
-
-
-class ProductBulkCreateResponse(BaseModel):
-    success: bool
-    total_created: int
-    products: list[ProductResponse] = []
-
-
 class ProductBarcodeLabelResponse(BaseModel):
     product_id: int
     product_name: str
