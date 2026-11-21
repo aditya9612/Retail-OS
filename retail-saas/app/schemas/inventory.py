@@ -301,6 +301,7 @@ class StockMovementResponse(BaseModel):
  
  
 class StockInResponse(StockMovementResponse):
+    supplier_id: Optional[int] = None
     batch_number: Optional[str] = None
     expiry_date: Optional[date] = None
     unit_cost: Optional[Decimal] = None
