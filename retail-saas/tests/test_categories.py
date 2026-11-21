@@ -119,9 +119,9 @@ def test_create_category_valid_names(tenant_fixture):
         "Fresh Fruits",
         "Dairy Products",
         "Home Appliances",
-        "4K TVs",
-        "USB-C Accessories",
-        "Shoes 2026",
+        "Television Sets",
+        "USB Accessories",
+        "Shoes and Footwear",
     ]
     for name in valid_names:
         resp = client.post(
@@ -184,6 +184,14 @@ def test_create_category_reject_invalid_names(tenant_fixture):
         "Category || Sub",
         "Category \\ Sub",
         "Cat,,,Sub",
+        "67hgjhj&-2456",
+        "&--",
+        "Category &- Sub",
+        "Category -& Sub",
+        "jhjkh88800soaps",
+        "life boy soap&-soap",
+        "4K TVs",
+        "Shoes 2026",
     ]
     for name in invalid_names:
         resp = client.post(
@@ -275,6 +283,13 @@ def test_create_category_parent_validation(tenant_fixture):
     )
     assert child_resp.status_code == 201
     assert child_resp.json()["parent_id"] == parent_id
+
+    # Invalid subcategory name (e.g. "life boy soap&-soap") -> 422
+    assert client.post(
+        "/api/v1/categories",
+        json={"name": "life boy soap&-soap", "parent_id": parent_id},
+        headers=headers,
+    ).status_code == 422
 
 
 def test_create_category_duplicate_name_within_same_tenant_rejected(tenant_fixture):
@@ -538,6 +553,7 @@ def test_update_category_validation(tenant_fixture):
     assert client.put(f"/api/v1/categories/{cat['id']}", json={"name": "   "}, headers=headers).status_code == 422
     assert client.put(f"/api/v1/categories/{cat['id']}", json={"name": "string"}, headers=headers).status_code == 422
     assert client.put(f"/api/v1/categories/{cat['id']}", json={"name": "1234"}, headers=headers).status_code == 422
+    assert client.put(f"/api/v1/categories/{cat['id']}", json={"name": "jhjkh88800soaps"}, headers=headers).status_code == 422
     assert client.put(f"/api/v1/categories/{cat['id']}", json={"name": "@#$%^"}, headers=headers).status_code == 422
 
     # Invalid descriptions in request body
