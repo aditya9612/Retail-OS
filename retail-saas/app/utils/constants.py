@@ -11,6 +11,7 @@ class RoleEnum(str, Enum):
     PURCHASE_MANAGER = "purchase_manager"
     SALES_EXECUTIVE = "sales_executive"
     CRM_SUPPORT = "crm_support"
+    CUSTOMER = "customer"
 
 
 class UserRole(str, Enum):
@@ -24,6 +25,7 @@ class UserRole(str, Enum):
     PURCHASE_MANAGER = "purchase_manager"
     SALES_EXECUTIVE = "sales_executive"
     CRM_SUPPORT = "crm_support"
+    CUSTOMER = "customer"
     # Legacy roles for backward compatibility
     ACCOUNTANT = "accountant"
     STAFF = "staff"
@@ -34,6 +36,7 @@ OFFICIAL_ROLES = [r.value for r in RoleEnum]
 
 class OrderStatus(str, Enum):
     DRAFT = "draft"
+    PENDING = "pending"
     CONFIRMED = "confirmed"
     PROCESSING = "processing"
     SHIPPED = "shipped"
@@ -46,6 +49,7 @@ class OrderStatus(str, Enum):
 class OrderType(str, Enum):
     POS = "pos"
     ECOMMERCE = "ecommerce"
+    ONLINE = "online"
 
 
 class PaymentMethod(str, Enum):
@@ -120,6 +124,7 @@ DEFAULT_ROLE_PERMISSIONS = {
     UserRole.SALES_EXECUTIVE: [],
     UserRole.CRM_SUPPORT: [],
     UserRole.STAFF: [],
+    UserRole.CUSTOMER: [],
 }
 
 # Ensure DEFAULT_ROLE_PERMISSIONS is also indexable by string role name
@@ -140,6 +145,7 @@ DEFAULT_ROLE_DESCRIPTIONS = {
     UserRole.SALES_EXECUTIVE: "Store sales associate handling counter sales, customer quotes, and discounts.",
     UserRole.CRM_SUPPORT: "Customer relationship specialist managing reviews, loyalty, and customer feedback.",
     UserRole.STAFF: "General retail staff handling front-desk store tasks and orders.",
+    UserRole.CUSTOMER: "Retail store customer account with access to personal orders, loyalty, and profile.",
 }
 
 # Ensure DEFAULT_ROLE_DESCRIPTIONS is also indexable by string role name

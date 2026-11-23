@@ -98,3 +98,85 @@ def send_whatsapp_message_task(
         return service.send_message(phone, message)
     finally:
         db.close()
+
+
+@celery_app.task(
+    name="send_khata_reminder",
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def send_khata_reminder_task(
+    self,
+    tenant_id: int,
+    customer_id: int,
+    store_id: Optional[int] = None,
+    custom_note: Optional[str] = None,
+) -> dict:
+    """Asynchronously dispatches an AI Khata balance reminder with dynamic UPI link to a customer."""
+    db = SessionLocal()
+    try:
+        from app.services.smart_khata_service import SmartKhataService
+        service = SmartKhataService(db=db, tenant_id=tenant_id, store_id=store_id)
+        return service.send_khata_reminder(customer_id=customer_id, custom_note=custom_note)
+    finally:
+        db.close()
+
+
+@celery_app.task(
+    name="broadcast_khata_reminders",
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 2},
+)
+def broadcast_khata_reminders_task(
+    self,
+    tenant_id: int,
+    min_balance: Optional[float] = None,
+    store_id: Optional[int] = None,
+) -> dict:
+    """Asynchronously broadcasts Khata reminders to all eligible overdue customers."""
+    db = SessionLocal()
+    try:
+        from app.services.smart_khata_service import SmartKhataService
+        service = SmartKhataService(db=db, tenant_id=tenant_id, store_id=store_id)
+        return service.broadcast_khata_reminders(min_balance=min_balance)
+    finally:
+        db.close()
+
+
+@celery_app.task(
+    name="process_handwritten_grocery_ocr",
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 2},
+)
+def process_handwritten_grocery_ocr_task(
+    self,
+    tenant_id: int,
+    image_base64: str,
+    mime_type: str = "image/jpeg",
+    from_phone: Optional[str] = None,
+    sender_name: Optional[str] = None,
+    auto_create_order: bool = True,
+    store_id: Optional[int] = None,
+) -> dict:
+    """Asynchronously processes a handwritten grocery list image via Gemini Vision."""
+    db = SessionLocal()
+    try:
+        from app.services.whatsapp_ordering_service import WhatsAppOrderingService
+        service = WhatsAppOrderingService(db=db)
+        return service.process_grocery_image_order(
+            image_base64=image_base64,
+            mime_type=mime_type,
+            from_phone=from_phone,
+            sender_name=sender_name,
+            auto_create_order=auto_create_order,
+            store_id=store_id,
+            tenant_id=tenant_id,
+        )
+    finally:
+        db.close()

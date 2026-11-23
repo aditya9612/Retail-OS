@@ -1,3 +1,4 @@
+from typing import Optional
 from datetime import date
 from datetime import datetime
 from decimal import Decimal
@@ -34,6 +35,9 @@ class Customer(Base, TimestampMixin):
     loyalty_points: Mapped[int] = mapped_column(Integer, default=0)
     whatsapp_opt_in: Mapped[bool] = mapped_column(Boolean, default=True)
     sms_opt_in: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_mobile_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    auth_pin: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    pin_set_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     status: Mapped[str] = mapped_column(String(20), default="active")
     segment: Mapped[str] = mapped_column(String(20), default="new")

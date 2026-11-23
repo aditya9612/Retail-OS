@@ -25,19 +25,10 @@ router = APIRouter(
 def require_multi_store_read_permission(
     user: User = Depends(get_current_user),
 ) -> User:
-    """
-    Ensures user has sufficient reporting or store-reading privileges.
-    Permits roles with '*', 'reports:read', 'stores:read', or 'analytics:read'.
-    """
     perms = user.role.permissions if (user.role and user.role.permissions) else []
-    if (
-        "*" in perms
-        or "reports:read" in perms
-        or "stores:read" in perms
-        or "analytics:read" in perms
-    ):
+    if "*" in perms or "reports:read" in perms:
         return user
-    raise ForbiddenException("Missing permission: reports:read or stores:read")
+    raise ForbiddenException("Missing permission: reports:read")
 
 
 @router.get(

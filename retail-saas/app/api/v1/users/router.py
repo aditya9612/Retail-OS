@@ -175,7 +175,7 @@ async def _save_user_file(
 )
 async def create_user(
     request: Request,
-    current_user: User = Depends(require_permission("users:write")),
+    current_user: User = Depends(require_permission("users:create")),
     db: Session = Depends(get_db),
 ):
     ct = request.headers.get("content-type", "")
@@ -421,7 +421,7 @@ def get_user(
 def update_user(
     user_id: int,
     data: UserUpdate,
-    current_user: User = Depends(require_permission("users:write")),
+    current_user: User = Depends(require_permission("users:update")),
     db: Session = Depends(get_db),
 ):
     target_user = UserService(db).get_user(
@@ -448,7 +448,7 @@ def update_user(
 )
 def activate_user(
     user_id: int,
-    current_user: User = Depends(require_permission("users:write")),
+    current_user: User = Depends(require_permission("users:update")),
     db: Session = Depends(get_db),
 ):
     target_user = UserService(db).get_user(
@@ -469,7 +469,7 @@ def activate_user(
 )
 def deactivate_user(
     user_id: int,
-    current_user: User = Depends(require_permission("users:write")),
+    current_user: User = Depends(require_permission("users:update")),
     db: Session = Depends(get_db),
 ):
     target_user = UserService(db).get_user(
@@ -492,7 +492,7 @@ def deactivate_user(
 )
 def delete_user(
     user_id: int,
-    current_user: User = Depends(require_permission("users:write")),
+    current_user: User = Depends(require_permission("users:delete")),
     db: Session = Depends(get_db),
 ):
     target_user = UserService(db).get_user(
@@ -522,7 +522,7 @@ def delete_user(
 def assign_store(
     user_id: int,
     data: AssignStoreRequest,
-    current_user: User = Depends(require_permission("users:write")),
+    current_user: User = Depends(require_permission("users:create")),
     db: Session = Depends(get_db),
 ):
     if current_user.store_id is not None:
@@ -560,7 +560,7 @@ def assign_store(
 def remove_store(
     user_id: int,
     data: Optional[RemoveStoreRequest] = None,
-    current_user: User = Depends(require_permission("users:write")),
+    current_user: User = Depends(require_permission("users:create")),
     db: Session = Depends(get_db),
 ):
     target_user = UserService(db).get_user(

@@ -1,8 +1,20 @@
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 import re
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class CategoryExportIsActive(str, Enum):
+    all = "all"
+    true = "true"
+    false = "false"
+
+
+class CategoryExportFormat(str, Enum):
+    excel = "excel"
+    csv = "csv"
 
 
 PLACEHOLDER_VALUES = {
@@ -44,14 +56,14 @@ def validate_category_name(v: str) -> str:
     if re.search(r"<\s*script|javascript\s*:|onload\s*=", v, re.IGNORECASE):
         raise ValueError("Category name contains invalid script content")
 
-    # Only allow letters, numbers, spaces, and safe retail connectors ('&', '-')
-    # Strictly reject random symbols (!@#$, [], {}, (), ,, //, \\, ||, <<, >>, ??, etc.)
-    if not re.fullmatch(r"^[a-zA-Z0-9\s\-&]+$", v):
-        raise ValueError("Category name contains invalid characters. Only letters, numbers, spaces, and '&' or '-' are allowed")
+    # Only allow letters, spaces, and safe retail connectors ('&', '-')
+    # Strictly reject numbers, digits, and random symbols (!@#$, [], {}, (), ,, //, \\, ||, <<, >>, ??, etc.)
+    if not re.fullmatch(r"^[a-zA-Z\s\-&]+$", v):
+        raise ValueError("Category name contains invalid characters. Only alphabetic letters, spaces, and '&' or '-' are allowed")
 
-    # Reject consecutive symbols like '--' or '&&'
-    if "--" in v or "&&" in v:
-        raise ValueError("Category name cannot contain consecutive symbols like '--' or '&&'")
+    # Reject consecutive or mixed symbols (e.g. '--', '&&', '&-', '-&', '&--', or separated by whitespace '& -')
+    if re.search(r"[-&]\s*[-&]", v):
+        raise ValueError("Category name cannot contain consecutive or mixed symbols like '&-', '-&', '--', or '&--'")
 
     # Cannot start or end with a symbol
     if v.startswith(("-", "&")) or v.endswith(("-", "&")):

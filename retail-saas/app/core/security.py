@@ -417,36 +417,24 @@ def require_permission(*permissions: str):
             else []
         )
 
-        if "*" in perms or any(p in perms for p in permissions):
+        if "*" in perms or (user.role and user.role.name.lower() in ["admin", "owner", "superadmin"]):
             return user
+
+        for p in permissions:
+            if p in perms:
+                return user
+            # Backward compatibility: if user has broad "module:write" and endpoint requires "module:create", "module:update", or "module:delete"
+            parts = p.split(":")
+            if len(parts) == 2 and parts[1] in ("create", "update", "delete"):
+                broad_write = f"{parts[0]}:write"
+                if broad_write in perms:
+                    return user
 
         # Backward compatibility for existing owner and admin roles in DB
         if user.role and user.role.name in ["admin", "owner"] and any(
             p.startswith("dashboard:") or p.startswith("ecommerce:") or p.startswith("reviews:") or p.startswith("suppliers:")
             for p in permissions
         ):
-            return user
-
-        # Fallbacks for modular permissions to broader operational permissions for backward compatibility
-        if any(p in ("suppliers:write", "warehouses:write") for p in permissions) and "inventory:write" in perms:
-            return user
-        if any(p in ("suppliers:read", "warehouses:read") for p in permissions) and "inventory:read" in perms:
-            return user
-        if any(p == "delivery:write" for p in permissions) and "orders:write" in perms:
-            return user
-        if any(p == "delivery:read" for p in permissions) and "orders:read" in perms:
-            return user
-        if any(p == "ai:read" for p in permissions) and "analytics:read" in perms:
-            return user
-        if any(p == "settings:write" for p in permissions) and ("stores:write" in perms or "billing:write" in perms):
-            return user
-        if any(p == "settings:read" for p in permissions) and ("stores:read" in perms or "billing:read" in perms):
-            return user
-        if any(p == "whatsapp:write" for p in permissions) and "stores:write" in perms:
-            return user
-        if any(p == "whatsapp:read" for p in permissions) and ("stores:read" in perms or "reports:read" in perms):
-            return user
-        if any(p == "whatsapp:send" for p in permissions) and ("billing:read" in perms or "orders:write" in perms):
             return user
 
         # Backward compatibility for pos:shift_manage for existing owner and admin roles in DB
@@ -520,3 +508,99 @@ def is_tenant_wide_authorized(user: Optional[User], db: Optional[Session] = None
         if "*" in permissions:
             return True
     return False
+
+
+def get_current_customer(
+    request: Request = None,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
+    db: Session = Depends(get_db),
+):
+    from app.models.customer import Customer
+
+    token = credentials.credentials if credentials else None
+    if not token and request is not None:
+        token = request.query_params.get("token")
+
+    if not token:
+        raise UnauthorizedException("Authentication token required")
+
+    payload = decode_token(token)
+
+    if payload.get("type") != "access":
+        raise UnauthorizedException("Invalid token type")
+
+    if is_token_blacklisted(token):
+        raise UnauthorizedException("Token has been revoked")
+
+    role = payload.get("role")
+    if role != "customer":
+        raise ForbiddenException("Access restricted to customers")
+
+    customer_id = payload.get("customer_id") or payload.get("sub")
+    tenant_id = payload.get("tenant_id")
+
+    if not customer_id:
+        raise UnauthorizedException("Invalid customer ID")
+
+    try:
+        customer_id = int(customer_id)
+    except (TypeError, ValueError) as exc:
+        raise UnauthorizedException("Invalid customer ID") from exc
+
+    customer = (
+        db.query(Customer)
+        .filter(
+            Customer.id == customer_id,
+            Customer.tenant_id == tenant_id,
+            Customer.status == "active",
+        )
+        .first()
+    )
+
+    if not customer:
+        raise UnauthorizedException("Customer account not found or inactive")
+
+    return customer
+
+
+def get_authenticated_entity(
+    request: Request = None,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
+    db: Session = Depends(get_db),
+):
+    """Returns either authenticated User or Customer based on token role."""
+    token = credentials.credentials if credentials else None
+    if not token and request is not None:
+        token = request.query_params.get("token")
+
+    if not token:
+        raise UnauthorizedException("Authentication token required")
+
+    payload = decode_token(token)
+    if payload.get("type") != "access":
+        raise UnauthorizedException("Invalid token type")
+
+    if is_token_blacklisted(token):
+        raise UnauthorizedException("Token has been revoked")
+
+    role = payload.get("role")
+    if role == "customer":
+        customer_id = payload.get("customer_id") or payload.get("sub")
+        tenant_id = payload.get("tenant_id")
+        from app.models.customer import Customer
+        customer = (
+            db.query(Customer)
+            .filter(
+                Customer.id == int(customer_id),
+                Customer.tenant_id == int(tenant_id),
+                Customer.status == "active",
+            )
+            .first()
+        )
+        if not customer:
+            raise UnauthorizedException("Customer account not found or inactive")
+        if customer.tenant_id:
+            set_current_tenant_id(customer.tenant_id)
+        return customer
+    else:
+        return get_current_user(request=request, credentials=credentials, db=db)

@@ -1,24 +1,40 @@
+import base64
 from datetime import datetime
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from typing import Optional, List
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import require_permission
-from app.models.user import User
+from app.models.customer import Customer
 from app.models.invoice import Invoice
-from app.models.whatsapp import WhatsAppSetting, WhatsAppLog
+from app.models.user import User
+from app.models.whatsapp import WhatsAppSetting, WhatsAppLog, KhataFollowup
 from app.schemas.whatsapp import (
-    WhatsAppSettingUpdate,
-    WhatsAppSettingResponse,
-    WhatsAppSendInvoiceRequest,
-    WhatsAppSendCustomRequest,
-    WhatsAppTestRequest,
-    WhatsAppLogResponse,
+    HandwrittenGroceryOcrRequest,
+    HandwrittenGroceryOcrResponse,
+    KhataFollowupListResponse,
+    KhataFollowupResponse,
+    KhataPendingCustomerItem,
+    KhataProcessReplyRequest,
+    KhataReminderBroadcastRequest,
+    KhataReminderRequest,
+    WhatsAppChatOrderRequest,
+    WhatsAppChatOrderResponse,
     WhatsAppLogListResponse,
+    WhatsAppLogResponse,
+    WhatsAppSendCustomRequest,
+    WhatsAppSendInvoiceRequest,
+    WhatsAppSettingResponse,
+    WhatsAppSettingUpdate,
+    WhatsAppTestRequest,
 )
+from app.services.smart_khata_service import SmartKhataService
+from app.services.whatsapp_ordering_service import WhatsAppOrderingService
 from app.services.whatsapp_service import WhatsAppService
 from app.tasks.whatsapp_tasks import (
+    broadcast_khata_reminders_task,
+    send_khata_reminder_task,
     send_whatsapp_invoice_task,
     send_whatsapp_message_task,
 )
@@ -37,7 +53,7 @@ router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
     description="Retrieves the Meta WhatsApp Cloud API credentials and automations for the current organization.",
 )
 def get_whatsapp_settings(
-    user: User = Depends(require_permission("whatsapp:read", "settings:read", "stores:read")),
+    user: User = Depends(require_permission("stores:read")),
     db: Session = Depends(get_db),
 ):
     setting = (
@@ -53,6 +69,9 @@ def get_whatsapp_settings(
             is_enabled=True,
             auto_send_invoice=True,
             auto_send_order_confirm=True,
+            ai_ordering_enabled=True,
+            ai_ocr_grocery_enabled=True,
+            ai_khata_reminders_enabled=True,
             template_invoice="pos_invoice_receipt",
             template_order_confirm="order_confirmation",
             template_language="en_US",
@@ -74,7 +93,7 @@ def get_whatsapp_settings(
 )
 def update_whatsapp_settings(
     payload: WhatsAppSettingUpdate,
-    user: User = Depends(require_permission("whatsapp:write", "settings:write", "stores:write")),
+    user: User = Depends(require_permission("stores:update")),
     db: Session = Depends(get_db),
 ):
     setting = (
@@ -115,7 +134,7 @@ def update_whatsapp_settings(
 )
 def test_whatsapp_connection(
     payload: WhatsAppTestRequest,
-    user: User = Depends(require_permission("whatsapp:write", "settings:write", "stores:write")),
+    user: User = Depends(require_permission("stores:create")),
     db: Session = Depends(get_db),
 ):
     service = WhatsAppService(db=db, tenant_id=user.tenant_id)
@@ -151,7 +170,7 @@ def test_whatsapp_connection(
 def send_invoice_via_whatsapp(
     invoice_id: int,
     payload: Optional[WhatsAppSendInvoiceRequest] = None,
-    user: User = Depends(require_permission("whatsapp:send", "billing:read")),
+    user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
     invoice = (
@@ -186,7 +205,7 @@ def send_invoice_via_whatsapp(
 )
 def send_message(
     data: WhatsAppSendCustomRequest,
-    user: User = Depends(require_permission("whatsapp:send", "orders:write")),
+    user: User = Depends(require_permission("orders:create")),
 ):
     task = send_whatsapp_message_task.delay(
         phone=data.phone,
@@ -197,7 +216,239 @@ def send_message(
 
 
 # ==============================================================================
-# 3. DELIVERY AUDIT LOGS
+# 3. AI FEATURE 1: "कागदी किराणा चिठ्ठी" OCR BOT (Handwritten List to Cart/Order)
+# ==============================================================================
+
+@router.post(
+    "/ocr-grocery-list",
+    response_model=HandwrittenGroceryOcrResponse,
+    summary="Handwritten Grocery List OCR to Cart/Order",
+    description=(
+        "Uses Gemini Multimodal Vision AI to read messy handwritten paper grocery lists "
+        "(किराणा मालाची चिठ्ठी/पर्ची) in Marathi, Hindi, or English. Extracts items, quantities, "
+        "regional fractions (पाव, अर्धा, पाऊण, दीड, अडीच), maps them to store inventory, "
+        "creates an order/cart, and generates an instant UPI payment deep-link."
+    ),
+)
+def ocr_grocery_list(
+    payload: HandwrittenGroceryOcrRequest,
+    user: User = Depends(require_permission("orders:create")),
+    db: Session = Depends(get_db),
+):
+    service = WhatsAppOrderingService(db=db)
+    result = service.process_grocery_image_order(
+        image_base64=payload.image_base64,
+        mime_type=payload.mime_type,
+        from_phone=payload.recipient_phone,
+        sender_name=payload.sender_name,
+        auto_create_order=payload.auto_create_order,
+        store_id=payload.store_id or user.store_id,
+        tenant_id=user.tenant_id,
+    )
+    return result
+
+
+@router.post(
+    "/ocr-grocery-list/upload",
+    response_model=HandwrittenGroceryOcrResponse,
+    summary="Handwritten Grocery List OCR (File Upload)",
+    description="Direct image file upload (JPEG/PNG/WebP) for handwritten grocery list scanning.",
+)
+async def ocr_grocery_list_upload(
+    file: UploadFile = File(...),
+    recipient_phone: Optional[str] = Query(default=None),
+    auto_create_order: bool = Query(default=True),
+    store_id: Optional[int] = Query(default=None),
+    user: User = Depends(require_permission("orders:create")),
+    db: Session = Depends(get_db),
+):
+    file_bytes = await file.read()
+    b64_str = base64.b64encode(file_bytes).decode("ascii")
+    mime = file.content_type or "image/jpeg"
+
+    service = WhatsAppOrderingService(db=db)
+    result = service.process_grocery_image_order(
+        image_base64=b64_str,
+        mime_type=mime,
+        from_phone=recipient_phone,
+        auto_create_order=auto_create_order,
+        store_id=store_id or user.store_id,
+        tenant_id=user.tenant_id,
+    )
+    return result
+
+
+# ==============================================================================
+# 4. AI FEATURE 2: 24/7 WHATSAPP CONVERSATIONAL ORDERING BOT
+# ==============================================================================
+
+@router.post(
+    "/conversational-order",
+    response_model=WhatsAppChatOrderResponse,
+    summary="Simulate WhatsApp Conversational Grocery Order",
+    description=(
+        "Simulates a customer sending a WhatsApp message in Marathi/Hindi/English "
+        "(e.g. '२ किलो बासमती तांदूळ, १ लिटर फॉर्च्युन तेल, अर्धा किलो साखर घरी पाठवा'). "
+        "Extracts items, checks stock, creates order, generates UPI payment link, and returns reply."
+    ),
+)
+def conversational_order(
+    payload: WhatsAppChatOrderRequest,
+    user: User = Depends(require_permission("orders:create")),
+    db: Session = Depends(get_db),
+):
+    service = WhatsAppOrderingService(db=db)
+    result = service.process_inbound_message(
+        from_phone=payload.phone,
+        message_body=payload.message,
+        sender_name=payload.sender_name,
+        tenant_id=user.tenant_id,
+        store_id=payload.store_id or user.store_id,
+    )
+    return WhatsAppChatOrderResponse(
+        status=result.get("status", "success"),
+        intent=result.get("intent", "order_created"),
+        order_id=result.get("order_id"),
+        order_number=result.get("order_number"),
+        total_amount=result.get("total_amount"),
+        upi_link=result.get("upi_link"),
+        reply=result.get("reply", ""),
+    )
+
+
+# ==============================================================================
+# 5. AI FEATURE 3: SMART KHATA (उधारी) RECOVERY AI AGENT
+# ==============================================================================
+
+@router.get(
+    "/khata/pending",
+    response_model=List[KhataPendingCustomerItem],
+    summary="List Customers with Pending Khata Balance",
+    description="Lists all customers with outstanding credit balance exceeding threshold along with recovery status.",
+)
+def list_pending_khata_customers(
+    min_balance: Optional[float] = Query(default=None, description="Minimum credit balance threshold"),
+    store_id: Optional[int] = Query(default=None),
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    service = SmartKhataService(db=db, tenant_id=user.tenant_id, store_id=store_id or user.store_id)
+    return service.get_pending_khata_customers(min_balance=min_balance)
+
+
+@router.post(
+    "/khata/send-reminder/{customer_id}",
+    summary="Send AI Khata Balance Reminder",
+    description="Sends a polite, personalized WhatsApp reminder with dynamic UPI link to a specific customer.",
+)
+def send_khata_reminder_endpoint(
+    customer_id: int,
+    payload: Optional[KhataReminderRequest] = None,
+    user: User = Depends(require_permission("customers:create")),
+    db: Session = Depends(get_db),
+):
+    service = SmartKhataService(db=db, tenant_id=user.tenant_id, store_id=user.store_id)
+    custom_note = payload.custom_note if payload else None
+    return service.send_khata_reminder(customer_id=customer_id, custom_note=custom_note)
+
+
+@router.post(
+    "/khata/broadcast-reminders",
+    summary="Broadcast AI Khata Reminders",
+    description="Queues automated smart WhatsApp reminders to all overdue customers meeting the balance threshold.",
+)
+def broadcast_khata_reminders_endpoint(
+    payload: Optional[KhataReminderBroadcastRequest] = None,
+    user: User = Depends(require_permission("customers:create")),
+    db: Session = Depends(get_db),
+):
+    min_bal = payload.min_balance if payload else 100.0
+    st_id = (payload.store_id if payload else None) or user.store_id
+
+    task = broadcast_khata_reminders_task.delay(
+        tenant_id=user.tenant_id,
+        min_balance=min_bal,
+        store_id=st_id,
+    )
+    return {
+        "message": "AI Khata reminders broadcast queued",
+        "task_id": task.id,
+        "min_balance": min_bal,
+    }
+
+
+@router.post(
+    "/khata/process-reply",
+    summary="Process Customer's Khata WhatsApp Reply",
+    description="Analyzes customer's reply using AI intent classification (promise to pay, date, dispute, paid) and schedules follow-up.",
+)
+def process_khata_reply_endpoint(
+    payload: KhataProcessReplyRequest,
+    user: User = Depends(require_permission("customers:create")),
+    db: Session = Depends(get_db),
+):
+    service = SmartKhataService(db=db, tenant_id=user.tenant_id, store_id=user.store_id)
+    return service.process_customer_khata_reply(
+        customer_id=payload.customer_id,
+        reply_text=payload.reply_message,
+    )
+
+
+@router.get(
+    "/khata/followups",
+    response_model=KhataFollowupListResponse,
+    summary="List Khata Recovery Followups",
+    description="Lists all reminder and promise-to-pay followup history.",
+)
+def list_khata_followups(
+    status: Optional[str] = Query(default=None, description="Filter: reminder_sent, promised, paid, disputed"),
+    customer_id: Optional[int] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    query = db.query(KhataFollowup).filter(KhataFollowup.tenant_id == user.tenant_id)
+    if status:
+        query = query.filter(KhataFollowup.status == status.lower())
+    if customer_id:
+        query = query.filter(KhataFollowup.customer_id == customer_id)
+
+    total = query.count()
+    items = (
+        query.order_by(KhataFollowup.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    results = []
+    for it in items:
+        cust = db.query(Customer).filter(Customer.id == it.customer_id).first()
+        results.append(
+            KhataFollowupResponse(
+                id=it.id,
+                tenant_id=it.tenant_id,
+                store_id=it.store_id,
+                customer_id=it.customer_id,
+                customer_name=cust.name if cust else None,
+                phone=cust.phone if cust else None,
+                outstanding_amount=float(it.outstanding_amount),
+                reminder_sent_at=it.reminder_sent_at,
+                reminder_message=it.reminder_message,
+                customer_reply=it.customer_reply,
+                detected_intent=it.detected_intent,
+                promised_date=it.promised_date,
+                status=it.status,
+                notes=it.notes,
+            )
+        )
+
+    return KhataFollowupListResponse(items=results, total=total)
+
+
+# ==============================================================================
+# 6. DELIVERY AUDIT LOGS
 # ==============================================================================
 
 @router.get(
@@ -214,7 +465,7 @@ def list_whatsapp_logs(
     date_to: Optional[datetime] = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
-    user: User = Depends(require_permission("whatsapp:read", "billing:read", "reports:read")),
+    user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
     query = db.query(WhatsAppLog).filter(WhatsAppLog.tenant_id == user.tenant_id)
@@ -247,7 +498,7 @@ def list_whatsapp_logs(
 
 
 # ==============================================================================
-# 4. META CLOUD API WEBHOOKS
+# 7. META CLOUD API WEBHOOKS
 # ==============================================================================
 
 @router.get(

@@ -48,6 +48,8 @@ from app.api.v1.multi_store.router import router as multi_store_router
 from app.api.v1.document_settings.router import router as document_settings_router
 from app.api.v1.pos.router import router as pos_router
 from app.api.v1.variants.router import router as variants_router
+from app.api.v1.customer_support.router import router as customer_support_router
+from app.api.v1.storefront.router import router as storefront_router
 
 from app.core.config import get_settings
 from app.core.database import init_db, SessionLocal
@@ -259,6 +261,10 @@ openapi_tags = [
     {
         "name": "whatsapp",
         "description": "WhatsApp messaging notifications, billing receipts, and alerts.",
+    },
+    {
+        "name": "Customer Support AI Bot",
+        "description": "24/7 AI Customer Support, Live Order Tracking, Tax Invoice PDF downloads, Self-Service Returns, and Interactive Web Chat Widget: [🔗 Open Chat Widget](http://127.0.0.1:8000/api/v1/support/widget) | [🔗 Short Link](http://127.0.0.1:8000/support-widget)",
     },
     {
         "name": "reviews",
@@ -526,6 +532,10 @@ app.include_router(pos_router, prefix=API_PREFIX)
 # Product Variants APIs
 app.include_router(variants_router, prefix=API_PREFIX)
 
+# Customer Support & Returns AI Chatbot APIs
+app.include_router(customer_support_router, prefix=API_PREFIX)
+app.include_router(storefront_router, prefix=API_PREFIX)
+
 
 # =========================
 # HEALTH CHECK
@@ -550,3 +560,16 @@ def health_check():
         "app": settings.APP_NAME,
         "database": db_status,
     }
+
+
+@app.get("/voice-assistant", include_in_schema=False)
+def voice_assistant_root():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/api/v1/ai/voice-assistant")
+
+
+@app.get("/support-widget", include_in_schema=False)
+def support_widget_root():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/api/v1/support/widget")
+

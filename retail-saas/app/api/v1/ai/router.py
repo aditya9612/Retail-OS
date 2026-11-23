@@ -1,5 +1,6 @@
 from typing import List, Literal, Optional
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -8,6 +9,8 @@ from app.models.user import User
 from app.schemas.ai import (
     AIChatQueryRequest,
     AIChatQueryResponse,
+    AIVoiceQueryRequest,
+    AIVoiceQueryResponse,
     BestSellerItem,
     CustomerChurnRiskItem,
     CustomerPatternResponse,
@@ -17,6 +20,7 @@ from app.schemas.ai import (
     ReorderPredictionItem,
     SlowMovingStockItem,
 )
+from app.api.v1.ai.voice_ui import get_voice_assistant_html
 from app.services.ai_service import AIService
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -30,7 +34,7 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 )
 def reorder_prediction(
     store_id: Optional[int] = Query(None, gt=0, description="Filter predictions by store ID"),
-    user: User = Depends(require_permission("ai:read", "analytics:read")),
+    user: User = Depends(require_permission("ai:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).reorder_prediction(user.tenant_id, store_id)
@@ -46,7 +50,7 @@ def demand_forecast(
     product_id: int,
     days: int = Query(default=30, gt=0, le=365, description="Historical analysis window in days"),
     store_id: Optional[int] = Query(None, gt=0, description="Filter demand forecast by store ID"),
-    user: User = Depends(require_permission("ai:read", "analytics:read")),
+    user: User = Depends(require_permission("ai:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).demand_forecast(user.tenant_id, product_id, days=days, store_id=store_id)
@@ -65,7 +69,7 @@ def best_sellers(
     ),
     sort_by: Literal["quantity", "revenue"] = Query(default="quantity", description="Sort criteria"),
     store_id: Optional[int] = Query(None, gt=0, description="Filter best sellers by store ID"),
-    user: User = Depends(require_permission("ai:read", "analytics:read")),
+    user: User = Depends(require_permission("ai:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).best_selling_products(
@@ -81,7 +85,7 @@ def best_sellers(
 )
 def customer_patterns(
     customer_id: int,
-    user: User = Depends(require_permission("ai:read", "analytics:read")),
+    user: User = Depends(require_permission("ai:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).customer_purchase_patterns(user.tenant_id, customer_id)
@@ -95,7 +99,7 @@ def customer_patterns(
 )
 def offer_recommendations(
     customer_id: int,
-    user: User = Depends(require_permission("ai:read", "analytics:read")),
+    user: User = Depends(require_permission("ai:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).smart_offer_recommendations(user.tenant_id, customer_id)
@@ -111,7 +115,7 @@ def frequently_bought_together(
     product_id: int,
     limit: int = Query(default=5, gt=0, le=20),
     store_id: Optional[int] = Query(None, gt=0, description="Filter by store ID"),
-    user: User = Depends(require_permission("ai:read", "analytics:read")),
+    user: User = Depends(require_permission("ai:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).frequently_bought_together(user.tenant_id, product_id, limit=limit, store_id=store_id)
@@ -127,7 +131,7 @@ def customer_churn_risk(
     inactive_days: int = Query(default=45, ge=7, le=365, description="Days of inactivity threshold"),
     limit: int = Query(default=50, gt=0, le=200),
     store_id: Optional[int] = Query(None, gt=0, description="Filter by store ID"),
-    user: User = Depends(require_permission("ai:read", "analytics:read")),
+    user: User = Depends(require_permission("ai:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).customer_churn_risk(
@@ -146,7 +150,7 @@ def slow_moving_stock(
     threshold_sales: int = Query(default=2, ge=0, le=50, description="Max units sold to qualify as slow moving"),
     store_id: Optional[int] = Query(None, gt=0, description="Filter by store ID"),
     limit: int = Query(default=50, gt=0, le=200),
-    user: User = Depends(require_permission("ai:read", "analytics:read")),
+    user: User = Depends(require_permission("ai:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).slow_moving_stock(
@@ -162,7 +166,52 @@ def slow_moving_stock(
 )
 def chat_query(
     payload: AIChatQueryRequest,
-    user: User = Depends(require_permission("ai:read", "analytics:read")),
+    user: User = Depends(require_permission("ai:read")),
     db: Session = Depends(get_db),
 ):
     return AIService(db).chat_query(user.tenant_id, payload.query, store_id=payload.store_id)
+
+
+@router.post(
+    "/voice-query",
+    response_model=AIVoiceQueryResponse,
+    summary="Retail-OS AI Real-Time Voice Assistant",
+    description=(
+        "Processes natural spoken voice queries via microphone (speech text or raw audio) using Gemini 3.5 Flash-Lite "
+        "and returns spoken speech_text ready for immediate speaker playback.\n\n"
+        "👉 **मायक्रोफोन वापरून बोलण्यासाठी (Live Microphone UI):**\n"
+        "Swagger UI मध्ये ब्राऊझर मायक्रोफोन बटण सपोर्ट नसते (फक्त JSON इनपुट असते). "
+        "थेट मायक्रोफोन बटण दाबून बोलण्यासाठी आमचे रिअल-टाईम व्हॉईस पोर्टल उघडा: "
+        "[http://127.0.0.1:8000/api/v1/ai/voice-assistant](/api/v1/ai/voice-assistant) (किंवा खालील `GET /api/v1/ai/voice-assistant` उघडा)."
+    ),
+)
+def voice_query(
+    payload: AIVoiceQueryRequest,
+    user: User = Depends(require_permission("ai:read")),
+    db: Session = Depends(get_db),
+):
+    return AIService(db).voice_query(
+        tenant_id=user.tenant_id,
+        query_str=payload.query,
+        audio_base64=payload.audio_base64,
+        audio_mime_type=payload.audio_mime_type,
+        store_id=payload.store_id,
+        language=payload.language,
+    )
+
+
+@router.get(
+    "/voice-assistant",
+    response_class=HTMLResponse,
+    summary="Interactive Voice AI Assistant Web Application",
+    description=(
+        "⚠️ **महत्त्वाचे (Please Note):** हा JSON डेटा API नसून हे **संपूर्ण वेब ॲप्लिकेशन (Interactive Web Page)** आहे.\n\n"
+        "Swagger UI मध्ये 'Execute' केल्यास फक्त कच्चा HTML कोड (Raw HTML Code) दिसेल.\n\n"
+        "👉 **मायक्रोफोन बटण दाबून बोलण्यासाठी ही लिंक थेट ब्राऊझरच्या नवीन टॅबमध्ये उघडा:**\n\n"
+        "🔗 **[http://127.0.0.1:8000/api/v1/ai/voice-assistant](http://127.0.0.1:8000/api/v1/ai/voice-assistant)**\n\n"
+        "*(किंवा शॉर्ट लिंक: [http://127.0.0.1:8000/voice-assistant](http://127.0.0.1:8000/voice-assistant))*"
+    ),
+)
+def voice_assistant_page():
+    return HTMLResponse(content=get_voice_assistant_html())
+

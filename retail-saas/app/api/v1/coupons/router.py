@@ -69,7 +69,7 @@ def list_coupons(
 )
 def create_coupon(
     data: CouponCreate,
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:create")),
     db: Session = Depends(get_db),
 ):
     return CouponService(db).create_coupon(
@@ -172,7 +172,7 @@ def export_coupons(
 )
 def bulk_generate_coupons(
     data: BulkGenerateCouponsRequest,
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:create")),
     db: Session = Depends(get_db),
 ):
     return CouponService(db).bulk_generate(
@@ -188,7 +188,7 @@ def bulk_generate_coupons(
 )
 def validate_coupon(
     data: ValidateCouponRequest,
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("orders:create")),
     db: Session = Depends(get_db),
 ):
     return CouponService(db).validate_coupon(
@@ -208,7 +208,7 @@ def validate_coupon(
 )
 def apply_coupon(
     data: ApplyCouponRequest,
-    user: User = Depends(require_permission("orders:write")),
+    user: User = Depends(require_permission("orders:create")),
     db: Session = Depends(get_db),
 ):
     return CouponService(db).apply_coupon(
@@ -273,7 +273,7 @@ def update_coupon_status(
         gt=0,
         description="Coupon ID must be a positive integer",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return CouponService(db).update_coupon_status(
@@ -295,7 +295,7 @@ def update_coupon(
         gt=0,
         description="Coupon ID must be a positive integer",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return CouponService(db).update_coupon(
@@ -315,7 +315,7 @@ def delete_coupon(
         gt=0,
         description="Coupon ID must be a positive integer",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:delete")),
     db: Session = Depends(get_db),
 ):
     return CouponService(db).delete_coupon(

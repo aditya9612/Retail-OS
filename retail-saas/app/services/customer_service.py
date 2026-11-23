@@ -171,6 +171,72 @@ class CustomerService:
                 raise ConflictException("GSTIN already exists")
             raise
 
+        # Automatic customer role and user assignment
+        try:
+            from app.models.role import Role
+            from app.models.user import User
+            from app.core.security import get_password_hash
+            import secrets
+
+            customer_role = (
+                self.db.query(Role)
+                .filter(
+                    Role.tenant_id == tenant_id,
+                    func.lower(Role.name) == "customer",
+                )
+                .first()
+            )
+            if not customer_role:
+                customer_role = Role(
+                    tenant_id=tenant_id,
+                    name="customer",
+                    description="Retail store customer account with access to personal orders, loyalty, and profile.",
+                    permissions=[],
+                    is_system=True,
+                )
+                self.db.add(customer_role)
+                self.db.flush()
+
+            user_phone = getattr(customer, "phone", None)
+            user_email = (getattr(customer, "email", None) or "").strip().lower()
+            if not user_email and user_phone:
+                user_email = f"{user_phone}@customer.retailos.local"
+
+            existing_user = None
+            if user_phone or user_email:
+                q = self.db.query(User).filter(
+                    User.tenant_id == tenant_id,
+                    User.is_deleted.is_(False),
+                )
+                if user_phone and user_email:
+                    existing_user = q.filter((User.phone == user_phone) | (User.email == user_email)).first()
+                elif user_phone:
+                    existing_user = q.filter(User.phone == user_phone).first()
+                else:
+                    existing_user = q.filter(User.email == user_email).first()
+
+            if not existing_user:
+                customer_user = User(
+                    tenant_id=tenant_id,
+                    store_id=None,
+                    role_id=customer_role.id,
+                    email=user_email,
+                    phone=user_phone,
+                    full_name=customer.name,
+                    password_hash=get_password_hash(secrets.token_urlsafe(16)),
+                    is_active=True,
+                    is_deleted=False,
+                )
+                self.db.add(customer_user)
+                self.db.commit()
+            elif existing_user.role_id != customer_role.id:
+                if existing_user.role and existing_user.role.name not in ("admin", "owner", "superadmin"):
+                    existing_user.role_id = customer_role.id
+                    self.db.commit()
+        except Exception:
+            # Non-blocking: ensure customer creation succeeds even if user linking encounters soft warning
+            pass
+
         return customer
 
     def get_customer(

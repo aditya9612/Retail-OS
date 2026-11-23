@@ -34,6 +34,7 @@ PROTECTED_CORE_ROLES = {
     "crm_support",
     "staff",
     "accountant",
+    "customer",
 }
 
 
@@ -424,3 +425,10 @@ class RoleService:
     @staticmethod
     def get_available_permissions() -> list[dict]:
         return AVAILABLE_PERMISSIONS
+
+    @staticmethod
+    def get_simple_permissions_map() -> dict[str, list[str]]:
+        return {
+            group["module"]: [p["code"] for p in group["permissions"]]
+            for group in AVAILABLE_PERMISSIONS
+        }

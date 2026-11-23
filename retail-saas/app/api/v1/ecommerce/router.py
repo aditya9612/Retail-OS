@@ -37,7 +37,7 @@ router = APIRouter(prefix="/ecommerce", tags=["E-Commerce"])
 
 def require_ecommerce_access(user: User = Depends(get_current_user)) -> User:
     perms = user.role.permissions if user.role else []
-    if "*" in perms or "ecommerce:read" in perms or "dashboard:read" in perms:
+    if "*" in perms or "ecommerce:read" in perms:
         return user
 
     if user.role and user.role.name in ["admin", "owner"]:
@@ -48,13 +48,13 @@ def require_ecommerce_access(user: User = Depends(get_current_user)) -> User:
 
 def require_storefront_write(user: User = Depends(get_current_user)) -> User:
     perms = user.role.permissions if user.role else []
-    if "*" in perms or "ecommerce:write" in perms or "stores:write" in perms:
+    if any(p in perms for p in ["*", "ecommerce:write", "ecommerce:create", "ecommerce:update", "ecommerce:delete"]):
         return user
 
     if user.role and user.role.name in ["admin", "owner"]:
         return user
 
-    raise ForbiddenException("Missing permission: ecommerce:write")
+    raise ForbiddenException("Missing permission: ecommerce:update")
 
 
 def _resolve_effective_store_id(

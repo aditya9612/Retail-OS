@@ -27,7 +27,7 @@ router = APIRouter(prefix="/refunds", tags=["refunds"])
 @router.post("", response_model=RefundResponse, status_code=201)
 def create_refund(
     payload: RefundCreate,
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:refund")),
     db: Session = Depends(get_db),
 ):
     return BillingService(db).create_refund(

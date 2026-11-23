@@ -232,6 +232,12 @@ def test_store_staff_and_isolation():
         headers=headers,
     ).json()
 
+    # Grant stores:read to manager role for this tenant under zero-trust RBAC
+    roles_list = client.get("/api/v1/roles", headers=headers).json()
+    mgr_role_obj = next((r for r in roles_list if r["name"] == "manager"), None)
+    if mgr_role_obj:
+        client.patch(f"/api/v1/roles/{mgr_role_obj['id']}", json={"permissions": ["stores:read"]}, headers=headers)
+
     # Create Manager assigned to Store 1
     mgr_email = f"mgr-{uuid.uuid4().hex[:6]}@test.com"
     mgr_user = client.post(

@@ -1,14 +1,19 @@
+import re
 from typing import Optional
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.category import (
+    PLACEHOLDER_VALUES,
     CategoryCreate,
     CategoryDeleteResponse,
     CategoryDetailResponse,
+    CategoryExportFormat,
+    CategoryExportIsActive,
     CategoryListResponse,
     CategoryProductsResponse,
     CategoryResponse,
@@ -29,7 +34,7 @@ router = APIRouter(prefix="/categories", tags=["categories"])
 )
 def create_category(
     data: CategoryCreate,
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:create")),
     db: Session = Depends(get_db),
 ):
     return CategoryService(db).create_category(
@@ -93,6 +98,48 @@ def get_category_tree(
         ),
         "data": tree,
     }
+
+
+@router.get(
+    "/export",
+    summary="Export categories report to Excel or CSV",
+    description="Exports tenant categories with hierarchy, status, product counts, and timestamps.",
+)
+def export_categories(
+    format: CategoryExportFormat = Query(..., description="Export format (required: 'excel', 'csv')"),
+    is_active: CategoryExportIsActive = Query(..., description="Filter by active status: 'all', 'true', 'false'"),
+    search: Optional[str] = Query(None, description="Optional search keyword in category name"),
+    user: User = Depends(require_permission("products:read")),
+    db: Session = Depends(get_db),
+):
+    cleaned_search = None
+    if search is not None:
+        s = search.strip()
+        if not s or s.lower() in PLACEHOLDER_VALUES or (len(s) > 1 and len(set(s)) == 1 and s[0] in "-_.*!@#$%^&"):
+            raise HTTPException(status_code=422, detail="Invalid search query parameter")
+        if len(s) > 100:
+            raise HTTPException(status_code=422, detail="Search query cannot exceed 100 characters")
+        if not re.search(r"[a-zA-Z0-9]", s):
+            raise HTTPException(status_code=422, detail="Search query must contain alphanumeric characters")
+        cleaned_search = s
+
+    is_active_val: Optional[bool] = None
+    if is_active == CategoryExportIsActive.true or str(is_active).lower() == "true":
+        is_active_val = True
+    elif is_active == CategoryExportIsActive.false or str(is_active).lower() == "false":
+        is_active_val = False
+
+    buffer, media_type, filename = CategoryService(db).export_categories(
+        tenant_id=user.tenant_id,
+        is_active=is_active_val,
+        search=cleaned_search,
+        format=format.value,
+    )
+    return StreamingResponse(
+        buffer,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.get(
@@ -180,7 +227,7 @@ def update_category(
         gt=0,
         description="Category ID must be greater than 0",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return CategoryService(db).update_category(
@@ -200,7 +247,7 @@ def activate_category(
         gt=0,
         description="Category ID must be greater than 0",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return CategoryService(db).set_category_active(
@@ -220,7 +267,7 @@ def deactivate_category(
         gt=0,
         description="Category ID must be greater than 0",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:update")),
     db: Session = Depends(get_db),
 ):
     return CategoryService(db).set_category_active(
@@ -240,7 +287,7 @@ def delete_category(
         gt=0,
         description="Category ID must be greater than 0",
     ),
-    user: User = Depends(require_permission("products:write")),
+    user: User = Depends(require_permission("products:delete")),
     db: Session = Depends(get_db),
 ):
     result = CategoryService(db).delete_category(

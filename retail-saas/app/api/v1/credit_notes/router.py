@@ -107,7 +107,7 @@ def validate_credit_note(
 )
 def redeem_credit_note(
     payload: CreditNoteRedeemRequest,
-    user: User = Depends(require_permission("billing:write")),
+    user: User = Depends(require_permission("billing:create")),
     db: Session = Depends(get_db),
 ):
     return BillingService(db).redeem_credit_note(

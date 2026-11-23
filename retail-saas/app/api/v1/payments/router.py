@@ -39,7 +39,7 @@ def get_payment_service(
     return PaymentService(db, user.tenant_id)
 
 
-@router.post("", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_operational_write), Depends(require_permission("payments:write", "billing:write"))])
+@router.post("", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_operational_write), Depends(require_permission("payments:create", "payments:write"))])
 def create_payment(
     data: PaymentCreate,
     service: PaymentService = Depends(get_payment_service),
@@ -49,7 +49,7 @@ def create_payment(
 
 @router.get("", response_model=list[PaymentResponse])
 def list_payments(
-    user: User = Depends(require_permission("payments:read", "billing:read")),
+    user: User = Depends(require_permission("payments:read")),
     order_id: int | None = Query(default=None, gt=0),
     payment_method: PaymentMethodValue | None = Query(default=None),
     status: PaymentStatusValue | None = Query(default=None),
@@ -66,7 +66,7 @@ def list_payments(
 
 @router.get("/history", response_model=list[PaymentResponse])
 def payment_history(
-    user: User = Depends(require_permission("payments:read", "billing:read")),
+    user: User = Depends(require_permission("payments:read")),
     status: PaymentStatusValue | None = Query(default=None),
     payment_method: PaymentMethodValue | None = Query(default=None),
     store_id: int | None = Query(default=None, gt=0, description="Filter payment history by store ID"),
@@ -120,7 +120,7 @@ def generate_payment_qr(
         default="preview",
         description="Delivery mode: 'preview' (renders visual QR code PNG inline in Swagger UI / browser), 'download' (downloads PNG file), or 'json' (returns UPI payload JSON)",
     ),
-    user: User = Depends(require_permission("payments:read", "billing:read")),
+    user: User = Depends(require_permission("payments:read")),
     service: PaymentService = Depends(get_payment_service),
 ):
     qr_data = service.generate_qr_payload(order_id=order_id, upi_id=upi_id, amount=amount)
@@ -162,7 +162,7 @@ def process_webhook(
 @router.post("/webhooks", response_model=PaymentWebhookLogResponse, status_code=status.HTTP_201_CREATED)
 def create_webhook_log(
     data: PaymentWebhookLogCreate,
-    user: User = Depends(require_permission("payments:write", "settings:write")),
+    user: User = Depends(require_permission("payments:create")),
     service: PaymentService = Depends(get_payment_service),
 ):
     return service.create_webhook_log(data)
@@ -170,7 +170,7 @@ def create_webhook_log(
 
 @router.get("/webhooks", response_model=list[PaymentWebhookLogResponse])
 def list_webhook_logs(
-    user: User = Depends(require_permission("payments:read", "settings:read")),
+    user: User = Depends(require_permission("payments:read")),
     status: str | None = Query(default=None),
     event_type: str | None = Query(default=None),
     transaction_id: str | None = Query(default=None),
@@ -188,7 +188,7 @@ def list_webhook_logs(
 
 
 @router.get("/webhooks/{log_id}", response_model=PaymentWebhookLogResponse)
-def get_webhook_log(log_id: int, user: User = Depends(require_permission("payments:read", "settings:read")), service: PaymentService = Depends(get_payment_service)):
+def get_webhook_log(log_id: int, user: User = Depends(require_permission("payments:read")), service: PaymentService = Depends(get_payment_service)):
     result = service.get_webhook_log(log_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Webhook log not found")
@@ -202,19 +202,19 @@ def get_webhook_log(log_id: int, user: User = Depends(require_permission("paymen
 )
 def create_payment_gateway(
     data: PaymentGatewayCreate,
-    user: User = Depends(require_permission("payments:write", "settings:write")),
+    user: User = Depends(require_permission("payments:create")),
     service: PaymentService = Depends(get_payment_service),
 ):
     return service.create_gateway(data)
 
 
 @router.get("/payment-gateways", response_model=list[PaymentGatewayResponse])
-def list_payment_gateways(user: User = Depends(require_permission("payments:read", "settings:read")), service: PaymentService = Depends(get_payment_service)):
+def list_payment_gateways(user: User = Depends(require_permission("payments:read")), service: PaymentService = Depends(get_payment_service)):
     return service.list_gateways()
 
 
 @router.get("/payment-gateways/{gateway_id}", response_model=PaymentGatewayResponse)
-def get_payment_gateway(gateway_id: int, user: User = Depends(require_permission("payments:read", "settings:read")), service: PaymentService = Depends(get_payment_service)):
+def get_payment_gateway(gateway_id: int, user: User = Depends(require_permission("payments:read")), service: PaymentService = Depends(get_payment_service)):
     result = service.get_gateway(gateway_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Payment gateway not found")
@@ -222,12 +222,12 @@ def get_payment_gateway(gateway_id: int, user: User = Depends(require_permission
 
 
 @router.put("/payment-gateways/{gateway_id}", response_model=PaymentGatewayResponse)
-def update_payment_gateway(gateway_id: int, data: PaymentGatewayUpdate, user: User = Depends(require_permission("payments:write", "settings:write")), service: PaymentService = Depends(get_payment_service)):
+def update_payment_gateway(gateway_id: int, data: PaymentGatewayUpdate, user: User = Depends(require_permission("payments:update")), service: PaymentService = Depends(get_payment_service)):
     return service.update_gateway(gateway_id, data)
 
 
 @router.delete("/payment-gateways/{gateway_id}")
-def delete_payment_gateway(gateway_id: int, user: User = Depends(require_permission("payments:write", "settings:write")), service: PaymentService = Depends(get_payment_service)):
+def delete_payment_gateway(gateway_id: int, user: User = Depends(require_permission("payments:delete")), service: PaymentService = Depends(get_payment_service)):
     return service.delete_gateway(gateway_id)
 
 
@@ -238,19 +238,19 @@ def delete_payment_gateway(gateway_id: int, user: User = Depends(require_permiss
 )
 def create_payment_split(
     data: PaymentSplitCreate,
-    user: User = Depends(require_permission("payments:write", "billing:write")),
+    user: User = Depends(require_permission("payments:create")),
     service: PaymentService = Depends(get_payment_service),
 ):
     return service.create_payment_split(data)
 
 
 @router.get("/payment-splits", response_model=list[PaymentSplitResponse])
-def list_payment_splits(transaction_id: int | None = Query(default=None, gt=0), user: User = Depends(require_permission("payments:read", "billing:read")), service: PaymentService = Depends(get_payment_service)):
+def list_payment_splits(transaction_id: int | None = Query(default=None, gt=0), user: User = Depends(require_permission("payments:read")), service: PaymentService = Depends(get_payment_service)):
     return service.list_payment_splits(transaction_id=transaction_id)
 
 
 @router.get("/payment-splits/{split_id}", response_model=PaymentSplitResponse)
-def get_payment_split(split_id: int, user: User = Depends(require_permission("payments:read", "billing:read")), service: PaymentService = Depends(get_payment_service)):
+def get_payment_split(split_id: int, user: User = Depends(require_permission("payments:read")), service: PaymentService = Depends(get_payment_service)):
     result = service.get_payment_split(split_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Payment split not found")
@@ -264,7 +264,7 @@ def get_payment_split(split_id: int, user: User = Depends(require_permission("pa
 )
 def create_settlement(
     data: SettlementCreate,
-    user: User = Depends(require_permission("payments:write", "billing:write")),
+    user: User = Depends(require_permission("payments:create")),
     service: PaymentService = Depends(get_payment_service),
 ):
     return service.create_settlement(data)
@@ -275,7 +275,7 @@ def create_settlement(
     response_model=list[SettlementResponse],
 )
 def list_settlements(
-    user: User = Depends(require_permission("payments:read", "billing:read")),
+    user: User = Depends(require_permission("payments:read")),
     gateway_id: int | None = Query(default=None, gt=0),
     status: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
@@ -295,7 +295,7 @@ def list_settlements(
 
 
 @router.get("/settlements/{settlement_id}", response_model=SettlementResponse)
-def get_settlement(settlement_id: int, user: User = Depends(require_permission("payments:read", "billing:read")), service: PaymentService = Depends(get_payment_service)):
+def get_settlement(settlement_id: int, user: User = Depends(require_permission("payments:read")), service: PaymentService = Depends(get_payment_service)):
     result = service.get_settlement(settlement_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Settlement not found")
@@ -303,7 +303,7 @@ def get_settlement(settlement_id: int, user: User = Depends(require_permission("
 
 
 @router.get("/{payment_id}", response_model=PaymentResponse)
-def get_payment(payment_id: int, user: User = Depends(require_permission("payments:read", "billing:read")), service: PaymentService = Depends(get_payment_service)):
+def get_payment(payment_id: int, user: User = Depends(require_permission("payments:read")), service: PaymentService = Depends(get_payment_service)):
     result = service.get_payment(payment_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Payment not found")
@@ -311,5 +311,5 @@ def get_payment(payment_id: int, user: User = Depends(require_permission("paymen
 
 
 @router.post("/{payment_id}/verify", response_model=PaymentResponse)
-def verify_payment(payment_id: int, data: PaymentVerify, user: User = Depends(require_permission("payments:write", "billing:write")), service: PaymentService = Depends(get_payment_service)):
+def verify_payment(payment_id: int, data: PaymentVerify, user: User = Depends(require_permission("payments:create")), service: PaymentService = Depends(get_payment_service)):
     return service.verify_payment_service(payment_id, data)

@@ -34,7 +34,7 @@ router = APIRouter(
 def create_review(
     data: ReviewCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("reviews:write")),
+    user: User = Depends(require_permission("reviews:create")),
 ):
     service = ReviewService(db)
     return service.create(
@@ -186,7 +186,7 @@ def update_review(
     review_id: int,
     data: ReviewUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("reviews:write")),
+    user: User = Depends(require_permission("reviews:update")),
 ):
     service = ReviewService(db)
     return service.update(
@@ -206,7 +206,7 @@ def update_review(
 def delete_review(
     review_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("reviews:write")),
+    user: User = Depends(require_permission("reviews:delete")),
 ):
     service = ReviewService(db)
     service.delete(
@@ -227,7 +227,7 @@ def reply_to_review(
     review_id: int,
     data: ReviewReplyRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("reviews:write")),
+    user: User = Depends(require_permission("reviews:create")),
 ):
     service = ReviewService(db)
     return service.reply(
@@ -248,7 +248,7 @@ def update_review_status(
     review_id: int,
     data: ReviewStatusUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("reviews:write")),
+    user: User = Depends(require_permission("reviews:update")),
 ):
     service = ReviewService(db)
     return service.update_status(

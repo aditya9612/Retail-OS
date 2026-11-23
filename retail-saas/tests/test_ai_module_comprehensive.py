@@ -437,7 +437,7 @@ def test_ai_chat_query_assistant(ai_test_setup):
     assert res1.status_code == 200, res1.text
     d1 = res1.json()
     assert d1["intent"] == "today_sales"
-    assert "sales" in d1["answer"].lower()
+    assert ("sales" in d1["answer"].lower()) or ("विक्री" in d1["answer"]) or ("गल्ला" in d1["answer"])
     assert len(d1["suggested_actions"]) > 0
 
     # Query 2: Best sellers

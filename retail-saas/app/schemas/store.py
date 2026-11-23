@@ -468,6 +468,15 @@ class StoreResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("is_warehouse", "is_main", "is_active", mode="before")
+    @classmethod
+    def coerce_booleans(cls, v: Any, info) -> bool:
+        if v is None:
+            if info.field_name == "is_active":
+                return True
+            return False
+        return bool(v)
+
     @field_validator("pincode", "phone", mode="before")
     @classmethod
     def coerce_to_str(cls, v: Any) -> str | None:
@@ -533,6 +542,15 @@ class StoreSummaryResponse(BaseModel):
     total_inventory_items: int = Field(default=0, examples=[150])
     low_stock_items_count: int = Field(default=0, examples=[8])
     out_of_stock_items_count: int = Field(default=0, examples=[3])
+
+    @field_validator("is_warehouse", "is_main", "is_active", mode="before")
+    @classmethod
+    def coerce_summary_booleans(cls, v: Any, info) -> bool:
+        if v is None:
+            if info.field_name == "is_active":
+                return True
+            return False
+        return bool(v)
 
 
 class StoreInventorySummaryResponse(BaseModel):
