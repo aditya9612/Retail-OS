@@ -1,8 +1,20 @@
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 import re
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class CategoryExportIsActive(str, Enum):
+    all = "all"
+    true = "true"
+    false = "false"
+
+
+class CategoryExportFormat(str, Enum):
+    excel = "excel"
+    csv = "csv"
 
 
 PLACEHOLDER_VALUES = {
