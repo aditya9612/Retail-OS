@@ -543,7 +543,7 @@ class ValidateCouponRequest(BaseModel):
         description="Order amount must be greater than 0",
     )
     customer_id: Optional[int] = Field(default=None, gt=0)
-    customer_phone: Optional[str] = Field(default=None, max_length=20)
+    customer_phone: Optional[str] = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
     store_id: Optional[int] = Field(default=None, gt=0)
 
     @field_validator("coupon_code")
@@ -577,7 +577,7 @@ class ApplyCouponRequest(BaseModel):
         description="Order amount must be greater than 0",
     )
     customer_id: Optional[int] = Field(default=None, gt=0)
-    customer_phone: Optional[str] = Field(default=None, max_length=20)
+    customer_phone: Optional[str] = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
     store_id: Optional[int] = Field(default=None, gt=0)
 
     @field_validator("coupon_code")
@@ -674,10 +674,10 @@ class BulkGenerateCouponsRequest(BaseModel):
     prefix: str = Field(..., min_length=2, max_length=20, description="Code prefix, e.g. FEST")
     count: int = Field(default=10, ge=1, le=500, description="Number of unique vouchers to generate")
     description: str = Field(..., min_length=3, max_length=255)
-    discount_type: str = Field(..., description="Discount type: percentage or fixed")
+    discount_type: str = Field(..., max_length=20, pattern=r"^(percentage|fixed)$", description="Discount type: percentage or fixed")
     discount_value: Decimal = Field(..., gt=0)
     minimum_order_amount: Decimal = Field(default=Decimal("1.00"), ge=Decimal("1.00"))
-    maximum_discount: Optional[Decimal] = None
+    maximum_discount: Optional[Decimal] = Field(default=None, ge=Decimal("1.00"), le=Decimal("999999999.99"))
     usage_limit: int = Field(default=1, gt=0)
     usage_limit_per_customer: Optional[int] = Field(default=1, gt=0)
     start_date: date
@@ -704,3 +704,9 @@ class ApplicableCouponsResponse(BaseModel):
     order_amount: float
     applicable_coupons: list[ApplicableCouponItem] = []
     locked_coupons: list[ApplicableCouponItem] = []
+
+
+class CouponDeleteResponse(BaseModel):
+    message: str
+    coupon_id: int
+    is_deleted: bool = True

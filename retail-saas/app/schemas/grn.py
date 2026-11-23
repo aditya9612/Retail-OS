@@ -356,7 +356,7 @@ class GRNCreate(BaseModel):
     vehicle_number: Optional[str] = Field(default=None, max_length=50)
     transporter_name: Optional[str] = Field(default=None, max_length=100)
     remarks: Optional[str] = Field(default=None, max_length=1000)
-    items: list[GRNItemCreate] = Field(default_factory=list)
+    items: list[GRNItemCreate] = Field(default_factory=list, max_length=500, description="List of GRN items (max 500)")
 
     @field_validator("invoice_number")
     @classmethod
@@ -519,7 +519,7 @@ class GRNItemQCUpdate(BaseModel):
 
 
 class GRNQualityCheckRequest(BaseModel):
-    items: list[GRNItemQCUpdate] = Field(..., min_length=1)
+    items: list[GRNItemQCUpdate] = Field(..., min_length=1, max_length=500, description="List of items for QC (max 500)")
     remarks: Optional[str] = Field(default=None, max_length=1000)
 
     @field_validator("remarks")

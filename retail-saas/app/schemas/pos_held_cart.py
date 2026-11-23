@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class POSHoldCartRequest(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=255, description="Reason or note for holding cart")
     customer_name: Optional[str] = Field(default=None, max_length=100, description="Customer name for held cart")
-    customer_phone: Optional[str] = Field(default=None, max_length=20, description="Customer phone for held cart")
+    customer_phone: Optional[str] = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Customer phone for held cart")
     customer_id: Optional[int] = Field(default=None, gt=0, description="Customer ID if registered")
 
 

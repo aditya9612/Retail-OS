@@ -129,9 +129,9 @@ def validate_category_description(v: Optional[str]) -> Optional[str]:
 
 
 class CategoryCreate(BaseModel):
-    name: str
+    name: str = Field(..., min_length=3, max_length=255, description="Category name (3 to 255 characters)")
     is_active: bool = True
-    description: Optional[str] = None
+    description: Optional[str] = Field(default=None, min_length=3, max_length=500)
     parent_id: Optional[int] = Field(
         default=None,
         gt=0,
@@ -150,9 +150,9 @@ class CategoryCreate(BaseModel):
 
 
 class CategoryUpdate(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=3, max_length=255)
     is_active: Optional[bool] = None
-    description: Optional[str] = None
+    description: Optional[str] = Field(default=None, min_length=3, max_length=500)
     parent_id: Optional[int] = Field(
         default=None,
         gt=0,

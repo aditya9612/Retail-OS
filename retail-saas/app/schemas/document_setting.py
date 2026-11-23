@@ -136,3 +136,18 @@ class BrandingContext(BaseModel):
 
 # Alias for backward compatibility
 DocumentSetting = BrandingContext
+
+
+class DocumentSettingDeleteResponse(BaseModel):
+    message: str = Field(..., description="Status message")
+
+
+class DocumentLogoUploadResponse(BaseModel):
+    message: str = Field(..., description="Status message")
+    logo_url: str = Field(..., description="Uploaded logo URL")
+    setting: DocumentSettingResponse
+
+
+class DocumentLogoDeleteResponse(BaseModel):
+    message: str = Field(..., description="Status message")
+    setting: DocumentSettingResponse

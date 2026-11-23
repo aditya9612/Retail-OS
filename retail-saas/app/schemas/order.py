@@ -13,6 +13,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from app.utils.validators import validate_single_pincode
 
 
 VALID_ORDER_TYPES = ["pos", "ecommerce", "online"]
@@ -268,9 +269,10 @@ class OrderCreate(BaseModel):
 
     delivery_pincode: Optional[str] = Field(
         default=None,
-        min_length=3,
-        max_length=20,
-        description="Optional delivery pincode / postal code",
+        min_length=6,
+        max_length=6,
+        pattern=r"^[1-9][0-9]{5}$",
+        description="Optional delivery pincode (6-digit Indian PIN)",
     )
 
     notes: Optional[str] = Field(
@@ -388,7 +390,7 @@ class OrderCreate(BaseModel):
         if v.lower() in INVALID_STRING_VALUES:
             raise ValueError("Invalid delivery pincode")
 
-        return v
+        return validate_single_pincode(v)
 
     @field_validator("notes")
     @classmethod
@@ -465,8 +467,10 @@ class OrderUpdate(BaseModel):
 
     delivery_pincode: Optional[str] = Field(
         default=None,
-        min_length=3,
-        max_length=20,
+        min_length=6,
+        max_length=6,
+        pattern=r"^[1-9][0-9]{5}$",
+        description="Optional delivery pincode (6-digit Indian PIN)",
     )
 
     notes: Optional[str] = Field(
@@ -569,7 +573,7 @@ class OrderUpdate(BaseModel):
         if v.lower() in INVALID_STRING_VALUES:
             raise ValueError("Invalid delivery pincode")
 
-        return v
+        return validate_single_pincode(v)
 
     @field_validator("notes")
     @classmethod

@@ -962,7 +962,7 @@ class ProductUpdate(BaseModel):
         },
     )
 
-    min_stock_alert: Optional[int] = None
+    min_stock_alert: Optional[int] = Field(default=None, ge=0, le=999999, description="Minimum stock threshold for low stock alert")
     stock_status: Optional[str] = None
     unit: Optional[str] = None
     is_active: Optional[bool] = None
@@ -1414,3 +1414,10 @@ class ProductBarcodeLabelResponse(BaseModel):
     @field_serializer("mrp", "selling_price", mode="plain", check_fields=False)
     def serialize_decimal(self, v: Decimal) -> float:
         return float(v) if v is not None else 0.0
+
+
+class GenerateMissingBarcodesResponse(BaseModel):
+    success: bool = True
+    total_checked: int = Field(..., examples=[25])
+    updated_count: int = Field(..., examples=[12])
+    message: str = Field(..., examples=["Successfully generated barcodes for 12 products"])

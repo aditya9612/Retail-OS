@@ -28,6 +28,7 @@ from app.models.product import ProductImage
 from app.models.user import User
 from app.schemas.product import (
     BarcodeLabelMode,
+    GenerateMissingBarcodesResponse,
     ProductBarcodeLabelResponse,
     ProductCatalogSummaryResponse,
     ProductCreate,
@@ -771,6 +772,7 @@ async def create_product(
 
 @router.post(
     "/generate-missing-barcodes",
+    response_model=GenerateMissingBarcodesResponse,
     summary="Generate Missing Barcodes in Bulk",
     description="Automatically generates and assigns unique 13-digit EAN barcodes for all products belonging to this tenant that currently have no barcode.",
     dependencies=[Depends(require_operational_write)],

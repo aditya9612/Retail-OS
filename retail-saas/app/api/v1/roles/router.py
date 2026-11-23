@@ -47,6 +47,7 @@ def list_roles(
 
 @router.get(
     "/permissions",
+    response_model=dict[str, list[str]] | list[PermissionGroup],
     summary="List Available Permissions",
     description="Returns all system permissions organized by module. Defaults to a clean, simple module-to-permissions map.",
 )

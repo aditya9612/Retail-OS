@@ -286,6 +286,7 @@ class RoleCreate(BaseModel):
     )
     permissions: list[str] = Field(
         default_factory=list,
+        max_length=200,
         description="List of permission strings assigned to this role (e.g., ['products:read', 'inventory:read'])",
         examples=[["products:read", "inventory:read", "inventory:write"]],
     )
@@ -327,6 +328,7 @@ class RoleUpdate(BaseModel):
     )
     permissions: Optional[list[str]] = Field(
         default=None,
+        max_length=200,
         description="Updated list of permission strings (must be valid system permissions)",
         examples=[["products:read", "inventory:read", "inventory:write", "batches:read"]],
     )

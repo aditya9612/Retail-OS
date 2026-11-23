@@ -43,18 +43,18 @@ class InventoryResponse(BaseModel):
     tenant_id: int
     store_id: int
     product_id: int
-    quantity: int
-    min_stock_level: int = 0
-    max_stock_level: int = 0
-    reorder_point: int = 0
-    low_stock_threshold: int = 10
+    quantity: int = Field(default=0, ge=0)
+    min_stock_level: int = Field(default=0, ge=0)
+    max_stock_level: int = Field(default=0, ge=0)
+    reorder_point: int = Field(default=0, ge=0)
+    low_stock_threshold: int = Field(default=10, ge=0)
     batch_number: Optional[str] = None
     expiry_date: Optional[date] = None
     product_name: Optional[str] = None
     product_sku: Optional[str] = None
     store_name: Optional[str] = None
-    cost_price: Optional[Decimal] = None
-    selling_price: Optional[Decimal] = None
+    cost_price: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"), examples=[Decimal("100.00")])
+    selling_price: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"), examples=[Decimal("150.00")])
     created_at: datetime
 
     model_config = {"from_attributes": True}

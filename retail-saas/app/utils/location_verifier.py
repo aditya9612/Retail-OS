@@ -206,8 +206,8 @@ def validate_store_name(value: Any) -> str:
     if normalized.upper() == "AB" or (len(normalized) == 2 and normalized.isupper() and normalized.lower() not in {"om"}):
         raise ValueError("Store name cannot be an abbreviation")
 
-    # Allow valid letters and single spaces between words
-    if not re.fullmatch(r"^[A-Za-z]+(?:\s+[A-Za-z]+)*$", normalized):
+    # Allow valid letters, numbers, and safe retail connectors with single spaces between words
+    if not re.fullmatch(r"^[A-Za-z0-9&'\-]+(?:\s+[A-Za-z0-9&'\-]+)*$", normalized):
         raise ValueError("Store name contains invalid characters")
 
     words = normalized.split(" ")

@@ -253,7 +253,8 @@ class SupplierBase(BaseModel):
     phone: Optional[str] = Field(
         default=None,
         min_length=10,
-        max_length=13,
+        max_length=15,
+        pattern=r"^(?:\+91)?[6-9]\d{9}$",
         description="Indian phone number: 10 digits or +91 followed by 10 digits"
     )
 
@@ -268,6 +269,7 @@ class SupplierBase(BaseModel):
         default=None,
         min_length=15,
         max_length=15,
+        pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$",
         description="GSTIN must be exactly 15 characters"
     )
 
@@ -322,7 +324,12 @@ class SupplierUpdate(BaseModel):
 
     email: Optional[EmailStr] = None
 
-    phone: Optional[str] = None
+    phone: Optional[str] = Field(
+        default=None,
+        min_length=10,
+        max_length=15,
+        pattern=r"^(?:\+91)?[6-9]\d{9}$",
+    )
 
     address: Optional[str] = Field(
         default=None,
@@ -333,7 +340,8 @@ class SupplierUpdate(BaseModel):
     gstin: Optional[str] = Field(
         default=None,
         min_length=15,
-        max_length=15
+        max_length=15,
+        pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$",
     )
 
     @field_validator("name")

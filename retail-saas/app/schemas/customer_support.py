@@ -14,7 +14,7 @@ class ReturnItemDetail(BaseModel):
 
 class CustomerReturnInitiateRequest(BaseModel):
     order_number: str = Field(..., min_length=3, max_length=100, description="Order number to return (e.g. ORD-1001)")
-    customer_phone: str = Field(..., min_length=5, max_length=20, description="Customer phone for verification")
+    customer_phone: str = Field(..., min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Customer phone for verification")
     reason: str = Field(..., min_length=3, max_length=200, description="Reason for return (defective, wrong_item, expired, etc.)")
     remarks: Optional[str] = Field(default=None, max_length=500, description="Additional customer remarks")
     refund_preference: Literal["store_credit", "upi", "cash", "original_payment"] = Field(
@@ -38,7 +38,7 @@ class CustomerReturnResponse(BaseModel):
 
 class CustomerOrderTrackRequest(BaseModel):
     order_number: Optional[str] = Field(default=None, description="Order number (e.g. ORD-1001)")
-    customer_phone: Optional[str] = Field(default=None, description="Customer phone number")
+    customer_phone: Optional[str] = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Customer phone number")
 
 
 class OrderItemSummary(BaseModel):
@@ -77,7 +77,7 @@ class CustomerInvoiceDownloadResponse(BaseModel):
 
 class CustomerSupportQueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000, description="Customer question or support message")
-    customer_phone: Optional[str] = Field(default=None, max_length=20, description="Customer phone number for context")
+    customer_phone: Optional[str] = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Customer phone number for context")
     order_number: Optional[str] = Field(default=None, max_length=100, description="Optional active order number")
     session_id: Optional[str] = Field(default=None, max_length=100, description="Web widget session identifier")
     tenant_id: Optional[int] = Field(default=None, description="Tenant organization ID (if multi-tenant widget)")

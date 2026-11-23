@@ -265,6 +265,7 @@ class CustomerBase(BaseModel):
     email: Optional[EmailStr] = None
 
     phone: str = Field(
+        pattern=r"^(?:\+91)?[6-9]\d{9}$",
         description="Phone must be 10 digits or +91 followed by 10 digits"
     )
 
@@ -277,6 +278,7 @@ class CustomerBase(BaseModel):
         default=None,
         min_length=15,
         max_length=15,
+        pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$",
     )
 
     birthday: Optional[date] = None
@@ -437,6 +439,7 @@ class CustomerUpdate(BaseModel):
         default=None,
         min_length=10,
         max_length=13,
+        pattern=r"^(?:\+91)?[6-9]\d{9}$",
         description=(
             "Phone must be 10 digits or "
             "+91 followed by 10 digits"
@@ -452,6 +455,7 @@ class CustomerUpdate(BaseModel):
         default=None,
         min_length=15,
         max_length=15,
+        pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$",
     )
 
     birthday: Optional[date] = None

@@ -10,6 +10,7 @@ from app.schemas.gst_rate import (
     GstBulkImportRequest,
     GstBulkImportResponse,
     GstRateCreate,
+    GstRateDeleteResponse,
     GstRateListResponse,
     GstRateResponse,
     GstRateUpdate,
@@ -177,6 +178,7 @@ def update_gst_rate(
 
 @router.delete(
     "/{rate_id}",
+    response_model=GstRateDeleteResponse,
     dependencies=[Depends(require_operational_write)],
     summary="Delete GST Rate",
     description="Deletes an unused GST rate configuration. Fails safely if active products are associated with this HSN code.",

@@ -27,8 +27,8 @@ class WhatsAppSettingBase(BaseModel):
 
 
 class WhatsAppSettingUpdate(BaseModel):
-    phone_number_id: Optional[str] = None
-    business_account_id: Optional[str] = None
+    phone_number_id: Optional[str] = Field(default=None, min_length=5, max_length=50, pattern=r"^[0-9]+$", description="Meta WhatsApp Cloud API Phone Number ID")
+    business_account_id: Optional[str] = Field(default=None, min_length=5, max_length=50, pattern=r"^[0-9]+$", description="Meta WhatsApp Business Account ID")
     access_token: Optional[str] = Field(default=None, description="Meta Cloud API System User Access Token")
     is_enabled: Optional[bool] = None
     auto_send_invoice: Optional[bool] = None
@@ -60,8 +60,9 @@ class WhatsAppSettingResponse(WhatsAppSettingBase):
 class WhatsAppSendInvoiceRequest(BaseModel):
     recipient_phone: Optional[str] = Field(
         default=None,
-        min_length=5,
-        max_length=20,
+        min_length=10,
+        max_length=15,
+        pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$",
         description="Override customer phone number. If omitted, uses invoice customer phone.",
     )
     custom_message: Optional[str] = Field(
@@ -72,12 +73,12 @@ class WhatsAppSendInvoiceRequest(BaseModel):
 
 
 class WhatsAppSendCustomRequest(BaseModel):
-    phone: str = Field(..., min_length=5, max_length=20, description="Recipient phone number (e.g. 9876543210 or +919876543210)")
+    phone: str = Field(..., min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Recipient phone number (e.g. 9876543210 or +919876543210)")
     message: str = Field(..., min_length=1, max_length=2000, description="Text message content")
 
 
 class WhatsAppTestRequest(BaseModel):
-    recipient_phone: str = Field(..., min_length=5, max_length=20, description="Test recipient phone number")
+    recipient_phone: str = Field(..., min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Test recipient phone number")
     template_name: Optional[str] = Field(default=None, description="Optional approved Meta template name to test")
 
 
@@ -131,7 +132,7 @@ class MappedOrderItemDetail(BaseModel):
 class HandwrittenGroceryOcrRequest(BaseModel):
     image_base64: str = Field(..., description="Base64 encoded photo of the handwritten grocery list")
     mime_type: str = Field(default="image/jpeg", description="MIME type (image/jpeg, image/png, image/webp)")
-    recipient_phone: Optional[str] = Field(default=None, description="Customer phone number to link cart/order")
+    recipient_phone: Optional[str] = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Customer phone number to link cart/order")
     sender_name: Optional[str] = Field(default=None, description="Customer name if known")
     auto_create_order: bool = Field(default=True, description="Whether to automatically create an order in Retail-OS")
     store_id: Optional[int] = Field(default=None, description="Target store outlet ID")
@@ -156,7 +157,7 @@ class HandwrittenGroceryOcrResponse(BaseModel):
 # ==============================================================================
 
 class WhatsAppChatOrderRequest(BaseModel):
-    phone: str = Field(..., min_length=5, max_length=20, description="Customer phone number")
+    phone: str = Field(..., min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Customer phone number")
     message: str = Field(..., min_length=1, max_length=2000, description="Customer grocery order text in Marathi/English")
     sender_name: Optional[str] = Field(default=None, description="Customer display name")
     store_id: Optional[int] = Field(default=None, description="Store ID (optional)")

@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 # ============================================================
@@ -102,7 +102,7 @@ class StorefrontPagesUpdate(BaseModel):
 # ============================================================
 
 class StorefrontContactSocialResponse(BaseModel):
-    contact_email: Optional[str] = Field(default="support@retailos-shop.in", description="Support email")
+    contact_email: Optional[EmailStr] = Field(default="support@retailos-shop.in", description="Support email")
     contact_phone: Optional[str] = Field(default="+91 98765 43210", description="Store phone number")
     whatsapp_number: Optional[str] = Field(default="+91 98765 43210", description="WhatsApp contact number")
     address: Optional[str] = Field(default="123 MG Road, Bangalore, KA 560001", description="Physical store address")
@@ -115,9 +115,9 @@ class StorefrontContactSocialResponse(BaseModel):
 
 
 class StorefrontContactSocialUpdate(BaseModel):
-    contact_email: Optional[str] = None
-    contact_phone: Optional[str] = None
-    whatsapp_number: Optional[str] = None
+    contact_email: Optional[EmailStr] = None
+    contact_phone: Optional[str] = Field(None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
+    whatsapp_number: Optional[str] = Field(None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
     address: Optional[str] = None
     instagram_url: Optional[str] = None
     facebook_url: Optional[str] = None
@@ -195,9 +195,9 @@ class StorefrontSettingUpdate(BaseModel):
     return_policy: Optional[str] = None
 
     # Contact & Social
-    contact_email: Optional[str] = None
-    contact_phone: Optional[str] = None
-    whatsapp_number: Optional[str] = None
+    contact_email: Optional[EmailStr] = None
+    contact_phone: Optional[str] = Field(None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
+    whatsapp_number: Optional[str] = Field(None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
     address: Optional[str] = None
     instagram_url: Optional[str] = None
     facebook_url: Optional[str] = None
@@ -259,7 +259,7 @@ class StorefrontSettingResponse(BaseModel):
     return_policy: Optional[str] = "Returns are accepted within 7 days of delivery for damaged or incorrect items."
 
     # Contact & Social
-    contact_email: Optional[str] = "support@retailos-shop.in"
+    contact_email: Optional[EmailStr] = "support@retailos-shop.in"
     contact_phone: Optional[str] = "+91 98765 43210"
     whatsapp_number: Optional[str] = "+91 98765 43210"
     address: Optional[str] = "123 MG Road, Bangalore, KA 560001"
@@ -499,7 +499,7 @@ class StorefrontCustomerProfileResponse(BaseModel):
 
 class StorefrontCustomerProfileUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=255, description="Full Name")
-    email: Optional[str] = Field(None, max_length=255, description="Email Address")
+    email: Optional[EmailStr] = Field(None, description="Email Address")
     address: Optional[str] = Field(None, max_length=500, description="Delivery Address")
     birthday: Optional[date] = Field(None, description="Date of birth")
 
@@ -512,7 +512,7 @@ class StorefrontFeedbackRequest(BaseModel):
 
 class StorefrontReferralRequest(BaseModel):
     referred_name: str = Field(..., min_length=2, max_length=100, description="Friend's full name")
-    referred_phone: str = Field(..., description="Friend's 10-digit mobile number")
+    referred_phone: str = Field(..., min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Friend's 10-digit mobile number")
 
 
 class StorefrontNotificationItem(BaseModel):

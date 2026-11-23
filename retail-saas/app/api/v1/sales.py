@@ -8,6 +8,7 @@ from app.core.security import require_operational_write, require_permission
 from app.models.user import User
 from app.schemas.sale import (
     SaleCreate,
+    SaleDeleteResponse,
     SaleResponse,
     SaleSummaryResponse,
     SaleThermalMode,
@@ -366,6 +367,7 @@ def void_sale(
 
 @router.delete(
     "/{sale_id}",
+    response_model=SaleDeleteResponse,
     dependencies=[Depends(require_operational_write)],
 )
 def delete_sale(

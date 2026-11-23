@@ -176,7 +176,7 @@ class CartSummaryResponse(BaseModel):
 
 class CartCustomerSetRequest(BaseModel):
     customer_id: Optional[int] = Field(default=None, gt=0)
-    phone: Optional[str] = Field(default=None, min_length=3, max_length=20)
+    phone: Optional[str] = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
 
 
 class CartCustomerResponse(BaseModel):

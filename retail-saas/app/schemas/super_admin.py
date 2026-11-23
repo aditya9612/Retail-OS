@@ -284,7 +284,7 @@ class SuperAdminChangePassword(BaseModel):
 
 class SuperAdminProfileUpdate(BaseModel):
     full_name: Optional[str] = Field(None, min_length=2, max_length=255, description="Full name of Super Admin")
-    phone: Optional[str] = Field(None, description="10-digit Indian phone number (e.g. 9876543210)")
+    phone: Optional[str] = Field(None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="10-digit Indian phone number (e.g. 9876543210)")
     email: Optional[EmailStr] = Field(None, description="Email address")
     password: Optional[str] = Field(None, min_length=8, max_length=128, description="New password (min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char)")
     pin: Optional[str] = Field(None, min_length=4, max_length=6, description="4 or 6 digit security PIN")
@@ -812,6 +812,9 @@ class SuperAdminStoreOwnerCreate(BaseModel):
     )
     owner_phone: Optional[str] = Field(
         default=None,
+        min_length=10,
+        max_length=15,
+        pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$",
         description="Phone number of the Store Owner",
     )
     domain: Optional[str] = Field(
@@ -839,8 +842,10 @@ class SuperAdminStoreOwnerCreate(BaseModel):
     )
     pincode: Optional[str] = Field(
         default=None,
-        max_length=20,
-        description="Pincode",
+        min_length=6,
+        max_length=6,
+        pattern=r"^[1-9][0-9]{5}$",
+        description="6-digit Indian PIN code",
     )
 
     model_config = ConfigDict(extra="ignore")
@@ -895,11 +900,11 @@ class SuperAdminStoreOwnerUpdate(BaseModel):
     business_name: Optional[str] = Field(default=None, min_length=2, max_length=255, description="Business / Company name")
     store_name: Optional[str] = Field(default=None, min_length=2, max_length=255, description="Main store name")
     owner_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
-    owner_phone: Optional[str] = None
-    address: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    pincode: Optional[str] = None
+    owner_phone: Optional[str] = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
+    address: Optional[str] = Field(default=None, max_length=500)
+    city: Optional[str] = Field(default=None, max_length=100)
+    state: Optional[str] = Field(default=None, max_length=100)
+    pincode: Optional[str] = Field(default=None, min_length=6, max_length=6, pattern=r"^[1-9][0-9]{5}$")
     is_active: Optional[bool] = None
 
     model_config = ConfigDict(extra="ignore")

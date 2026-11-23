@@ -15,6 +15,9 @@ from app.models.store import Store
 from app.models.user import User
 from app.schemas.document_setting import (
     BrandingContext,
+    DocumentLogoDeleteResponse,
+    DocumentLogoUploadResponse,
+    DocumentSettingDeleteResponse,
     DocumentSettingResponse,
     DocumentSettingUpdate,
 )
@@ -161,7 +164,7 @@ def update_document_setting(
     return res_setting
 
 
-@router.delete("", status_code=status.HTTP_200_OK)
+@router.delete("", response_model=DocumentSettingDeleteResponse, status_code=status.HTTP_200_OK)
 def delete_document_setting(
     store_id: int | None = Query(default=None, gt=0),
     user: User = Depends(require_settings_write),
@@ -271,7 +274,7 @@ def preview_document(
     )
 
 
-@router.post("/logo")
+@router.post("/logo", response_model=DocumentLogoUploadResponse)
 async def upload_document_logo(
     file: UploadFile = File(...),
     store_id: int | None = Query(default=None, gt=0),
@@ -403,7 +406,7 @@ async def upload_document_logo(
     }
 
 
-@router.delete("/logo")
+@router.delete("/logo", response_model=DocumentLogoDeleteResponse)
 def delete_logo(
     store_id: int | None = Query(default=None, gt=0),
     user: User = Depends(require_settings_write),

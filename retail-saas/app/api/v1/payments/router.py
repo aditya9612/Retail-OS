@@ -226,7 +226,7 @@ def update_payment_gateway(gateway_id: int, data: PaymentGatewayUpdate, user: Us
     return service.update_gateway(gateway_id, data)
 
 
-@router.delete("/payment-gateways/{gateway_id}")
+@router.delete("/payment-gateways/{gateway_id}", response_model=PaymentGatewayResponse)
 def delete_payment_gateway(gateway_id: int, user: User = Depends(require_permission("payments:delete")), service: PaymentService = Depends(get_payment_service)):
     return service.delete_gateway(gateway_id)
 

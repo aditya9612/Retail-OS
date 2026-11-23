@@ -226,7 +226,8 @@ class SaleCreate(BaseModel):
     items: List[SaleItemCreate] = Field(
         ...,
         min_length=1,
-        description="Sale must contain at least one item",
+        max_length=500,
+        description="Sale must contain between 1 and 500 items",
     )
 
     @field_validator("store_id", mode="before")
@@ -745,4 +746,9 @@ class SaleSummaryResponse(BaseModel):
     total_discount: float = 0.0
     payment_methods: dict = {}
     payment_statuses: dict = {}
+
+
+class SaleDeleteResponse(BaseModel):
+    message: str = Field(default="Sale deleted successfully", description="Status message")
+    sale_id: int = Field(..., description="ID of deleted sale")
 

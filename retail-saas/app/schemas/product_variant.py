@@ -450,8 +450,8 @@ class ProductVariantListResponse(BaseModel):
 
 class VariantMatrixGenerateRequest(BaseModel):
     product_id: int = Field(gt=0, description="Parent product ID to generate variants for")
-    sizes: List[str] = Field(default=[], description="List of sizes (e.g. ['S', 'M', 'L'])")
-    colors: List[str] = Field(default=[], description="List of colors (e.g. ['Black', 'White', 'Blue'])")
+    sizes: List[str] = Field(default=[], max_length=50, description="List of sizes (e.g. ['S', 'M', 'L'])")
+    colors: List[str] = Field(default=[], max_length=50, description="List of colors (e.g. ['Black', 'White', 'Blue'])")
     attributes: Optional[Dict[str, Any]] = Field(default=None, description="Common attributes for all variants")
     selling_price: Optional[Decimal] = Field(default=None, gt=0, le=Decimal("999999.99"))
     cost_price: Optional[Decimal] = Field(default=None, ge=0, le=Decimal("999999.99"))

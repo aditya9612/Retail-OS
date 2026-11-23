@@ -115,16 +115,46 @@ DEFAULT_ROLE_PERMISSIONS = {
     UserRole.OWNER: [
         "*",
     ],
-    UserRole.MANAGER: [],
-    UserRole.ACCOUNTANT: [],
-    UserRole.CASHIER: [],
-    UserRole.INVENTORY_MANAGER: [],
-    UserRole.WAREHOUSE_STAFF: [],
-    UserRole.PURCHASE_MANAGER: [],
-    UserRole.SALES_EXECUTIVE: [],
-    UserRole.CRM_SUPPORT: [],
-    UserRole.STAFF: [],
-    UserRole.CUSTOMER: [],
+    UserRole.MANAGER: [
+        "billing:create", "billing:read", "billing:update", "billing:delete", "billing:refund",
+        "invoices:read", "credit_notes:create", "credit_notes:read", "payments:create", "payments:read",
+        "orders:create", "orders:read", "orders:update", "sales:create", "sales:read",
+        "inventory:create", "inventory:read", "inventory:update", "batches:read",
+        "products:create", "products:read", "products:update", "categories:read",
+        "customers:create", "customers:read", "customers:update", "reports:read", "pos:shift_manage"
+    ],
+    UserRole.ACCOUNTANT: [
+        "billing:read", "invoices:read", "credit_notes:create", "credit_notes:read", "credit_notes:update",
+        "payments:read", "reports:read", "gst_rates:read"
+    ],
+    UserRole.CASHIER: [
+        "billing:create", "billing:read", "billing:update", "payments:create", "payments:read",
+        "orders:create", "orders:read", "sales:create", "sales:read", "products:read",
+        "customers:read", "customers:create", "pos:shift_manage"
+    ],
+    UserRole.INVENTORY_MANAGER: [
+        "inventory:create", "inventory:read", "inventory:update", "inventory:delete",
+        "batches:create", "batches:read", "batches:update", "warehouses:create", "warehouses:read",
+        "products:create", "products:read", "products:update", "purchase_orders:create", "purchase_orders:read"
+    ],
+    UserRole.WAREHOUSE_STAFF: [
+        "inventory:read", "inventory:update", "batches:read", "warehouses:read", "products:read"
+    ],
+    UserRole.PURCHASE_MANAGER: [
+        "purchase_orders:create", "purchase_orders:read", "purchase_orders:update", "suppliers:create", "suppliers:read"
+    ],
+    UserRole.SALES_EXECUTIVE: [
+        "orders:create", "orders:read", "sales:create", "sales:read", "products:read", "customers:read"
+    ],
+    UserRole.CRM_SUPPORT: [
+        "customers:read", "customers:update", "reviews:read", "reviews:update"
+    ],
+    UserRole.STAFF: [
+        "billing:read", "orders:read", "products:read", "sales:read"
+    ],
+    UserRole.CUSTOMER: [
+        "orders:read"
+    ],
 }
 
 # Ensure DEFAULT_ROLE_PERMISSIONS is also indexable by string role name

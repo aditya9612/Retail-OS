@@ -1,6 +1,6 @@
 
 from typing import Any, Optional
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 import re
 
 from app.utils.phone import normalize_phone_number
@@ -30,18 +30,18 @@ class RegisterRequest(BaseModel):
 
     tenant_name: str = Field(..., min_length=2, max_length=255, description="Tenant/Store name")
     domain: str = Field(..., min_length=2, max_length=255, description="Tenant unique domain identifier")
-    email: str = Field(..., description="Administrator/Owner email address")
+    email: EmailStr = Field(..., description="Administrator/Owner email address")
     admin_name: str = Field(..., min_length=2, max_length=255, description="Administrator/Owner full name")
-    password: str = Field(..., description="Administrator/Owner password")
-    phone: str | None = Field(default=None, description="Administrator/Owner phone number")
+    password: str = Field(..., min_length=6, max_length=128, description="Administrator/Owner password")
+    phone: str | None = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Administrator/Owner phone number")
     plan_id: int | None = Field(default=None, description="Optional subscription plan ID")
-    plan_code: str | None = Field(default=None, description="Optional subscription plan code")
+    plan_code: str | None = Field(default=None, max_length=50, description="Optional subscription plan code")
 
     # Store Owner aliases
-    store_name: Optional[str] = None
-    owner_name: Optional[str] = None
-    owner_email: Optional[str] = None
-    owner_phone: Optional[str] = None
+    store_name: Optional[str] = Field(default=None, max_length=255)
+    owner_name: Optional[str] = Field(default=None, max_length=255)
+    owner_email: Optional[EmailStr] = None
+    owner_phone: Optional[str] = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
 
     @model_validator(mode="before")
     @classmethod
@@ -105,8 +105,8 @@ class RegisterResponse(BaseModel):
 class LoginRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(..., min_length=1, max_length=128)
 
     @field_validator("email")
     @classmethod
@@ -174,7 +174,7 @@ PINResetVerifyResponse = OTPVerifyResponse
 class ForgotPasswordRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    email: str = Field(..., description="Registered account email", examples=["owner@example.com"])
+    email: EmailStr = Field(..., description="Registered account email", examples=["owner@example.com"])
 
     @field_validator("email")
     @classmethod
@@ -185,7 +185,7 @@ class ForgotPasswordRequest(BaseModel):
 class VerifyOTPRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    email: str = Field(..., description="Registered account email", examples=["owner@example.com"])
+    email: EmailStr = Field(..., description="Registered account email", examples=["owner@example.com"])
     otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code", examples=["123456"])
 
     @field_validator("email")
@@ -253,7 +253,7 @@ class MobileOTPRequestSchema(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
+    phone: str = Field(..., min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
 
     @field_validator("phone")
     @classmethod
@@ -269,7 +269,7 @@ class MobileOTPVerifySchema(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
+    phone: str = Field(..., min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
     otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code", examples=["123456"])
 
     @field_validator("phone")
@@ -293,7 +293,7 @@ class MobilePINLoginRequest(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
+    phone: str = Field(..., min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
     pin: str = Field(..., min_length=4, max_length=4, description="4-digit security PIN", examples=["1234"])
 
     @field_validator("phone")
@@ -362,7 +362,7 @@ class PINResetRequestSchema(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
+    phone: str = Field(..., min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
 
     @field_validator("phone")
     @classmethod
@@ -378,7 +378,7 @@ class PINResetVerifySchema(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    phone: str = Field(..., description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
+    phone: str = Field(..., min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$", description="Mobile phone number (Indian 10-digit format)", examples=["9876543210"])
     otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code", examples=["123456"])
 
     @field_validator("phone")

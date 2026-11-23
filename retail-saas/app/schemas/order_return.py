@@ -180,7 +180,8 @@ class OrderReturnCreate(BaseModel):
 
     items: list[OrderReturnItemCreate] = Field(
         default_factory=list,
-        description="Optional list of items to return. If empty, all order items are returned.",
+        max_length=100,
+        description="Optional list of items to return (max 100). If empty, all order items are returned.",
     )
 
     @field_validator("reason")
@@ -331,7 +332,8 @@ class OrderReturnExchangeRequest(BaseModel):
     exchange_items: list[OrderReturnExchangeItem] = Field(
         ...,
         min_length=1,
-        description="At least one exchange item is required",
+        max_length=100,
+        description="At least one exchange item is required (max 100)",
     )
     notes: Optional[str] = Field(
         default=None,

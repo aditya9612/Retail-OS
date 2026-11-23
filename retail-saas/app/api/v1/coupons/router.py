@@ -21,6 +21,7 @@ from app.schemas.coupon import (
     BulkGenerateCouponsRequest,
     BulkGenerateCouponsResponse,
     CouponCreate,
+    CouponDeleteResponse,
     CouponRedemptionEmptyResponse,
     CouponRedemptionResponse,
     CouponResponse,
@@ -307,6 +308,7 @@ def update_coupon(
 
 @router.delete(
     "/{coupon_id}",
+    response_model=CouponDeleteResponse,
     summary="Delete or safely archive a coupon",
 )
 def delete_coupon(

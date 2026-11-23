@@ -70,6 +70,11 @@ class UserBase(BaseModel):
 
     phone: Optional[str] = Field(
         default=None,
+        min_length=10,
+        max_length=15,
+        pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$",
+        description="Optional 10-digit Indian phone number",
+        examples=["9876543210"],
     )
 
     store_id: Optional[int] = Field(
@@ -177,6 +182,9 @@ class UserCreate(UserBase):
 
     phone: str = Field(
         ...,
+        min_length=10,
+        max_length=15,
+        pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$",
         description="Mandatory 10-digit Indian phone number",
         examples=["9876543210"],
     )
@@ -289,6 +297,9 @@ class UserUpdate(BaseModel):
 
     phone: Optional[str] = Field(
         default=None,
+        min_length=10,
+        max_length=15,
+        pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$",
         description="Updated 10-digit phone number",
         examples=["9876543210"],
     )
@@ -495,6 +506,9 @@ class MyProfileUpdate(BaseModel):
 
     phone: Optional[str] = Field(
         default=None,
+        min_length=10,
+        max_length=15,
+        pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$",
         description="Updated 10-digit phone number",
         examples=["9876543210"],
     )

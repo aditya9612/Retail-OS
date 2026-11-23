@@ -165,7 +165,7 @@ class GstBulkImportItem(BaseModel):
 
 
 class GstBulkImportRequest(BaseModel):
-    items: list[GstBulkImportItem] = Field(..., min_length=1, description="List of HSN/SAC rate items to import")
+    items: list[GstBulkImportItem] = Field(..., min_length=1, max_length=500, description="List of HSN/SAC rate items to import (max 500)")
 
     model_config = {
         "json_schema_extra": {
@@ -190,3 +190,7 @@ class GstBulkImportResponse(BaseModel):
     updated_count: int
     errors: list[str] = []
     rates: list[GstRateResponse]
+
+
+class GstRateDeleteResponse(BaseModel):
+    message: str = Field(..., description="Success message", examples=["GST rate for HSN code '1006' deleted successfully"])

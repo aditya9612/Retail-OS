@@ -1,6 +1,6 @@
-from typing import Optional
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -165,7 +165,7 @@ def get_store_review_summary(
     description="Get a single review by ID with customer, product, store, and reply details.",
 )
 def get_review(
-    review_id: int,
+    review_id: Annotated[int, Path(gt=0, le=999999, description="Review ID")],
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("reviews:read")),
 ):
@@ -183,7 +183,7 @@ def get_review(
     description="Update review rating or comment. Sets is_edited flag to true.",
 )
 def update_review(
-    review_id: int,
+    review_id: Annotated[int, Path(gt=0, le=999999, description="Review ID")],
     data: ReviewUpdate,
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("reviews:update")),
@@ -204,7 +204,7 @@ def update_review(
     description="Soft-delete a customer review.",
 )
 def delete_review(
-    review_id: int,
+    review_id: Annotated[int, Path(gt=0, le=999999, description="Review ID")],
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("reviews:delete")),
 ):
@@ -224,7 +224,7 @@ def delete_review(
     description="Merchant or store admin responds to a customer review.",
 )
 def reply_to_review(
-    review_id: int,
+    review_id: Annotated[int, Path(gt=0, le=999999, description="Review ID")],
     data: ReviewReplyRequest,
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("reviews:create")),
@@ -245,7 +245,7 @@ def reply_to_review(
     description="Moderate a review by changing its status (approved, pending, rejected, hidden).",
 )
 def update_review_status(
-    review_id: int,
+    review_id: Annotated[int, Path(gt=0, le=999999, description="Review ID")],
     data: ReviewStatusUpdate,
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("reviews:update")),

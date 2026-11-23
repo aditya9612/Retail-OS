@@ -4,7 +4,7 @@ from enum import Enum
 import re
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.utils.validators import (
     MAJOR_INDIAN_CITIES_STATE_MAP,
@@ -588,7 +588,7 @@ class DeliveryZoneCreate(BaseModel):
     description: Optional[str] = Field(default=None, description="Zone description (optional)")
     city: Optional[str] = Field(default=None, description="Optional city name")
     state: Optional[str] = Field(default=None, description="Optional state name")
-    pincodes: list[str] = Field(default_factory=list, description="List of 6-digit postal pincodes")
+    pincodes: list[str] = Field(default_factory=list, max_length=500, description="List of 6-digit postal pincodes (max 500)")
     is_active: bool = Field(default=True, description="Active status")
 
     @field_validator("name", mode="before")
@@ -657,7 +657,7 @@ class DeliveryZoneUpdate(BaseModel):
     description: Optional[str] = Field(default=None, description="Optional description up to 255 characters")
     city: Optional[str] = Field(default=None, description="Optional city name")
     state: Optional[str] = Field(default=None, description="Optional state name")
-    pincodes: Optional[list[str]] = Field(default=None, description="List of 6-digit postal pincodes")
+    pincodes: Optional[list[str]] = Field(default=None, max_length=500, description="List of 6-digit postal pincodes (max 500)")
     is_active: Optional[bool] = Field(default=None, description="Active status")
 
     @field_validator("name", mode="before")
@@ -746,8 +746,8 @@ class DeliveryPartnerConnect(BaseModel):
     name: str = Field(..., description="Partner name between 2 and 100 characters")
     code: str = Field(..., description="Unique partner code (alphanumeric, underscores, hyphens)")
     description: str = Field(..., description="Meaningful description (required)")
-    contact_email: Optional[str] = Field(default=None, description="Optional contact email")
-    contact_phone: Optional[str] = Field(default=None, description="Optional contact phone")
+    contact_email: Optional[EmailStr] = Field(default=None, description="Optional contact email")
+    contact_phone: Optional[str] = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91)?[6-9]\d{9}$", description="Optional contact phone")
     api_key: Optional[str] = Field(default=None, description="Optional API key for carrier integration")
     api_secret: Optional[str] = Field(default=None, description="Optional API secret for carrier integration")
     tracking_url_template: Optional[str] = Field(default=None, description="Optional tracking URL template")
@@ -813,8 +813,8 @@ class DeliveryPartnerUpdate(BaseModel):
     name: Optional[str] = Field(default=None, description="Partner name between 2 and 100 characters")
     code: Optional[str] = Field(default=None, description="Unique partner code")
     description: Optional[str] = Field(default=None, description="Optional description up to 255 characters")
-    contact_email: Optional[str] = Field(default=None, description="Optional contact email")
-    contact_phone: Optional[str] = Field(default=None, description="Optional contact phone")
+    contact_email: Optional[EmailStr] = Field(default=None, description="Optional contact email")
+    contact_phone: Optional[str] = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91)?[6-9]\d{9}$", description="Optional contact phone")
     api_key: Optional[str] = Field(default=None, description="Optional API key")
     api_secret: Optional[str] = Field(default=None, description="Optional API secret")
     tracking_url_template: Optional[str] = Field(default=None, description="Optional tracking URL template")

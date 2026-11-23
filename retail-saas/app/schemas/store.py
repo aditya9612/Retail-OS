@@ -121,11 +121,11 @@ class StoreCreate(BaseModel):
     address: Optional[str] = Field(default=None, max_length=255)
     city: Optional[str] = Field(default=None, max_length=50)
     state: Optional[str] = Field(default=None, max_length=50)
-    pincode: Optional[str] = Field(default=None, max_length=10)
-    phone: Optional[str] = Field(default=None, max_length=20)
-    email: Optional[str] = None
+    pincode: Optional[str] = Field(default=None, min_length=6, max_length=6, pattern=r"^[1-9][0-9]{5}$")
+    phone: Optional[str] = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
+    email: Optional[EmailStr] = None
     is_main: bool = False
-    gstin: Optional[str] = Field(default=None, max_length=15)
+    gstin: Optional[str] = Field(default=None, min_length=15, max_length=15, pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$")
     is_warehouse: Optional[bool] = None
     reference_number: Optional[str] = Field(default=None, max_length=100)
 
@@ -292,11 +292,11 @@ class StoreUpdate(BaseModel):
     address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
-    pincode: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[str] = None
+    pincode: Optional[str] = Field(default=None, min_length=6, max_length=6, pattern=r"^[1-9][0-9]{5}$")
+    phone: Optional[str] = Field(default=None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
+    email: Optional[EmailStr] = None
     is_main: Optional[bool] = None
-    gstin: Optional[str] = None
+    gstin: Optional[str] = Field(default=None, min_length=15, max_length=15, pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$")
     is_active: Optional[bool] = None
     is_warehouse: Optional[bool] = None
     reference_number: Optional[str] = Field(default=None, max_length=100)

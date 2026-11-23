@@ -1,8 +1,8 @@
 import uuid
-from pathlib import Path
-from typing import Any, Optional
+from pathlib import Path as FilePath
+from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from pydantic import EmailStr, ValidationError
 from sqlalchemy.orm import Session
@@ -136,7 +136,7 @@ async def _save_user_file(
             detail=f"{prefix.replace('_', ' ').title()} file exceeds maximum allowed size of {max_mb}MB",
         )
 
-    ext = Path(filename).suffix.lower()
+    ext = FilePath(filename).suffix.lower()
     if not ext:
         content_type = getattr(file, "content_type", "")
         if "pdf" in content_type:
@@ -157,7 +157,7 @@ async def _save_user_file(
         )
 
     unique_filename = f"{prefix}_{uuid.uuid4().hex[:12]}{ext}"
-    user_upload_dir = Path("uploads") / "users"
+    user_upload_dir = FilePath("uploads") / "users"
     user_upload_dir.mkdir(parents=True, exist_ok=True)
     file_path = user_upload_dir / unique_filename
     with open(file_path, "wb") as f:
@@ -396,7 +396,7 @@ def get_users_by_store(
     response_model=UserResponse,
 )
 def get_user(
-    user_id: int,
+    user_id: Annotated[int, Path(gt=0, le=999999, description="Target User ID")],
     current_user: User = Depends(require_permission("users:read")),
     db: Session = Depends(get_db),
 ):
@@ -419,7 +419,7 @@ def get_user(
     include_in_schema=False,
 )
 def update_user(
-    user_id: int,
+    user_id: Annotated[int, Path(gt=0, le=999999, description="Target User ID")],
     data: UserUpdate,
     current_user: User = Depends(require_permission("users:update")),
     db: Session = Depends(get_db),
@@ -447,7 +447,7 @@ def update_user(
     response_model=UserResponse,
 )
 def activate_user(
-    user_id: int,
+    user_id: Annotated[int, Path(gt=0, le=999999, description="Target User ID")],
     current_user: User = Depends(require_permission("users:update")),
     db: Session = Depends(get_db),
 ):
@@ -468,7 +468,7 @@ def activate_user(
     response_model=UserResponse,
 )
 def deactivate_user(
-    user_id: int,
+    user_id: Annotated[int, Path(gt=0, le=999999, description="Target User ID")],
     current_user: User = Depends(require_permission("users:update")),
     db: Session = Depends(get_db),
 ):
@@ -491,7 +491,7 @@ def deactivate_user(
     description="Deletes the user successfully and returns no response body.",
 )
 def delete_user(
-    user_id: int,
+    user_id: Annotated[int, Path(gt=0, le=999999, description="Target User ID")],
     current_user: User = Depends(require_permission("users:delete")),
     db: Session = Depends(get_db),
 ):
@@ -520,7 +520,7 @@ def delete_user(
     include_in_schema=False,
 )
 def assign_store(
-    user_id: int,
+    user_id: Annotated[int, Path(gt=0, le=999999, description="Target User ID")],
     data: AssignStoreRequest,
     current_user: User = Depends(require_permission("users:create")),
     db: Session = Depends(get_db),
@@ -558,7 +558,7 @@ def assign_store(
     include_in_schema=False,
 )
 def remove_store(
-    user_id: int,
+    user_id: Annotated[int, Path(gt=0, le=999999, description="Target User ID")],
     data: Optional[RemoveStoreRequest] = None,
     current_user: User = Depends(require_permission("users:create")),
     db: Session = Depends(get_db),

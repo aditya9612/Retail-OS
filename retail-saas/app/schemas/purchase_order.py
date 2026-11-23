@@ -326,7 +326,7 @@ class PurchaseOrderCreate(BaseModel):
         description="Shipping / Freight charges applied to purchase order",
     )
 
-    items: list[PurchaseOrderItemCreate]
+    items: list[PurchaseOrderItemCreate] = Field(..., min_length=1, max_length=500, description="List of purchase order items (1 to 500)")
 
     @field_validator("invoice_number")
     @classmethod
@@ -408,6 +408,8 @@ class PurchaseOrderUpdate(BaseModel):
 
     tax_rate: Optional[Decimal] = Field(
         default=None,
+        ge=Decimal("0.00"),
+        le=Decimal("100.00"),
         description="Optional updated tax rate percentage for purchase order items",
     )
 

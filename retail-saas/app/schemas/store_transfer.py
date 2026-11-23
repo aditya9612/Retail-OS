@@ -281,7 +281,8 @@ class StoreTransferCreate(BaseModel):
     items: List[StoreTransferItemCreate] = Field(
         ...,
         min_length=1,
-        description="At least one transfer item is required",
+        max_length=200,
+        description="Between 1 and 200 transfer items are required",
     )
 
     @field_validator("source_store_id", mode="before")
@@ -339,7 +340,8 @@ class StoreTransferUpdate(BaseModel):
     items: List[StoreTransferItemUpdate] = Field(
         ...,
         min_length=1,
-        description="At least one transfer item is required",
+        max_length=200,
+        description="At least one transfer item is required (max 200 items)",
     )
 
     @field_validator("items", mode="before")
@@ -444,7 +446,8 @@ class StoreTransferDiscrepancyRequest(BaseModel):
     items: List[StoreTransferDiscrepancyItemInput] = Field(
         ...,
         min_length=1,
-        description="List of received items with their discrepancy breakdown",
+        max_length=200,
+        description="List of received items with their discrepancy breakdown (max 200 items)",
     )
     notes: Optional[str] = Field(
         default=None,
