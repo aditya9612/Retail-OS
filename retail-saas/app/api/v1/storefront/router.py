@@ -1,4 +1,5 @@
-from typing import List, Optional
+from datetime import date
+from typing import List, Literal, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
@@ -6,6 +7,16 @@ from app.core.database import get_db
 from app.core.pdf_utils import render_pdf_or_preview
 from app.core.security import get_current_customer
 from app.models.customer import Customer
+from app.schemas.customer import (
+    CustomerFeedbackResponse,
+    CustomerLedgerStatementResponse,
+    CustomerReferralListResponse,
+    LoyaltyResponse,
+    ReferralResponse,
+    SubResourceNoDataResponse,
+    WalletResponse,
+    WalletTransactionResponse,
+)
 from app.schemas.storefront import (
     StorefrontCartItemRequest,
     StorefrontCartItemUpdate,
@@ -14,9 +25,13 @@ from app.schemas.storefront import (
     StorefrontCheckoutRequest,
     StorefrontCheckoutResponse,
     StorefrontCustomerProfileResponse,
+    StorefrontCustomerProfileUpdate,
+    StorefrontFeedbackRequest,
+    StorefrontNotificationListResponse,
     StorefrontOrderDetailResponse,
     StorefrontOrderSummary,
     StorefrontProductListResponse,
+    StorefrontReferralRequest,
 )
 from app.services.billing_service import BillingService
 from app.services.storefront_service import StorefrontService
@@ -275,3 +290,206 @@ def get_profile(
     db: Session = Depends(get_db),
 ):
     return StorefrontService(db).get_customer_profile(customer.tenant_id, customer.id)
+
+
+@router.put(
+    "/profile",
+    response_model=StorefrontCustomerProfileResponse,
+    summary="Update Customer Profile",
+    description="Updates the customer's personal details, address, and birthday.",
+)
+def update_profile(
+    payload: StorefrontCustomerProfileUpdate,
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+):
+    return StorefrontService(db).update_customer_profile(
+        customer.tenant_id, customer.id, payload
+    )
+
+
+# ==============================================================================
+# 6. CUSTOMER WALLET & PASSBOOK
+# ==============================================================================
+
+@router.get(
+    "/wallet",
+    response_model=WalletResponse,
+    summary="Get Customer Wallet Balance",
+    description="Retrieves the logged-in customer's wallet balance and status.",
+)
+def get_my_wallet(
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+):
+    return StorefrontService(db).get_wallet(customer.tenant_id, customer.id)
+
+
+@router.get(
+    "/wallet/transactions",
+    response_model=Union[List[WalletTransactionResponse], SubResourceNoDataResponse],
+    summary="Get Wallet Transaction Passbook",
+    description="Retrieves history of wallet credits, debits, and order refunds.",
+)
+def get_my_wallet_transactions(
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
+    page_size: Optional[int] = Query(None, ge=1, le=100, description="Items per page"),
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+):
+    return StorefrontService(db).get_wallet_transactions(
+        customer.tenant_id, customer.id, page=page, page_size=page_size
+    )
+
+
+# ==============================================================================
+# 7. CUSTOMER LOYALTY POINTS HISTORY
+# ==============================================================================
+
+@router.get(
+    "/loyalty/history",
+    response_model=Union[List[LoyaltyResponse], SubResourceNoDataResponse],
+    summary="Get Customer Loyalty Points Passbook",
+    description="Retrieves history of earned and redeemed loyalty rewards.",
+)
+def get_my_loyalty_history(
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
+    page_size: Optional[int] = Query(None, ge=1, le=100, description="Items per page"),
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+):
+    return StorefrontService(db).get_loyalty_history(
+        customer.tenant_id, customer.id, page=page, page_size=page_size
+    )
+
+
+# ==============================================================================
+# 8. CUSTOMER KHATA / UDHAR LEDGER STATEMENT
+# ==============================================================================
+
+@router.get(
+    "/ledger",
+    response_model=CustomerLedgerStatementResponse,
+    summary="Get Customer Khata / Ledger Statement",
+    description="Retrieves the customer's personal credit purchase, payment history, and current outstanding debt balance.",
+)
+def get_my_ledger(
+    from_date: Optional[date] = Query(None, description="Statement start date"),
+    to_date: Optional[date] = Query(None, description="Statement end date"),
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+):
+    return StorefrontService(db).get_customer_ledger(
+        customer.tenant_id, customer.id, from_date=from_date, to_date=to_date
+    )
+
+
+@router.get(
+    "/ledger/pdf",
+    summary="Download Customer Khata Statement PDF",
+    description="Generates and downloads the customer's official store credit ledger statement as PDF.",
+    responses={
+        200: {
+            "content": {
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}},
+                "image/png": {"schema": {"type": "string", "format": "binary"}},
+            },
+            "description": "Rendered Ledger PDF download or visual PNG preview.",
+        }
+    },
+)
+def download_my_ledger_pdf(
+    from_date: Optional[date] = Query(None, description="Statement start date"),
+    to_date: Optional[date] = Query(None, description="Statement end date"),
+    mode: Literal["download", "preview"] = Query(default="download", description="Delivery mode"),
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+):
+    pdf_stream = StorefrontService(db).export_ledger_pdf(
+        customer.tenant_id, customer.id, from_date=from_date, to_date=to_date
+    )
+    return render_pdf_or_preview(
+        pdf_content=pdf_stream,
+        filename_base=f"khata_statement_{customer.phone}",
+        mode=mode,
+    )
+
+
+# ==============================================================================
+# 9. CUSTOMER FEEDBACK & REVIEWS
+# ==============================================================================
+
+@router.post(
+    "/feedback",
+    response_model=CustomerFeedbackResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Submit Customer Feedback & Rating",
+    description="Allows the customer to submit a 1 to 5 star rating and comment for store service or delivery.",
+)
+def submit_customer_feedback(
+    payload: StorefrontFeedbackRequest,
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+):
+    return StorefrontService(db).create_feedback(
+        customer.tenant_id, customer.id, payload
+    )
+
+
+# ==============================================================================
+# 10. CUSTOMER REFERRALS (REFER & EARN)
+# ==============================================================================
+
+@router.post(
+    "/referrals",
+    response_model=ReferralResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Invite a Friend (Refer & Earn)",
+    description="Generates an official referral invite code to share with friends and family.",
+)
+def create_customer_referral(
+    payload: StorefrontReferralRequest,
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+):
+    return StorefrontService(db).create_referral(
+        customer.tenant_id, customer.id, payload
+    )
+
+
+@router.get(
+    "/referrals",
+    response_model=CustomerReferralListResponse,
+    summary="Get My Referrals",
+    description="Lists all friends referred by the customer and referral reward statuses.",
+)
+def get_my_referrals(
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
+    page_size: Optional[int] = Query(None, ge=1, le=100, description="Items per page"),
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+):
+    return StorefrontService(db).get_my_referrals(
+        customer.tenant_id, customer.id, page=page, page_size=page_size
+    )
+
+
+# ==============================================================================
+# 11. CUSTOMER NOTIFICATIONS INBOX
+# ==============================================================================
+
+@router.get(
+    "/notifications",
+    response_model=StorefrontNotificationListResponse,
+    summary="Get Customer Notifications Inbox",
+    description="Retrieves order updates, delivery alerts, and promotional messages sent to this customer.",
+)
+def get_my_notifications(
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
+    page_size: Optional[int] = Query(None, ge=1, le=100, description="Items per page"),
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+):
+    return StorefrontService(db).get_my_notifications(
+        customer.tenant_id, customer.id, page=page, page_size=page_size
+    )

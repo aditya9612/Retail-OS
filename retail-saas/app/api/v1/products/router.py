@@ -1468,6 +1468,7 @@ ADD_IMAGE_OPENAPI_EXTRA = {
                 "schema": {
                     "type": "object",
                     "title": "AddProductImageFormData",
+                    "required": ["images"],
                     "properties": {
                         "images": {
                             "type": "array",
@@ -1475,13 +1476,8 @@ ADD_IMAGE_OPENAPI_EXTRA = {
                                 "type": "string",
                                 "format": "binary",
                             },
-                            "title": "Product Photos (Multiple Files)",
-                            "description": "Upload multiple product photo files (.jpg, .jpeg, .png, .webp - Max 10MB each)",
-                        },
-                        "image": {
-                            "type": "string",
-                            "format": "binary",
-                            "title": "Single Photo File (Backward Compatible)",
+                            "title": "Product Photo(s)",
+                            "description": "Upload single or multiple product photo files (.jpg, .jpeg, .png, .webp - Max 10MB each)",
                         },
                         "is_primary": {
                             "type": "boolean",
@@ -1496,17 +1492,13 @@ ADD_IMAGE_OPENAPI_EXTRA = {
                 "schema": {
                     "type": "object",
                     "title": "AddProductImageJSON",
+                    "required": ["image_urls"],
                     "properties": {
-                        "image_url": {
-                            "type": "string",
-                            "title": "Photo URL / Path",
-                            "description": "Public URL or relative path of the photo (e.g. /uploads/products/photo.png)",
-                        },
                         "image_urls": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "title": "Multiple Photo URLs",
-                            "description": "List of photo URLs to add",
+                            "title": "Photo URL(s)",
+                            "description": "One or multiple photo URLs to add (e.g. ['/uploads/products/photo1.png'])",
                         },
                         "is_primary": {
                             "type": "boolean",

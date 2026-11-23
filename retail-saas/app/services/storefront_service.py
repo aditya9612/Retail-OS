@@ -23,10 +23,15 @@ from app.schemas.storefront import (
     StorefrontCheckoutRequest,
     StorefrontCheckoutResponse,
     StorefrontCustomerProfileResponse,
+    StorefrontCustomerProfileUpdate,
+    StorefrontFeedbackRequest,
+    StorefrontNotificationItem,
+    StorefrontNotificationListResponse,
     StorefrontOrderDetailResponse,
     StorefrontOrderSummary,
     StorefrontProductItem,
     StorefrontProductListResponse,
+    StorefrontReferralRequest,
 )
 
 
@@ -568,9 +573,182 @@ class StorefrontService:
             phone=customer.phone,
             email=customer.email,
             address=customer.address,
+            birthday=customer.birthday,
             loyalty_points=customer.loyalty_points or 0,
             wallet_balance=wallet_balance,
             outstanding_balance=customer.outstanding_balance or Decimal("0.00"),
             credit_limit=customer.credit_limit or Decimal("0.00"),
             status=customer.status,
         )
+
+    def update_customer_profile(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        data: StorefrontCustomerProfileUpdate,
+    ) -> StorefrontCustomerProfileResponse:
+        customer = (
+            self.db.query(Customer)
+            .filter(Customer.id == customer_id, Customer.tenant_id == tenant_id)
+            .first()
+        )
+        if not customer:
+            raise NotFoundException(f"Customer #{customer_id} not found")
+
+        if data.name is not None and data.name.strip():
+            customer.name = data.name.strip()
+        if data.email is not None:
+            customer.email = data.email.strip() if data.email.strip() else None
+        if data.address is not None:
+            customer.address = data.address.strip() if data.address.strip() else None
+        if data.birthday is not None:
+            customer.birthday = data.birthday
+
+        self.db.commit()
+        self.db.refresh(customer)
+        return self.get_customer_profile(tenant_id, customer_id)
+
+    def get_wallet(self, tenant_id: int, customer_id: int):
+        from app.services.customer_service import CustomerService
+        return CustomerService(self.db).get_wallet(tenant_id, customer_id)
+
+    def get_wallet_transactions(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ):
+        from app.services.customer_service import CustomerService
+        return CustomerService(self.db).get_wallet_transactions(
+            tenant_id, customer_id, page=page, page_size=page_size
+        )
+
+    def get_loyalty_history(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ):
+        from app.services.customer_service import CustomerService
+        return CustomerService(self.db).get_loyalty_history(
+            tenant_id, customer_id, page=page, page_size=page_size
+        )
+
+    def get_customer_ledger(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        from_date=None,
+        to_date=None,
+    ):
+        from app.services.customer_service import CustomerService
+        return CustomerService(self.db).get_customer_ledger(
+            tenant_id, customer_id, from_date=from_date, to_date=to_date
+        )
+
+    def export_ledger_pdf(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        from_date=None,
+        to_date=None,
+    ):
+        from app.services.customer_service import CustomerService
+        return CustomerService(self.db).export_ledger_pdf(
+            tenant_id, customer_id, from_date=from_date, to_date=to_date
+        )
+
+    def create_feedback(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        data: StorefrontFeedbackRequest,
+    ):
+        from app.schemas.customer import CustomerFeedbackCreate
+        from app.services.customer_service import CustomerService
+
+        feedback_create = CustomerFeedbackCreate(
+            customer_id=customer_id,
+            invoice_id=data.invoice_id,
+            rating=data.rating,
+            comments=data.feedback,
+            feedback=data.feedback,
+        )
+        return CustomerService(self.db).create_feedback(tenant_id, feedback_create)
+
+    def create_referral(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        data: StorefrontReferralRequest,
+    ):
+        from app.schemas.customer import ReferralCreate
+        from app.services.customer_service import CustomerService
+
+        ref_code = f"REF-{customer_id}-{uuid.uuid4().hex[:6].upper()}"
+        ref_create = ReferralCreate(
+            customer_id=customer_id,
+            referral_code=ref_code,
+        )
+        return CustomerService(self.db).create_referral(tenant_id, ref_create)
+
+    def get_my_referrals(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ):
+        from app.models.customer import CustomerReferral
+        query = (
+            self.db.query(CustomerReferral)
+            .filter(CustomerReferral.customer_id == customer_id)
+            .order_by(CustomerReferral.created_at.desc())
+        )
+        if page is not None and page_size is not None:
+            query = query.offset((page - 1) * page_size).limit(page_size)
+        elif page_size is not None:
+            query = query.limit(page_size)
+        referrals = query.all()
+        return {
+            "success": True,
+            "message": "Referrals retrieved successfully" if referrals else "No referrals found",
+            "data": referrals,
+            "page": page or 1,
+            "page_size": page_size or len(referrals),
+            "total": len(referrals),
+        }
+
+    def get_my_notifications(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ):
+        from app.models.customer import CustomerCommunication
+        query = (
+            self.db.query(CustomerCommunication)
+            .filter(CustomerCommunication.customer_id == customer_id)
+            .order_by(CustomerCommunication.sent_at.desc())
+        )
+        total = query.count()
+        if page is not None and page_size is not None:
+            query = query.offset((page - 1) * page_size).limit(page_size)
+        elif page_size is not None:
+            query = query.limit(page_size)
+
+        comms = query.all()
+        items = [
+            StorefrontNotificationItem(
+                id=c.id,
+                type=str(c.communication_type),
+                message=c.message,
+                status=str(c.delivery_status),
+                created_at=c.sent_at or datetime.utcnow(),
+            )
+            for c in comms
+        ]
+        return StorefrontNotificationListResponse(items=items, total=total)

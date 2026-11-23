@@ -299,7 +299,7 @@ class StorefrontUploadResponse(BaseModel):
 # CUSTOMER STOREFRONT & SHOPPING SCHEMAS
 # ============================================================
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Literal
 from pydantic import ConfigDict
@@ -440,6 +440,7 @@ class StorefrontCustomerProfileResponse(BaseModel):
     phone: str
     email: Optional[str] = None
     address: Optional[str] = None
+    birthday: Optional[date] = None
     loyalty_points: int = 0
     wallet_balance: Decimal = Decimal("0.00")
     outstanding_balance: Decimal = Decimal("0.00")
@@ -447,3 +448,36 @@ class StorefrontCustomerProfileResponse(BaseModel):
     status: str = "active"
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class StorefrontCustomerProfileUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=2, max_length=255, description="Full Name")
+    email: Optional[str] = Field(None, max_length=255, description="Email Address")
+    address: Optional[str] = Field(None, max_length=500, description="Delivery Address")
+    birthday: Optional[date] = Field(None, description="Date of birth")
+
+
+class StorefrontFeedbackRequest(BaseModel):
+    rating: int = Field(..., ge=1, le=5, description="Rating from 1 to 5 stars")
+    feedback: Optional[str] = Field(None, max_length=1000, description="Feedback comment")
+    invoice_id: Optional[int] = Field(None, description="Optional invoice ID associated with this feedback")
+
+
+class StorefrontReferralRequest(BaseModel):
+    referred_name: str = Field(..., min_length=2, max_length=100, description="Friend's full name")
+    referred_phone: str = Field(..., description="Friend's 10-digit mobile number")
+
+
+class StorefrontNotificationItem(BaseModel):
+    id: int
+    type: str = "ORDER"
+    message: str
+    status: str = "SENT"
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StorefrontNotificationListResponse(BaseModel):
+    items: List[StorefrontNotificationItem] = []
+    total: int = 0

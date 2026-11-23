@@ -172,6 +172,7 @@ def create_customer(
     "/feedback",
     response_model=CustomerFeedbackResponse,
     status_code=201,
+    include_in_schema=False,
 )
 def create_feedback(
     data: CustomerFeedbackCreate,
@@ -184,6 +185,7 @@ def create_feedback(
 @router.get(
     "/feedback",
     response_model=Union[list[CustomerFeedbackResponse], SubResourceNoDataResponse],
+    include_in_schema=False,
 )
 def get_feedback(
     customer_id: Optional[int] = Query(None, gt=0, deprecated=True, description="Deprecated: Use GET /customers/feedback/{customer_id} instead"),
@@ -328,6 +330,7 @@ def birthday_customers(
 @router.post(
     "/referrals",
     response_model=ReferralResponse,
+    include_in_schema=False,
 )
 def create_referral(
     data: ReferralCreate,
@@ -403,6 +406,7 @@ def create_note(
 @router.get(
     "/notes",
     response_model=Union[list[CustomerNoteResponse], SubResourceNoDataResponse],
+    include_in_schema=False,
 )
 def get_notes(
     customer_id: Optional[int] = Query(None, gt=0, deprecated=True, description="Deprecated: Use GET /customers/notes/{customer_id} instead"),
@@ -738,6 +742,7 @@ def send_customer_ledger_pdf(
 @router.post(
     "/notifications/sms",
     response_model=CommunicationResponse,
+    include_in_schema=False,
 )
 def send_sms(
     data: CommunicationCreate,
@@ -759,6 +764,7 @@ def send_sms(
 @router.get(
     "/notifications/sms",
     response_model=CustomerCommunicationListResponse,
+    include_in_schema=False,
 )
 def get_sms_notifications(
     page: Optional[int] = Query(None, ge=1),
@@ -782,6 +788,7 @@ def get_sms_notifications(
 @router.post(
     "/notifications/whatsapp",
     response_model=CommunicationResponse,
+    include_in_schema=False,
 )
 def send_whatsapp(
     data: CommunicationCreate,
@@ -803,6 +810,7 @@ def send_whatsapp(
 @router.get(
     "/notifications/whatsapp",
     response_model=CustomerCommunicationListResponse,
+    include_in_schema=False,
 )
 def get_whatsapp_notifications(
     page: Optional[int] = Query(None, ge=1),
