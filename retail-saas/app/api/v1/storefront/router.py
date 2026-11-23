@@ -28,8 +28,11 @@ from app.schemas.storefront import (
     StorefrontCustomerProfileUpdate,
     StorefrontFeedbackRequest,
     StorefrontNotificationListResponse,
+    StorefrontOrderCancelRequest,
+    StorefrontOrderCancelResponse,
     StorefrontOrderDetailResponse,
     StorefrontOrderSummary,
+    StorefrontProductDetailResponse,
     StorefrontProductListResponse,
     StorefrontReferralRequest,
 )
@@ -76,6 +79,23 @@ def list_products(
         search=search,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get(
+    "/products/{product_id}",
+    response_model=StorefrontProductDetailResponse,
+    summary="Get Store Product Details",
+    description="Fetches full details, gallery images, barcode, category, and live stock for a product.",
+)
+def get_product_details(
+    product_id: int,
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+):
+    return StorefrontService(db).get_product_detail(
+        tenant_id=customer.tenant_id,
+        product_id=product_id,
     )
 
 
@@ -225,6 +245,29 @@ def get_order_details(
         tenant_id=customer.tenant_id,
         customer_id=customer.id,
         order_id=order_id,
+    )
+
+
+@router.post(
+    "/my-orders/{order_id}/cancel",
+    response_model=StorefrontOrderCancelResponse,
+    summary="Cancel Customer Online Order",
+    description=(
+        "Allows customer to cancel a pending order. "
+        "Automatically refunds wallet payments and restores inventory stock."
+    ),
+)
+def cancel_my_order(
+    order_id: int,
+    payload: Optional[StorefrontOrderCancelRequest] = None,
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+):
+    return StorefrontService(db).cancel_order(
+        tenant_id=customer.tenant_id,
+        customer_id=customer.id,
+        order_id=order_id,
+        payload=payload,
     )
 
 

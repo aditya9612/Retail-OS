@@ -27,8 +27,12 @@ from app.schemas.storefront import (
     StorefrontFeedbackRequest,
     StorefrontNotificationItem,
     StorefrontNotificationListResponse,
+    StorefrontOrderCancelRequest,
+    StorefrontOrderCancelResponse,
     StorefrontOrderDetailResponse,
     StorefrontOrderSummary,
+    StorefrontOrderTrackingItem,
+    StorefrontProductDetailResponse,
     StorefrontProductItem,
     StorefrontProductListResponse,
     StorefrontReferralRequest,
@@ -154,7 +158,7 @@ class StorefrontService:
                     category_name=p.category.name if p.category else None,
                     in_stock=(curr_stock > 0),
                     stock_quantity=max(0, curr_stock),
-                    image_url=None,
+                    image_url=p.image_url,
                 )
             )
 
@@ -163,6 +167,64 @@ class StorefrontService:
             total=total,
             page=page,
             page_size=page_size,
+        )
+
+    def get_product_detail(
+        self,
+        tenant_id: int,
+        product_id: int,
+        store_id: Optional[int] = None,
+    ) -> StorefrontProductDetailResponse:
+        product = (
+            self.db.query(Product)
+            .filter(
+                Product.id == product_id,
+                Product.tenant_id == tenant_id,
+                Product.is_active.is_(True),
+            )
+            .first()
+        )
+        if not product:
+            raise NotFoundException(f"Product #{product_id} not found or inactive")
+
+        curr_stock = 999
+        if store_id:
+            inv = (
+                self.db.query(Inventory)
+                .filter(
+                    Inventory.tenant_id == tenant_id,
+                    Inventory.store_id == store_id,
+                    Inventory.product_id == product.id,
+                )
+                .first()
+            )
+            if inv is not None:
+                curr_stock = inv.quantity
+
+        selling_price = getattr(product, "selling_price", getattr(product, "price", Decimal("0.00")))
+        mrp_val = getattr(product, "mrp", selling_price) or selling_price
+
+        image_urls = []
+        if hasattr(product, "images") and product.images:
+            image_urls = [img.image_url for img in product.images if getattr(img, "image_url", None)]
+        if not image_urls and product.image_url:
+            image_urls = [product.image_url]
+
+        return StorefrontProductDetailResponse(
+            id=product.id,
+            name=product.name,
+            sku=product.sku,
+            barcode=getattr(product, "barcode", None),
+            description=getattr(product, "description", None),
+            price=Decimal(str(selling_price)),
+            mrp=Decimal(str(mrp_val)),
+            unit=getattr(product, "unit", "pcs"),
+            category_id=product.category_id,
+            category_name=product.category.name if product.category else None,
+            in_stock=(curr_stock > 0),
+            stock_quantity=max(0, curr_stock),
+            image_url=product.image_url,
+            images=image_urls,
         )
 
     # --------------------------------------------------------------------------
@@ -204,6 +266,7 @@ class StorefrontService:
                         quantity=qty,
                         total_price=item_total,
                         unit=getattr(product, "unit", "pcs"),
+                        image_url=product.image_url,
                     )
                 )
                 subtotal += item_total
@@ -340,13 +403,18 @@ class StorefrontService:
         final_address = payload.delivery_address or customer.address or "Store Pickup Counter"
 
         # Check wallet balance if payment_method is wallet
+        wallet_obj = None
         if payload.payment_method == "wallet":
             from app.models.customer import CustomerWallet
-            wallet = self.db.query(CustomerWallet).filter(CustomerWallet.customer_id == customer.id).first()
-            wallet_bal = wallet.balance if wallet else Decimal("0.00")
+            wallet_obj = self.db.query(CustomerWallet).filter(CustomerWallet.customer_id == customer.id).first()
+            wallet_bal = Decimal(str(getattr(wallet_obj, "current_balance", getattr(wallet_obj, "balance", 0)) or 0))
             if wallet_bal < cart.total_amount:
                 raise AppException(f"Insufficient wallet balance (Available: Rs.{wallet_bal}, Required: Rs.{cart.total_amount})")
-            wallet.balance -= cart.total_amount
+            new_bal = wallet_bal - cart.total_amount
+            if hasattr(wallet_obj, "current_balance"):
+                wallet_obj.current_balance = new_bal
+            if hasattr(wallet_obj, "balance"):
+                wallet_obj.balance = new_bal
 
         # Generate unique order number
         order_uid = uuid.uuid4().hex[:6].upper()
@@ -374,10 +442,26 @@ class StorefrontService:
             total_amount=cart.total_amount,
             payment_method=payload.payment_method.upper(),
             payment_status="paid" if payload.payment_method == "wallet" else "pending",
+            delivery_address=final_address,
             notes=f"Mode: {payload.delivery_type.capitalize()} | Address: {final_address} | {payload.notes or ''}".strip(),
         )
         self.db.add(order)
         self.db.flush()
+
+        # Log debit transaction if wallet was used
+        if payload.payment_method == "wallet" and wallet_obj:
+            try:
+                from app.models.customer import WalletTransaction
+                wallet_tx = WalletTransaction(
+                    wallet_id=wallet_obj.id,
+                    transaction_type="DEBIT",
+                    amount=cart.total_amount,
+                    reference_no=order_number,
+                    remarks=f"Payment for online order #{order_number}",
+                )
+                self.db.add(wallet_tx)
+            except Exception as e:
+                logger.warning(f"Wallet transaction logging failed: {e}")
 
         # Create OrderItems
         for item in cart.items:
@@ -527,12 +611,35 @@ class StorefrontService:
                     "quantity": it.quantity,
                     "unit_price": float(it.unit_price),
                     "total_amount": float(it.total_amount),
+                    "image_url": it.product.image_url if (it.product and hasattr(it.product, "image_url")) else None,
                 }
             )
 
         invoice_url = None
         if order.invoice:
             invoice_url = f"/api/v1/invoices/{order.invoice.id}/pdf"
+
+        # Tracking timeline milestones
+        tracking_items = []
+        if hasattr(order, "tracking") and order.tracking:
+            for t in order.tracking:
+                tracking_items.append(
+                    StorefrontOrderTrackingItem(
+                        id=t.id,
+                        status=t.status,
+                        remarks=getattr(t, "notes", None) or getattr(t, "remarks", None),
+                        created_at=t.created_at or order.created_at or datetime.utcnow(),
+                    )
+                )
+        if not tracking_items:
+            tracking_items.append(
+                StorefrontOrderTrackingItem(
+                    id=None,
+                    status=order.status,
+                    remarks=f"Order placed via Storefront ({order.payment_method or 'COD'})",
+                    created_at=order.created_at or datetime.utcnow(),
+                )
+            )
 
         return StorefrontOrderDetailResponse(
             id=order.id,
@@ -545,9 +652,131 @@ class StorefrontService:
             payment_method=order.payment_method,
             payment_status=order.payment_status,
             notes=order.notes,
+            delivery_address=order.delivery_address or (order.notes if (order.notes and "Address:" in order.notes) else None),
             created_at=order.created_at or datetime.utcnow(),
             items=items_list,
+            tracking=tracking_items,
             invoice_url=invoice_url,
+        )
+
+    def cancel_order(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        order_id: int,
+        payload: Optional[StorefrontOrderCancelRequest] = None,
+    ) -> StorefrontOrderCancelResponse:
+        order = (
+            self.db.query(Order)
+            .filter(
+                Order.id == order_id,
+                Order.tenant_id == tenant_id,
+                Order.customer_id == customer_id,
+            )
+            .first()
+        )
+        if not order:
+            raise NotFoundException(f"Order #{order_id} not found")
+
+        if order.status.lower() in ["cancelled", "canceled"]:
+            raise AppException("This order has already been cancelled.")
+
+        non_cancellable = ["confirmed", "processing", "packed", "dispatched", "out_for_delivery", "delivered", "completed"]
+        if order.status.lower() in non_cancellable:
+            raise AppException(
+                f"Cannot cancel order #{order.order_number} in '{order.status}' status. "
+                "The store has already started processing or dispatching your order. Please contact store support."
+            )
+
+        # 1. Restore inventory stock
+        for it in order.items:
+            try:
+                inv = (
+                    self.db.query(Inventory)
+                    .filter(
+                        Inventory.tenant_id == tenant_id,
+                        Inventory.store_id == order.store_id,
+                        Inventory.product_id == it.product_id,
+                    )
+                    .first()
+                )
+                if inv:
+                    inv.quantity += it.quantity
+            except Exception as e:
+                logger.warning(f"Stock restore skipped for item #{it.product_id}: {e}")
+
+        # 2. Refund wallet if paid with wallet
+        refunded_to_wallet = False
+        refund_amount = None
+        if str(order.payment_method).upper() == "WALLET" and order.payment_status.lower() == "paid":
+            from app.models.customer import CustomerWallet, WalletTransaction
+            wallet = self.db.query(CustomerWallet).filter(CustomerWallet.customer_id == customer_id).first()
+            if not wallet:
+                wallet = CustomerWallet(customer_id=customer_id, current_balance=Decimal("0.00"))
+                self.db.add(wallet)
+                self.db.flush()
+
+            cur_bal = Decimal(str(getattr(wallet, "current_balance", getattr(wallet, "balance", 0)) or 0))
+            new_bal = cur_bal + order.total_amount
+            if hasattr(wallet, "current_balance"):
+                wallet.current_balance = new_bal
+            if hasattr(wallet, "balance"):
+                wallet.balance = new_bal
+
+            try:
+                tx = WalletTransaction(
+                    wallet_id=wallet.id,
+                    transaction_type="CREDIT",
+                    amount=order.total_amount,
+                    reference_no=f"REFUND-{order.order_number}",
+                    remarks=f"Refund for cancelled order #{order.order_number}",
+                )
+                self.db.add(tx)
+            except Exception as e:
+                logger.warning(f"Wallet refund transaction record failed: {e}")
+
+            refunded_to_wallet = True
+            refund_amount = order.total_amount
+            order.payment_status = "refunded"
+        else:
+            order.payment_status = "cancelled"
+
+        # 3. Mark status as cancelled
+        order.status = "cancelled"
+
+        # 4. Add tracking entry
+        reason_text = payload.reason.strip() if payload and payload.reason else "Customer cancelled via Storefront"
+        try:
+            from app.models.order import OrderTracking
+            tracking = OrderTracking(
+                order_id=order.id,
+                status="cancelled",
+                remarks=f"Cancelled by customer: {reason_text}",
+                notes=f"Cancelled by customer: {reason_text}",
+            )
+            self.db.add(tracking)
+        except Exception as e:
+            logger.warning(f"Tracking cancellation entry failed: {e}")
+
+        # 5. Cancel delivery record if present
+        if hasattr(order, "delivery") and order.delivery:
+            order.delivery.status = "cancelled"
+
+        self.db.commit()
+        self.db.refresh(order)
+
+        msg = f"Order #{order.order_number} has been cancelled successfully."
+        if refunded_to_wallet and refund_amount:
+            msg += f" Rs.{refund_amount} has been refunded to your wallet."
+
+        return StorefrontOrderCancelResponse(
+            order_id=order.id,
+            order_number=order.order_number,
+            status="cancelled",
+            message=msg,
+            refunded_to_wallet=refunded_to_wallet,
+            refund_amount=refund_amount,
+            cancelled_at=datetime.utcnow(),
         )
 
     def get_customer_profile(

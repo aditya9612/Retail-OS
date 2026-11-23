@@ -329,6 +329,25 @@ class StorefrontProductItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class StorefrontProductDetailResponse(BaseModel):
+    id: int
+    name: str
+    sku: str
+    barcode: Optional[str] = None
+    description: Optional[str] = None
+    price: Decimal
+    mrp: Decimal
+    unit: str = "pcs"
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
+    in_stock: bool = True
+    stock_quantity: int = 0
+    image_url: Optional[str] = None
+    images: List[str] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class StorefrontProductListResponse(BaseModel):
     items: List[StorefrontProductItem]
     total: int
@@ -415,6 +434,15 @@ class StorefrontOrderSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class StorefrontOrderTrackingItem(BaseModel):
+    id: Optional[int] = None
+    status: str
+    remarks: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class StorefrontOrderDetailResponse(BaseModel):
     id: int
     order_number: str
@@ -429,9 +457,28 @@ class StorefrontOrderDetailResponse(BaseModel):
     delivery_address: Optional[str] = None
     created_at: datetime
     items: List[dict] = []
+    tracking: List[StorefrontOrderTrackingItem] = []
     invoice_url: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class StorefrontOrderCancelRequest(BaseModel):
+    reason: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Reason for cancellation (e.g. placed by mistake, wrong address, changed mind)",
+    )
+
+
+class StorefrontOrderCancelResponse(BaseModel):
+    order_id: int
+    order_number: str
+    status: str = "cancelled"
+    message: str = "Order cancelled successfully"
+    refunded_to_wallet: bool = False
+    refund_amount: Optional[Decimal] = None
+    cancelled_at: datetime
 
 
 class StorefrontCustomerProfileResponse(BaseModel):
