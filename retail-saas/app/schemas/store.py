@@ -7,7 +7,13 @@ from email_validator import (
     validate_email as email_validator,
     EmailNotValidError,
 )
-from pydantic import BaseModel, Field, ConfigDict, field_validator, EmailStr
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator, EmailStr
+from app.utils.location_verifier import (
+    validate_store_name,
+    validate_complete_store_address,
+    validate_store_city,
+    verify_address_city_match,
+)
 from app.utils.validators import validate_email_address, validate_gstin_number
 
 INDIAN_STATES_AND_UTS = {
@@ -131,50 +137,7 @@ class StoreCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, value):
-        if value is None:
-            return None
-        value = value.strip()
-        if not value:
-            raise ValueError("Store name is required")
-
-        if value.lower() in {
-            "string",
-            "test",
-            "name",
-            "store",
-            "example",
-            "null",
-            "none",
-            "n/a",
-            "na",
-        }:
-            raise ValueError("Please enter a valid store name")
-
-        if len(value) < 2:
-            raise ValueError("Store name must contain at least 2 characters")
-
-        if len(value) > 100:
-            raise ValueError("Store name must not exceed 100 characters")
-
-        if value.upper() == "AB" or (len(value) == 2 and value.isupper()):
-            raise ValueError("Store name cannot be an abbreviation")
-
-        # Must contain at least one alphabetic character
-        if not re.search(r"[A-Za-z]", value):
-            raise ValueError(
-                "Store name must contain at least one letter"
-            )
-
-        # Allow only letters and normal spaces between words
-        if not re.fullmatch(
-            r"^[A-Za-z]+(?:\s+[A-Za-z]+)*$",
-            value
-        ):
-            raise ValueError(
-                "Store name contains invalid characters"
-            )
-
-        return value
+        return validate_store_name(value)
     @field_validator("code")
     @classmethod
     def validate_code(cls, value):
@@ -203,76 +166,11 @@ class StoreCreate(BaseModel):
     @field_validator("address")
     @classmethod
     def validate_address(cls, value):
-        if value is None:
-            return None
-
-        value = value.strip()
-
-        if not value:
-            raise ValueError("Address is required")
-
-        if len(value) < 5:
-            raise ValueError("Address must contain at least 5 characters")
-
-        if len(value) > 250:
-            raise ValueError("Address must not exceed 250 characters")
-
-        # Address must contain at least one letter
-        if not re.search(r"[A-Za-z]", value):
-            raise ValueError("Address must contain at least one letter")
-
-        # Reject addresses without any letters or numbers
-        if not re.search(r"[A-Za-z0-9]", value):
-            raise ValueError("Invalid address")
-
-        # Allow normal address characters
-        if not re.fullmatch(r"[A-Za-z0-9\s,./#&'():\-]+", value):
-            raise ValueError("Address contains invalid characters")
-
-        return value
+        return validate_complete_store_address(value)
     @field_validator("city")
     @classmethod
     def validate_city(cls, value):
-        if value is None:
-            return None
-
-        value = value.strip()
-
-        if not value:
-            raise ValueError("City is required")
-
-        if value.casefold() in {
-            "string", "test", "city", "example", "null",
-            "none", "n/a", "na",
-        }:
-            raise ValueError("Please enter a valid city name")
-
-        if len(value) < 2:
-            raise ValueError("City must contain at least 2 characters")
-
-        if len(value) > 100:
-            raise ValueError("City must not exceed 100 characters")
-
-        if not re.search(r"[A-Za-z]", value):
-            raise ValueError("City must contain at least one letter")
-
-        if not re.fullmatch(r"[A-Za-z]+(?:[ .'-][A-Za-z]+)*", value):
-            raise ValueError(
-                "City must contain only letters, spaces, hyphens and apostrophes"
-        )
-
-        if value.casefold() in {
-            state.casefold() for state in INDIAN_STATES_AND_UTS
-        }:
-            raise ValueError(
-                "City cannot be a state or union territory name"
-            )
-
-        if value.casefold() in {
-            name.casefold() for name in NON_CITY_LOCATION_NAMES
-        }:
-            raise ValueError("Please enter a valid city name")
-        return value
+        return validate_store_city(value)
     @field_validator("state")
     @classmethod
     def validate_state(cls, value):
@@ -380,6 +278,13 @@ class StoreCreate(BaseModel):
         if not v or not v.strip():
             return None
         return validate_gstin_number(v, field_name="GSTIN", required=False)
+
+
+    @model_validator(mode="after")
+    def validate_store_create_location_consistency(self) -> "StoreCreate":
+        if self.address and self.city:
+            verify_address_city_match(self.address, self.city, pincode=self.pincode)
+        return self
 
 
 class StoreUpdate(BaseModel):
@@ -406,123 +311,21 @@ class StoreUpdate(BaseModel):
     def validate_name(cls, value):
         if value is None:
             return None
-        value = value.strip()
-        if not value:
-            raise ValueError("Store name is required")
-
-        if value.lower() in {
-            "string",
-            "test",
-            "name",
-            "store",
-            "example",
-            "null",
-            "none",
-            "n/a",
-            "na",
-        }:
-            raise ValueError("Please enter a valid store name")
-
-        if len(value) < 2:
-            raise ValueError("Store name must contain at least 2 characters")
-
-        if len(value) > 100:
-            raise ValueError("Store name must not exceed 100 characters")
-
-        if value.upper() == "AB" or (len(value) == 2 and value.isupper()):
-            raise ValueError("Store name cannot be an abbreviation")
-
-        if not re.search(r"[A-Za-z]", value):
-            raise ValueError("Store name must contain at least one letter")
-
-        # Allow only letters and normal spaces between words
-        if not re.fullmatch(
-            r"^[A-Za-z]+(?:\s+[A-Za-z]+)*$",
-            value
-        ):
-            raise ValueError(
-                "Store name contains invalid characters"
-            )
-
-        return value
+        return validate_store_name(value)
 
     @field_validator("address")
     @classmethod
     def validate_address(cls, value):
         if value is None:
             return None
-        value = value.strip()
-
-        if not value:
-            raise ValueError("Address is required")
-
-        if len(value) < 5:
-            raise ValueError("Address must contain at least 5 characters")
-
-        if len(value) > 250:
-            raise ValueError("Address must not exceed 250 characters")
-
-        # Address must contain at least one letter
-        if not re.search(r"[A-Za-z]", value):
-            raise ValueError("Address must contain at least one letter")
-
-        # Reject an address containing only special characters/numbers
-        if not re.search(r"[A-Za-z0-9]", value):
-            raise ValueError("Invalid address")
-
-        # Allow normal address characters
-        if not re.fullmatch(
-            r"[A-Za-z0-9\s,./#&'():\-]+",
-            value
-        ):
-            raise ValueError("Address contains invalid characters")
-
-        return value
+        return validate_complete_store_address(value)
 
     @field_validator("city")
     @classmethod
     def validate_city(cls, value):
         if value is None:
             return None
-
-        value = value.strip()
-
-        if not value:
-            raise ValueError("City is required")
-
-        if value.casefold() in {
-            "string", "test", "city", "example", "null",
-            "none", "n/a", "na",
-        }:
-            raise ValueError("Please enter a valid city name")
-
-        if len(value) < 2:
-            raise ValueError("City must contain at least 2 characters")
-
-        if len(value) > 100:
-            raise ValueError("City must not exceed 100 characters")
-
-        if not re.search(r"[A-Za-z]", value):
-            raise ValueError("City must contain at least one letter")
-
-        if not re.fullmatch(r"[A-Za-z]+(?:[ .'-][A-Za-z]+)*", value):
-            raise ValueError(
-                "City must contain only letters, spaces, hyphens and apostrophes"
-            )
-
-        if value.casefold() in {
-            state.casefold() for state in INDIAN_STATES_AND_UTS
-        }:
-            raise ValueError(
-                "City cannot be a state or union territory name"
-            )
-
-        if value.casefold() in {
-            name.casefold() for name in NON_CITY_LOCATION_NAMES
-        }:
-            raise ValueError("Please enter a valid city name")
-
-        return value
+        return validate_store_city(value)
 
     @field_validator("state")
     @classmethod
@@ -635,6 +438,14 @@ class StoreUpdate(BaseModel):
         if not v or not v.strip():
             return None
         return validate_gstin_number(v, field_name="GSTIN", required=False)
+
+    @model_validator(mode="after")
+    def validate_store_update_location_consistency(self) -> "StoreUpdate":
+        if self.address and self.city:
+            verify_address_city_match(self.address, self.city, pincode=self.pincode)
+        return self
+
+
 class StoreResponse(BaseModel):
     id: int = Field(..., description="Unique Store ID", examples=[2])
     tenant_id: int = Field(..., description="Organization / Tenant ID", examples=[1])

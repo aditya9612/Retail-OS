@@ -1,3 +1,6 @@
+import csv
+from datetime import datetime
+from io import BytesIO, StringIO
 from typing import Optional
 from fastapi import status
 from sqlalchemy import func
@@ -9,6 +12,7 @@ from app.models.category import Category
 from app.models.product import Product
 from app.repositories.category_repo import CategoryRepository
 from app.schemas.category import CategoryCreate, CategoryUpdate
+from app.services.excel_export_service import ExcelExportService
 
 
 class CategoryService:
@@ -342,4 +346,85 @@ class CategoryService:
         if not category:
             raise NotFoundException("Category not found")
 
-        return self.repository.set_active_status(category, is_active)
+        return self.repository.set_active_status(category, is_active)
+
+    def export_categories(
+        self,
+        tenant_id: int,
+        is_active: Optional[bool] = None,
+        search: Optional[str] = None,
+        format: str = "excel",
+    ) -> tuple[BytesIO, str, str]:
+        f_clean = format.value if hasattr(format, "value") else str(format).strip().lower()
+        if f_clean not in ["excel", "csv"]:
+            raise AppException(f"Unsupported export format '{format}'. Choose from: excel, csv")
+
+        categories = self.repository.get_all(
+            tenant_id=tenant_id,
+            search=search,
+            is_active=is_active,
+        )
+
+        all_tenant_cats = self.db.query(Category).filter(Category.tenant_id == tenant_id).all()
+        parent_map = {c.id: c.name for c in all_tenant_cats}
+
+        product_count_rows = (
+            self.db.query(Product.category_id, func.count(Product.id))
+            .filter(Product.tenant_id == tenant_id, Product.category_id.isnot(None))
+            .group_by(Product.category_id)
+            .all()
+        )
+        product_counts = {cat_id: count for cat_id, count in product_count_rows}
+
+        headers = [
+            "Category ID",
+            "Category Name",
+            "Parent Category",
+            "Status",
+            "Total Products",
+            "Description",
+            "Created Date",
+        ]
+
+        rows = []
+        for c in categories:
+            parent_name = parent_map.get(c.parent_id, "Root") if c.parent_id else "Root"
+            status_str = "Active" if c.is_active else "Inactive"
+            prod_count = product_counts.get(c.id, 0)
+            created_str = c.created_at.strftime("%Y-%m-%d %H:%M:%S") if c.created_at else ""
+            rows.append([
+                c.id,
+                c.name,
+                parent_name,
+                status_str,
+                prod_count,
+                c.description or "",
+                created_str,
+            ])
+
+        timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+
+        if f_clean == "excel":
+            output = ExcelExportService().export_to_stream(
+                sheet_title="Categories",
+                headers=headers,
+                rows=rows,
+            )
+            return (
+                output,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                f"categories_export_{timestamp_str}.xlsx",
+            )
+        else:
+            str_output = StringIO()
+            writer = csv.writer(str_output)
+            writer.writerow(headers)
+            for r in rows:
+                writer.writerow(r)
+            bytes_output = BytesIO(str_output.getvalue().encode("utf-8"))
+            bytes_output.seek(0)
+            return (
+                bytes_output,
+                "text/csv",
+                f"categories_export_{timestamp_str}.csv",
+            )

@@ -171,11 +171,11 @@ class StockMovement(Base, TimestampMixin):
 
     @property
     def supplier_id(self) -> int | None:
-        return None
+        return getattr(self, "_supplier_id", None)
 
     @supplier_id.setter
     def supplier_id(self, val: Any) -> None:
-        pass
+        self._supplier_id = int(val) if val is not None else None
 
     store: Mapped["Store"] = relationship(
         "Store",

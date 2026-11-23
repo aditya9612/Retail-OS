@@ -119,9 +119,9 @@ def test_create_category_valid_names(tenant_fixture):
         "Fresh Fruits",
         "Dairy Products",
         "Home Appliances",
-        "4K TVs",
-        "USB-C Accessories",
-        "Shoes 2026",
+        "Television Sets",
+        "USB Accessories",
+        "Shoes and Footwear",
     ]
     for name in valid_names:
         resp = client.post(
@@ -184,6 +184,14 @@ def test_create_category_reject_invalid_names(tenant_fixture):
         "Category || Sub",
         "Category \\ Sub",
         "Cat,,,Sub",
+        "67hgjhj&-2456",
+        "&--",
+        "Category &- Sub",
+        "Category -& Sub",
+        "jhjkh88800soaps",
+        "life boy soap&-soap",
+        "4K TVs",
+        "Shoes 2026",
     ]
     for name in invalid_names:
         resp = client.post(
@@ -275,6 +283,13 @@ def test_create_category_parent_validation(tenant_fixture):
     )
     assert child_resp.status_code == 201
     assert child_resp.json()["parent_id"] == parent_id
+
+    # Invalid subcategory name (e.g. "life boy soap&-soap") -> 422
+    assert client.post(
+        "/api/v1/categories",
+        json={"name": "life boy soap&-soap", "parent_id": parent_id},
+        headers=headers,
+    ).status_code == 422
 
 
 def test_create_category_duplicate_name_within_same_tenant_rejected(tenant_fixture):
@@ -538,6 +553,7 @@ def test_update_category_validation(tenant_fixture):
     assert client.put(f"/api/v1/categories/{cat['id']}", json={"name": "   "}, headers=headers).status_code == 422
     assert client.put(f"/api/v1/categories/{cat['id']}", json={"name": "string"}, headers=headers).status_code == 422
     assert client.put(f"/api/v1/categories/{cat['id']}", json={"name": "1234"}, headers=headers).status_code == 422
+    assert client.put(f"/api/v1/categories/{cat['id']}", json={"name": "jhjkh88800soaps"}, headers=headers).status_code == 422
     assert client.put(f"/api/v1/categories/{cat['id']}", json={"name": "@#$%^"}, headers=headers).status_code == 422
 
     # Invalid descriptions in request body
@@ -867,4 +883,76 @@ def test_list_categories_descending_order_newest_first(tenant_fixture):
 
     ids = [c["id"] for c in data if c["id"] in {cat1["id"], cat2["id"], cat3["id"]}]
     assert ids == [cat3["id"], cat2["id"], cat1["id"]], f"Expected newest first [cat3, cat2, cat1], got {ids}"
+
+
+# =====================================================================
+# 10. GET /api/v1/categories/export (Excel & CSV)
+# =====================================================================
+
+def test_export_categories_excel(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    # Ensure at least one category exists
+    client.post("/api/v1/categories", json={"name": "Export Test Category", "description": "Export testing"}, headers=headers)
+
+    resp = client.get("/api/v1/categories/export?format=excel&is_active=all", headers=headers)
+    assert resp.status_code == 200
+    assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in resp.headers["content-type"]
+    assert "attachment; filename=categories_export_" in resp.headers["content-disposition"]
+    assert resp.headers["content-disposition"].endswith(".xlsx")
+    assert len(resp.content) > 0
+
+
+def test_export_categories_csv(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    client.post("/api/v1/categories", json={"name": "Export CSV Category", "description": "CSV testing"}, headers=headers)
+
+    resp = client.get("/api/v1/categories/export?format=csv&is_active=all", headers=headers)
+    assert resp.status_code == 200
+    assert "text/csv" in resp.headers["content-type"]
+    assert "attachment; filename=categories_export_" in resp.headers["content-disposition"]
+    assert resp.headers["content-disposition"].endswith(".csv")
+    csv_text = resp.content.decode("utf-8")
+    assert "Category ID,Category Name,Parent Category,Status,Total Products,Description,Created Date" in csv_text
+    assert "Export CSV Category" in csv_text
+
+
+def test_export_categories_filter_active(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    resp = client.get("/api/v1/categories/export?format=csv&is_active=true", headers=headers)
+    assert resp.status_code == 200
+    csv_text = resp.content.decode("utf-8")
+    assert "Category Name" in csv_text
+
+    resp_all = client.get("/api/v1/categories/export?format=csv&is_active=all", headers=headers)
+    assert resp_all.status_code == 200
+
+    resp_inactive = client.get("/api/v1/categories/export?format=csv&is_active=false", headers=headers)
+    assert resp_inactive.status_code == 200
+
+
+def test_export_categories_invalid_format(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    # Required format missing
+    assert client.get("/api/v1/categories/export?is_active=all", headers=headers).status_code == 422
+
+    # Required is_active missing
+    assert client.get("/api/v1/categories/export?format=csv", headers=headers).status_code == 422
+
+    # Random / invalid / placeholder format values strictly rejected with 422
+    for bad_format in ["123", "!@#$", "nausomd", "----", "string", "null", "", "   ", "undefined"]:
+        resp = client.get(f"/api/v1/categories/export?format={bad_format}&is_active=all", headers=headers)
+        assert resp.status_code == 422, f"Expected 422 for bad format '{bad_format}', got {resp.status_code}"
+
+
+def test_export_categories_search_validation(tenant_fixture):
+    headers = tenant_fixture["headers"]
+    # Invalid search keywords rejected with 422
+    for bad_search in ["string", "null", "none", "----", "---", "--", "@#$%^", "!@#$%"]:
+        resp = client.get(f"/api/v1/categories/export?format=csv&is_active=all&search={bad_search}", headers=headers)
+        assert resp.status_code == 422, f"Expected 422 for bad search '{bad_search}', got {resp.status_code}"
+
+    # Valid search accepted
+    resp_valid = client.get("/api/v1/categories/export?format=csv&is_active=all&search=Export", headers=headers)
+    assert resp_valid.status_code == 200
+
 

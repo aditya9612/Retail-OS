@@ -3,7 +3,9 @@ from decimal import Decimal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ConflictException, NotFoundException
+from fastapi.exceptions import RequestValidationError
+from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
+from app.utils.location_verifier import verify_address_city_match
 from app.models.inventory import Inventory, StockMovement
 from app.models.order import Order
 from app.models.pos_shift import POSShift
@@ -128,9 +130,41 @@ class StoreService:
             )
 
         if "name" in update_data:
+            if update_data["name"] is None:
+                raise BadRequestException("Store name cannot be null")
             existing = self.repo.get_by_name(update_data["name"], tenant_id)
             if existing and existing.id != store_id:
                 raise ConflictException("Store name already exists")
+
+        # Validate effective address-city consistency for partial updates
+        has_address_update = "address" in update_data
+        has_city_update = "city" in update_data
+        has_pincode_update = "pincode" in update_data
+
+        if has_address_update or has_city_update or has_pincode_update:
+            effective_address = update_data.get("address", store.address)
+            effective_city = update_data.get("city", store.city)
+            effective_pincode = update_data.get("pincode", store.pincode)
+
+            if effective_address and effective_city:
+                try:
+                    verify_address_city_match(
+                        effective_address,
+                        effective_city,
+                        pincode=effective_pincode,
+                    )
+                except ValueError as exc:
+                    loc_field = "address" if has_address_update else "city"
+                    raise RequestValidationError(
+                        [
+                            {
+                                "type": "value_error",
+                                "loc": ("body", loc_field),
+                                "msg": str(exc),
+                                "input": getattr(data, loc_field),
+                            }
+                        ]
+                    )
 
         if "code" in update_data:
             existing = self.repo.get_by_code(update_data["code"], tenant_id)

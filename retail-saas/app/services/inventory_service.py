@@ -266,6 +266,7 @@ class InventoryService:
         movement.batch_number = data.batch_number
         movement.expiry_date = data.expiry_date
         movement.unit_cost = data.unit_cost
+        movement.supplier_id = data.supplier_id if supplier else None
 
         cache_delete_pattern(f"inventory:{tenant_id}:*")
 

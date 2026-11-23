@@ -399,6 +399,19 @@ class StoreTargetService:
 
             update_data = data.model_dump(exclude_unset=True)
 
+            if "target_type" in update_data:
+                target_type_val = update_data["target_type"]
+                if (
+                    target_type_val is None
+                    or not isinstance(target_type_val, str)
+                    or not target_type_val.strip()
+                    or target_type_val.strip().lower() in ("null", "none", "undefined", "n/a", "na")
+                ):
+                    raise AppException(
+                        "Target type cannot be null or empty",
+                        status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    )
+
             for key, value in update_data.items():
                 setattr(target, key, value)
 
@@ -530,15 +543,22 @@ class StoreTargetService:
             )
             current_value = (Decimal(str(sale_sum)) + Decimal(str(order_sum))).quantize(Decimal("0.01"))
 
-        target_value = Decimal(
-            str(target.target_value)
-        ).quantize(Decimal("0.01"))
-
-        achievement_pct = (
-            float(round((current_value / target_value) * 100, 2))
-            if target_value > 0
-            else 0.0
+        target_value = (
+            Decimal(str(target.target_value)).quantize(Decimal("0.01"))
+            if target.target_value is not None
+            else Decimal("0.00")
         )
+
+        if (
+            target_value > Decimal("0.00")
+            and current_value is not None
+            and current_value >= Decimal("0.00")
+        ):
+            achievement_pct = float(
+                round((Decimal(str(current_value)) / target_value) * Decimal("100"), 2)
+            )
+        else:
+            achievement_pct = 0.0
 
         remaining = max(
             Decimal("0.00"),
@@ -630,18 +650,43 @@ class StoreTargetService:
             store_name = target.store_name or (target.store.name if getattr(target, "store", None) else f"Store {target.store_id}")
             store_code = target.store_code or (target.store.code if getattr(target, "store", None) else None)
 
+            target_val = (
+                Decimal(str(progress.target_value)).quantize(Decimal("0.01"))
+                if progress.target_value is not None
+                else Decimal("0.00")
+            )
+            curr_val = (
+                Decimal(str(progress.current_value)).quantize(Decimal("0.01"))
+                if progress.current_value is not None
+                else Decimal("0.00")
+            )
+
+            if target_val > Decimal("0.00") and curr_val >= Decimal("0.00"):
+                achievement_pct = float(
+                    round((curr_val / target_val) * Decimal("100"), 2)
+                )
+            else:
+                achievement_pct = 0.0
+
+            remaining_val = max(
+                Decimal("0.00"),
+                target_val - curr_val,
+            ).quantize(Decimal("0.01"))
+
+            is_achieved_val = curr_val >= target_val if target_val > Decimal("0.00") else False
+
             items.append({
                 "target_id": target.id,
                 "store_id": target.store_id,
                 "store_name": store_name,
                 "store_code": store_code,
                 "target_type": target.target_type,
-                "target_value": progress.target_value,
-                "current_value": progress.current_value,
-                "achievement_percentage": progress.achievement_percentage,
-                "remaining_value": progress.remaining_value,
+                "target_value": target_val,
+                "current_value": curr_val,
+                "achievement_percentage": achievement_pct,
+                "remaining_value": remaining_val,
                 "period": target.period,
-                "is_achieved": progress.is_achieved,
+                "is_achieved": is_achieved_val,
                 "status": target.status,
             })
 

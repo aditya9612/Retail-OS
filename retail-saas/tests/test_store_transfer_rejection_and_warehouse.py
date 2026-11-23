@@ -82,10 +82,10 @@ def test_create_store_is_warehouse_false():
     payload = {
         "name": "Masala Retail Store",
         "code": f"STR-{uuid.uuid4().hex[:4].upper()}",
-        "address": "MUMBAI",
-        "city": "MUMBAI",
+        "address": "Shop 12, Phoenix Marketcity, Kurla West, Mumbai",
+        "city": "Mumbai",
         "state": "Maharashtra",
-        "pincode": "854123",
+        "pincode": "400070",
         "phone": "8541203256",
         "email": "masala_store@gmail.com",
         "is_main": False,
