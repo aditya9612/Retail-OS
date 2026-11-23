@@ -1,8 +1,9 @@
+import math
 import re
 from enum import Enum
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import (
     BaseModel,
@@ -59,6 +60,39 @@ ALLOWED_TARGET_TYPES = {item.value for item in TargetType}
 TARGET_TYPE_REGEX = re.compile(r"^[A-Za-z]+(?: [A-Za-z]+)*$")
 
 
+def validate_target_type_common(value: Optional[str]) -> str:
+    if value is None:
+        raise ValueError("Target type cannot be null")
+    if not isinstance(value, str):
+        raise ValueError("Target type must be a string")
+    cleaned = value.strip()
+    if not cleaned or cleaned.lower() in ("null", "none", "undefined", "n/a", "na"):
+        raise ValueError("Target type cannot be null or empty")
+    if len(cleaned) < 2:
+        raise ValueError("Target type must contain at least 2 characters")
+    if len(cleaned) > 30:
+        raise ValueError("Target type must not exceed 30 characters")
+    if not TARGET_TYPE_REGEX.fullmatch(cleaned):
+        raise ValueError(
+            "Target type must contain only letters with a single space between words"
+        )
+    words = set(cleaned.lower().split())
+    allowed_keywords = (
+        {t.value.lower() for t in TargetType}
+        | {w.lower() for t in TargetType for w in t.value.split()}
+        | {"target"}
+    )
+    if not (
+        words & allowed_keywords
+        or any(t.value.lower() in cleaned.lower() for t in TargetType)
+    ):
+        allowed = ", ".join(sorted(ALLOWED_TARGET_TYPES))
+        raise ValueError(
+            f"Target type must be or include a supported target type: {allowed}"
+        )
+    return cleaned
+
+
 class StoreTargetCreate(BaseModel):
     store_id: int = Field(
         ...,
@@ -113,31 +147,7 @@ class StoreTargetCreate(BaseModel):
     @field_validator("target_type")
     @classmethod
     def validate_target_type(cls, value: str) -> str:
-        if value is None:
-            return None
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("Target type cannot be empty")
-        if len(cleaned) < 2:
-            raise ValueError("Target type must contain at least 2 characters")
-        if len(cleaned) > 30:
-            raise ValueError("Target type must not exceed 30 characters")
-        if not TARGET_TYPE_REGEX.fullmatch(cleaned):
-            raise ValueError(
-                "Target type must contain only letters with a single space between words"
-            )
-        words = set(cleaned.lower().split())
-        allowed_keywords = (
-            {t.value.lower() for t in TargetType}
-            | {w.lower() for t in TargetType for w in t.value.split()}
-            | {"target"}
-        )
-        if not (words & allowed_keywords or any(t.value.lower() in cleaned.lower() for t in TargetType)):
-            allowed = ", ".join(sorted(ALLOWED_TARGET_TYPES))
-            raise ValueError(
-                f"Target type must be or include a supported target type: {allowed}"
-            )
-        return cleaned
+        return validate_target_type_common(value)
 
     @field_validator("target_value")
     @classmethod
@@ -241,20 +251,7 @@ class StoreTargetUpdate(BaseModel):
     @field_validator("target_type")
     @classmethod
     def validate_target_type(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("Target type cannot be empty")
-        if len(cleaned) < 2:
-            raise ValueError("Target type must contain at least 2 characters")
-        if len(cleaned) > 30:
-            raise ValueError("Target type must not exceed 30 characters")
-        if not TARGET_TYPE_REGEX.fullmatch(cleaned):
-            raise ValueError(
-                "Target type must contain only letters with a single space between words"
-            )
-        return cleaned
+        return validate_target_type_common(value)
 
     @field_validator("target_value")
     @classmethod
@@ -361,6 +358,37 @@ class StoreTargetProgressResponse(BaseModel):
     is_achieved: bool = Field(..., description="Whether Target Has Been Fully Achieved", examples=[False])
     days_remaining: int = Field(..., description="Days Remaining Until Target Period Closes", examples=[12])
 
+    @field_validator("achievement_percentage", mode="before")
+    @classmethod
+    def validate_achievement_percentage(cls, value: Any) -> float:
+        if value is None:
+            return 0.0
+        try:
+            val = float(value)
+            if math.isnan(val) or math.isinf(val) or val < 0.0:
+                return 0.0
+            return round(val, 2)
+        except (ValueError, TypeError):
+            raise ValueError("Achievement percentage must be a valid non-negative number")
+
+    @model_validator(mode="after")
+    def validate_and_recalculate_achievement(self) -> "StoreTargetProgressResponse":
+        if (
+            self.target_value is not None
+            and self.target_value > Decimal("0.00")
+            and self.current_value is not None
+            and self.current_value >= Decimal("0.00")
+        ):
+            self.achievement_percentage = float(
+                round(
+                    (Decimal(str(self.current_value)) / Decimal(str(self.target_value))) * Decimal("100"),
+                    2,
+                )
+            )
+        else:
+            self.achievement_percentage = 0.0
+        return self
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -378,6 +406,37 @@ class StoreTargetLeaderboardItem(BaseModel):
     period: str = Field(..., description="Target Period", examples=["monthly"])
     is_achieved: bool = Field(..., description="Whether target has been met or exceeded", examples=[True])
     status: str = Field(..., description="Target Status", examples=["active"])
+
+    @field_validator("achievement_percentage", mode="before")
+    @classmethod
+    def validate_achievement_percentage(cls, value: Any) -> float:
+        if value is None:
+            return 0.0
+        try:
+            val = float(value)
+            if math.isnan(val) or math.isinf(val) or val < 0.0:
+                return 0.0
+            return round(val, 2)
+        except (ValueError, TypeError):
+            raise ValueError("Achievement percentage must be a valid non-negative number")
+
+    @model_validator(mode="after")
+    def validate_and_recalculate_achievement(self) -> "StoreTargetLeaderboardItem":
+        if (
+            self.target_value is not None
+            and self.target_value > Decimal("0.00")
+            and self.current_value is not None
+            and self.current_value >= Decimal("0.00")
+        ):
+            self.achievement_percentage = float(
+                round(
+                    (Decimal(str(self.current_value)) / Decimal(str(self.target_value))) * Decimal("100"),
+                    2,
+                )
+            )
+        else:
+            self.achievement_percentage = 0.0
+        return self
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -399,3 +458,36 @@ class StoreTargetSummaryResponse(BaseModel):
     on_track_targets_count: int = Field(default=0, description="Count of targets achieving 50%-99%", examples=[3])
     lagging_targets_count: int = Field(default=0, description="Count of targets achieving <50% or lagging near deadline", examples=[2])
     period: Optional[str] = Field(None, description="Period filter applied if any", examples=["monthly"])
+
+    @field_validator("overall_achievement_percentage", mode="before")
+    @classmethod
+    def validate_overall_achievement_percentage(cls, value: Any) -> float:
+        if value is None:
+            return 0.0
+        try:
+            val = float(value)
+            if math.isnan(val) or math.isinf(val) or val < 0.0:
+                return 0.0
+            return round(val, 2)
+        except (ValueError, TypeError):
+            raise ValueError("Overall achievement percentage must be a valid non-negative number")
+
+    @model_validator(mode="after")
+    def validate_and_recalculate_overall_achievement(self) -> "StoreTargetSummaryResponse":
+        if (
+            self.total_target_value is not None
+            and self.total_target_value > Decimal("0.00")
+            and self.total_current_value is not None
+            and self.total_current_value >= Decimal("0.00")
+        ):
+            self.overall_achievement_percentage = float(
+                round(
+                    (Decimal(str(self.total_current_value)) / Decimal(str(self.total_target_value))) * Decimal("100"),
+                    2,
+                )
+            )
+        else:
+            self.overall_achievement_percentage = 0.0
+        return self
+
+    model_config = ConfigDict(from_attributes=True)
