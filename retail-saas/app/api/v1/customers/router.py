@@ -31,6 +31,11 @@ from app.schemas.customer import (
     LoyaltyEarnRequest,
     LoyaltyRedeemRequest,
     LoyaltyResponse,
+    LoyaltyUpdateRequest,
+    LoyaltyDeleteResponse,
+    LoyaltyStatsResponse,
+    LoyaltyCustomerListResponse,
+    CUSTOMER_FORBIDDEN_TEXT_SYMBOLS,
     CommunicationCreate,
     CommunicationResponse,
     ReferralCreate,
@@ -495,6 +500,54 @@ def export_directory(
     )
 
 
+@router.get(
+    "/loyalty/stats",
+    response_model=LoyaltyStatsResponse,
+    summary="Get overall loyalty program statistics",
+    description="Retrieves aggregated loyalty KPIs including active members, points in circulation, liability, and monthly redemption metrics.",
+)
+def get_loyalty_stats(
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    stats_data = CustomerService(db).get_loyalty_stats(user.tenant_id)
+    return LoyaltyStatsResponse(
+        success=True,
+        message="Loyalty statistics retrieved successfully",
+        data=stats_data,
+    )
+
+
+@router.get(
+    "/loyalty",
+    response_model=LoyaltyCustomerListResponse,
+    summary="List customers with loyalty points",
+    description="Returns a paginated list of customers and their loyalty status.",
+)
+def list_loyalty_customers(
+    page: Optional[int] = Query(1, ge=1, description="Page number starting at 1"),
+    page_size: Optional[int] = Query(20, ge=1, le=100, description="Items per page (1-100)"),
+    search: Optional[str] = Query(None, description="Search by name, phone, or email"),
+    min_points: Optional[int] = Query(None, ge=0, description="Filter by minimum loyalty points"),
+    user: User = Depends(require_permission("customers:read")),
+    db: Session = Depends(get_db),
+):
+    if search is not None:
+        search_clean = search.strip()
+        if re.search(r"<\s*script|javascript\s*:|onload\s*=", search_clean, re.IGNORECASE):
+            raise HTTPException(status_code=422, detail="Search query contains invalid script content")
+        if any(c in CUSTOMER_FORBIDDEN_TEXT_SYMBOLS for c in search_clean):
+            raise HTTPException(status_code=422, detail="Search query contains invalid special characters")
+    res = CustomerService(db).list_loyalty_customers(
+        user.tenant_id,
+        page=page or 1,
+        page_size=page_size or 20,
+        search=search,
+        min_points=min_points,
+    )
+    return LoyaltyCustomerListResponse(**res)
+
+
 @router.get("/{customer_id}", response_model=CustomerResponse)
 def get_customer(
     customer_id: int = Path(..., gt=0),
@@ -609,6 +662,49 @@ def get_loyalty_history(
         customer_id,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.put(
+    "/{customer_id}/loyalty",
+    response_model=LoyaltyResponse,
+    summary="Update customer loyalty balance",
+    description="Adjusts or updates a customer's loyalty points balance with a validated reason.",
+)
+def update_loyalty(
+    customer_id: int = Path(..., gt=0, description="Customer ID"),
+    data: LoyaltyUpdateRequest = ...,
+    user: User = Depends(require_permission("customers:update")),
+    db: Session = Depends(get_db),
+):
+    record = CustomerService(db).update_loyalty_points(
+        user.tenant_id,
+        customer_id,
+        new_points=data.points,
+        reason=data.reason,
+    )
+    return LoyaltyResponse.model_validate(record)
+
+
+@router.delete(
+    "/{customer_id}/loyalty",
+    response_model=LoyaltyDeleteResponse,
+    summary="Delete or reset customer loyalty points",
+    description="Resets the customer's loyalty points balance to zero.",
+)
+def delete_loyalty(
+    customer_id: int = Path(..., gt=0, description="Customer ID"),
+    user: User = Depends(require_permission("customers:delete")),
+    db: Session = Depends(get_db),
+):
+    res = CustomerService(db).delete_loyalty_points(
+        user.tenant_id,
+        customer_id,
+    )
+    return LoyaltyDeleteResponse(
+        success=True,
+        message="Customer loyalty balance reset successfully",
+        data=res,
     )
 
 

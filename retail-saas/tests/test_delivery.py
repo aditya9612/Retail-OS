@@ -1650,6 +1650,8 @@ def test_create_delivery_method_tenant_isolation(tenant_a, tenant_b):
         ("name", ""),
         ("name", "   "),
         ("name", "A"),
+        ("name", "lj"),
+        ("name", "HTDFFGHGKGKHK"),
         ("name", "$$$@@@"),
         ("code", ""),
         ("code", "   "),
@@ -1678,6 +1680,67 @@ def test_create_delivery_method_validation_errors(tenant_a, field, value):
     payload[field] = value
     resp = client.post("/api/v1/delivery/methods", json=payload, headers=headers)
     assert resp.status_code == 422
+
+
+def test_create_delivery_method_rejects_meaningless_name_and_gibberish(tenant_a):
+    headers, _ = tenant_a
+
+    # 1. Exact meaningless payload reported by user: {"name": "lj", "code": "FC03465465612", "description": "HTDFFGHGKGKHK", "cost": 2000, "estimated_days": null, "is_active": true}
+    resp1 = client.post(
+        "/api/v1/delivery/methods",
+        json={
+            "name": "lj",
+            "code": "FC03465465612",
+            "description": "HTDFFGHGKGKHK",
+            "cost": 2000,
+            "estimated_days": None,
+            "is_active": True,
+        },
+        headers=headers,
+    )
+    assert resp1.status_code == 422
+    err1 = resp1.json()
+    assert any("name" in str(err) for err in err1.get("detail", []))
+
+    # 2. Meaningless name with valid description must return 422
+    resp2 = client.post(
+        "/api/v1/delivery/methods",
+        json={
+            "name": "lj",
+            "code": "VALID_CODE_LJ",
+            "description": "Valid method description",
+            "cost": 50.0,
+        },
+        headers=headers,
+    )
+    assert resp2.status_code == 422
+
+    # 3. Valid name with consonant gibberish description must return 422
+    resp3 = client.post(
+        "/api/v1/delivery/methods",
+        json={
+            "name": "Express Courier",
+            "code": "EXP_COURIER_01",
+            "description": "HTDFFGHGKGKHK",
+            "cost": 50.0,
+        },
+        headers=headers,
+    )
+    assert resp3.status_code == 422
+
+    # 4. Valid industry standard delivery methods must pass with 201
+    standard_payload = {
+        "name": "Express Delivery",
+        "code": "EXP_DELIV_REAL",
+        "description": "Fast next day priority delivery",
+        "cost": 120.00,
+        "estimated_days": 1,
+        "is_active": True,
+    }
+    resp4 = client.post("/api/v1/delivery/methods", json=standard_payload, headers=headers)
+    assert resp4.status_code == 201
+    assert resp4.json()["data"]["name"] == "Express Delivery"
+
 
 
 def test_list_delivery_methods_filter_is_active(tenant_a):
@@ -1789,6 +1852,8 @@ def test_update_delivery_method_duplicate_code_conflict(tenant_a):
         ("name", ""),
         ("name", "   "),
         ("name", "X"),
+        ("name", "lj"),
+        ("name", "HTDFFGHGKGKHK"),
         ("code", ""),
         ("code", "   "),
         ("code", "X"),

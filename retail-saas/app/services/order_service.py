@@ -284,6 +284,20 @@ class OrderService:
             same_state=same_state,
         )
 
+        variant_val = item.variant
+        variant_id = getattr(item, "variant_id", None)
+        if not variant_val and variant_id:
+            pv = (
+                self.db.query(ProductVariant)
+                .filter(
+                    ProductVariant.id == variant_id,
+                    ProductVariant.tenant_id == product.tenant_id,
+                )
+                .first()
+            )
+            if pv and pv.variant_name:
+                variant_val = pv.variant_name
+
         return OrderItem(
             product_id=product.id,
             product_name=product.name,
@@ -297,8 +311,9 @@ class OrderService:
             cgst_amount=tax["cgst_amount"],
             sgst_amount=tax["sgst_amount"],
             igst_amount=tax["igst_amount"],
-            variant=item.variant,
-            variant_id=getattr(item, "variant_id", None),
+            variant=variant_val,
+            variant_id=variant_id,
+            _variant_col=variant_val,
         )
 
     def _calculate_order_discount(
@@ -460,6 +475,10 @@ class OrderService:
             if match:
                 delivery_pincode = match.group(1)
 
+        initial_delivery_status = getattr(data, "delivery_status", None)
+        if not initial_delivery_status and (data.order_type == "ecommerce" or data.delivery_address):
+            initial_delivery_status = "pending"
+
         order = Order(
             tenant_id=tenant_id,
             store_id=data.store_id,
@@ -471,9 +490,11 @@ class OrderService:
             order_type=data.order_type,
             status=OrderStatus.DRAFT.value,
             coupon_code=data.coupon_code,
+            payment_method=data.payment_method,
             discount_amount=Decimal("0.00"),
             delivery_address=data.delivery_address,
             delivery_pincode=delivery_pincode,
+            delivery_status=initial_delivery_status,
             notes=data.notes,
         )
 
@@ -580,6 +601,43 @@ class OrderService:
                     self.db.refresh(created_order)
                 else:
                     self.db.flush()
+
+        if created_order.order_type == "ecommerce" or created_order.delivery_address:
+            existing_delivery = (
+                self.db.query(Delivery)
+                .filter(
+                    Delivery.tenant_id == tenant_id,
+                    Delivery.order_id == created_order.id,
+                )
+                .first()
+            )
+            if not existing_delivery:
+                del_status = initial_delivery_status or "pending"
+                delivery = Delivery(
+                    tenant_id=tenant_id,
+                    order_id=created_order.id,
+                    status=del_status,
+                )
+                self.db.add(delivery)
+                created_order.delivery = delivery
+                delivery_tracking = OrderTracking(
+                    order_id=created_order.id,
+                    status=del_status,
+                    remarks=f"Delivery created with status '{del_status}'",
+                )
+                self.db.add(delivery_tracking)
+                if commit:
+                    self.db.commit()
+                    self.db.refresh(created_order)
+                else:
+                    self.db.flush()
+
+        for idx, it in enumerate(created_order.items):
+            if not getattr(it, "_variant", None) and idx < len(data.items):
+                it._variant = getattr(data.items[idx], "variant", None) or it.variant
+            if not getattr(it, "_variant_col", None) and getattr(it, "_variant", None):
+                it._variant_col = it._variant
+
         return created_order
 
     def get_order(
@@ -807,6 +865,27 @@ class OrderService:
                 value,
             )
 
+        if "delivery_status" in update_data and update_data["delivery_status"] is not None:
+            new_del_status = update_data["delivery_status"]
+            order.delivery_status = new_del_status
+            if order.delivery:
+                order.delivery.status = new_del_status
+            elif order.order_type == "ecommerce" or order.delivery_address:
+                delivery = Delivery(
+                    tenant_id=tenant_id,
+                    order_id=order.id,
+                    status=new_del_status,
+                )
+                self.db.add(delivery)
+                order.delivery = delivery
+
+            delivery_tracking = OrderTracking(
+                order_id=order.id,
+                status=new_del_status,
+                remarks=f"Delivery status updated to '{new_del_status}'",
+            )
+            self.db.add(delivery_tracking)
+
         self._recalculate_order(order)
 
         return self.repo.update(order)
@@ -910,19 +989,28 @@ class OrderService:
                 order.status = OrderStatus.CONFIRMED.value
 
                 if order.order_type == "ecommerce" or order.delivery_address:
-                    delivery = Delivery(
-                        tenant_id=tenant_id,
-                        order_id=order.id,
-                        status="pending",
+                    existing_delivery = (
+                        self.db.query(Delivery)
+                        .filter(
+                            Delivery.tenant_id == tenant_id,
+                            Delivery.order_id == order.id,
+                        )
+                        .first()
                     )
-                    self.db.add(delivery)
+                    if not existing_delivery:
+                        delivery = Delivery(
+                            tenant_id=tenant_id,
+                            order_id=order.id,
+                            status="pending",
+                        )
+                        self.db.add(delivery)
 
-                    delivery_tracking = OrderTracking(
-                        order_id=order.id,
-                        status="pending",
-                        remarks="Delivery created with status 'pending'",
-                    )
-                    self.db.add(delivery_tracking)
+                        delivery_tracking = OrderTracking(
+                            order_id=order.id,
+                            status="pending",
+                            remarks="Delivery created with status 'pending'",
+                        )
+                        self.db.add(delivery_tracking)
 
                 tracking = OrderTracking(
                     order_id=order.id,
