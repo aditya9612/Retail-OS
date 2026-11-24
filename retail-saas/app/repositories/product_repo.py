@@ -150,6 +150,7 @@ class ProductRepository:
         min_price: Optional[Decimal] = None,
         max_price: Optional[Decimal] = None,
         sort_by: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> List[Product]:
         query = (
             self.db.query(Product)
@@ -167,6 +168,18 @@ class ProductRepository:
                 Product.is_active.is_(True),
                 or_(Product.expiry_date.is_(None), Product.expiry_date >= today),
             )
+
+        if search and search.strip():
+            s = search.strip()
+            search_conditions = [
+                Product.name.ilike(f"%{s}%"),
+                Product.sku.ilike(f"%{s}%"),
+                Product.barcode.ilike(f"%{s}%"),
+                Product.brand.ilike(f"%{s}%"),
+            ]
+            if s.isdigit():
+                search_conditions.append(Product.hsn_code.like(f"{s}%"))
+            query = query.filter(or_(*search_conditions))
 
         if category_id is not None:
             query = query.filter(Product.category_id == category_id)

@@ -36,6 +36,22 @@ class ProductService:
         tenant_id: int,
         data: ProductCreate,
     ) -> Product:
+        name_val = str(data.name).strip() if data.name else ""
+        if not name_val or len(name_val) < 2:
+            raise ConflictException("Product name must be at least 2 characters")
+        if sum(c.isalpha() for c in name_val) < 2:
+            raise ConflictException("Product name must contain at least 2 letters")
+        if name_val.lower() in {
+            "string", "null", "none", "undefined", "test", "sample", "temp",
+            "n/a", "na", "product", "dummy", "item", "untitled", "asdf", "qwerty"
+        }:
+            raise ConflictException(f"Invalid product name: '{name_val}' is a placeholder")
+
+        if data.selling_price < Decimal("0.01"):
+            raise ConflictException("Selling price must be at least 0.01")
+        if data.selling_price.as_tuple().exponent < -2:
+            raise ConflictException("Selling price cannot have more than 2 decimal places")
+
         sku = data.sku.strip().upper()
         barcode = data.barcode.strip() if data.barcode else None
 
@@ -273,6 +289,7 @@ class ProductService:
         min_price: Optional[Decimal] = None,
         max_price: Optional[Decimal] = None,
         sort_by: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> list[Product]:
         if page <= 0:
             raise ConflictException(
@@ -297,6 +314,7 @@ class ProductService:
             min_price=min_price,
             max_price=max_price,
             sort_by=sort_by,
+            search=search,
         )
 
     def update_product(
@@ -592,14 +610,9 @@ class ProductService:
     def list_low_stock(
         self,
         tenant_id: int,
-        store_id: int,
+        store_id: Optional[int] = None,
         threshold: int = 10,
     ) -> List[ProductLowStockResponse]:
-        if store_id <= 0:
-            raise ConflictException(
-                "Store ID must be greater than 0"
-            )
-
         if threshold <= 0:
             raise ConflictException(
                 "Threshold must be greater than 0"
@@ -610,24 +623,44 @@ class ProductService:
                 "Threshold must not exceed 1000000"
             )
 
-        store = (
-            self.db.query(Store)
-            .filter(
-                Store.id == store_id,
-                Store.tenant_id == tenant_id,
-                Store.is_active.is_(True),
-            )
-            .first()
-        )
+        target_store_id = store_id
+        if target_store_id is not None:
+            if target_store_id <= 0:
+                raise ConflictException(
+                    "Store ID must be greater than 0"
+                )
 
-        if not store:
-            raise NotFoundException(
-                "Store not found"
+            store = (
+                self.db.query(Store)
+                .filter(
+                    Store.id == target_store_id,
+                    Store.tenant_id == tenant_id,
+                    Store.is_active.is_(True),
+                )
+                .first()
             )
+
+            if not store:
+                raise NotFoundException(
+                    "Store not found"
+                )
+        else:
+            store = (
+                self.db.query(Store)
+                .filter(
+                    Store.tenant_id == tenant_id,
+                    Store.is_active.is_(True),
+                )
+                .order_by(Store.is_main.desc(), Store.id.asc())
+                .first()
+            )
+            if not store:
+                return []
+            target_store_id = store.id
 
         rows = self.repo.list_low_stock(
             tenant_id,
-            store_id,
+            target_store_id,
             threshold,
         )
 
@@ -638,7 +671,7 @@ class ProductService:
                 product
             )
 
-            response.store_id = store_id
+            response.store_id = target_store_id
             response.current_stock = qty
             response.quantity = qty
             response.threshold = threshold

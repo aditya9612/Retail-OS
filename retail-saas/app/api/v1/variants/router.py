@@ -185,8 +185,10 @@ def update_variant(
 @router.patch(
     "/variants/{variant_id}",
     response_model=ProductVariantResponse,
+    include_in_schema=False,
+    deprecated=True,
     dependencies=[Depends(require_operational_write)],
-    description="Partially update a product variant by ID",
+    description="Partially update a product variant by ID (Deprecated: use PUT)",
 )
 def patch_variant(
     data: ProductVariantUpdate,
@@ -394,8 +396,10 @@ def update_product_variant(
 @router.patch(
     "/products/{product_id}/variants/{variant_id}",
     response_model=ProductVariantResponse,
+    include_in_schema=False,
+    deprecated=True,
     dependencies=[Depends(require_operational_write)],
-    description="Partially update a product variant by product ID and variant ID",
+    description="Partially update a product variant by product ID and variant ID (Deprecated: use PUT)",
 )
 def patch_product_variant(
     data: ProductVariantUpdate,
