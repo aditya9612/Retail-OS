@@ -47,25 +47,53 @@ class RoleService:
         self,
         tenant_id: int,
         search: Optional[str] = None,
+        name: Optional[str] = None,
         is_system: Optional[bool] = None,
+        role_id: Optional[int] = None,
+        skip: int = 0,
+        limit: int = 100,
     ) -> list[RoleDetailResponse]:
         if tenant_id is None:
-            raise ConflictException("Tenant ID is required")
+            # Superadmin or unassigned tenant: query all system or tenant roles
+            roles = (
+                self.db.query(Role)
+                .order_by(Role.id.asc())
+                .all()
+            )
+        else:
+            roles = self.repo.list_by_tenant(tenant_id)
 
-        roles = self.repo.list_by_tenant(tenant_id)
+        if role_id is not None:
+            roles = [r for r in roles if r.id == role_id]
+
+        if name is not None:
+            name_clean = name.strip().lower()
+            roles = [r for r in roles if (r.name or "").strip().lower() == name_clean]
+
         if search:
             search_clean = search.strip().lower()
-            roles = [r for r in roles if search_clean in (r.name or "").lower()]
+            if search_clean.isdigit():
+                s_id = int(search_clean)
+                roles = [
+                    r for r in roles
+                    if r.id == s_id or search_clean in (r.name or "").lower()
+                ]
+            else:
+                roles = [r for r in roles if search_clean in (r.name or "").lower()]
+
         if is_system is not None:
             roles = [
                 r for r in roles
                 if bool(r.is_system or (r.name or "").lower() in PROTECTED_CORE_ROLES) is is_system
             ]
 
-        user_counts = self.repo.count_users_for_roles(tenant_id)
+        user_counts = self.repo.count_users_for_roles(tenant_id) if tenant_id else {}
+
+        # Apply pagination
+        paginated_roles = roles[skip : skip + limit]
 
         result: list[RoleDetailResponse] = []
-        for role in roles:
+        for role in paginated_roles:
             role_name_clean = (role.name or "").lower()
             is_core_sys = bool(role.is_system or role_name_clean in PROTECTED_CORE_ROLES)
             desc = getattr(role, "description", None) or DEFAULT_ROLE_DESCRIPTIONS.get(role_name_clean, None)
@@ -83,15 +111,12 @@ class RoleService:
             )
         return result
 
-    def get_role(self, tenant_id: int, role_id: int) -> RoleDetailResponse:
-        if tenant_id is None:
-            raise ConflictException("Tenant ID is required")
-
-        role = self.repo.get_by_id(role_id=role_id, tenant_id=tenant_id)
+    def get_role(self, tenant_id: int, role_id: int | str) -> RoleDetailResponse:
+        role = self.repo.get_by_id_or_name(role_id, tenant_id)
         if not role:
-            raise NotFoundException("Role not found")
+            raise NotFoundException(f"Role '{role_id}' not found")
 
-        user_count = self.repo.count_users_by_role(role_id=role.id, tenant_id=tenant_id)
+        user_count = self.repo.count_users_by_role(role_id=role.id, tenant_id=tenant_id) if tenant_id else 0
 
         role_name_clean = (role.name or "").lower()
         is_core_sys = bool(role.is_system or role_name_clean in PROTECTED_CORE_ROLES)
@@ -111,32 +136,51 @@ class RoleService:
     def get_role_users(
         self,
         tenant_id: int,
-        role_id: int,
+        role_id: int | str,
         page: int = 1,
         page_size: int = 20,
-        store_id: Optional[int] = None,
+        store_id: Optional[str | int] = None,
+        is_active: Optional[bool] = None,
         current_user_store_id: Optional[int] = None,
     ) -> RoleUsersResponse:
         if tenant_id is None:
             raise ConflictException("Tenant ID is required")
 
-        role = self.repo.get_by_id(role_id=role_id, tenant_id=tenant_id)
+        role = self.repo.get_by_id_or_name(role_id, tenant_id)
         if not role:
-            raise NotFoundException("Role not found")
+            raise NotFoundException(f"Role '{role_id}' not found")
 
-        effective_store_id = store_id
-        if current_user_store_id is not None:
-            if store_id is not None and store_id != current_user_store_id:
-                raise ForbiddenException("Access denied to users of another store")
-            effective_store_id = current_user_store_id
-
-        query = self.db.query(User).filter(
-            User.tenant_id == tenant_id,
-            User.role_id == role_id,
-            User.is_deleted.is_(False),
+        from sqlalchemy.orm import joinedload
+        query = (
+            self.db.query(User)
+            .options(joinedload(User.store))
+            .filter(
+                User.tenant_id == tenant_id,
+                User.role_id == role.id,
+                User.is_deleted.is_(False),
+            )
         )
-        if effective_store_id is not None:
-            query = query.filter(User.store_id == effective_store_id)
+
+        effective_store_filter: Optional[str] = None
+        if current_user_store_id is not None:
+            if store_id is not None and str(store_id).strip() != str(current_user_store_id):
+                raise ForbiddenException("Access denied to users of another store")
+            effective_store_filter = str(current_user_store_id)
+        elif store_id is not None:
+            effective_store_filter = str(store_id).strip()
+
+        if effective_store_filter is not None:
+            clean_store = effective_store_filter.lower()
+            if clean_store in ("null", "none", "unassigned", "0"):
+                query = query.filter(User.store_id.is_(None))
+            elif clean_store.isdigit():
+                query = query.filter(User.store_id == int(clean_store))
+            else:
+                from app.models.store import Store
+                query = query.join(User.store).filter(func.lower(Store.name) == clean_store)
+
+        if is_active is not None:
+            query = query.filter(User.is_active == is_active)
 
         total_users = query.count()
         offset = max(0, (page - 1) * page_size)
@@ -188,9 +232,25 @@ class RoleService:
             is_system=False,
         )
 
-        role = self.repo.create(role)
-        self.db.commit()
-        self.db.refresh(role)
+        try:
+            role = self.repo.create(role)
+            self.db.commit()
+            self.db.refresh(role)
+        except Exception as exc:
+            self.db.rollback()
+            exc_str = str(exc).lower()
+            if "unknown column 'description'" in exc_str or "no such column: description" in exc_str:
+                role = Role(
+                    tenant_id=tenant_id,
+                    name=clean_name,
+                    permissions=clean_perms,
+                    is_system=False,
+                )
+                role = self.repo.create(role)
+                self.db.commit()
+                self.db.refresh(role)
+            else:
+                raise ConflictException(f"Failed to create role: {exc}") from exc
 
         return RoleDetailResponse(
             id=role.id,
@@ -206,40 +266,62 @@ class RoleService:
     def update_role(
         self,
         tenant_id: int,
-        role_id: int,
+        role_id: int | str,
         data: RoleUpdate,
     ) -> RoleDetailResponse:
         if tenant_id is None:
             raise ConflictException("Tenant ID is required")
 
-        role = self.repo.get_by_id(role_id=role_id, tenant_id=tenant_id)
+        role = self.repo.get_by_id_or_name(role_id, tenant_id)
         if not role:
-            raise NotFoundException("Role not found")
+            raise NotFoundException(f"Role '{role_id}' not found")
+
+        role_name_clean = (role.name or "").lower()
 
         if data.name is not None:
             new_name = data.name.strip().lower()
-            if role.name in {"owner", "admin"} or role.is_system:
-                if new_name != role.name:
-                    raise ConflictException("Default administrator role names cannot be renamed")
+            if role_name_clean in {"owner", "admin"} or role.is_system:
+                if new_name != role_name_clean:
+                    raise ConflictException("Default administrator and system role names cannot be renamed")
 
             if new_name in {"superadmin", "owner", "admin"}:
                 raise ConflictException(f"Cannot rename role to reserved system role '{new_name}'")
 
-            if new_name != role.name:
+            if new_name != role_name_clean:
                 existing = self.repo.get_by_name(name=new_name, tenant_id=tenant_id)
                 if existing and existing.id != role.id:
                     raise ConflictException(f"Role '{new_name}' already exists in your organization")
                 role.name = new_name
 
-        if data.description is not None:
-            role.description = data.description
-
         if data.permissions is not None:
+            if role_name_clean in {"owner", "superadmin"} and len(data.permissions) == 0:
+                raise ForbiddenException("Cannot remove all permissions from Owner or Superadmin role")
             role.permissions = data.permissions
 
-        role = self.repo.update(role)
-        self.db.commit()
-        self.db.refresh(role)
+        desc_updated = False
+        if data.description is not None:
+            desc_updated = True
+            role.description = data.description
+
+        try:
+            role = self.repo.update(role)
+            self.db.commit()
+            self.db.refresh(role)
+        except Exception as exc:
+            self.db.rollback()
+            exc_str = str(exc).lower()
+            if desc_updated and ("unknown column 'description'" in exc_str or "no such column: description" in exc_str):
+                # Retry commit without modifying description column
+                role = self.repo.get_by_id(role.id, tenant_id)
+                if data.name is not None:
+                    role.name = data.name.strip().lower()
+                if data.permissions is not None:
+                    role.permissions = data.permissions
+                role = self.repo.update(role)
+                self.db.commit()
+                self.db.refresh(role)
+            else:
+                raise ConflictException(f"Failed to update role: {exc}") from exc
 
         user_count = self.repo.count_users_by_role(role_id=role.id, tenant_id=tenant_id)
 
@@ -247,8 +329,8 @@ class RoleService:
             id=role.id,
             tenant_id=role.tenant_id,
             name=role.name,
-            description=getattr(role, "description", None),
-            is_system=role.is_system,
+            description=getattr(role, "description", None) or DEFAULT_ROLE_DESCRIPTIONS.get(role_name_clean, None),
+            is_system=bool(role.is_system or role_name_clean in PROTECTED_CORE_ROLES),
             permissions=role.permissions or [],
             user_count=user_count,
             created_at=role.created_at,
@@ -257,37 +339,45 @@ class RoleService:
     def reassign_users(
         self,
         tenant_id: int,
-        role_id: int,
-        target_role_id: int,
+        role_id: int | str,
+        target_role_id: int | str,
     ) -> RoleReassignUsersResponse:
         if tenant_id is None:
             raise ConflictException("Tenant ID is required")
 
-        source_role = self.repo.get_by_id(role_id=role_id, tenant_id=tenant_id)
+        source_role = self.repo.get_by_id_or_name(role_id, tenant_id)
         if not source_role:
-            raise NotFoundException("Source role not found")
+            raise NotFoundException(f"Source role '{role_id}' not found")
 
-        target_role = self.repo.get_by_id(role_id=target_role_id, tenant_id=tenant_id)
+        target_role = self.repo.get_by_id_or_name(target_role_id, tenant_id)
         if not target_role:
-            raise NotFoundException("Target role not found")
+            raise NotFoundException(f"Target role '{target_role_id}' not found")
 
         if source_role.id == target_role.id:
             raise ConflictException("Source and target roles cannot be the same")
+
+        source_name_clean = source_role.name.strip().lower()
+        if source_name_clean in {"owner", "superadmin"}:
+            raise ForbiddenException("Cannot bulk reassign users from Owner or Superadmin role")
 
         target_name_clean = target_role.name.strip().lower()
         if target_name_clean in {"owner", "superadmin"}:
             raise ForbiddenException("Cannot bulk reassign users to Owner or Superadmin role")
 
-        reassigned_count = (
-            self.db.query(User)
-            .filter(
-                User.tenant_id == tenant_id,
-                User.role_id == role_id,
-                User.is_deleted.is_(False),
+        try:
+            reassigned_count = (
+                self.db.query(User)
+                .filter(
+                    User.tenant_id == tenant_id,
+                    User.role_id == source_role.id,
+                    User.is_deleted.is_(False),
+                )
+                .update({"role_id": target_role.id}, synchronize_session=False)
             )
-            .update({"role_id": target_role.id}, synchronize_session=False)
-        )
-        self.db.commit()
+            self.db.commit()
+        except Exception as exc:
+            self.db.rollback()
+            raise ConflictException(f"Failed to reassign users: {exc}") from exc
 
         return RoleReassignUsersResponse(
             message=f"Successfully reassigned {reassigned_count} user(s) to role '{target_role.name}'",
@@ -301,14 +391,14 @@ class RoleService:
     def reset_default_role(
         self,
         tenant_id: int,
-        role_id: int,
+        role_id: int | str,
     ) -> RoleDetailResponse:
         if tenant_id is None:
             raise ConflictException("Tenant ID is required")
 
-        role = self.repo.get_by_id(role_id=role_id, tenant_id=tenant_id)
+        role = self.repo.get_by_id_or_name(role_id, tenant_id)
         if not role:
-            raise NotFoundException("Role not found")
+            raise NotFoundException(f"Role '{role_id}' not found")
 
         role_name_clean = role.name.strip().lower()
         if role_name_clean not in DEFAULT_ROLE_PERMISSIONS:
@@ -319,10 +409,25 @@ class RoleService:
         default_perms = list(DEFAULT_ROLE_PERMISSIONS[role_name_clean])
         role.permissions = default_perms
         role.is_system = True
-        role.description = DEFAULT_ROLE_DESCRIPTIONS.get(role_name_clean, getattr(role, "description", None))
-        role = self.repo.update(role)
-        self.db.commit()
-        self.db.refresh(role)
+        desc = DEFAULT_ROLE_DESCRIPTIONS.get(role_name_clean, getattr(role, "description", None))
+        try:
+            if hasattr(role, "description"):
+                role.description = desc
+            role = self.repo.update(role)
+            self.db.commit()
+            self.db.refresh(role)
+        except Exception as exc:
+            self.db.rollback()
+            exc_str = str(exc).lower()
+            if "unknown column 'description'" in exc_str or "no such column: description" in exc_str:
+                role = self.repo.get_by_id(role.id, tenant_id)
+                role.permissions = default_perms
+                role.is_system = True
+                role = self.repo.update(role)
+                self.db.commit()
+                self.db.refresh(role)
+            else:
+                raise ConflictException(f"Failed to reset role: {exc}") from exc
 
         user_count = self.repo.count_users_by_role(role_id=role.id, tenant_id=tenant_id)
 
@@ -330,8 +435,8 @@ class RoleService:
             id=role.id,
             tenant_id=role.tenant_id,
             name=role.name,
-            description=getattr(role, "description", None),
-            is_system=role.is_system,
+            description=desc,
+            is_system=True,
             permissions=role.permissions or [],
             user_count=user_count,
             created_at=role.created_at,
@@ -387,15 +492,16 @@ class RoleService:
             modules=module_groups,
         )
 
-    def delete_role(self, tenant_id: int, role_id: int) -> RoleDeleteResponse:
+    def delete_role(self, tenant_id: int, role_id: int | str) -> RoleDeleteResponse:
         if tenant_id is None:
             raise ConflictException("Tenant ID is required")
 
-        role = self.repo.get_by_id(role_id=role_id, tenant_id=tenant_id)
+        role = self.repo.get_by_id_or_name(role_id, tenant_id)
         if not role:
-            raise NotFoundException("Role not found")
+            raise NotFoundException(f"Role '{role_id}' not found")
 
-        if role.is_system or role.name in PROTECTED_CORE_ROLES:
+        role_name_clean = (role.name or "").lower()
+        if role.is_system or role_name_clean in PROTECTED_CORE_ROLES:
             raise ConflictException(f"Default role '{role.name}' is a core system role and cannot be deleted")
 
         user_count = self.repo.count_users_by_role(role_id=role.id, tenant_id=tenant_id, include_deleted=False)
@@ -405,30 +511,49 @@ class RoleService:
                 "Please reassign these users to another role before deleting."
             )
 
-        # For any soft-deleted users referencing this role, reassign them to default 'staff' role
+        # For any soft-deleted users referencing this role, reassign them to a safe fallback role
         fallback_role = self.repo.get_by_name("staff", tenant_id)
-        if fallback_role and fallback_role.id != role_id:
-            self.db.query(User).filter(
-                User.role_id == role_id,
-                User.tenant_id == tenant_id,
-            ).update({"role_id": fallback_role.id}, synchronize_session=False)
+        if not fallback_role or fallback_role.id == role.id:
+            all_tenant_roles = self.repo.list_by_tenant(tenant_id)
+            for r in all_tenant_roles:
+                if r.id != role.id and (r.name or "").lower() not in {"owner", "superadmin"}:
+                    fallback_role = r
+                    break
 
-        role_name = role.name
-        self.repo.delete(role)
-        self.db.commit()
+        try:
+            if fallback_role and fallback_role.id != role.id:
+                self.db.query(User).filter(
+                    User.role_id == role.id,
+                    User.tenant_id == tenant_id,
+                ).update({"role_id": fallback_role.id}, synchronize_session=False)
+
+            role_name = role.name
+            del_id = role.id
+            self.repo.delete(role)
+            self.db.commit()
+        except Exception as exc:
+            self.db.rollback()
+            raise ConflictException(f"Failed to delete role: {exc}") from exc
 
         return RoleDeleteResponse(
             message=f"Role '{role_name}' deleted successfully",
-            deleted_role_id=role_id,
+            deleted_role_id=del_id,
         )
 
     @staticmethod
-    def get_available_permissions() -> list[dict]:
+    def get_available_permissions(module: Optional[str] = None) -> list[dict]:
+        if module:
+            clean_mod = module.strip().lower()
+            return [g for g in AVAILABLE_PERMISSIONS if g["module"].lower() == clean_mod]
         return AVAILABLE_PERMISSIONS
 
     @staticmethod
-    def get_simple_permissions_map() -> dict[str, list[str]]:
+    def get_simple_permissions_map(module: Optional[str] = None) -> dict[str, list[str]]:
+        groups = AVAILABLE_PERMISSIONS
+        if module:
+            clean_mod = module.strip().lower()
+            groups = [g for g in AVAILABLE_PERMISSIONS if g["module"].lower() == clean_mod]
         return {
             group["module"]: [p["code"] for p in group["permissions"]]
-            for group in AVAILABLE_PERMISSIONS
+            for group in groups
         }

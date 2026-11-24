@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.exceptions import ForbiddenException
+from app.core.exceptions import AppException, ForbiddenException
 from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.role import (
@@ -26,41 +26,70 @@ router = APIRouter(
 )
 
 
+def resolve_role_param(
+    role_id: Annotated[
+        str,
+        Path(description="Role ID (positive integer up to 999999) or Role Name (e.g. 'cashier')"),
+    ],
+) -> str:
+    cleaned = role_id.strip()
+    try:
+        val = int(cleaned)
+        if val <= 0 or val > 999999:
+            raise AppException(
+                "Role ID must be a positive integer up to 999999",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+    except ValueError:
+        pass
+    return cleaned
+
+
 @router.get(
     "",
     response_model=list[RoleDetailResponse],
     summary="List Roles",
-    description="Lists all roles for the authenticated tenant, with optional search and system/custom filtering.",
+    description="Lists all roles for the authenticated tenant, with optional search, exact name match, and system/custom filtering.",
 )
 def list_roles(
-    search: Optional[str] = Query(None, description="Search roles by name"),
+    search: Optional[str] = Query(None, description="Search roles by name or role ID"),
+    name: Optional[str] = Query(None, description="Exact match filter by role name (e.g. 'cashier')"),
+    role_id: Optional[int] = Query(None, description="Direct filter by numeric Role ID"),
     is_system: Optional[bool] = Query(None, description="Filter system roles (true) or custom roles (false)"),
+    skip: int = Query(0, ge=0, description="Offset for pagination"),
+    limit: int = Query(100, ge=1, le=100, description="Limit items returned"),
     current_user: User = Depends(require_permission("users:read")),
     db: Session = Depends(get_db),
 ):
     return RoleService(db).list_roles(
         tenant_id=current_user.tenant_id,
         search=search,
+        name=name,
+        role_id=role_id,
         is_system=is_system,
+        skip=skip,
+        limit=limit,
     )
 
 
 @router.get(
     "/permissions",
-    response_model=dict[str, list[str]] | list[PermissionGroup],
+    response_model=list[PermissionGroup] | dict[str, list[str]],
     summary="List Available Permissions",
-    description="Returns all system permissions organized by module. Defaults to a clean, simple module-to-permissions map.",
+    description="Returns all system permissions organized by module. Defaults to full metadata group list ('detailed'), or clean {module: [codes]} map ('simple').",
 )
 def list_permissions(
     format: Optional[str] = Query(
-        default="simple",
-        description="Format: 'simple' returns clean {module: [permissions]} dictionary, 'detailed' returns full metadata list",
+        default="detailed",
+        pattern="^(detailed|simple)$",
+        description="Format: 'detailed' (default) returns full metadata group list, 'simple' returns clean {module: [permissions]} dictionary",
     ),
+    module: Optional[str] = Query(None, description="Filter permissions for a specific module (e.g. 'billing', 'inventory')"),
     current_user: User = Depends(require_permission("users:read")),
 ):
-    if format == "detailed":
-        return RoleService.get_available_permissions()
-    return RoleService.get_simple_permissions_map()
+    if format == "simple":
+        return RoleService.get_simple_permissions_map(module=module)
+    return RoleService.get_available_permissions(module=module)
 
 
 @router.get(
@@ -80,10 +109,10 @@ def get_roles_matrix(
     "/{role_id}",
     response_model=RoleDetailResponse,
     summary="Get Role Details",
-    description="Gets detailed information about a specific role, including assigned user count and permissions.",
+    description="Gets detailed information about a specific role by Role ID or Role Name, including assigned user count and permissions.",
 )
 def get_role(
-    role_id: Annotated[int, Path(gt=0, le=999999, description="Role ID must be a positive integer up to 999999")],
+    role_id: Annotated[str, Depends(resolve_role_param)],
     current_user: User = Depends(require_permission("users:read")),
     db: Session = Depends(get_db),
 ):
@@ -94,13 +123,14 @@ def get_role(
     "/{role_id}/users",
     response_model=RoleUsersResponse,
     summary="List Users Assigned to Role",
-    description="Returns a paginated list of all active users currently assigned to this role, with optional store filtering.",
+    description="Returns a paginated list of all active users currently assigned to this role, with optional store and status filtering.",
 )
 def list_role_users(
-    role_id: Annotated[int, Path(gt=0, le=999999, description="Role ID must be a positive integer up to 999999")],
+    role_id: Annotated[str, Depends(resolve_role_param)],
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    store_id: Optional[int] = Query(None, description="Filter users by assigned store ID"),
+    store_id: Optional[str] = Query(None, description="Filter users by assigned store ID (e.g. 1), or 'null'/'unassigned' for users without a store"),
+    is_active: Optional[bool] = Query(None, description="Filter active (true) or inactive (false) users"),
     current_user: User = Depends(require_permission("users:read")),
     db: Session = Depends(get_db),
 ):
@@ -110,6 +140,7 @@ def list_role_users(
         page=page,
         page_size=page_size,
         store_id=store_id,
+        is_active=is_active,
         current_user_store_id=current_user.store_id,
     )
 
@@ -139,7 +170,7 @@ def create_role(
     description="Reassigns all active users from this role to a target role in one atomic operation. Useful before deleting or deprecating a role.",
 )
 def reassign_role_users(
-    role_id: Annotated[int, Path(gt=0, le=999999, description="Source Role ID")],
+    role_id: Annotated[str, Depends(resolve_role_param)],
     data: RoleReassignUsersRequest,
     current_user: User = Depends(require_permission("users:create")),
     db: Session = Depends(get_db),
@@ -161,7 +192,7 @@ def reassign_role_users(
     description="Resets an official system role (manager, cashier, accountant, etc.) back to factory default permissions.",
 )
 def reset_role_to_default(
-    role_id: Annotated[int, Path(gt=0, le=999999, description="Role ID to reset")],
+    role_id: Annotated[str, Depends(resolve_role_param)],
     current_user: User = Depends(require_permission("users:create")),
     db: Session = Depends(get_db),
 ):
@@ -186,7 +217,7 @@ def reset_role_to_default(
     include_in_schema=False,
 )
 def update_role(
-    role_id: Annotated[int, Path(gt=0, le=999999, description="Role ID must be a positive integer up to 999999")],
+    role_id: Annotated[str, Depends(resolve_role_param)],
     data: RoleUpdate,
     current_user: User = Depends(require_permission("users:update")),
     db: Session = Depends(get_db),
@@ -208,7 +239,7 @@ def update_role(
     description="Store Owner deletes a custom role. System/core roles and roles with active assigned users cannot be deleted.",
 )
 def delete_role(
-    role_id: Annotated[int, Path(gt=0, le=999999, description="Role ID must be a positive integer up to 999999")],
+    role_id: Annotated[str, Depends(resolve_role_param)],
     current_user: User = Depends(require_permission("users:delete")),
     db: Session = Depends(get_db),
 ):

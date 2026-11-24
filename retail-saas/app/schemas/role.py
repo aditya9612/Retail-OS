@@ -206,6 +206,8 @@ def get_all_valid_permission_codes() -> set[str]:
         for group in AVAILABLE_PERMISSIONS
         for p in group["permissions"]
     }
+    # Allow wildcard for superadmin / owner administrative permissions
+    valid.add("*")
     # Backward compatibility: accept broad :write permissions as valid codes
     for group in AVAILABLE_PERMISSIONS:
         for p in group["permissions"]:
@@ -407,10 +409,9 @@ class RoleUsersResponse(BaseModel):
 
 
 class RoleReassignUsersRequest(BaseModel):
-    target_role_id: int = Field(
+    target_role_id: int | str = Field(
         ...,
-        gt=0,
-        description="Role ID to which all active users will be moved",
+        description="Target Role ID (e.g. 2) or Target Role Name (e.g. 'staff') to which all active users will be moved",
         examples=[2],
     )
 

@@ -22,7 +22,10 @@ class RoleRepository:
     ) -> Optional[Role]:
         query = self.db.query(Role).filter(Role.id == role_id)
         if tenant_id is not None:
-            query = query.filter(Role.tenant_id == tenant_id)
+            query = query.filter(
+                (Role.tenant_id == tenant_id)
+                | (Role.tenant_id.is_(None) & (Role.is_system == True))
+            )
         return query.first()
 
     def get_by_name(
@@ -31,25 +34,57 @@ class RoleRepository:
         tenant_id: int,
     ) -> Optional[Role]:
         name_clean = name.strip().lower()
-        return (
+        roles = (
             self.db.query(Role)
             .filter(
                 func.lower(Role.name) == name_clean,
-                Role.tenant_id == tenant_id,
+                (Role.tenant_id == tenant_id)
+                | (Role.tenant_id.is_(None) & (Role.is_system == True)),
             )
-            .first()
+            .order_by(Role.tenant_id.desc().nullslast())
+            .all()
         )
+        return roles[0] if roles else None
+
+    def get_by_id_or_name(
+        self,
+        identifier: int | str,
+        tenant_id: int,
+    ) -> Optional[Role]:
+        if isinstance(identifier, int):
+            return self.get_by_id(identifier, tenant_id)
+        ident_str = str(identifier).strip()
+        if ident_str.isdigit():
+            role = self.get_by_id(int(ident_str), tenant_id)
+            if role:
+                return role
+        return self.get_by_name(ident_str, tenant_id)
 
     def list_by_tenant(
         self,
         tenant_id: int,
     ) -> list[Role]:
-        return (
+        roles = (
             self.db.query(Role)
-            .filter(Role.tenant_id == tenant_id)
+            .filter(
+                (Role.tenant_id == tenant_id)
+                | (Role.tenant_id.is_(None) & (Role.is_system == True))
+            )
             .order_by(Role.id.asc())
             .all()
         )
+        # Deduplicate by role name (case-insensitive), giving priority to tenant-specific roles
+        seen_names: set[str] = set()
+        deduped: list[Role] = []
+        # Sort tenant-specific first so they take precedence over global roles with same name
+        sorted_roles = sorted(roles, key=lambda r: 0 if r.tenant_id == tenant_id else 1)
+        for r in sorted_roles:
+            r_name = (r.name or "").lower()
+            if r_name not in seen_names:
+                seen_names.add(r_name)
+                deduped.append(r)
+        deduped.sort(key=lambda r: r.id)
+        return deduped
 
     def count_users_by_role(
         self,
