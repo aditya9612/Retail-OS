@@ -301,6 +301,50 @@ def register_exception_handlers(app):
 
         if (
             request.method in ("POST", "PUT", "PATCH")
+            and "/document-settings" in clean_path
+        ):
+            has_json_invalid = any(err.get("type") == "json_invalid" for err in errors)
+            if has_json_invalid:
+                try:
+                    raw_body = await request.body()
+                    body_text = raw_body.decode("utf-8", errors="replace")
+                except Exception:
+                    body_text = ""
+
+                bool_match = re.search(r'["\'](show_[a-z_]+|is_[a-z_]+)["\']\s*:\s*([^"{\[\d\s,]+)', body_text)
+                if bool_match:
+                    field_name = bool_match.group(1)
+                    msg = f"Invalid JSON format. Expected a boolean: true or false for '{field_name}'."
+                    err_type = "bool_parsing"
+                    ctx_err = f"Expected a boolean: true or false for '{field_name}'."
+                    formatted = {
+                        "success": False,
+                        "message": f"Validation failed: '{field_name}': {msg}",
+                        "detail": [
+                            {
+                                "type": err_type,
+                                "loc": ["body", field_name],
+                                "msg": msg,
+                                "input": None,
+                                "ctx": {"error": ctx_err},
+                            }
+                        ],
+                        "errors": [
+                            {
+                                "field": field_name,
+                                "message": msg,
+                                "type": err_type,
+                                "loc": ["body", field_name],
+                            }
+                        ],
+                    }
+                    return JSONResponse(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        content=formatted,
+                    )
+
+        if (
+            request.method in ("POST", "PUT", "PATCH")
             and "/categories" in clean_path
         ):
             has_json_invalid = any(err.get("type") == "json_invalid" for err in errors)

@@ -247,6 +247,7 @@ def get_top_products(
     "/storefront/settings",
     response_model=StorefrontSettingResponse,
     summary="Get All Store Management Settings (Branding, SEO, Pages, Contact, Advanced)",
+    include_in_schema=False,
 )
 def get_storefront_settings(
     store_id: Optional[int] = Query(
@@ -268,6 +269,7 @@ def get_storefront_settings(
     "/storefront/settings",
     response_model=StorefrontSettingResponse,
     summary="Save Store Management Settings changes (Invoked by Save Changes button)",
+    include_in_schema=False,
 )
 def update_storefront_settings(
     data: StorefrontSettingUpdate,
@@ -291,6 +293,7 @@ def update_storefront_settings(
     "/storefront/toggle-status",
     response_model=StorefrontSettingResponse,
     summary="Toggle Store Online Switch (Store Online)",
+    include_in_schema=False,
 )
 def toggle_store_online_status(
     data: StorefrontStatusToggleRequest,
@@ -314,6 +317,7 @@ def toggle_store_online_status(
     "/storefront/upload-asset",
     response_model=StorefrontUploadResponse,
     summary="Upload media assets (Store Logo, Store Banner, Favicon)",
+    include_in_schema=False,
 )
 async def upload_storefront_asset(
     asset_type: str = Form(..., description="Asset type: logo, banner, favicon, or og_image"),
@@ -342,6 +346,7 @@ async def upload_storefront_asset(
     "/storefront/seo-domain",
     response_model=StorefrontSEODomainResponse,
     summary="Get SEO & Domain Settings Tab data",
+    include_in_schema=False,
 )
 def get_seo_domain_settings(
     store_id: Optional[int] = Query(default=None, gt=0),
@@ -359,6 +364,7 @@ def get_seo_domain_settings(
     "/storefront/seo-domain",
     response_model=StorefrontSEODomainResponse,
     summary="Save SEO & Domain Settings Tab data",
+    include_in_schema=False,
 )
 def update_seo_domain_settings(
     data: StorefrontSEODomainUpdate,
@@ -379,6 +385,7 @@ def update_seo_domain_settings(
     "/storefront/pages",
     response_model=StorefrontPagesResponse,
     summary="Get Store Pages Tab data (About Us, Contact, Privacy, Terms, Returns)",
+    include_in_schema=False,
 )
 def get_store_pages(
     store_id: Optional[int] = Query(default=None, gt=0),
@@ -396,6 +403,7 @@ def get_store_pages(
     "/storefront/pages",
     response_model=StorefrontPagesResponse,
     summary="Save Store Pages Tab data",
+    include_in_schema=False,
 )
 def update_store_pages(
     data: StorefrontPagesUpdate,
@@ -416,6 +424,7 @@ def update_store_pages(
     "/storefront/contact-social",
     response_model=StorefrontContactSocialResponse,
     summary="Get Contact & Social Media Links Tab data",
+    include_in_schema=False,
 )
 def get_contact_social_settings(
     store_id: Optional[int] = Query(default=None, gt=0),
@@ -433,6 +442,7 @@ def get_contact_social_settings(
     "/storefront/contact-social",
     response_model=StorefrontContactSocialResponse,
     summary="Save Contact & Social Media Links Tab data",
+    include_in_schema=False,
 )
 def update_contact_social_settings(
     data: StorefrontContactSocialUpdate,
@@ -453,6 +463,7 @@ def update_contact_social_settings(
     "/storefront/advanced",
     response_model=StorefrontAdvancedSettingsResponse,
     summary="Get Advanced Feature Switches Tab data (7 Toggles)",
+    include_in_schema=False,
 )
 def get_advanced_settings(
     store_id: Optional[int] = Query(default=None, gt=0),
@@ -470,6 +481,7 @@ def get_advanced_settings(
     "/storefront/advanced",
     response_model=StorefrontAdvancedSettingsResponse,
     summary="Save Advanced Feature Switches Tab data",
+    include_in_schema=False,
 )
 def update_advanced_settings(
     data: StorefrontAdvancedSettingsUpdate,
@@ -490,6 +502,7 @@ def update_advanced_settings(
     "/storefront/public",
     response_model=StorefrontSettingResponse,
     summary="Get public storefront profile (Customer-facing, no authentication)",
+    include_in_schema=False,
 )
 def get_public_storefront(
     subdomain: Optional[str] = Query(default=None, description="Subdomain slug of store"),

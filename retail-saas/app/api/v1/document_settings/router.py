@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path as FastAPIPath, Query, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -21,7 +21,22 @@ from app.schemas.document_setting import (
     DocumentSettingResponse,
     DocumentSettingUpdate,
 )
+from app.schemas.storefront import (
+    StorefrontAdvancedSettingsResponse,
+    StorefrontAdvancedSettingsUpdate,
+    StorefrontContactSocialResponse,
+    StorefrontContactSocialUpdate,
+    StorefrontPagesResponse,
+    StorefrontPagesUpdate,
+    StorefrontSEODomainResponse,
+    StorefrontSEODomainUpdate,
+    StorefrontSettingResponse,
+    StorefrontSettingUpdate,
+    StorefrontStatusToggleRequest,
+    StorefrontUploadResponse,
+)
 from app.services.document_settings_service import DocumentSettingsService
+from app.services.storefront_service import StorefrontService
 
 router = APIRouter(prefix="/document-settings", tags=["Document Settings"])
 
@@ -50,14 +65,14 @@ def _require_tenant_id(user: User) -> int:
     return user.tenant_id
 
 
-@router.get("", response_model=Optional[DocumentSettingResponse])
+@router.get("", response_model=Optional[DocumentSettingResponse], summary="Get Document & Store Settings")
 def get_document_setting(
-    store_id: int | None = Query(default=None, gt=0),
+    store_id: int | None = Query(default=None, gt=0, description="Optional store ID (> 0). If omitted, retrieves tenant-wide company setting."),
     user: User = Depends(require_settings_read),
     db: Session = Depends(get_db),
 ):
     """
-    Retrieves the raw DocumentSetting record for the authenticated tenant (and optional store).
+    Retrieves the unified document branding and website storefront settings.
     """
     tenant_id = _require_tenant_id(user)
     if store_id is not None:
@@ -73,12 +88,35 @@ def get_document_setting(
         tenant_id=tenant_id,
         store_id=store_id,
     )
-    return setting
+    if not setting:
+        return None
+
+    res = DocumentSettingResponse.model_validate(setting)
+    from app.models.storefront_setting import StorefrontSetting
+    sf_query = db.query(StorefrontSetting).filter(StorefrontSetting.tenant_id == tenant_id)
+    if store_id is not None:
+        sf_setting = sf_query.filter(StorefrontSetting.store_id == store_id).first()
+    else:
+        sf_setting = sf_query.filter(StorefrontSetting.store_id.is_(None)).first()
+
+    if sf_setting:
+        for attr in [
+            "is_online", "tagline", "banner_url", "favicon_url", "theme_name",
+            "custom_domain", "url_slug", "meta_title", "meta_description", "keywords",
+            "google_analytics_id", "about_us", "contact_us", "privacy_policy",
+            "return_policy", "whatsapp_number", "instagram_url", "facebook_url",
+            "twitter_url", "enable_product_reviews", "show_out_of_stock", "guest_checkout",
+            "wishlist_enabled", "auto_sync_inventory", "enable_coupons", "gst_invoice_enabled"
+        ]:
+            val = getattr(sf_setting, attr, None)
+            if val is not None:
+                setattr(res, attr, val)
+    return res
 
 
-@router.get("/effective", response_model=BrandingContext)
+@router.get("/effective", response_model=BrandingContext, summary="Get Effective Branding")
 def get_effective_branding(
-    store_id: int | None = Query(default=None, gt=0),
+    store_id: int | None = Query(default=None, gt=0, description="Optional store ID (> 0) to resolve effective branding for."),
     user: User = Depends(require_settings_read),
     db: Session = Depends(get_db),
 ):
@@ -102,15 +140,15 @@ def get_effective_branding(
     )
 
 
-@router.put("", response_model=DocumentSettingResponse)
+@router.put("", response_model=DocumentSettingResponse, summary="Update Document & Store Settings")
 def update_document_setting(
     payload: DocumentSettingUpdate,
-    store_id: int | None = Query(default=None, gt=0),
+    store_id: int | None = Query(default=None, gt=0, description="Optional store ID (> 0). If omitted, updates tenant-wide company setting."),
     user: User = Depends(require_settings_write),
     db: Session = Depends(get_db),
 ):
     """
-    Creates or updates DocumentSetting branding, display flags, sequence rules and terms for the tenant (and optional store).
+    Updates unified branding, display flags, sequence rules, terms, and storefront website settings.
     """
     tenant_id = _require_tenant_id(user)
     res_setting = DocumentSettingsService(db).create_or_update_setting(
@@ -119,14 +157,27 @@ def update_document_setting(
         store_id=store_id,
     )
 
-    # Auto-sync branding and contact info to StorefrontSetting if exists
+    # Auto-sync branding and contact info to StorefrontSetting
     from app.models.storefront_setting import StorefrontSetting
     sf_query = db.query(StorefrontSetting).filter(StorefrontSetting.tenant_id == tenant_id)
     if store_id is not None:
         sf_setting = sf_query.filter(StorefrontSetting.store_id == store_id).first()
     else:
         sf_setting = sf_query.filter(StorefrontSetting.store_id.is_(None)).first()
-    if sf_setting:
+
+    if not sf_setting:
+        sf_setting = StorefrontSetting(
+            tenant_id=tenant_id,
+            store_id=store_id,
+            store_name=payload.business_name or "RetailOS Shop",
+            address=payload.address,
+            contact_phone=payload.phone,
+            contact_email=payload.email,
+            logo_url=payload.logo_path,
+            terms_conditions=payload.terms_and_conditions,
+        )
+        db.add(sf_setting)
+    else:
         if payload.business_name is not None:
             sf_setting.store_name = payload.business_name
         if payload.address is not None:
@@ -137,7 +188,24 @@ def update_document_setting(
             sf_setting.contact_email = payload.email
         if payload.logo_path is not None:
             sf_setting.logo_url = payload.logo_path
-        db.commit()
+        if payload.terms_and_conditions is not None:
+            sf_setting.terms_conditions = payload.terms_and_conditions
+
+    # Update any storefront website fields provided in payload
+    for attr in [
+        "is_online", "tagline", "banner_url", "favicon_url", "theme_name",
+        "custom_domain", "url_slug", "meta_title", "meta_description", "keywords",
+        "google_analytics_id", "about_us", "contact_us", "privacy_policy",
+        "return_policy", "whatsapp_number", "instagram_url", "facebook_url",
+        "twitter_url", "enable_product_reviews", "show_out_of_stock", "guest_checkout",
+        "wishlist_enabled", "auto_sync_inventory", "enable_coupons", "gst_invoice_enabled"
+    ]:
+        val = getattr(payload, attr, None)
+        if val is not None:
+            setattr(sf_setting, attr, val)
+
+    db.commit()
+    db.refresh(sf_setting)
 
     # Auto-sync branding to the Store model so legacy code (thermal/PDF) picks it up
     if store_id is not None:
@@ -161,12 +229,37 @@ def update_document_setting(
                 store_obj.logo_url = payload.logo_path
             db.commit()
 
-    return res_setting
+    res = DocumentSettingResponse.model_validate(res_setting)
+    for attr in [
+        "is_online", "tagline", "banner_url", "favicon_url", "theme_name",
+        "custom_domain", "url_slug", "meta_title", "meta_description", "keywords",
+        "google_analytics_id", "about_us", "contact_us", "privacy_policy",
+        "return_policy", "whatsapp_number", "instagram_url", "facebook_url",
+        "twitter_url", "enable_product_reviews", "show_out_of_stock", "guest_checkout",
+        "wishlist_enabled", "auto_sync_inventory", "enable_coupons", "gst_invoice_enabled"
+    ]:
+        val = getattr(sf_setting, attr, None)
+        if val is not None:
+            setattr(res, attr, val)
+    return res
 
 
-@router.delete("", response_model=DocumentSettingDeleteResponse, status_code=status.HTTP_200_OK)
+@router.post("", response_model=DocumentSettingResponse, summary="Create / Update Document Setting (POST)")
+def create_document_setting_post(
+    payload: DocumentSettingUpdate,
+    store_id: int | None = Query(default=None, gt=0, description="Optional store ID (> 0). If omitted, creates/updates company setting."),
+    user: User = Depends(require_settings_write),
+    db: Session = Depends(get_db),
+):
+    """
+    POST alias for creating or updating DocumentSetting branding, display flags, sequence rules and terms for the tenant (and optional store).
+    """
+    return update_document_setting(payload=payload, store_id=store_id, user=user, db=db)
+
+
+@router.delete("", response_model=DocumentSettingDeleteResponse, status_code=status.HTTP_200_OK, summary="Delete Document Setting")
 def delete_document_setting(
-    store_id: int | None = Query(default=None, gt=0),
+    store_id: int | None = Query(default=None, gt=0, description="Optional store ID (> 0). If omitted, resets company setting to defaults."),
     user: User = Depends(require_settings_write),
     db: Session = Depends(get_db),
 ):
@@ -179,11 +272,11 @@ def delete_document_setting(
     return {"message": f"Document settings for {scope} deleted successfully. Reverted to defaults."}
 
 
-@router.get("/preview")
+@router.get("/preview", summary="Preview Document")
 def preview_document(
-    store_id: int | None = Query(default=None, gt=0),
-    document_type: Literal["invoice", "bill"] = Query(default="invoice"),
-    mode: Literal["download", "preview"] = Query(default="preview", description="Delivery mode: 'preview' (visual PNG preview in Swagger UI / browser) or 'download' (attachment .pdf)"),
+    store_id: int | None = Query(default=None, gt=0, description="Optional store ID (> 0) to preview branding for."),
+    document_type: Literal["invoice", "bill"] = Query(default="invoice", description="Document type to render: 'invoice' (Tax Invoice) or 'bill' (Retail Sale Bill)"),
+    mode: Literal["download", "preview"] = Query(default="download", description="Delivery mode: 'download' (attachment .pdf) or 'preview' (visual PNG preview in Swagger UI / browser)"),
     user: User = Depends(require_settings_read),
     db: Session = Depends(get_db),
 ):
@@ -274,10 +367,10 @@ def preview_document(
     )
 
 
-@router.post("/logo", response_model=DocumentLogoUploadResponse)
+@router.post("/logo", response_model=DocumentLogoUploadResponse, summary="Upload Document Logo", include_in_schema=False)
 async def upload_document_logo(
-    file: UploadFile = File(...),
-    store_id: int | None = Query(default=None, gt=0),
+    file: UploadFile = File(..., description="Logo image file (PNG or JPEG, maximum size 5MB)"),
+    store_id: int | None = Query(default=None, gt=0, description="Optional store ID (> 0). If omitted, uploads company master logo."),
     user: User = Depends(require_settings_write),
     db: Session = Depends(get_db),
 ):
@@ -406,9 +499,9 @@ async def upload_document_logo(
     }
 
 
-@router.delete("/logo", response_model=DocumentLogoDeleteResponse)
+@router.delete("/logo", response_model=DocumentLogoDeleteResponse, summary="Delete Logo")
 def delete_logo(
-    store_id: int | None = Query(default=None, gt=0),
+    store_id: int | None = Query(default=None, gt=0, description="Optional store ID (> 0). If omitted, deletes company master logo."),
     user: User = Depends(require_settings_write),
     db: Session = Depends(get_db),
 ):
@@ -470,3 +563,146 @@ def delete_logo(
         "message": "Logo deleted successfully",
         "setting": DocumentSettingResponse.model_validate(setting),
     }
+
+
+# ============================================================================
+# UNIFIED WEBSITE & STOREFRONT CONTROL ENDPOINTS
+# ============================================================================
+
+@router.patch("/toggle-status", summary="Toggle Store Online Switch")
+def toggle_store_online_status(
+    data: StorefrontStatusToggleRequest,
+    store_id: Optional[int] = Query(default=None, gt=0, description="Optional store ID"),
+    user: User = Depends(require_settings_write),
+    db: Session = Depends(get_db),
+):
+    tenant_id = _require_tenant_id(user)
+    return StorefrontService(db).toggle_online_status(
+        tenant_id=tenant_id,
+        store_id=store_id,
+        is_online=data.is_online,
+    )
+
+
+@router.post("/upload-asset", response_model=StorefrontUploadResponse, summary="Upload Media Asset (Logo, Banner, Favicon)")
+async def upload_storefront_asset(
+    file: UploadFile = File(..., description="Media file (PNG, JPG, JPEG, SVG, ICO, WEBP - max 5MB)"),
+    asset_type: str = Form(default="logo", description="Asset type: logo (default), banner, favicon, or og_image"),
+    store_id: Optional[int] = Query(default=None, gt=0, description="Optional store ID (> 0). If omitted, uploads company master asset."),
+    user: User = Depends(require_settings_write),
+    db: Session = Depends(get_db),
+):
+    """
+    Unified media asset upload endpoint for store/company logo, website banner, and browser favicon.
+    Automatically updates both the online website and all billing documents (invoices/bills) in real time.
+    """
+    tenant_id = _require_tenant_id(user)
+    content = await file.read()
+    res = StorefrontService(db).upload_asset(
+        tenant_id=tenant_id,
+        store_id=store_id,
+        asset_type=asset_type,
+        filename=file.filename or "",
+        content=content,
+    )
+    if res.asset_type == "logo":
+        res.logo_url = res.url
+        setting = DocumentSettingsService(db).get_setting(tenant_id=tenant_id, store_id=store_id)
+        if setting:
+            res.setting = DocumentSettingResponse.model_validate(setting)
+    return res
+
+
+@router.get("/seo-domain", response_model=StorefrontSEODomainResponse, summary="Get SEO & Domain Settings")
+def get_seo_domain_settings(
+    store_id: Optional[int] = Query(default=None, gt=0),
+    user: User = Depends(require_settings_read),
+    db: Session = Depends(get_db),
+):
+    tenant_id = _require_tenant_id(user)
+    return StorefrontService(db).get_seo_domain(tenant_id=tenant_id, store_id=store_id)
+
+
+@router.put("/seo-domain", response_model=StorefrontSEODomainResponse, summary="Update SEO & Domain Settings")
+def update_seo_domain_settings(
+    data: StorefrontSEODomainUpdate,
+    store_id: Optional[int] = Query(default=None, gt=0),
+    user: User = Depends(require_settings_write),
+    db: Session = Depends(get_db),
+):
+    tenant_id = _require_tenant_id(user)
+    return StorefrontService(db).update_seo_domain(tenant_id=tenant_id, store_id=store_id, data=data)
+
+
+@router.get("/pages", response_model=StorefrontPagesResponse, summary="Get Store Pages (About Us, Contact, Privacy, Terms, Returns)")
+def get_store_pages(
+    store_id: Optional[int] = Query(default=None, gt=0),
+    user: User = Depends(require_settings_read),
+    db: Session = Depends(get_db),
+):
+    tenant_id = _require_tenant_id(user)
+    return StorefrontService(db).get_pages(tenant_id=tenant_id, store_id=store_id)
+
+
+@router.put("/pages", response_model=StorefrontPagesResponse, summary="Update Store Pages")
+def update_store_pages(
+    data: StorefrontPagesUpdate,
+    store_id: Optional[int] = Query(default=None, gt=0),
+    user: User = Depends(require_settings_write),
+    db: Session = Depends(get_db),
+):
+    tenant_id = _require_tenant_id(user)
+    return StorefrontService(db).update_pages(tenant_id=tenant_id, store_id=store_id, data=data)
+
+
+@router.get("/contact-social", response_model=StorefrontContactSocialResponse, summary="Get Contact & Social Media Links")
+def get_contact_social(
+    store_id: Optional[int] = Query(default=None, gt=0),
+    user: User = Depends(require_settings_read),
+    db: Session = Depends(get_db),
+):
+    tenant_id = _require_tenant_id(user)
+    return StorefrontService(db).get_contact_social(tenant_id=tenant_id, store_id=store_id)
+
+
+@router.put("/contact-social", response_model=StorefrontContactSocialResponse, summary="Update Contact & Social Media Links")
+def update_contact_social(
+    data: StorefrontContactSocialUpdate,
+    store_id: Optional[int] = Query(default=None, gt=0),
+    user: User = Depends(require_settings_write),
+    db: Session = Depends(get_db),
+):
+    tenant_id = _require_tenant_id(user)
+    return StorefrontService(db).update_contact_social(tenant_id=tenant_id, store_id=store_id, data=data)
+
+
+@router.get("/advanced", response_model=StorefrontAdvancedSettingsResponse, summary="Get Advanced Feature Switches (7 Toggles)")
+def get_advanced_settings(
+    store_id: Optional[int] = Query(default=None, gt=0),
+    user: User = Depends(require_settings_read),
+    db: Session = Depends(get_db),
+):
+    tenant_id = _require_tenant_id(user)
+    return StorefrontService(db).get_advanced_settings(tenant_id=tenant_id, store_id=store_id)
+
+
+@router.put("/advanced", response_model=StorefrontAdvancedSettingsResponse, summary="Update Advanced Feature Switches")
+def update_advanced_settings(
+    data: StorefrontAdvancedSettingsUpdate,
+    store_id: Optional[int] = Query(default=None, gt=0),
+    user: User = Depends(require_settings_write),
+    db: Session = Depends(get_db),
+):
+    tenant_id = _require_tenant_id(user)
+    return StorefrontService(db).update_advanced_settings(tenant_id=tenant_id, store_id=store_id, data=data)
+
+
+@router.get("/public", summary="Get public storefront profile (Customer-facing, no authentication)")
+def get_public_storefront(
+    subdomain: Optional[str] = Query(default=None),
+    store_id: Optional[int] = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+):
+    return StorefrontService(db).get_public_storefront(subdomain=subdomain, store_id=store_id)
+
+

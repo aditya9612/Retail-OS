@@ -172,7 +172,7 @@ class StorefrontRepository:
             if hasattr(setting, key) and val is not None:
                 setattr(setting, key, val)
 
-        # Auto-sync business name and contact info to DocumentSetting if present
+        # Auto-sync business name, contact info, logo and terms to DocumentSetting if present
         sync_updates = {}
         if "store_name" in update_dict and update_dict["store_name"]:
             sync_updates["business_name"] = update_dict["store_name"]
@@ -182,6 +182,10 @@ class StorefrontRepository:
             sync_updates["phone"] = update_dict["contact_phone"]
         if "contact_email" in update_dict and update_dict["contact_email"]:
             sync_updates["email"] = update_dict["contact_email"]
+        if "logo_url" in update_dict and update_dict["logo_url"]:
+            sync_updates["logo_path"] = update_dict["logo_url"]
+        if "terms_conditions" in update_dict and update_dict["terms_conditions"]:
+            sync_updates["terms_and_conditions"] = update_dict["terms_conditions"]
 
         if sync_updates:
             doc_q = self.db.query(DocumentSetting).filter(DocumentSetting.tenant_id == tenant_id)
@@ -199,6 +203,25 @@ class StorefrontRepository:
             else:
                 for k, v in sync_updates.items():
                     setattr(doc_setting, k, v)
+
+        # Auto-sync to Store model if store-level update
+        if store_id is not None:
+            store_obj = (
+                self.db.query(Store)
+                .filter(Store.id == store_id, Store.tenant_id == tenant_id)
+                .first()
+            )
+            if store_obj:
+                if "store_name" in update_dict and update_dict["store_name"]:
+                    store_obj.name = update_dict["store_name"]
+                if "address" in update_dict and update_dict["address"]:
+                    store_obj.address = update_dict["address"]
+                if "contact_phone" in update_dict and update_dict["contact_phone"]:
+                    store_obj.phone = update_dict["contact_phone"]
+                if "contact_email" in update_dict and update_dict["contact_email"]:
+                    store_obj.email = update_dict["contact_email"]
+                if "logo_url" in update_dict and update_dict["logo_url"]:
+                    store_obj.logo_url = update_dict["logo_url"]
 
         self.db.commit()
         self.db.refresh(setting)
@@ -240,6 +263,15 @@ class StorefrontRepository:
                 self.db.add(doc_setting)
             else:
                 doc_setting.logo_path = asset_url
+
+            if store_id is not None:
+                store_obj = (
+                    self.db.query(Store)
+                    .filter(Store.id == store_id, Store.tenant_id == tenant_id)
+                    .first()
+                )
+                if store_obj:
+                    store_obj.logo_url = asset_url
         elif asset_type == "banner":
             setting.banner_url = asset_url
         elif asset_type == "favicon":

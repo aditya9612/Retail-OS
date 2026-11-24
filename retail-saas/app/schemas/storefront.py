@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -116,8 +116,8 @@ class StorefrontContactSocialResponse(BaseModel):
 
 class StorefrontContactSocialUpdate(BaseModel):
     contact_email: Optional[EmailStr] = None
-    contact_phone: Optional[str] = Field(None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
-    whatsapp_number: Optional[str] = Field(None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
+    contact_phone: Optional[str] = Field(None, min_length=7, max_length=25, pattern=r"^(?:\+91[\s-]?|91[\s-]?|0)?[6-9]\d{9}$")
+    whatsapp_number: Optional[str] = Field(None, min_length=7, max_length=25, pattern=r"^(?:\+91[\s-]?|91[\s-]?|0)?[6-9]\d{9}$")
     address: Optional[str] = None
     instagram_url: Optional[str] = None
     facebook_url: Optional[str] = None
@@ -196,8 +196,8 @@ class StorefrontSettingUpdate(BaseModel):
 
     # Contact & Social
     contact_email: Optional[EmailStr] = None
-    contact_phone: Optional[str] = Field(None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
-    whatsapp_number: Optional[str] = Field(None, min_length=10, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
+    contact_phone: Optional[str] = Field(None, min_length=7, max_length=25, pattern=r"^(?:\+91[\s-]?|91[\s-]?|0)?[6-9]\d{9}$")
+    whatsapp_number: Optional[str] = Field(None, min_length=7, max_length=25, pattern=r"^(?:\+91[\s-]?|91[\s-]?|0)?[6-9]\d{9}$")
     address: Optional[str] = None
     instagram_url: Optional[str] = None
     facebook_url: Optional[str] = None
@@ -290,9 +290,11 @@ class StorefrontSettingResponse(BaseModel):
 
 
 class StorefrontUploadResponse(BaseModel):
-    asset_type: str
+    asset_type: str = "logo"
     url: str
     message: str = "Asset uploaded successfully"
+    logo_url: Optional[str] = None
+    setting: Optional[Any] = None
 
 
 # ============================================================
