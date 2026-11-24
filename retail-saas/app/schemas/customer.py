@@ -1216,6 +1216,141 @@ class LoyaltyResponse(BaseModel):
 
         return self
 
+
+DISALLOWED_LOYALTY_REASON_PLACEHOLDERS = {
+    "string", "null", "none", "undefined", "test", "dummy", "sample",
+    "placeholder", "name", "reason", "na", "n/a", "temp", "p0@#$", "ppppp", "12233", "123445"
+}
+
+FORBIDDEN_LOYALTY_SYMBOLS = set(r"\|[]{}<>~^$%;:?")
+
+
+def validate_loyalty_reason(v: Any) -> str:
+    """
+    Validates reason field for loyalty point updates/adjustments:
+    - Rejects null, non-string, empty, whitespace.
+    - Requires 3 to 500 characters.
+    - Rejects placeholders ('string', 'null', 'none', 'undefined', 'test', etc.).
+    - Rejects forbidden symbols (|, [, ], {, }, <, >, ~, ^, $, %, ;, :, ?).
+    - Rejects consecutive repeating symbols (--, ++, @@, ##, **, //, ==, __, ..).
+    - Rejects HTML/script injection (<script>, javascript:, onload=).
+    - Must contain at least 2 distinct alphabetic letters.
+    - Rejects numeric-only (e.g. 12233).
+    - Rejects repetitive character spam (e.g. ppppp, aaaa).
+    - Digits cannot exceed letters.
+    - Rejects consonant mash without vowels (e.g. HTDFFGHGKGKHK) or 5+ consecutive consonants.
+    """
+    if v is None:
+        raise ValueError("Reason cannot be null")
+
+    if not isinstance(v, str):
+        raise ValueError("Reason must be a string")
+
+    val = v.strip()
+    if not val:
+        raise ValueError("Reason cannot be empty or whitespace")
+
+    if len(val) < 3 or len(val) > 500:
+        raise ValueError("Reason must be between 3 and 500 characters")
+
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", val.lower())
+    if val.lower() in DISALLOWED_LOYALTY_REASON_PLACEHOLDERS or clean_norm in DISALLOWED_LOYALTY_REASON_PLACEHOLDERS:
+        raise ValueError(f"Reason cannot be placeholder '{val}'")
+
+    if any(c in FORBIDDEN_LOYALTY_SYMBOLS for c in val):
+        raise ValueError("Reason contains invalid special characters")
+
+    if re.search(r"[-+@#*/=_.,]{2,}", val):
+        raise ValueError("Reason cannot contain consecutive repeating symbols")
+
+    if re.search(r"<\s*script|javascript\s*:|onload\s*=", val, re.IGNORECASE):
+        raise ValueError("Reason contains invalid script content")
+
+    alpha_chars = [c.lower() for c in val if c.isalpha()]
+    if len(alpha_chars) < 2:
+        if val.isdigit():
+            raise ValueError("Reason cannot be numeric-only")
+        raise ValueError("Reason must contain at least 2 alphabetic letters")
+
+    if len(set(alpha_chars)) < 2:
+        raise ValueError(f"Reason cannot consist of repetitive characters '{val}'")
+
+    digit_count = sum(1 for c in val if c.isdigit())
+    if digit_count > len(alpha_chars):
+        raise ValueError("Reason cannot contain more digits than letters")
+
+    # Consonant cluster check (5 or more consecutive consonants)
+    if re.search(r"[bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]{5,}", val):
+        raise ValueError(f"Reason contains meaningless consonant cluster in '{val}'")
+
+    # Vowel check in words of length >= 3
+    vowels = set("aeiouAEIOU")
+    words = re.findall(r"[a-zA-Z]+", val)
+    for word in words:
+        if len(word) >= 3 and not any(c in vowels for c in word):
+            raise ValueError(f"Reason contains meaningless word '{word}' without vowels")
+
+    return val
+
+
+class LoyaltyUpdateRequest(BaseModel):
+    points: int = Field(..., ge=0, le=1000000, description="New loyalty points balance (must be non-negative integer)")
+    reason: str = Field(..., description="Meaningful reason for loyalty points adjustment")
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def validate_reason_field(cls, v: Any) -> str:
+        return validate_loyalty_reason(v)
+
+
+class LoyaltyDeleteData(BaseModel):
+    customer_id: int
+    loyalty_points: int = 0
+
+
+class LoyaltyDeleteResponse(BaseModel):
+    success: bool = True
+    message: str = "Customer loyalty balance reset successfully"
+    data: LoyaltyDeleteData
+
+
+class LoyaltyStatsData(BaseModel):
+    active_members: int = 0
+    new_members_this_week: int = 0
+    points_in_circulation: int = 0
+    points_liability_amount: Decimal = Decimal("0.00")
+    points_redeemed_this_month: int = 0
+    amount_saved_this_month: Decimal = Decimal("0.00")
+    avg_spend_per_member_bill: Decimal = Decimal("0.00")
+    member_spend_multiplier: Decimal = Decimal("1.0")
+
+
+class LoyaltyStatsResponse(BaseModel):
+    success: bool = True
+    message: str = "Loyalty statistics retrieved successfully"
+    data: LoyaltyStatsData
+
+
+class LoyaltyCustomerItem(BaseModel):
+    customer_id: int
+    customer_name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    loyalty_points: int = 0
+    tier: str = "Silver Tier"
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class LoyaltyCustomerListResponse(BaseModel):
+    success: bool = True
+    message: str = "Loyalty customers retrieved successfully"
+    data: list[LoyaltyCustomerItem] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 20
+
+
 class CommunicationCreate(BaseModel):
 
     customer_id: Optional[int] = Field(

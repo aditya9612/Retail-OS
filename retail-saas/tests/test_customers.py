@@ -1476,6 +1476,172 @@ def test_loyalty_earn_reason_validation(tenant_a):
         assert res_good.json()["reason"] == good_reason
 
 
+def test_loyalty_four_apis_stats_list_update_delete_and_validation(tenant_a, tenant_b):
+    headers_a, _ = tenant_a
+    headers_b, _ = tenant_b
+
+    # 1. Setup customers for tenant A and tenant B
+    cust1 = create_test_customer(headers_a, name="Loyalty Member One")
+    cust2 = create_test_customer(headers_a, name="Loyalty Member Two")
+    cust_b = create_test_customer(headers_b, name="Tenant B Loyalty Member")
+
+    # Give cust1 some initial points via earn
+    earn_resp = client.post(
+        "/api/v1/customers/loyalty/earn",
+        json={"customer_id": cust1["id"], "points": 1200, "reason": "Initial store shopping reward"},
+        headers=headers_a,
+    )
+    assert earn_resp.status_code == 200
+
+    # =========================================================================
+    # API 1: STATS API (GET /api/v1/customers/loyalty/stats)
+    # =========================================================================
+    stats_resp_a = client.get("/api/v1/customers/loyalty/stats", headers=headers_a)
+    assert stats_resp_a.status_code == 200
+    sdata_a = stats_resp_a.json()["data"]
+    assert sdata_a["active_members"] >= 1
+    assert sdata_a["points_in_circulation"] >= 1200
+    assert float(sdata_a["points_liability_amount"]) >= 120.00
+    assert "points_redeemed_this_month" in sdata_a
+    assert "amount_saved_this_month" in sdata_a
+    assert "avg_spend_per_member_bill" in sdata_a
+
+    # Tenant isolation for stats
+    stats_resp_b = client.get("/api/v1/customers/loyalty/stats", headers=headers_b)
+    assert stats_resp_b.status_code == 200
+    assert stats_resp_b.json()["data"]["points_in_circulation"] == 0
+
+    # =========================================================================
+    # API 2: LIST API (GET /api/v1/customers/loyalty)
+    # =========================================================================
+    list_resp = client.get("/api/v1/customers/loyalty", headers=headers_a)
+    assert list_resp.status_code == 200
+    ldata = list_resp.json()
+    assert ldata["success"] is True
+    assert ldata["total"] >= 2
+    assert any(c["customer_id"] == cust1["id"] for c in ldata["data"])
+    # Cust_b must not appear in tenant A's list
+    assert not any(c["customer_id"] == cust_b["id"] for c in ldata["data"])
+
+    # Search filter works
+    search_resp = client.get("/api/v1/customers/loyalty", params={"search": "Member One"}, headers=headers_a)
+    assert search_resp.status_code == 200
+    assert any(c["customer_id"] == cust1["id"] for c in search_resp.json()["data"])
+
+    # Rejects invalid query parameters (script, forbidden symbol spam, bad pagination)
+    assert client.get("/api/v1/customers/loyalty", params={"page": 0}, headers=headers_a).status_code == 422
+    assert client.get("/api/v1/customers/loyalty", params={"page_size": 0}, headers=headers_a).status_code == 422
+    assert client.get("/api/v1/customers/loyalty", params={"page_size": 200}, headers=headers_a).status_code == 422
+    assert client.get("/api/v1/customers/loyalty", params={"search": "<script>alert(1)</script>"}, headers=headers_a).status_code == 422
+    assert client.get("/api/v1/customers/loyalty", params={"search": "[[[]]]"}, headers=headers_a).status_code == 422
+
+    # =========================================================================
+    # API 3: UPDATE API (PUT /api/v1/customers/{customer_id}/loyalty)
+    # =========================================================================
+    # Valid update
+    update_valid_resp = client.put(
+        f"/api/v1/customers/{cust1['id']}/loyalty",
+        json={"points": 500, "reason": "Customer compensation for delayed delivery"},
+        headers=headers_a,
+    )
+    assert update_valid_resp.status_code == 200
+    assert update_valid_resp.json()["balance_points"] == 500
+
+    # Cross-tenant update rejected with 404
+    assert client.put(
+        f"/api/v1/customers/{cust1['id']}/loyalty",
+        json={"points": 200, "reason": "Cross tenant attempt reward"},
+        headers=headers_b,
+    ).status_code == 404
+
+    # Non-existent customer rejected with 404
+    assert client.put(
+        "/api/v1/customers/99999999/loyalty",
+        json={"points": 200, "reason": "Non existent customer points"},
+        headers=headers_a,
+    ).status_code == 404
+
+    # Strict validation: Rejects negative points and non-integer points
+    assert client.put(
+        f"/api/v1/customers/{cust1['id']}/loyalty",
+        json={"points": -10, "reason": "Valid reason for negative points"},
+        headers=headers_a,
+    ).status_code == 422
+
+    assert client.put(
+        f"/api/v1/customers/{cust1['id']}/loyalty",
+        json={"points": "invalid_points", "reason": "Valid reason for string points"},
+        headers=headers_a,
+    ).status_code == 422
+
+    # Strict validation: Rejects all random/meaningless data in reason field
+    # (empty, null, "string", 12233, @@#$%, ppppp, -----, [[[]]], >?"{P:><L:"{:., HTDFFGHGKGKHK)
+    invalid_reasons = [
+        "",
+        "   ",
+        None,
+        "string",
+        "null",
+        "none",
+        "undefined",
+        "test",
+        "dummy",
+        "sample",
+        "placeholder",
+        "12233",
+        "123456",
+        "@@#$%",
+        "!@#$%",
+        "ppppp",
+        "aaaaa",
+        "-----",
+        "+++++",
+        "/////",
+        "[[[]]]",
+        "{{}}",
+        "|||||",
+        ">?\"{P:><L:\"{:.",
+        "HTDFFGHGKGKHK",
+        "qwrtyp",
+    ]
+    for bad_reason in invalid_reasons:
+        bad_resp = client.put(
+            f"/api/v1/customers/{cust1['id']}/loyalty",
+            json={"points": 100, "reason": bad_reason},
+            headers=headers_a,
+        )
+        assert bad_resp.status_code == 422, f"Failed to reject invalid reason '{bad_reason}': status {bad_resp.status_code}"
+
+    # Missing reason rejected with 422
+    assert client.put(
+        f"/api/v1/customers/{cust1['id']}/loyalty",
+        json={"points": 100},
+        headers=headers_a,
+    ).status_code == 422
+
+    # =========================================================================
+    # API 4: DELETE API (DELETE /api/v1/customers/{customer_id}/loyalty)
+    # =========================================================================
+    # Cross-tenant delete rejected with 404
+    assert client.delete(f"/api/v1/customers/{cust1['id']}/loyalty", headers=headers_b).status_code == 404
+
+    # Non-existent customer delete rejected with 404
+    assert client.delete("/api/v1/customers/99999999/loyalty", headers=headers_a).status_code == 404
+
+    # Valid delete resets points to 0
+    del_resp = client.delete(f"/api/v1/customers/{cust1['id']}/loyalty", headers=headers_a)
+    assert del_resp.status_code == 200
+    del_data = del_resp.json()
+    assert del_data["success"] is True
+    assert del_data["data"]["customer_id"] == cust1["id"]
+    assert del_data["data"]["loyalty_points"] == 0
+
+    # Verify customer points is now 0 via GET customer
+    cust_check = client.get(f"/api/v1/customers/{cust1['id']}", headers=headers_a)
+    assert cust_check.status_code == 200
+    assert cust_check.json()["loyalty_points"] == 0
+
+
 def test_list_customers_status_pagination_and_legacy_serialization(tenant_a, tenant_b):
     headers_a, user_a = tenant_a
     headers_b, user_b = tenant_b
