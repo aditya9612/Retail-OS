@@ -449,7 +449,7 @@ class TenderPaymentSplit(BaseModel):
 class TenderChangeRequest(BaseModel):
     payable_amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2, description="Total amount payable")
     tendered_amount: Decimal = Field(ge=0, max_digits=12, decimal_places=2, description="Cash tendered by customer")
-    other_payments: Optional[list[TenderPaymentSplit]] = Field(default=None, description="Other non-cash payments like UPI/Card")
+    other_payments: Optional[list[TenderPaymentSplit]] = Field(default=None, max_length=10, description="Other non-cash payments like UPI/Card")
     calculate_denominations: Optional[bool] = Field(default=False, description="Whether to calculate currency denomination breakdown")
 
 
@@ -485,6 +485,7 @@ class InvoiceCreate(BaseModel):
     same_state: bool = True
     items: Optional[list[InvoiceItemCreate]] = Field(
         default=None,
+        max_length=500,
         description=(
             "Optional direct line items. If omitted, items from user's "
             "active cart will be used."

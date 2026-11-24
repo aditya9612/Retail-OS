@@ -460,9 +460,9 @@ class DeliveryStatsResponse(BaseModel):
 
 
 class DeliveryMethodCreate(BaseModel):
-    name: str = Field(..., description="Method name between 2 and 100 characters")
-    code: str = Field(..., description="Unique method code (alphanumeric, underscores, hyphens)")
-    description: Optional[str] = Field(default=None, description="Meaningful description (optional)")
+    name: str = Field(..., min_length=2, max_length=100, description="Method name between 2 and 100 characters")
+    code: str = Field(..., min_length=2, max_length=50, description="Unique method code (alphanumeric, underscores, hyphens)")
+    description: Optional[str] = Field(default=None, max_length=500, description="Meaningful description (optional)")
     cost: Decimal = Field(..., gt=Decimal("0.00"), description="Delivery cost must be greater than zero")
     estimated_days: Optional[int] = Field(default=None, gt=0, le=60, description="Estimated delivery days (1-60)")
     is_active: bool = Field(default=True, description="Active status")
@@ -511,9 +511,9 @@ class DeliveryMethodCreate(BaseModel):
 
 
 class DeliveryMethodUpdate(BaseModel):
-    name: Optional[str] = Field(default=None, description="Method name between 2 and 100 characters")
-    code: Optional[str] = Field(default=None, description="Unique method code")
-    description: Optional[str] = Field(default=None, description="Optional description up to 255 characters")
+    name: Optional[str] = Field(default=None, min_length=2, max_length=100, description="Method name between 2 and 100 characters")
+    code: Optional[str] = Field(default=None, min_length=2, max_length=50, description="Unique method code")
+    description: Optional[str] = Field(default=None, max_length=500, description="Optional description up to 500 characters")
     cost: Optional[Decimal] = Field(default=None, gt=Decimal("0.00"), description="Delivery cost must be greater than zero")
     estimated_days: Optional[int] = Field(default=None, gt=0, le=60, description="Estimated delivery days (1-60)")
     is_active: Optional[bool] = Field(default=None, description="Active status")

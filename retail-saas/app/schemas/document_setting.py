@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
-from typing import Any
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Any, Optional
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from app.utils.validators import (
     validate_email_address,
     validate_gstin_number,
@@ -11,16 +11,16 @@ from app.utils.validators import (
 
 
 class DocumentSettingBase(BaseModel):
-    business_name: str | None = None
-    address: str | None = None
-    phone: str | None = None
-    email: str | None = None
-    website: str | None = None
-    gstin: str | None = None
-    footer_text: str | None = None
-    terms_and_conditions: str | None = None
-    invoice_prefix: str | None = None
-    bill_prefix: str | None = None
+    business_name: Optional[str] = Field(default=None, max_length=255)
+    address: Optional[str] = Field(default=None, max_length=500)
+    phone: Optional[str] = Field(default=None, min_length=8, max_length=15, pattern=r"^(?:\+91|91|0)?[6-9]\d{9}$")
+    email: Optional[EmailStr] = None
+    website: Optional[str] = Field(default=None, max_length=255)
+    gstin: Optional[str] = Field(default=None, min_length=15, max_length=15, pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$")
+    footer_text: Optional[str] = Field(default=None, max_length=500)
+    terms_and_conditions: Optional[str] = Field(default=None, max_length=2000)
+    invoice_prefix: Optional[str] = Field(default=None, max_length=10)
+    bill_prefix: Optional[str] = Field(default=None, max_length=10)
     padding_length: int = Field(default=6, ge=4, le=10, description="Serial sequence padding digits (4 to 10)")
     primary_color: str | None = Field(default=None, description="Primary brand HEX color code e.g. #1E3A8A")
     secondary_color: str | None = Field(default=None, description="Secondary brand HEX color code e.g. #059669")

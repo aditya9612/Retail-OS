@@ -209,11 +209,13 @@ class CouponBase(BaseModel):
 
     applicable_categories: Optional[list[str]] = Field(
         default=None,
+        max_length=200,
         description="List of applicable category names or IDs",
     )
 
     applicable_products: Optional[list[str]] = Field(
         default=None,
+        max_length=200,
         description="List of applicable product SKUs or IDs",
     )
 
