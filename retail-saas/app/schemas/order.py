@@ -1,8 +1,9 @@
 
+import re
 from enum import Enum
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import (
     AliasChoices,
@@ -41,6 +42,22 @@ VALID_PAYMENT_METHODS = [
     "credit",
     "khata",
     "customer_credit",
+    "cod",
+    "net_banking",
+    "bank_transfer",
+    "cheque",
+]
+
+VALID_DELIVERY_STATUSES = [
+    "pending",
+    "assigned",
+    "in_transit",
+    "picked_up",
+    "out_for_delivery",
+    "delivered",
+    "cancelled",
+    "failed",
+    "returned",
 ]
 
 INVALID_STRING_VALUES = [
@@ -52,7 +69,13 @@ INVALID_STRING_VALUES = [
     "null value",
     "n/a",
     "na",
+    "nausomd",
+    "dummy",
+    "sample",
+    "placeholder",
 ]
+
+FORBIDDEN_VARIANT_SYMBOLS = set(r"\|[]{}<>~`^")
 
 
 class OrderItemCreate(BaseModel):
@@ -120,22 +143,26 @@ class OrderItemCreate(BaseModel):
 
         return v
 
-    @field_validator("variant")
+    @field_validator("variant", mode="before")
     @classmethod
     def validate_variant(
         cls,
-        v: Optional[str],
+        v: Any,
     ) -> Optional[str]:
 
         if v is None:
             return None
 
+        if not isinstance(v, str):
+            raise ValueError("Variant must be a valid string")
+
         v = v.strip()
 
         if not v:
-            raise ValueError("Variant cannot be empty")
+            raise ValueError("Variant cannot be empty or whitespace")
 
-        if v.lower() in INVALID_STRING_VALUES:
+        clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+        if v.lower() in INVALID_STRING_VALUES or clean_norm in INVALID_STRING_VALUES:
             raise ValueError("Invalid variant value")
 
         invalid_variants = {
@@ -155,8 +182,23 @@ class OrderItemCreate(BaseModel):
         if v.lower() in invalid_variants:
             raise ValueError("Invalid variant value")
 
-        if v.isdigit():
+        if v.isdigit() or (clean_norm.isdigit() and not any(c.isalpha() for c in v)):
             raise ValueError("Variant cannot contain only numbers")
+
+        if any(c in FORBIDDEN_VARIANT_SYMBOLS for c in v):
+            raise ValueError("Variant contains invalid characters")
+
+        if not any(c.isalnum() for c in v):
+            raise ValueError("Variant must contain alphanumeric characters")
+
+        if re.search(r"[-+@#*/=_.,:;?!&$%]{2,}", v):
+            raise ValueError("Variant cannot contain consecutive symbols")
+
+        if re.search(r"(.)\1{3,}", v, re.IGNORECASE):
+            raise ValueError(f"Variant cannot contain repetitive characters in '{v}'")
+
+        if re.search(r"[bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]{5,}", v):
+            raise ValueError(f"Variant contains invalid character sequence in '{v}'")
 
         return v
 
@@ -246,6 +288,13 @@ class OrderCreate(BaseModel):
         description="Order type must be pos or ecommerce",
     )
 
+    payment_method: Optional[str] = Field(
+        default=None,
+        min_length=2,
+        max_length=30,
+        description="Payment method: cash, upi, card, cod, wallet, net_banking, credit, etc.",
+    )
+
     coupon_code: Optional[str] = Field(
         default=None,
         min_length=3,
@@ -271,6 +320,13 @@ class OrderCreate(BaseModel):
         min_length=3,
         max_length=20,
         description="Optional delivery pincode / postal code",
+    )
+
+    delivery_status: Optional[str] = Field(
+        default=None,
+        min_length=2,
+        max_length=30,
+        description="Delivery status: pending, assigned, in_transit, out_for_delivery, delivered, cancelled",
     )
 
     notes: Optional[str] = Field(
@@ -305,6 +361,62 @@ class OrderCreate(BaseModel):
 
         if v not in VALID_ORDER_TYPES:
             raise ValueError(f"order_type must be one of {VALID_ORDER_TYPES}")
+
+        return v
+
+    @field_validator("payment_method", mode="before")
+    @classmethod
+    def validate_payment_method(
+        cls,
+        v: Any,
+    ) -> Optional[str]:
+
+        if v is None:
+            return None
+
+        if not isinstance(v, str):
+            raise ValueError("Payment method must be a valid string")
+
+        v = v.strip().lower()
+
+        if not v:
+            raise ValueError("Payment method cannot be empty")
+
+        if v in INVALID_STRING_VALUES:
+            raise ValueError("Invalid payment method")
+
+        if v not in VALID_PAYMENT_METHODS:
+            raise ValueError(
+                f"payment_method must be one of {VALID_PAYMENT_METHODS}"
+            )
+
+        return v
+
+    @field_validator("delivery_status", mode="before")
+    @classmethod
+    def validate_delivery_status(
+        cls,
+        v: Any,
+    ) -> Optional[str]:
+
+        if v is None:
+            return None
+
+        if not isinstance(v, str):
+            raise ValueError("Delivery status must be a valid string")
+
+        v = v.strip().lower()
+
+        if not v:
+            raise ValueError("Delivery status cannot be empty")
+
+        if v in INVALID_STRING_VALUES:
+            raise ValueError("Invalid delivery status")
+
+        if v not in VALID_DELIVERY_STATUSES:
+            raise ValueError(
+                f"delivery_status must be one of {VALID_DELIVERY_STATUSES}"
+            )
 
         return v
 
@@ -457,6 +569,13 @@ class OrderUpdate(BaseModel):
         description="Discount percentage must be between 0 and 100",
     )
 
+    payment_method: Optional[str] = Field(
+        default=None,
+        min_length=2,
+        max_length=30,
+        description="Optional payment method update: cash, upi, card, cod, wallet, etc.",
+    )
+
     delivery_address: Optional[str] = Field(
         default=None,
         min_length=3,
@@ -467,6 +586,13 @@ class OrderUpdate(BaseModel):
         default=None,
         min_length=3,
         max_length=20,
+    )
+
+    delivery_status: Optional[str] = Field(
+        default=None,
+        min_length=2,
+        max_length=30,
+        description="Optional delivery status update: pending, assigned, in_transit, out_for_delivery, delivered, cancelled",
     )
 
     notes: Optional[str] = Field(
@@ -611,6 +737,62 @@ class OrderUpdate(BaseModel):
 
         if v not in VALID_ORDER_STATUSES:
             raise ValueError(f"status must be one of {VALID_ORDER_STATUSES}")
+
+        return v
+
+    @field_validator("payment_method", mode="before")
+    @classmethod
+    def validate_payment_method(
+        cls,
+        v: Any,
+    ) -> Optional[str]:
+
+        if v is None:
+            return None
+
+        if not isinstance(v, str):
+            raise ValueError("Payment method must be a valid string")
+
+        v = v.strip().lower()
+
+        if not v:
+            raise ValueError("Payment method cannot be empty")
+
+        if v in INVALID_STRING_VALUES:
+            raise ValueError("Invalid payment method")
+
+        if v not in VALID_PAYMENT_METHODS:
+            raise ValueError(
+                f"payment_method must be one of {VALID_PAYMENT_METHODS}"
+            )
+
+        return v
+
+    @field_validator("delivery_status", mode="before")
+    @classmethod
+    def validate_delivery_status(
+        cls,
+        v: Any,
+    ) -> Optional[str]:
+
+        if v is None:
+            return None
+
+        if not isinstance(v, str):
+            raise ValueError("Delivery status must be a valid string")
+
+        v = v.strip().lower()
+
+        if not v:
+            raise ValueError("Delivery status cannot be empty")
+
+        if v in INVALID_STRING_VALUES:
+            raise ValueError("Invalid delivery status")
+
+        if v not in VALID_DELIVERY_STATUSES:
+            raise ValueError(
+                f"delivery_status must be one of {VALID_DELIVERY_STATUSES}"
+            )
 
         return v
 

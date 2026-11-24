@@ -159,8 +159,159 @@ def validate_delivery_person_name(value: Any, required: bool = True) -> Optional
     return validate_person_name(value, field_name="Delivery person name", required=required)
 
 
+DISALLOWED_METHOD_PLACEHOLDERS = {
+    "string", "null", "none", "undefined", "test", "dummy", "sample",
+    "placeholder", "name", "description", "delivery", "method", "value",
+    "unknown", "n/a", "na", "temp", "false", "true", "default", "p0@#$", "ppppp", "123445"
+}
+
+
+def validate_delivery_method_name(value: Any, required: bool = True) -> Optional[str]:
+    """
+    Validates delivery method name:
+    - Rejects null (if required), empty, or whitespace.
+    - Requires 3 to 100 characters (rejects meaningless 1-2 letter names like 'lj', 'a', 'x').
+    - Rejects placeholders ('string', 'null', 'none', 'dummy', 'sample', 'method', etc.).
+    - Rejects script/HTML injection (<script>, javascript:, onload=).
+    - Only allows alphabetic letters, numbers, spaces, and safe retail connectors ('-', '&', '/', ''', '()').
+    - Cannot start or end with a symbol.
+    - Rejects consecutive repeating symbols (e.g. '--', '&&', '///').
+    - Must contain at least 3 alphabetic letters.
+    - Digits cannot exceed letters.
+    - Rejects single character repeated (e.g. 'ppppp', 'aaaa').
+    - Rejects consonant mash / gibberish:
+      * Every alphabetic word of length >= 3 must contain at least one vowel (a, e, i, o, u, y).
+      * No sequence of 5 or more consecutive consonants (rejects 'HTDFFGHGKGKHK', etc.).
+    """
+    if value is None:
+        if required:
+            raise ValueError("Method name cannot be null")
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("Method name must be a string")
+
+    v = value.strip()
+    if not v:
+        raise ValueError("Method name cannot be empty or whitespace")
+
+    if len(v) < 3 or len(v) > 100:
+        raise ValueError("Method name must be between 3 and 100 characters")
+
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_METHOD_PLACEHOLDERS or clean_norm in DISALLOWED_METHOD_PLACEHOLDERS:
+        raise ValueError(f"Method name cannot be placeholder '{value}'")
+
+    if re.search(r"<\s*script|javascript\s*:|onload\s*=", v, re.IGNORECASE):
+        raise ValueError("Method name contains invalid script content")
+
+    if not re.fullmatch(r"^[a-zA-Z0-9\s\-&/'()]+$", v):
+        raise ValueError("Method name contains invalid characters. Only letters, numbers, spaces, and safe connectors ('-', '&', '/', ''', '()') are allowed")
+
+    if v.startswith(("-", "&", "/", "'", "(", ")")) or v.endswith(("-", "&", "/", "'", "(", ")")):
+        raise ValueError("Method name cannot start or end with a symbol")
+
+    if re.search(r"[-&/'()]{2,}", v):
+        raise ValueError("Method name cannot contain consecutive symbols")
+
+    alpha_chars = [c.lower() for c in v if c.isalpha()]
+    alpha_count = len(alpha_chars)
+    if alpha_count < 3:
+        raise ValueError("Method name must contain at least 3 alphabetic letters")
+
+    digit_count = sum(1 for c in v if c.isdigit())
+    if digit_count > alpha_count:
+        raise ValueError("Method name cannot contain more digits than letters")
+
+    if len(set(alpha_chars)) < 2:
+        raise ValueError(f"Method name cannot consist of repetitive characters '{value}'")
+
+    # Consonant cluster check (5 or more consecutive consonants)
+    if re.search(r"[bcdfghjklmnpqrstvwxzBCDFGHJKLMNPQRSTVWXZ]{5,}", v):
+        raise ValueError(f"Method name contains meaningless consonant cluster in '{value}'")
+
+    # Vowel check in words of length >= 3
+    vowels = set("aeiouyAEIOUY")
+    words = re.findall(r"[a-zA-Z]+", v)
+    for word in words:
+        if len(word) >= 3 and not any(c in vowels for c in word):
+            raise ValueError(f"Method name contains meaningless word '{word}' without vowels")
+
+    return v
+
+
+def validate_delivery_method_description(value: Any, required: bool = False) -> Optional[str]:
+    """
+    Validates delivery method description:
+    - If None and not required: returns None.
+    - If provided: length 3 to 255.
+    - Rejects placeholders.
+    - Rejects script/HTML injection.
+    - Only allows letters, digits, spaces, and standard sentence punctuation (.,'\"&()\-/:;%).
+    - Must contain at least 3 alphabetic letters.
+    - Digits cannot exceed letters.
+    - Rejects single character repeated.
+    - Rejects consonant cluster of 5+ consonants (rejects 'HTDFFGHGKGKHK').
+    - Rejects words of 3+ letters without vowels.
+    """
+    if value is None:
+        if required:
+            raise ValueError("Description cannot be null")
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("Description must be a string")
+
+    v = value.strip()
+    if not v:
+        if required:
+            raise ValueError("Description cannot be empty or whitespace")
+        return None
+
+    if len(v) < 3 or len(v) > 255:
+        raise ValueError("Description must be between 3 and 255 characters")
+
+    clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
+    if v.lower() in DISALLOWED_METHOD_PLACEHOLDERS or clean_norm in DISALLOWED_METHOD_PLACEHOLDERS:
+        raise ValueError(f"Description cannot be placeholder '{value}'")
+
+    if re.search(r"<\s*script|javascript\s*:|onload\s*=", v, re.IGNORECASE):
+        raise ValueError("Description contains invalid script content")
+
+    if not re.fullmatch(r"^[a-zA-Z0-9\s.,'\"&()\-/:;%]+$", v):
+        raise ValueError("Description contains invalid characters")
+
+    if re.search(r"[-+@#*/=_.,;:]{3,}", v):
+        raise ValueError("Description cannot contain consecutive repeating symbols")
+
+    alpha_chars = [c.lower() for c in v if c.isalpha()]
+    alpha_count = len(alpha_chars)
+    if alpha_count < 3:
+        raise ValueError("Description must contain at least 3 alphabetic letters")
+
+    digit_count = sum(1 for c in v if c.isdigit())
+    if digit_count > alpha_count:
+        raise ValueError("Description cannot contain more digits than letters")
+
+    if len(set(alpha_chars)) < 2:
+        raise ValueError(f"Description cannot consist of repetitive characters '{value}'")
+
+    # Consonant cluster check (5 or more consecutive consonants)
+    if re.search(r"[bcdfghjklmnpqrstvwxzBCDFGHJKLMNPQRSTVWXZ]{5,}", v):
+        raise ValueError(f"Description contains meaningless consonant cluster in '{value}'")
+
+    # Vowel check in words of length >= 3
+    vowels = set("aeiouyAEIOUY")
+    words = re.findall(r"[a-zA-Z]+", v)
+    for word in words:
+        if len(word) >= 3 and not any(c in vowels for c in word):
+            raise ValueError(f"Description contains meaningless word '{word}' without vowels")
+
+    return v
+
+
 def validate_method_name(value: Any, required: bool = True) -> Optional[str]:
-    return validate_meaningful_text(value, field_name="Method name", min_length=2, max_length=100, required=required)
+    return validate_delivery_method_name(value, required=required)
 
 
 def validate_method_code(value: Any, required: bool = True) -> Optional[str]:
@@ -460,7 +611,7 @@ class DeliveryStatsResponse(BaseModel):
 
 
 class DeliveryMethodCreate(BaseModel):
-    name: str = Field(..., description="Method name between 2 and 100 characters")
+    name: str = Field(..., description="Method name between 3 and 100 characters")
     code: str = Field(..., description="Unique method code (alphanumeric, underscores, hyphens)")
     description: Optional[str] = Field(default=None, description="Meaningful description (optional)")
     cost: Decimal = Field(..., gt=Decimal("0.00"), description="Delivery cost must be greater than zero")
@@ -470,7 +621,7 @@ class DeliveryMethodCreate(BaseModel):
     @field_validator("name", mode="before")
     @classmethod
     def check_name(cls, value: Any) -> str:
-        res = validate_meaningful_text(value, field_name="Method name", min_length=2, max_length=100, required=True)
+        res = validate_delivery_method_name(value, required=True)
         if not res:
             raise ValueError("Method name cannot be empty")
         return res
@@ -486,7 +637,7 @@ class DeliveryMethodCreate(BaseModel):
     @field_validator("description", mode="before")
     @classmethod
     def check_description(cls, value: Any) -> Optional[str]:
-        return validate_meaningful_text(value, field_name="Description", min_length=2, max_length=255, required=False)
+        return validate_delivery_method_description(value, required=False)
 
     @field_validator("cost", mode="before")
     @classmethod
@@ -511,7 +662,7 @@ class DeliveryMethodCreate(BaseModel):
 
 
 class DeliveryMethodUpdate(BaseModel):
-    name: Optional[str] = Field(default=None, description="Method name between 2 and 100 characters")
+    name: Optional[str] = Field(default=None, description="Method name between 3 and 100 characters")
     code: Optional[str] = Field(default=None, description="Unique method code")
     description: Optional[str] = Field(default=None, description="Optional description up to 255 characters")
     cost: Optional[Decimal] = Field(default=None, gt=Decimal("0.00"), description="Delivery cost must be greater than zero")
@@ -521,7 +672,7 @@ class DeliveryMethodUpdate(BaseModel):
     @field_validator("name", mode="before")
     @classmethod
     def check_name(cls, value: Any) -> Optional[str]:
-        return validate_meaningful_text(value, field_name="Method name", min_length=2, max_length=100, required=False)
+        return validate_delivery_method_name(value, required=False)
 
     @field_validator("code", mode="before")
     @classmethod
@@ -531,7 +682,7 @@ class DeliveryMethodUpdate(BaseModel):
     @field_validator("description", mode="before")
     @classmethod
     def check_description(cls, value: Any) -> Optional[str]:
-        return validate_meaningful_text(value, field_name="Description", min_length=2, max_length=255, required=False)
+        return validate_delivery_method_description(value, required=False)
 
     @field_validator("cost", mode="before")
     @classmethod

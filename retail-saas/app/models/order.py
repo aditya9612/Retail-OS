@@ -71,7 +71,13 @@ class Order(Base, TimestampMixin):
 
     @property
     def delivery_status(self) -> Optional[str]:
-        return getattr(self, "_delivery_status", self.status)
+        if getattr(self, "_delivery_status", None) is not None:
+            return self._delivery_status
+        if getattr(self, "delivery", None) is not None and getattr(self.delivery, "status", None):
+            return self.delivery.status
+        if getattr(self, "order_type", "") == "ecommerce" or getattr(self, "delivery_address", None):
+            return "pending"
+        return None
 
     @delivery_status.setter
     def delivery_status(self, val: Optional[str]) -> None:

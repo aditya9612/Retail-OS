@@ -545,8 +545,10 @@ def test_delivery_tenant_isolation_returns_404(tenant_a, tenant_b):
 def test_delivery_methods_strict_validation_hardening(tenant_a):
     headers, _ = tenant_a
 
-    # 1. Invalid names: "d0", "123445", "!@##$%", "ppppp", "p0@#$", symbol spam, placeholders
+    # 1. Invalid names: "d0", "123445", "!@##$%", "ppppp", "p0@#$", symbol spam, placeholders, meaningless 2-letter / gibberish
     invalid_names = [
+        "lj",
+        "HTDFFGHGKGKHK",
         "d0",
         "123445",
         "!@##$%",
@@ -607,8 +609,9 @@ def test_delivery_methods_strict_validation_hardening(tenant_a):
         )
         assert resp.status_code == 422, f"Expected 422 for bad code '{bad_code}', got {resp.status_code}"
 
-    # 3. Invalid descriptions: "00-", "123445", "!@##$%", "ppppp", symbol spam
+    # 3. Invalid descriptions: "00-", "123445", "!@##$%", "ppppp", symbol spam, consonant gibberish
     invalid_descriptions = [
+        "HTDFFGHGKGKHK",
         "00-",
         "123445",
         "!@##$%",
