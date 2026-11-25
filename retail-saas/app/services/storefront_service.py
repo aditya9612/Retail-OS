@@ -57,6 +57,8 @@ UPLOAD_DIR = Path("uploads/storefront")
 
 
 class StorefrontService:
+    _local_cart_store: Dict[str, dict] = {}
+
     def __init__(self, db: Session):
         self.db = db
         self.repo = StorefrontRepository(db)
@@ -64,7 +66,6 @@ class StorefrontService:
             self.redis = get_redis()
         except Exception:
             self.redis = None
-        self._local_cart_store: Dict[str, dict] = {}
 
     # --- Master All-in-One Settings ---
     def get_settings(
@@ -285,7 +286,7 @@ class StorefrontService:
                     return json.loads(raw)
             except Exception:
                 pass
-        return self._local_cart_store.get(key, {"items": {}})
+        return StorefrontService._local_cart_store.get(key, {"items": {}})
 
     def _save_cart_data(self, tenant_id: int, customer_id: int, cart: dict) -> None:
         key = self._cart_key(tenant_id, customer_id)
@@ -294,7 +295,7 @@ class StorefrontService:
                 self.redis.setex(key, 86400 * 7, json.dumps(cart))
             except Exception:
                 pass
-        self._local_cart_store[key] = cart
+        StorefrontService._local_cart_store[key] = cart
 
     # --------------------------------------------------------------------------
     # 1. Catalog & Categories
@@ -368,7 +369,7 @@ class StorefrontService:
 
         items = []
         for p in products:
-            curr_stock = stock_map.get(p.id, 999) if store_id else 999
+            curr_stock = stock_map.get(p.id, Decimal("0.0000")) if store_id else 999
             selling_price = getattr(p, "selling_price", getattr(p, "price", Decimal("0.00")))
             mrp_val = getattr(p, "mrp", selling_price) or selling_price
             items.append(
@@ -423,8 +424,7 @@ class StorefrontService:
                 )
                 .first()
             )
-            if inv is not None:
-                curr_stock = inv.quantity
+            curr_stock = inv.quantity if inv is not None else Decimal("0.0000")
 
         selling_price = getattr(product, "selling_price", getattr(product, "price", Decimal("0.00")))
         mrp_val = getattr(product, "mrp", selling_price) or selling_price
@@ -574,7 +574,7 @@ class StorefrontService:
                 self.redis.delete(key)
             except Exception:
                 pass
-        self._local_cart_store.pop(key, None)
+        StorefrontService._local_cart_store.pop(key, None)
 
     # --------------------------------------------------------------------------
     # 3. Checkout & Order Placement
@@ -738,6 +738,7 @@ class StorefrontService:
                         store_id=store.id,
                         product_id=item.product_id,
                         quantity=item.quantity,
+                        notes="Online Storefront Checkout",
                     ),
                     commit=False,
                 )

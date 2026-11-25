@@ -1287,17 +1287,44 @@ class AuthService:
                     self.db.rollback()
                     pass
 
-            # 7. Issue JWT for Staff User
-            token_data = {
-                "sub": str(user.id),
-                "tenant_id": user.tenant_id,
-                "role": (
-                    user.role.name
-                    if user.role
-                    else ""
-                ),
-                "store_id": user.store_id,
-            }
+            # 7. Issue JWT for Staff User or Customer User
+            if user.role and user.role.name.lower() == "customer":
+                cust_rec = (
+                    self.db.query(Customer)
+                    .filter(
+                        Customer.phone == canonical_phone,
+                        Customer.tenant_id == user.tenant_id,
+                    )
+                    .first()
+                )
+                if cust_rec:
+                    token_data = {
+                        "sub": str(cust_rec.id),
+                        "tenant_id": user.tenant_id,
+                        "role": "customer",
+                        "customer_id": cust_rec.id,
+                        "phone": cust_rec.phone,
+                        "name": cust_rec.name,
+                    }
+                else:
+                    token_data = {
+                        "sub": str(user.id),
+                        "tenant_id": user.tenant_id,
+                        "role": "customer",
+                        "customer_id": user.id,
+                        "phone": user.phone,
+                    }
+            else:
+                token_data = {
+                    "sub": str(user.id),
+                    "tenant_id": user.tenant_id,
+                    "role": (
+                        user.role.name
+                        if user.role
+                        else ""
+                    ),
+                    "store_id": user.store_id,
+                }
         else:
             # 7. Issue JWT for Customer
             token_data = {

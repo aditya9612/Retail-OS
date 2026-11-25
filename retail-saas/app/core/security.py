@@ -263,6 +263,9 @@ def get_current_user(
     if not user_id:
         raise UnauthorizedException()
 
+    if str(payload.get("role", "")).lower() == "customer":
+        raise ForbiddenException("Customer tokens cannot access staff endpoints")
+
     try:
         user_id = int(user_id)
     except (TypeError, ValueError) as exc:
@@ -556,6 +559,32 @@ def get_current_customer(
         )
         .first()
     )
+
+    if not customer:
+        phone = payload.get("phone")
+        if phone:
+            customer = (
+                db.query(Customer)
+                .filter(
+                    Customer.phone == phone,
+                    Customer.tenant_id == tenant_id,
+                    Customer.status == "active",
+                )
+                .first()
+            )
+        if not customer:
+            from app.models.user import User
+            user_rec = db.query(User).filter(User.id == customer_id, User.tenant_id == tenant_id).first()
+            if user_rec and user_rec.phone:
+                customer = (
+                    db.query(Customer)
+                    .filter(
+                        Customer.phone == user_rec.phone,
+                        Customer.tenant_id == tenant_id,
+                        Customer.status == "active",
+                    )
+                    .first()
+                )
 
     if not customer:
         raise UnauthorizedException("Customer account not found or inactive")

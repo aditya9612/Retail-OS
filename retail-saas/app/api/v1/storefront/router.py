@@ -66,6 +66,7 @@ def list_categories(
     description="Search and browse products available in the store with prices, discounts, and stock availability.",
 )
 def list_products(
+    store_id: Optional[int] = Query(default=None, gt=0, description="Optional Store ID to check store-specific inventory"),
     category_id: Optional[int] = Query(default=None, description="Filter by category ID"),
     search: Optional[str] = Query(default=None, description="Search by product name, barcode, or SKU"),
     page: int = Query(default=1, ge=1, description="Page number"),
@@ -75,6 +76,7 @@ def list_products(
 ):
     return StorefrontService(db).get_products(
         tenant_id=customer.tenant_id,
+        store_id=store_id,
         category_id=category_id,
         search=search,
         page=page,
@@ -90,12 +92,14 @@ def list_products(
 )
 def get_product_details(
     product_id: int,
+    store_id: Optional[int] = Query(default=None, gt=0, description="Optional Store ID to check store-specific inventory"),
     customer: Customer = Depends(get_current_customer),
     db: Session = Depends(get_db),
 ):
     return StorefrontService(db).get_product_detail(
         tenant_id=customer.tenant_id,
         product_id=product_id,
+        store_id=store_id,
     )
 
 
