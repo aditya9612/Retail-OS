@@ -22,11 +22,8 @@ def _calculate_denominations_total(denominations: Dict[str, int]) -> Decimal:
 
 
 class POSShiftOpenRequest(BaseModel):
-    store_id: Optional[int] = Field(
-        default=None,
-        gt=0,
-        description="Store ID for the shift (optional; auto-selected for Admin/Owner if omitted)",
-    )
+    model_config = ConfigDict(extra="ignore")
+
     opening_cash_float: Decimal = Field(
         default=Decimal("0.00"),
         ge=0,
@@ -35,11 +32,11 @@ class POSShiftOpenRequest(BaseModel):
     register_id: Optional[str] = Field(
         default=None,
         max_length=50,
-        description="Physical cash register or POS terminal ID (e.g. 'REG-01', 'Counter-1')",
+        description="Physical cash register or POS terminal ID (e.g. 'Counter-1', 'REG-01')",
     )
     denominations: Optional[Dict[str, int]] = Field(
         default=None,
-        description="Opening cash denominations count e.g. {'500': 10, '200': 5, '100': 10}",
+        description="Optional opening cash denominations count e.g. {'500': 10, '200': 5, '100': 10}",
     )
     notes: Optional[str] = Field(default=None, max_length=500, description="Optional opening shift notes")
 

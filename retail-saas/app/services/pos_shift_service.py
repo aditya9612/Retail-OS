@@ -44,7 +44,7 @@ class POSShiftService:
         user_role_name = getattr(user.role, "name", "").lower() if user.role else ""
         is_admin_or_owner = user_role_name in ["admin", "owner", "superadmin"]
 
-        effective_store_id = data.store_id or store_id or user.store_id
+        effective_store_id = getattr(data, "store_id", None) or store_id or user.store_id
         if effective_store_id is None and is_admin_or_owner:
             first_store = (
                 self.db.query(Store)
@@ -149,23 +149,85 @@ class POSShiftService:
         if shift:
             return POSShiftResponse.model_validate(shift)
 
-        # If user has no active shift and is admin/owner/manager searching by store_id
-        if (is_admin_or_owner or is_manager) and (store_id is not None or user.store_id is not None):
-            eff_store = store_id or user.store_id
-            store_shift = (
-                self.db.query(POSShift)
-                .filter(
-                    POSShift.tenant_id == user.tenant_id,
-                    POSShift.store_id == eff_store,
-                    POSShift.status == "open",
-                )
-                .order_by(POSShift.opened_at.desc())
-                .first()
+        # If user has no active personal shift and is admin/owner/manager
+        if is_admin_or_owner or is_manager:
+            query = self.db.query(POSShift).filter(
+                POSShift.tenant_id == user.tenant_id,
+                POSShift.status == "open",
             )
+            eff_store = store_id or user.store_id
+            if eff_store is not None:
+                query = query.filter(POSShift.store_id == eff_store)
+            store_shift = query.order_by(POSShift.opened_at.desc()).first()
             if store_shift:
                 return POSShiftResponse.model_validate(store_shift)
 
         raise NotFoundException("No active open shift found for this cashier")
+
+    def get_shift_by_id(self, user: User, shift_id: int) -> POSShiftResponse:
+        if user.tenant_id is None:
+            raise AppException("Tenant context required")
+
+        shift = (
+            self.db.query(POSShift)
+            .filter(
+                POSShift.id == shift_id,
+                POSShift.tenant_id == user.tenant_id,
+            )
+            .first()
+        )
+        if not shift:
+            raise NotFoundException("Shift not found")
+
+        user_role_name = getattr(user.role, "name", "").lower() if user.role else ""
+        is_admin_or_owner = user_role_name in ["admin", "owner", "superadmin"]
+
+        if not is_admin_or_owner:
+            if user_role_name == "manager":
+                if shift.store_id != user.store_id:
+                    raise ForbiddenException("Managers can only view shifts for their assigned store")
+            else:
+                if shift.store_id != user.store_id or shift.cashier_id != user.id:
+                    raise ForbiddenException("Cashiers can only view their own shifts")
+
+        return POSShiftResponse.model_validate(shift)
+
+    def get_cash_movements(self, user: User, shift_id: int) -> List[POSCashMovementResponse]:
+        if user.tenant_id is None:
+            raise AppException("Tenant context required")
+
+        shift = (
+            self.db.query(POSShift)
+            .filter(
+                POSShift.id == shift_id,
+                POSShift.tenant_id == user.tenant_id,
+            )
+            .first()
+        )
+        if not shift:
+            raise NotFoundException("Shift not found")
+
+        user_role_name = getattr(user.role, "name", "").lower() if user.role else ""
+        is_admin_or_owner = user_role_name in ["admin", "owner", "superadmin"]
+
+        if not is_admin_or_owner:
+            if user_role_name == "manager":
+                if shift.store_id != user.store_id:
+                    raise ForbiddenException("Managers can only view cash movements for their assigned store")
+            else:
+                if shift.store_id != user.store_id or shift.cashier_id != user.id:
+                    raise ForbiddenException("Cashiers can only view cash movements for their own shifts")
+
+        movements = (
+            self.db.query(POSCashMovement)
+            .filter(
+                POSCashMovement.shift_id == shift.id,
+                POSCashMovement.tenant_id == user.tenant_id,
+            )
+            .order_by(POSCashMovement.id.asc())
+            .all()
+        )
+        return [POSCashMovementResponse.model_validate(m) for m in movements]
 
     def record_cash_movement(self, user: User, data: POSCashMovementRequest) -> POSCashMovementResponse:
         if user.tenant_id is None:

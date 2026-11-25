@@ -37,7 +37,6 @@ router = APIRouter(
 )
 def open_shift(
     payload: POSShiftOpenRequest,
-    store_id: Optional[int] = Query(None, gt=0, description="Optional Store ID override for Admin/Owner"),
     user: User = Depends(require_permission("pos:shift_manage")),
     db: Session = Depends(get_db),
 ):
@@ -45,27 +44,29 @@ def open_shift(
     Opens a new POS shift session for the authenticated cashier at their assigned store.
     Records opening float cash in drawer and optional denominations breakdown & register ID.
     """
-    return POSShiftService(db).open_shift(user, payload, store_id=store_id)
+    return POSShiftService(db).open_shift(user, payload)
 
 
 @router.get(
     "/current",
     response_model=POSShiftResponse,
+    summary="Get Current Shift",
+    description="Retrieves the currently active open shift for the authenticated cashier.",
 )
 @router.get(
     "/current-shift",
     response_model=POSShiftResponse,
+    include_in_schema=False,
 )
 def get_current_shift(
-    store_id: Optional[int] = Query(None, gt=0, description="Filter current active shift by store ID"),
     user: User = Depends(require_permission("pos:shift_manage")),
     db: Session = Depends(get_db),
 ):
     """
-    Retrieves the currently active open shift for the authenticated cashier or specified store.
-    Secured so non-managers can only see their own active cashier shift.
+    Retrieves the currently active open shift for the authenticated cashier.
+    Secured so cashiers can only see their own active cashier shift.
     """
-    return POSShiftService(db).get_current_shift(user, store_id=store_id)
+    return POSShiftService(db).get_current_shift(user)
 
 
 @router.post(
@@ -120,6 +121,34 @@ def force_close_shift(
     Force closes an active POS shift by a store manager or tenant administrator.
     """
     return POSShiftService(db).force_close_shift(user, shift_id, payload)
+
+
+@router.get(
+    "/{shift_id}",
+    response_model=POSShiftResponse,
+    summary="Get Shift Details by ID",
+    description="Retrieves the detailed record of a specific POS shift by its ID.",
+)
+def get_shift_by_id(
+    shift_id: int,
+    user: User = Depends(require_permission("pos:shift_manage")),
+    db: Session = Depends(get_db),
+):
+    return POSShiftService(db).get_shift_by_id(user, shift_id)
+
+
+@router.get(
+    "/{shift_id}/cash-movements",
+    response_model=List[POSCashMovementResponse],
+    summary="List Cash Movements for Shift",
+    description="Retrieves all cash drops, payouts, and cash additions recorded during a specific POS shift.",
+)
+def list_shift_cash_movements(
+    shift_id: int,
+    user: User = Depends(require_permission("pos:shift_manage")),
+    db: Session = Depends(get_db),
+):
+    return POSShiftService(db).get_cash_movements(user, shift_id)
 
 
 @router.get(

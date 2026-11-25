@@ -405,3 +405,58 @@ def test_admin_owner_can_open_shift_auto_store(enhancement_setup):
     assert close_res.status_code == 200
     assert close_res.json()["shift"]["status"] == "closed"
 
+
+def test_get_shift_by_id_and_cash_movements(enhancement_setup):
+    headers = enhancement_setup["owner_headers"]
+    # 1. Open shift
+    open_res = client.post(
+        "/api/v1/pos/shifts/open",
+        headers=headers,
+        json={
+            "register_id": "REG-DETAIL-01",
+            "opening_cash_float": 1000.00,
+            "notes": "Testing shift details & movements endpoints",
+        },
+    )
+    assert open_res.status_code == 201
+    shift_id = open_res.json()["id"]
+
+    # 2. Record Cash In movement
+    move_res = client.post(
+        "/api/v1/pos/shifts/cash-movement",
+        headers=headers,
+        json={
+            "movement_type": "CASH_IN",
+            "amount": 500.00,
+            "reason": "Added 500 change to drawer",
+        },
+    )
+    assert move_res.status_code == 201
+
+    # 3. Test GET /api/v1/pos/shifts/{shift_id}
+    detail_res = client.get(f"/api/v1/pos/shifts/{shift_id}", headers=headers)
+    assert detail_res.status_code == 200
+    detail_data = detail_res.json()
+    assert detail_data["id"] == shift_id
+    assert detail_data["register_id"] == "REG-DETAIL-01"
+    assert detail_data["status"] == "open"
+    assert float(detail_data["opening_cash_float"]) == 1000.00
+
+    # 4. Test GET /api/v1/pos/shifts/{shift_id}/cash-movements
+    movements_res = client.get(f"/api/v1/pos/shifts/{shift_id}/cash-movements", headers=headers)
+    assert movements_res.status_code == 200
+    movements_data = movements_res.json()
+    assert len(movements_data) >= 1
+    assert any(m["movement_type"] == "CASH_IN" and float(m["amount"]) == 500.00 for m in movements_data)
+
+    # 5. Non-existent shift returns 404
+    non_exist_res = client.get("/api/v1/pos/shifts/999999", headers=headers)
+    assert non_exist_res.status_code == 404
+
+    # Close shift
+    client.post(
+        "/api/v1/pos/shifts/close",
+        headers=headers,
+        json={"closing_cash_counted": 1500.00},
+    )
+

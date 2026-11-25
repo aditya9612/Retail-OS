@@ -185,13 +185,15 @@ def is_token_blacklisted(
     if not jti:
         return False
 
-    redis = get_redis()
-
-    return bool(
-        redis.exists(
-            f"auth:blacklist:{jti}"
+    try:
+        redis = get_redis()
+        return bool(
+            redis.exists(
+                f"auth:blacklist:{jti}"
+            )
         )
-    )
+    except Exception:
+        return False
 
 
 def blacklist_token(
@@ -215,13 +217,15 @@ def blacklist_token(
     if ttl <= 0:
         return
 
-    redis = get_redis()
-
-    redis.setex(
-        f"auth:blacklist:{jti}",
-        ttl,
-        "1",
-    )
+    try:
+        redis = get_redis()
+        redis.setex(
+            f"auth:blacklist:{jti}",
+            ttl,
+            "1",
+        )
+    except Exception:
+        pass
 
 
 def get_current_user(
