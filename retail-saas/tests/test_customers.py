@@ -316,13 +316,15 @@ def test_list_customers_and_tenant_isolation(tenant_a, tenant_b):
     cust_b = create_test_customer(headers_b, name="Tenant B Customer")
 
     # Tenant A list contains cust_a, but NOT cust_b
-    list_a = client.get("/api/v1/customers", headers=headers_a).json()
+    list_a_data = client.get("/api/v1/customers", headers=headers_a).json()
+    assert "counts" in list_a_data
+    list_a = list_a_data["items"]
     ids_a = [c["id"] for c in list_a]
     assert cust_a["id"] in ids_a
     assert cust_b["id"] not in ids_a
 
     # Tenant B list contains cust_b, but NOT cust_a
-    list_b = client.get("/api/v1/customers", headers=headers_b).json()
+    list_b = client.get("/api/v1/customers", headers=headers_b).json()["items"]
     ids_b = [c["id"] for c in list_b]
     assert cust_b["id"] in ids_b
     assert cust_a["id"] not in ids_b
@@ -330,7 +332,7 @@ def test_list_customers_and_tenant_isolation(tenant_a, tenant_b):
     # Search parameter works
     search_resp = client.get("/api/v1/customers", params={"search": "Tenant A"}, headers=headers_a)
     assert search_resp.status_code == 200
-    search_ids = [c["id"] for c in search_resp.json()]
+    search_ids = [c["id"] for c in search_resp.json()["items"]]
     assert cust_a["id"] in search_ids
 
 
@@ -378,7 +380,9 @@ def test_customer_stats(tenant_a):
     create_test_customer(headers, name="Stats Customer Beta")
 
     customers_resp = client.get("/api/v1/customers", headers=headers)
-    customers_count = len(customers_resp.json())
+    customers_payload = customers_resp.json()
+    customers_count = customers_payload["total"]
+    assert customers_payload["counts"]["total"] == customers_count
 
     stats_resp = client.get("/api/v1/customers/stats", headers=headers)
     assert stats_resp.status_code == 200
@@ -1203,7 +1207,7 @@ def test_customer_list_name_filter_matching_and_unmatched_404(tenant_a):
     # Match found -> 200 with matching customer
     resp_match = client.get("/api/v1/customers", params={"name": "Unique Name Alpha"}, headers=headers)
     assert resp_match.status_code == 200
-    results = resp_match.json()
+    results = resp_match.json()["items"]
     assert len(results) >= 1
     assert any(c["id"] == cust["id"] for c in results)
 
@@ -1491,36 +1495,36 @@ def test_list_customers_status_pagination_and_legacy_serialization(tenant_a, ten
     # 1. status works independently (active, inactive, blocked) without name/mobile/segment
     res_active = client.get("/api/v1/customers", params={"status": "active"}, headers=headers_a)
     assert res_active.status_code == 200
-    active_ids = [c["id"] for c in res_active.json()]
+    active_ids = [c["id"] for c in res_active.json()["items"]]
     assert cust1["id"] in active_ids
     assert cust2["id"] in active_ids
     assert cust_b["id"] not in active_ids
 
     res_inactive = client.get("/api/v1/customers", params={"status": "inactive"}, headers=headers_a)
     assert res_inactive.status_code == 200
-    assert isinstance(res_inactive.json(), list)
+    assert isinstance(res_inactive.json()["items"], list)
 
     res_blocked = client.get("/api/v1/customers", params={"status": "blocked"}, headers=headers_a)
     assert res_blocked.status_code == 200
-    assert res_blocked.json() == []  # Empty result returns [] (200 OK), not 404 or 500
+    assert res_blocked.json()["items"] == []  # Empty result returns [] (200 OK), not 404 or 500
 
     # 2. page works independently
     res_p1 = client.get("/api/v1/customers", params={"page": 1}, headers=headers_a)
     assert res_p1.status_code == 200
-    assert len(res_p1.json()) >= 3
+    assert len(res_p1.json()["items"]) >= 3
 
     res_p2 = client.get("/api/v1/customers", params={"page": 2}, headers=headers_a)
     assert res_p2.status_code == 200
-    assert isinstance(res_p2.json(), list)
+    assert isinstance(res_p2.json()["items"], list)
 
     # 3. page_size works independently
     res_ps1 = client.get("/api/v1/customers", params={"page_size": 1}, headers=headers_a)
     assert res_ps1.status_code == 200
-    assert len(res_ps1.json()) == 1
+    assert len(res_ps1.json()["items"]) == 1
 
     res_ps10 = client.get("/api/v1/customers", params={"page_size": 10}, headers=headers_a)
     assert res_ps10.status_code == 200
-    assert len(res_ps10.json()) >= 3
+    assert len(res_ps10.json()["items"]) >= 3
 
     res_ps100 = client.get("/api/v1/customers", params={"page_size": 100}, headers=headers_a)
     assert res_ps100.status_code == 200
@@ -1528,11 +1532,11 @@ def test_list_customers_status_pagination_and_legacy_serialization(tenant_a, ten
     # 4. Combinations work
     res_comb1 = client.get("/api/v1/customers", params={"page": 1, "page_size": 2}, headers=headers_a)
     assert res_comb1.status_code == 200
-    assert len(res_comb1.json()) == 2
+    assert len(res_comb1.json()["items"]) == 2
 
     res_comb2 = client.get("/api/v1/customers", params={"status": "active", "page": 1, "page_size": 10}, headers=headers_a)
     assert res_comb2.status_code == 200
-    assert len(res_comb2.json()) >= 3
+    assert len(res_comb2.json()["items"]) >= 3
 
     # 5. Invalid parameters return HTTP 422, NEVER 500
     for bad_status in ["test", "invalid_status", "ACTIVE", "", "   "]:
@@ -1569,7 +1573,7 @@ def test_list_customers_status_pagination_and_legacy_serialization(tenant_a, ten
         # GET with status=active must succeed with 200 (not 500)
         res_legacy_status = client.get("/api/v1/customers", params={"status": "active"}, headers=headers_a)
         assert res_legacy_status.status_code == 200, f"Failed on legacy record with status=active: {res_legacy_status.text}"
-        data = res_legacy_status.json()
+        data = res_legacy_status.json()["items"]
         leg_entry = next((c for c in data if c["id"] == legacy_cust.id), None)
         assert leg_entry is not None
         assert leg_entry["segment"] in ("new", "regular", "vip", "inactive")
@@ -1595,7 +1599,7 @@ def test_list_customers_status_pagination_and_legacy_serialization(tenant_a, ten
 
         res_legacy_status2 = client.get("/api/v1/customers", headers=headers_a)
         assert res_legacy_status2.status_code == 200
-        data2 = res_legacy_status2.json()
+        data2 = res_legacy_status2.json()["items"]
         leg_entry2 = next((c for c in data2 if c["id"] == legacy_cust2.id), None)
         assert leg_entry2 is not None
         assert leg_entry2["status"] in ("active", "inactive", "blocked")
@@ -1603,21 +1607,21 @@ def test_list_customers_status_pagination_and_legacy_serialization(tenant_a, ten
         # 7. Mobile filtering
         res_mobile = client.get("/api/v1/customers", params={"mobile": cust1["phone"]}, headers=headers_a)
         assert res_mobile.status_code == 200
-        assert any(c["id"] == cust1["id"] for c in res_mobile.json())
+        assert any(c["id"] == cust1["id"] for c in res_mobile.json()["items"])
 
         # 8. Segment filtering
         res_seg_new = client.get("/api/v1/customers", params={"segment": "new"}, headers=headers_a)
         assert res_seg_new.status_code == 200
-        assert isinstance(res_seg_new.json(), list)
+        assert isinstance(res_seg_new.json()["items"], list)
 
         res_seg_reg = client.get("/api/v1/customers", params={"segment": "regular"}, headers=headers_a)
         assert res_seg_reg.status_code == 200
-        assert isinstance(res_seg_reg.json(), list)
+        assert isinstance(res_seg_reg.json()["items"], list)
 
         # 9. No matching records on filters (status/segment) returns 200 with [] (never 404/500)
         res_seg_empty = client.get("/api/v1/customers", params={"segment": "inactive"}, headers=headers_a)
         assert res_seg_empty.status_code == 200
-        assert res_seg_empty.json() == []
+        assert res_seg_empty.json()["items"] == []
 
     finally:
         db.close()

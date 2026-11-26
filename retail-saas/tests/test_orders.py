@@ -97,8 +97,10 @@ def test_list_orders_handles_null_tax_and_roundoff_decimals(setup_order_flow):
 
     res = client.get("/api/v1/orders?page=1&page_size=20", headers=headers)
     assert res.status_code == 200, res.text
-    orders = res.json()
-    assert isinstance(orders, list)
+    body = res.json()
+    assert isinstance(body["items"], list)
+    assert body["counts"]["total"] >= len(body["items"])
+    orders = body["items"]
     target = next((o for o in orders if o["id"] == order_id), None)
     if target:
         assert Decimal(str(target["cgst_amount"])) == Decimal("0.00")

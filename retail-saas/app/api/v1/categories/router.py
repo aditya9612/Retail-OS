@@ -57,7 +57,7 @@ def list_categories(
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    categories, total = CategoryService(db).list_categories(
+    categories, total, counts = CategoryService(db).list_categories(
         tenant_id=user.tenant_id,
         search=search,
         is_active=is_active,
@@ -66,6 +66,8 @@ def list_categories(
         page=page,
         page_size=page_size,
     )
+    from app.utils.pagination import compute_total_pages
+    total_pages = compute_total_pages(total, page_size) if page_size else (1 if total > 0 else 0)
     return {
         "success": True,
         "message": (
@@ -76,6 +78,8 @@ def list_categories(
         "total": total,
         "page": page,
         "page_size": page_size,
+        "total_pages": total_pages,
+        "counts": counts,
         "data": categories,
     }
 

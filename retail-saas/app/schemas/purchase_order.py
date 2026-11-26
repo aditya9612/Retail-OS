@@ -625,6 +625,17 @@ class PurchaseOrderResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class PurchaseOrderCounts(BaseModel):
+    """Purchase order status summary counts for list view display."""
+
+    total: int = 0
+    draft: int = 0
+    approved: int = 0
+    partially_received: int = 0
+    received: int = 0
+    cancelled: int = 0
+
+
 class PurchaseOrderStatsResponse(BaseModel):
     total_orders: int
     draft_orders: int

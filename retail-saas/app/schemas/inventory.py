@@ -502,6 +502,15 @@ class BulkAdjustmentProcessedItem(BaseModel):
     movement_reference: Optional[str] = None
 
 
+class InventoryCounts(BaseModel):
+    """Inventory summary counts for list view display."""
+
+    total: int = 0
+    in_stock: int = 0
+    low_stock: int = 0
+    out_of_stock: int = 0
+
+
 class BulkInventoryAdjustmentResponse(BaseModel):
     success: bool = True
     message: str = "Bulk inventory adjustment completed successfully"

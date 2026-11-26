@@ -169,6 +169,28 @@ class PurchaseOrderRepository:
         )
         return query.count()
 
+    def get_counts(self, tenant_id: int, store_id: Optional[int] = None) -> dict[str, int]:
+        """Return purchase order counts grouped by status in a single query."""
+        q = (
+            self.db.query(PurchaseOrder.status, func.count(PurchaseOrder.id))
+            .filter(
+                PurchaseOrder.tenant_id == tenant_id,
+                PurchaseOrder.is_deleted.is_(False),
+            )
+        )
+        if store_id is not None:
+            q = q.filter(PurchaseOrder.store_id == store_id)
+        rows = q.group_by(PurchaseOrder.status).all()
+        by_status = {str(s).lower(): int(c) for s, c in rows if s is not None}
+        return {
+            "total": sum(by_status.values()),
+            "draft": by_status.get("draft", 0),
+            "approved": by_status.get("approved", 0),
+            "partially_received": by_status.get("partially_received", 0),
+            "received": by_status.get("received", 0),
+            "cancelled": by_status.get("cancelled", 0),
+        }
+
     def update(
         self,
         purchase_order: PurchaseOrder,

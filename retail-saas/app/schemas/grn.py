@@ -567,6 +567,15 @@ class GRNHistoryResponse(BaseModel):
     timeline: list[GRNHistoryEvent] = []
 
 
+class GRNCounts(BaseModel):
+    """GRN status summary counts for list view display."""
+
+    total: int = 0
+    pending: int = 0
+    received: int = 0
+    rejected: int = 0
+
+
 class GRNStatsResponse(BaseModel):
     total_grns: int
     pending_grns: int

@@ -12,7 +12,9 @@ from app.core.exceptions import ForbiddenException, NotFoundException
 from app.core.security import is_tenant_wide_authorized, require_operational_write, require_permission
 from app.models.store import Store
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.billing import (
+    InvoiceCounts,
     InvoiceCreate,
     InvoicePdfStatusResponse,
     InvoiceReprintRequest,
@@ -60,7 +62,7 @@ def create_invoice(
     )
 
 
-@router.get("", response_model=list[InvoiceResponse])
+@router.get("", response_model=ListWithCountsResponse[InvoiceResponse, InvoiceCounts])
 def search_invoices(
     invoice_number: Optional[str] = Query(
         default=None,
@@ -177,7 +179,7 @@ def search_invoices(
         if not store:
             raise NotFoundException(f"Store {store_id} not found")
 
-    return BillingService(db).search_invoices(
+    return BillingService(db).search_invoices_with_counts(
         user.tenant_id,
         invoice_number,
         customer_name,

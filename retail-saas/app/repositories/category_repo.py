@@ -87,6 +87,10 @@ class CategoryRepository:
 
         return query.count()
 
+    def get_counts(self, tenant_id: int) -> dict[str, int]:
+        from app.utils.pagination import count_boolean_flag
+        return count_boolean_flag(self.db, Category, tenant_id, Category.is_active)
+
     def get_by_id(
         self,
         tenant_id: int,

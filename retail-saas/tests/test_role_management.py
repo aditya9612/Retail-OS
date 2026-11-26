@@ -61,7 +61,7 @@ def test_role_management_full_flow(unique_slug):
     # 5. List default roles (should contain admin, owner, manager, accountant, cashier, staff)
     roles_res = client.get("/api/v1/roles", headers=owner_headers)
     assert roles_res.status_code == 200
-    roles = roles_res.json()
+    roles = roles_res.json()["items"]
     role_names = [r["name"] for r in roles]
     assert "owner" in role_names
     assert "admin" in role_names

@@ -393,6 +393,65 @@ class GRNService:
             limit=limit,
         )
 
+    def list_with_counts(
+        self,
+        tenant_id: int,
+        purchase_order_id: Optional[int] = None,
+        warehouse_id: Optional[int] = None,
+        store_id: Optional[int] = None,
+        supplier_id: Optional[int] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        skip: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages
+        items = self.list(
+            tenant_id=tenant_id,
+            purchase_order_id=purchase_order_id,
+            warehouse_id=warehouse_id,
+            store_id=store_id,
+            supplier_id=supplier_id,
+            status=status,
+            search=search,
+            from_date=from_date,
+            to_date=to_date,
+            page=page,
+            page_size=page_size,
+            skip=skip,
+            limit=limit,
+        )
+        all_filtered = self.list(
+            tenant_id=tenant_id,
+            purchase_order_id=purchase_order_id,
+            warehouse_id=warehouse_id,
+            store_id=store_id,
+            supplier_id=supplier_id,
+            status=status,
+            search=search,
+            from_date=from_date,
+            to_date=to_date,
+        )
+        total = len(all_filtered)
+        eff_page = page if page is not None else 1
+        eff_size = page_size if page_size is not None else (limit if limit is not None else total)
+        total_pages = compute_total_pages(total, eff_size) if eff_size else (1 if total > 0 else 0)
+        counts = self.repo.get_counts(tenant_id=tenant_id, store_id=store_id)
+        return {
+            "success": True,
+            "message": "GRNs retrieved successfully" if items else "No GRNs found",
+            "items": items,
+            "total": total,
+            "page": eff_page,
+            "page_size": eff_size,
+            "total_pages": total_pages,
+            "counts": counts,
+        }
+
     def get(
         self,
         tenant_id: int,

@@ -345,6 +345,14 @@ class TopReturnReasonItem(BaseModel):
     total_amount: Decimal
 
 
+class PurchaseOrderReturnCounts(BaseModel):
+    total: int = 0
+    requested: int = 0
+    approved: int = 0
+    completed: int = 0
+    rejected: int = 0
+
+
 class PurchaseOrderReturnStatsResponse(BaseModel):
     total_returns: int
     requested_count: int

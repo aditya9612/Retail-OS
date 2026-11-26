@@ -624,25 +624,28 @@ def test_supplier_list_and_search_empty_responses():
     token = login.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    # 1. GET /api/v1/suppliers when empty: must NOT return bare []
+    # 1. GET /api/v1/suppliers when empty: returns structured wrapper with items=[], counts
     list_resp = client.get("/api/v1/suppliers", headers=headers)
     assert list_resp.status_code == 200, list_resp.text
     list_data = list_resp.json()
     assert isinstance(list_data, dict)
     assert list_data.get("success") is True
     assert list_data.get("message") == "No suppliers found"
-    assert list_data.get("data") == []
+    assert list_data.get("items") == []
+    assert list_data.get("total") == 0
+    assert list_data.get("counts") == {"total": 0, "active": 0, "inactive": 0}
 
-    # 2. GET /api/v1/suppliers/search when no match: must NOT return bare [] or 404
+    # 2. GET /api/v1/suppliers/search when no match: returns structured wrapper with items=[]
     search_resp = client.get("/api/v1/suppliers/search?search=NonExistentSupplier", headers=headers)
     assert search_resp.status_code == 200, search_resp.text
     search_data = search_resp.json()
     assert isinstance(search_data, dict)
     assert search_data.get("success") is True
     assert search_data.get("message") == "No suppliers found matching the search"
-    assert search_data.get("data") == []
+    assert search_data.get("items") == []
+    assert search_data.get("total") == 0
 
-    # 3. Create a supplier and verify non-empty responses preserve existing structure
+    # 3. Create a supplier and verify non-empty responses return uniform wrapper + counts
     create_resp = client.post(
         "/api/v1/suppliers",
         json={
@@ -655,28 +658,28 @@ def test_supplier_list_and_search_empty_responses():
 
     list_resp2 = client.get("/api/v1/suppliers", headers=headers)
     assert list_resp2.status_code == 200
-    list_data2 = list_resp2.json()
-    assert isinstance(list_data2, list)
+    list_body2 = list_resp2.json()
+    assert list_body2["counts"] == {"total": 1, "active": 1, "inactive": 0}
+    list_data2 = list_body2["items"]
     assert len(list_data2) == 1
     assert list_data2[0]["name"] == "Found Supplier"
 
     search_resp2 = client.get("/api/v1/suppliers/search?search=Found Supplier", headers=headers)
     assert search_resp2.status_code == 200
-    search_data2 = search_resp2.json()
-    assert isinstance(search_data2, list)
+    search_data2 = search_resp2.json()["items"]
     assert len(search_data2) == 1
     assert search_data2[0]["name"] == "Found Supplier"
 
     # 4. Partial / half name search
     half_resp = client.get("/api/v1/suppliers/search?search=Found", headers=headers)
     assert half_resp.status_code == 200
-    assert len(half_resp.json()) == 1
-    assert half_resp.json()[0]["name"] == "Found Supplier"
+    assert len(half_resp.json()["items"]) == 1
+    assert half_resp.json()["items"][0]["name"] == "Found Supplier"
 
     half_resp2 = client.get("/api/v1/suppliers/search?search=supp", headers=headers)
     assert half_resp2.status_code == 200
-    assert len(half_resp2.json()) == 1
-    assert half_resp2.json()[0]["name"] == "Found Supplier"
+    assert len(half_resp2.json()["items"]) == 1
+    assert half_resp2.json()["items"][0]["name"] == "Found Supplier"
 
     # 5. Empty search should be rejected with 422
     assert client.get("/api/v1/suppliers/search?search=", headers=headers).status_code == 422

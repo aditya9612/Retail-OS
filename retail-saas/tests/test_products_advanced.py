@@ -78,14 +78,16 @@ def setup_product_data():
 
 
 def test_search_products_returns_empty_list_when_no_match(setup_product_data):
-    """Bug fix: Search must return 200 OK with empty list [] when nothing matches, not 404."""
+    """Bug fix: Search must return 200 OK with empty items [] when nothing matches, not 404."""
     t1 = setup_product_data["t1"]
     resp = client.get(
         "/api/v1/products/search?search=NonExistentProductXYZ123",
         headers=t1["headers"],
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json() == []
+    data = resp.json()
+    assert data["items"] == []
+    assert "counts" in data
 
 
 def test_category_tenant_validation(setup_product_data):
@@ -166,20 +168,22 @@ def test_list_products_filtering_and_sorting(setup_product_data):
     # 1. Filter by category_id
     resp_cat = client.get(f"/api/v1/products?category_id={cat1.id}", headers=t1["headers"])
     assert resp_cat.status_code == 200
-    cat_items = resp_cat.json()
+    cat_body = resp_cat.json()
+    assert cat_body["counts"]["total"] >= 2
+    cat_items = cat_body["items"]
     assert any(p["sku"] == sku_a for p in cat_items)
     assert not any(p["sku"] == sku_b for p in cat_items)
 
     # 2. Filter by brand
     resp_brand = client.get("/api/v1/products?brand=AlphaBrand", headers=t1["headers"])
     assert resp_brand.status_code == 200
-    brand_items = resp_brand.json()
+    brand_items = resp_brand.json()["items"]
     assert all("alphabrand" in (p["brand"] or "").lower() for p in brand_items)
 
     # 3. Filter by price range
     resp_price = client.get("/api/v1/products?min_price=1000&max_price=2000", headers=t1["headers"])
     assert resp_price.status_code == 200
-    price_items = resp_price.json()
+    price_items = resp_price.json()["items"]
     assert any(p["sku"] == sku_b for p in price_items)
     assert not any(p["sku"] == sku_a for p in price_items)
 
@@ -407,7 +411,7 @@ def test_expiring_soon_returns_real_expiring_products(setup_product_data):
             headers=t1["headers"],
         )
         assert resp.status_code == 200, resp.text
-        items = resp.json()
+        items = resp.json()["items"]
         ids = [p["id"] for p in items]
         assert exp_prod.id in ids
         assert safe_prod.id not in ids

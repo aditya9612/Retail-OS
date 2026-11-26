@@ -246,6 +246,40 @@ class UserService:
 
         return users
 
+    def list_users_with_counts(
+        self,
+        tenant_id: int,
+        page: int = 1,
+        page_size: int = 20,
+        include_inactive: bool = False,
+        store_id: int | None = None,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages
+        skip = (page - 1) * page_size
+        users = self.list_users(
+            tenant_id=tenant_id,
+            skip=skip,
+            limit=page_size,
+            include_inactive=include_inactive,
+            store_id=store_id,
+        )
+        total = self.repo.count_filtered(
+            tenant_id=tenant_id,
+            include_inactive=include_inactive,
+            store_id=store_id,
+        )
+        counts = self.repo.get_counts(tenant_id=tenant_id, store_id=store_id)
+        return {
+            "success": True,
+            "message": "Users retrieved successfully" if users else "No users found",
+            "items": users,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": compute_total_pages(total, page_size),
+            "counts": counts,
+        }
+
     def update_user(
         self,
         tenant_id: int,

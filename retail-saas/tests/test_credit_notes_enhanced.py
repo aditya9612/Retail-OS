@@ -222,8 +222,10 @@ def test_credit_note_filters_and_pagination(credit_note_setup):
         headers=headers,
     )
     assert res.status_code == 200
-    items = res.json()
+    payload = res.json()
+    items = payload["items"]
     assert isinstance(items, list)
+    assert "counts" in payload
 
 
 def test_credit_note_thermal_voucher_json_and_text(credit_note_setup):

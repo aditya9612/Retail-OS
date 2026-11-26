@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.core.security import require_permission
 from app.models.user import User
 
+from app.schemas.common import BasicStatusCounts, ListWithCountsResponse
 from app.schemas.supplier import (
     SupplierCreate,
     SupplierDeleteResponse,
@@ -47,7 +48,7 @@ def create_supplier(
 
 @router.get(
     "",
-    response_model=Union[list[SupplierResponse], SupplierEmptyResponse],
+    response_model=ListWithCountsResponse[SupplierResponse, BasicStatusCounts],
 )
 def list_suppliers(
     search: Optional[str] = Query(None, description="Search by name, phone, contact person, or GSTIN"),
@@ -59,7 +60,7 @@ def list_suppliers(
     ),
     db: Session = Depends(get_db),
 ):
-    return SupplierService(db).list_suppliers(
+    return SupplierService(db).list_suppliers_with_counts(
         tenant_id=user.tenant_id,
         search=search,
         is_active=is_active,
@@ -70,7 +71,7 @@ def list_suppliers(
 
 @router.get(
     "/search",
-    response_model=Union[list[SupplierResponse], SupplierEmptyResponse],
+    response_model=ListWithCountsResponse[SupplierResponse, BasicStatusCounts],
 )
 def search_suppliers(
     search: str = Query(
@@ -79,6 +80,8 @@ def search_suppliers(
         max_length=255,
         description="Search supplier by name, phone, contact person, or GSTIN",
     ),
+    page: Optional[int] = Query(None, ge=1, description="Page number"),
+    page_size: Optional[int] = Query(None, ge=1, le=100, description="Items per page"),
     user: User = Depends(
         require_permission("suppliers:read")
     ),
@@ -90,9 +93,11 @@ def search_suppliers(
             status_code=422,
             detail="Search term cannot be empty or whitespace",
         )
-    return SupplierService(db).search_suppliers(
+    return SupplierService(db).search_suppliers_with_counts(
         user.tenant_id,
         search_clean,
+        page=page,
+        page_size=page_size,
     )
 
 

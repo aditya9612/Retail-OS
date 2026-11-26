@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 import qrcode
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -205,6 +206,41 @@ class PaymentService:
             )
 
         return payments
+
+    def list_payments_with_counts(
+        self,
+        order_id=None,
+        status=None,
+        method=None,
+        store_id=None,
+    ) -> dict:
+        from app.utils.pagination import count_by_status
+        payments = self.list_payments(
+            order_id=order_id,
+            status=status,
+            method=method,
+            store_id=store_id,
+        )
+        total = len(payments)
+        counts = count_by_status(
+            self.db,
+            Payment,
+            self.tenant_id,
+            Payment.status,
+            statuses=("completed", "pending", "failed", "refunded"),
+            extra_filters=[Order.store_id == store_id] if store_id is not None else None,
+            joins=[(Order, Payment.order_id == Order.id)] if store_id is not None else None,
+        )
+        return {
+            "success": True,
+            "message": "Payments retrieved successfully" if payments else "No payments found",
+            "items": payments,
+            "total": total,
+            "page": 1,
+            "page_size": total,
+            "total_pages": 1 if total > 0 else 0,
+            "counts": counts,
+        }
 
     def refund_payment(self, payment_id: int):
         payment = self.get_payment(payment_id)

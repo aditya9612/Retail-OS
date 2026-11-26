@@ -532,6 +532,82 @@ class CouponService:
             "total_used": total_used,
         }
 
+    def _build_coupon_counts(self, tenant_id: int) -> dict[str, int]:
+        stats = self.get_coupon_stats(tenant_id)
+        return {
+            "total": stats["total_coupons"],
+            "active": stats["active_coupons"],
+            "expired": stats["expired_coupons"],
+            "inactive": stats["inactive_coupons"],
+            "scheduled": stats["scheduled_coupons"],
+        }
+
+    def list_coupons_with_counts(
+        self,
+        tenant_id: int,
+        page: int = 1,
+        page_size: Optional[int] = None,
+        is_active: Optional[bool] = None,
+        search: Optional[str] = None,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages
+        skip = (page - 1) * page_size if page_size else 0
+        coupons = self.repo.list_coupons(
+            tenant_id=tenant_id,
+            skip=skip,
+            limit=page_size,
+            is_active=is_active,
+            search=search,
+        )
+        all_filtered = self.repo.list_coupons(
+            tenant_id=tenant_id,
+            skip=0,
+            limit=None,
+            is_active=is_active,
+            search=search,
+        )
+        total = len(all_filtered)
+        eff_size = page_size if page_size else total
+        total_pages = compute_total_pages(total, page_size) if page_size else (1 if total > 0 else 0)
+        return {
+            "success": True,
+            "message": "Coupons retrieved successfully" if coupons else "No coupons found",
+            "items": coupons,
+            "total": total,
+            "page": page,
+            "page_size": eff_size,
+            "total_pages": total_pages,
+            "counts": self._build_coupon_counts(tenant_id),
+        }
+
+    def get_active_coupons_with_counts(self, tenant_id: int) -> dict:
+        coupons = self.repo.get_active_coupons(tenant_id)
+        total = len(coupons)
+        return {
+            "success": True,
+            "message": "Active coupons retrieved successfully" if coupons else "No active coupons found",
+            "items": coupons,
+            "total": total,
+            "page": 1,
+            "page_size": total,
+            "total_pages": 1 if total > 0 else 0,
+            "counts": self._build_coupon_counts(tenant_id),
+        }
+
+    def get_expired_coupons_with_counts(self, tenant_id: int) -> dict:
+        coupons = self.repo.get_expired_coupons(tenant_id)
+        total = len(coupons)
+        return {
+            "success": True,
+            "message": "Expired coupons retrieved successfully" if coupons else "No expired coupons found",
+            "items": coupons,
+            "total": total,
+            "page": 1,
+            "page_size": total,
+            "total_pages": 1 if total > 0 else 0,
+            "counts": self._build_coupon_counts(tenant_id),
+        }
+
     # -------------------------------------------------------------
     # NEW ENTERPRISE APIS
     # -------------------------------------------------------------

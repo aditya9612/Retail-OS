@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import get_current_user, require_operational_write, require_permission
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.order_return import (
+    OrderReturnCounts,
     OrderReturnCreate,
     OrderReturnExchangeRequest,
     OrderReturnRejectRequest,
@@ -48,7 +50,7 @@ def create_return(
 
 @router.get(
     "",
-    response_model=list[OrderReturnResponse],
+    response_model=ListWithCountsResponse[OrderReturnResponse, OrderReturnCounts],
     summary="List Returns",
 )
 def list_returns(
@@ -71,7 +73,7 @@ def list_returns(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("orders:read")),
 ):
-    return OrderReturnService.list_returns(
+    return OrderReturnService.list_returns_with_counts(
         db=db,
         tenant_id=current_user.tenant_id,
         skip=skip,

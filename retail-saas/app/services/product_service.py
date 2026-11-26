@@ -299,6 +299,80 @@ class ProductService:
             sort_by=sort_by,
         )
 
+    def search_products_with_counts(
+        self,
+        tenant_id: int,
+        query: str,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages
+        if page <= 0:
+            raise ConflictException("Page must be greater than 0")
+        if page_size <= 0 or page_size > 100:
+            raise ConflictException("Page size must be between 1 and 100")
+        query = query.strip()
+        if not query:
+            raise ConflictException("Search query cannot be empty")
+        if len(query) < 2:
+            raise ConflictException("Search query must contain at least 2 characters")
+
+        skip = (page - 1) * page_size
+        items, total, counts = self.repo.search_products_with_meta(tenant_id, query, skip, page_size)
+        return {
+            "success": True,
+            "message": "Products retrieved successfully" if items else "No products found",
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": compute_total_pages(total, page_size),
+            "counts": counts,
+        }
+
+    def list_products_with_counts(
+        self,
+        tenant_id: int,
+        page: int = 1,
+        page_size: int = 20,
+        include_inactive: bool = False,
+        category_id: Optional[int] = None,
+        brand: Optional[str] = None,
+        stock_status: Optional[str] = None,
+        min_price: Optional[Decimal] = None,
+        max_price: Optional[Decimal] = None,
+        sort_by: Optional[str] = None,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages
+        if page <= 0:
+            raise ConflictException("Page must be greater than 0")
+        if page_size <= 0 or page_size > 100:
+            raise ConflictException("Page size must be between 1 and 100")
+
+        skip = (page - 1) * page_size
+        items, total, counts = self.repo.list_products_with_meta(
+            tenant_id=tenant_id,
+            skip=skip,
+            limit=page_size,
+            include_inactive=include_inactive,
+            category_id=category_id,
+            brand=brand,
+            stock_status=stock_status,
+            min_price=min_price,
+            max_price=max_price,
+            sort_by=sort_by,
+        )
+        return {
+            "success": True,
+            "message": "Products retrieved successfully" if items else "No products found",
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": compute_total_pages(total, page_size),
+            "counts": counts,
+        }
+
     def update_product(
         self,
         tenant_id: int,
@@ -647,6 +721,25 @@ class ProductService:
 
         return result
 
+    def list_low_stock_with_counts(
+        self,
+        tenant_id: int,
+        store_id: int,
+        threshold: int = 10,
+    ) -> dict:
+        items = self.list_low_stock(tenant_id, store_id, threshold)
+        total = len(items)
+        return {
+            "success": True,
+            "message": "Low stock products retrieved successfully" if items else "No low stock products found",
+            "items": items,
+            "total": total,
+            "page": 1,
+            "page_size": total,
+            "total_pages": 1 if total > 0 else 0,
+            "counts": {"total": total},
+        }
+
     def list_expiring_soon(
         self,
         tenant_id: int,
@@ -683,6 +776,25 @@ class ProductService:
             store_id,
             days,
         )
+
+    def list_expiring_soon_with_counts(
+        self,
+        tenant_id: int,
+        store_id: int,
+        days: int = 30,
+    ) -> dict:
+        items = self.list_expiring_soon(tenant_id, store_id, days)
+        total = len(items)
+        return {
+            "success": True,
+            "message": "Expiring products retrieved successfully" if items else "No expiring products found",
+            "items": items,
+            "total": total,
+            "page": 1,
+            "page_size": total,
+            "total_pages": 1 if total > 0 else 0,
+            "counts": {"total": total},
+        }
 
     def generate_barcode_for_product(
         self,

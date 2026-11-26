@@ -210,19 +210,19 @@ def test_po_list_with_search_filters_and_pagination_headers(tenant_fixture):
     search_resp = client.get(f"/api/v1/purchase-orders?search={inv_code}", headers=headers)
     assert search_resp.status_code == 200
     assert "X-Total-Count" in search_resp.headers
-    results = search_resp.json()
+    results = search_resp.json()["items"]
     assert len(results) == 1
     assert results[0]["id"] == po_id
 
     # 2. Filter by status 'draft'
     status_resp = client.get("/api/v1/purchase-orders?status=draft", headers=headers)
     assert status_resp.status_code == 200
-    assert all(o["status"] == "draft" for o in status_resp.json())
+    assert all(o["status"] == "draft" for o in status_resp.json()["items"])
 
     # 3. Filter by non-existent status
     empty_resp = client.get("/api/v1/purchase-orders?status=cancelled", headers=headers)
     assert empty_resp.status_code == 200
-    assert len(empty_resp.json()) == 0
+    assert len(empty_resp.json()["items"]) == 0
 
 
 def test_po_update_draft_items_and_rejection_of_non_draft_updates(tenant_fixture):

@@ -336,7 +336,7 @@ def test_checkout_split_payment_and_search(billing_setup):
         headers=headers,
     )
     assert search_resp.status_code == 200
-    assert len(search_resp.json()) >= 1
+    assert len(search_resp.json()["items"]) >= 1
 
 
 def test_invoice_pdf_download(billing_setup):
@@ -412,7 +412,7 @@ def test_refund_approval_creates_credit_note(billing_setup):
         headers=headers,
     )
     assert cn_resp.status_code == 200
-    credit_notes = cn_resp.json()
+    credit_notes = cn_resp.json()["items"]
     assert len(credit_notes) == 1
     assert credit_notes[0]["credit_note_no"].startswith("CN-")
     assert credit_notes[0]["refund_amount"] == "100.00"
@@ -424,7 +424,7 @@ def _inventory_qty(headers, store_id, product_id):
         "/api/v1/inventory",
         params={"store_id": store_id},
         headers=headers,
-    ).json()
+    ).json()["items"]
     match = next((r for r in rows if r["product_id"] == product_id), None)
     return match["quantity"] if match else 0
 
@@ -528,14 +528,14 @@ def test_invoice_search_by_gstin_and_payment_status(billing_setup):
         "/api/v1/invoices",
         params={"gstin": "27AAAAA0000A1Z5"},
         headers=headers,
-    ).json()
+    ).json()["items"]
     assert any(i["id"] == invoice["id"] for i in by_gstin)
 
     by_payment = client.get(
         "/api/v1/invoices",
         params={"payment_status": "completed"},
         headers=headers,
-    ).json()
+    ).json()["items"]
     assert any(i["id"] == invoice["id"] for i in by_payment)
 
 

@@ -145,6 +145,47 @@ class WarehouseService:
 
         return warehouses
 
+    def list_with_counts(
+        self,
+        tenant_id: int,
+        search: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        store_id: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> dict:
+        from app.utils.pagination import count_boolean_flag, paginate_query
+
+        query = self.db.query(Warehouse).filter(Warehouse.tenant_id == tenant_id)
+        if search:
+            search_clean = search.strip()
+            query = query.filter(
+                (Warehouse.name.ilike(f"%{search_clean}%"))
+                | (Warehouse.code.ilike(f"%{search_clean}%"))
+            )
+        if is_active is not None:
+            query = query.filter(Warehouse.is_active == is_active)
+        if store_id is not None:
+            query = query.filter(Warehouse.store_id == store_id)
+        query = query.order_by(Warehouse.created_at.desc())
+
+        warehouses, total, eff_page, eff_size, total_pages = paginate_query(
+            query, page=page, page_size=page_size, default_page_size=50
+        )
+        for w in warehouses:
+            self._attach_store_name(w)
+        counts = count_boolean_flag(self.db, Warehouse, tenant_id, Warehouse.is_active)
+        return {
+            "success": True,
+            "message": "Warehouses retrieved successfully" if warehouses else "No warehouses found",
+            "items": warehouses,
+            "total": total,
+            "page": eff_page,
+            "page_size": eff_size,
+            "total_pages": total_pages,
+            "counts": counts,
+        }
+
     def get(
         self,
         tenant_id: int,

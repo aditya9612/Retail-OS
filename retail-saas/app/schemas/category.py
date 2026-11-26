@@ -4,6 +4,7 @@ from enum import Enum
 import re
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from app.schemas.common import BasicStatusCounts
 
 
 class CategoryExportIsActive(str, Enum):
@@ -203,6 +204,8 @@ class CategoryListResponse(BaseModel):
     total: Optional[int] = None
     page: Optional[int] = None
     page_size: Optional[int] = None
+    total_pages: Optional[int] = None
+    counts: BasicStatusCounts = Field(default_factory=BasicStatusCounts)
     data: list[CategoryResponse] = Field(default_factory=list)
 
 

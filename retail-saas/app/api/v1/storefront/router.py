@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.core.pdf_utils import render_pdf_or_preview
 from app.core.security import get_current_customer
 from app.models.customer import Customer
+from app.schemas.common import ListWithCountsResponse, TotalCountOnly
 from app.schemas.customer import (
     CustomerFeedbackResponse,
     CustomerLedgerStatementResponse,
@@ -30,6 +31,7 @@ from app.schemas.storefront import (
     StorefrontNotificationListResponse,
     StorefrontOrderCancelRequest,
     StorefrontOrderCancelResponse,
+    StorefrontOrderCounts,
     StorefrontOrderDetailResponse,
     StorefrontOrderSummary,
     StorefrontProductDetailResponse,
@@ -48,7 +50,7 @@ router = APIRouter(prefix="/storefront", tags=["Customer Storefront & Online Sho
 
 @router.get(
     "/categories",
-    response_model=List[StorefrontCategoryItem],
+    response_model=ListWithCountsResponse[StorefrontCategoryItem, TotalCountOnly],
     summary="List Store Categories",
     description="Browse all available product categories in the store.",
 )
@@ -56,7 +58,7 @@ def list_categories(
     customer: Customer = Depends(get_current_customer),
     db: Session = Depends(get_db),
 ):
-    return StorefrontService(db).get_categories(customer.tenant_id)
+    return StorefrontService(db).get_categories_with_counts(customer.tenant_id)
 
 
 @router.get(
@@ -223,15 +225,19 @@ def checkout(
 
 @router.get(
     "/my-orders",
-    response_model=List[StorefrontOrderSummary],
+    response_model=ListWithCountsResponse[StorefrontOrderSummary, StorefrontOrderCounts],
     summary="List Customer Orders",
     description="Retrieves the order history and statuses for the logged-in customer.",
 )
 def list_my_orders(
+    page: int = Query(default=1, ge=1, description="Page number"),
+    page_size: int = Query(default=20, ge=1, le=100, description="Items per page"),
     customer: Customer = Depends(get_current_customer),
     db: Session = Depends(get_db),
 ):
-    return StorefrontService(db).get_my_orders(customer.tenant_id, customer.id)
+    return StorefrontService(db).get_my_orders_with_counts(
+        customer.tenant_id, customer.id, page=page, page_size=page_size
+    )
 
 
 @router.get(

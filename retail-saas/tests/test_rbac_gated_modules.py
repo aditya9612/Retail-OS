@@ -225,7 +225,7 @@ def test_zero_trust_default_permissions_and_admin_grant(unique_slug):
     # Verify all roles returned by /api/v1/roles
     roles_res = client.get("/api/v1/roles", headers=owner_headers)
     assert roles_res.status_code == 200
-    roles_data = {r["name"]: r for r in roles_res.json()}
+    roles_data = {r["name"]: r for r in roles_res.json()["items"]}
 
     assert "admin" in roles_data
     assert "owner" in roles_data

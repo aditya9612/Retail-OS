@@ -455,7 +455,7 @@ def test_stock_transfer_success(auth_context):
     assert data["reference"] != data["reference_type"]
 
     # Verify inventory across stores
-    inv_all = client.get("/api/v1/inventory", headers=headers).json()
+    inv_all = client.get("/api/v1/inventory", headers=headers).json()["items"]
     item_s1 = next(item for item in inv_all if item["store_id"] == s1 and item["product_id"] == p)
     assert item_s1["quantity"] == 60
 
@@ -907,14 +907,16 @@ def test_list_inventory_empty_and_populated(auth_context):
     s1 = auth_context["store1"]["id"]
     p = auth_context["product"]["id"]
 
-    # 1. Before stock-in: empty inventory returns meaningful JSON response (not bare [])
+    # 1. Before stock-in: empty inventory returns structured response with items=[] and zero counts
     resp_empty = client.get("/api/v1/inventory", headers=headers)
     assert resp_empty.status_code == 200
     data_empty = resp_empty.json()
     assert isinstance(data_empty, dict)
     assert data_empty["success"] is True
     assert data_empty["message"] == "No inventory found"
-    assert data_empty["data"] == []
+    assert data_empty["items"] == []
+    assert data_empty["total"] == 0
+    assert data_empty["counts"] == {"total": 0, "in_stock": 0, "low_stock": 0, "out_of_stock": 0}
 
     # 2. Stock in
     client.post(
@@ -923,10 +925,12 @@ def test_list_inventory_empty_and_populated(auth_context):
         headers=headers,
     )
 
-    # 3. After stock-in: returns list of items directly
+    # 3. After stock-in: returns structured response with items and counts
     resp = client.get("/api/v1/inventory", headers=headers)
     assert resp.status_code == 200
-    data = resp.json()
+    body = resp.json()
+    assert body["counts"]["total"] >= 1
+    data = body["items"]
     assert isinstance(data, list)
     assert any(item["product_id"] == p and item["quantity"] == 25 for item in data)
 
@@ -1079,7 +1083,7 @@ def test_all_7_get_apis_tenant_isolation(auth_context, unique_slug):
     r1 = client.get("/api/v1/inventory", headers=headers_b)
     assert r1.status_code == 200
     assert r1.json()["message"] == "No inventory found"
-    assert r1.json()["data"] == []
+    assert r1.json()["items"] == []
 
     # 2. GET /inventory/{product_id} with Tenant A's product -> 404
     r2 = client.get(f"/api/v1/inventory/{p_a}", headers=headers_b)

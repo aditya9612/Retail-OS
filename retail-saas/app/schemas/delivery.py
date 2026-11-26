@@ -133,6 +133,17 @@ class DeliveryResponse(BaseModel):
             return 0
 
 
+class DeliveryCounts(BaseModel):
+    """Delivery status summary counts for list view display."""
+
+    total: int = 0
+    pending: int = 0
+    assigned: int = 0
+    out_for_delivery: int = 0
+    delivered: int = 0
+    cancelled: int = 0
+
+
 class DeliveryListResponse(BaseModel):
     success: bool = True
     message: str = "Deliveries retrieved successfully"
@@ -141,6 +152,7 @@ class DeliveryListResponse(BaseModel):
     page: Optional[int] = None
     page_size: Optional[int] = None
     total_pages: Optional[int] = None
+    counts: DeliveryCounts = Field(default_factory=DeliveryCounts)
 
 
 class SingleDeliveryResponse(BaseModel):

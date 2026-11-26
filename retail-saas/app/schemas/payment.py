@@ -751,3 +751,11 @@ class PaymentWebhookLogResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+
+
+class PaymentCounts(BaseModel):
+    total: int = 0
+    completed: int = 0
+    pending: int = 0
+    failed: int = 0
+    refunded: int = 0

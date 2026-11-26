@@ -113,6 +113,49 @@ class StoreService:
             is_warehouse=is_warehouse,
         )
 
+    def list_stores_with_counts(
+        self,
+        tenant_id: int,
+        store_id: int | None = None,
+        include_inactive: bool = False,
+        search: str | None = None,
+        is_warehouse: bool | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages
+        items = self.list_stores(
+            tenant_id=tenant_id,
+            store_id=store_id,
+            include_inactive=include_inactive,
+            search=search,
+            is_warehouse=is_warehouse,
+        )
+        total = len(items)
+        if page is not None or page_size is not None:
+            eff_page = page if (page is not None and page >= 1) else 1
+            eff_size = page_size if (page_size is not None and page_size >= 1) else 20
+            offset = (eff_page - 1) * eff_size
+            paged_items = items[offset : offset + eff_size]
+            total_pages = compute_total_pages(total, eff_size)
+        else:
+            paged_items = items
+            eff_page = 1
+            eff_size = total
+            total_pages = 1 if total > 0 else 0
+
+        counts = self.repo.get_counts(tenant_id=tenant_id, store_id=store_id)
+        return {
+            "success": True,
+            "message": "Stores retrieved successfully" if paged_items else "No stores found",
+            "items": paged_items,
+            "total": total,
+            "page": eff_page,
+            "page_size": eff_size,
+            "total_pages": total_pages,
+            "counts": counts,
+        }
+
     def update_store(self, tenant_id: int, store_id: int, data: StoreUpdate) -> Store:
 
         store = self.get_store(tenant_id, store_id, include_inactive=True)

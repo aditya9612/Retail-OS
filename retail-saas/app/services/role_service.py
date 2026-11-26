@@ -111,6 +111,49 @@ class RoleService:
             )
         return result
 
+    def list_roles_with_counts(
+        self,
+        tenant_id: int,
+        search: Optional[str] = None,
+        name: Optional[str] = None,
+        is_system: Optional[bool] = None,
+        role_id: Optional[int] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages
+        all_roles = self.repo.list_by_tenant(tenant_id) if tenant_id is not None else self.db.query(Role).order_by(Role.id.asc()).all()
+        system_count = sum(1 for r in all_roles if bool(r.is_system or (r.name or "").lower() in PROTECTED_CORE_ROLES))
+        total_all = len(all_roles)
+        counts = {
+            "total": total_all,
+            "system_roles": system_count,
+            "custom_roles": max(0, total_all - system_count),
+        }
+
+        filtered_all = self.list_roles(
+            tenant_id=tenant_id,
+            search=search,
+            name=name,
+            is_system=is_system,
+            role_id=role_id,
+            skip=0,
+            limit=max(total_all, 1),
+        )
+        total = len(filtered_all)
+        items = filtered_all[skip : skip + limit]
+        page = (skip // limit) + 1 if limit > 0 else 1
+        return {
+            "success": True,
+            "message": "Roles retrieved successfully" if items else "No roles found",
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": limit,
+            "total_pages": compute_total_pages(total, limit),
+            "counts": counts,
+        }
+
     def get_role(self, tenant_id: int, role_id: int | str) -> RoleDetailResponse:
         role = self.repo.get_by_id_or_name(role_id, tenant_id)
         if not role:

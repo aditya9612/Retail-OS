@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.core.exceptions import ForbiddenException
 from app.core.security import get_current_user, require_permission
 from app.models.user import User
+from app.schemas.common import BasicStatusCounts, ListWithCountsResponse
 from app.schemas.user import (
     MyProfileUpdate,
     RoleResponse,
@@ -300,7 +301,7 @@ async def create_user(
 
 @router.get(
     "",
-    response_model=list[UserResponse],
+    response_model=ListWithCountsResponse[UserResponse, BasicStatusCounts],
 )
 def list_users(
     page: int = Query(1, ge=1),
@@ -316,12 +317,10 @@ def list_users(
             raise ForbiddenException("Access denied to users of this store")
         effective_store_id = current_user.store_id
 
-    skip = (page - 1) * page_size
-
-    return UserService(db).list_users(
+    return UserService(db).list_users_with_counts(
         tenant_id=current_user.tenant_id,
-        skip=skip,
-        limit=page_size,
+        page=page,
+        page_size=page_size,
         include_inactive=include_inactive,
         store_id=effective_store_id,
     )

@@ -46,20 +46,22 @@ def test_roles_advanced_complete_flow():
     # 4. Test Search and is_system filtering on GET /api/v1/roles
     all_roles_res = client.get("/api/v1/roles", headers=owner_headers)
     assert all_roles_res.status_code == 200
-    all_roles = all_roles_res.json()
+    all_roles_body = all_roles_res.json()
+    assert all_roles_body["counts"]["total"] >= 6
+    all_roles = all_roles_body["items"]
     assert len(all_roles) >= 6
 
     # Filter search by name
     search_cashier = client.get("/api/v1/roles?search=cashier", headers=owner_headers)
     assert search_cashier.status_code == 200
-    cashier_results = search_cashier.json()
+    cashier_results = search_cashier.json()["items"]
     assert len(cashier_results) >= 1
     assert any(r["name"] == "cashier" for r in cashier_results)
 
     # Filter is_system=true
     system_roles = client.get("/api/v1/roles?is_system=true", headers=owner_headers)
     assert system_roles.status_code == 200
-    for r in system_roles.json():
+    for r in system_roles.json()["items"]:
         assert r["is_system"] is True
 
     # 5. Test RBAC Permissions Matrix Endpoint: GET /api/v1/roles/matrix

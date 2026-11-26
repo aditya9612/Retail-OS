@@ -1,5 +1,5 @@
 
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.orm import Session
@@ -8,7 +8,9 @@ from app.core.database import get_db
 from app.core.exceptions import ForbiddenException
 from app.core.security import require_permission
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.store import (
+    StoreCounts,
     StoreCreate,
     StoreDeleteResponse,
     StoreInventorySummaryResponse,
@@ -39,7 +41,7 @@ def get_store_service(
 
 @router.get(
     "/",
-    response_model=list[StoreResponse],
+    response_model=ListWithCountsResponse[StoreResponse, StoreCounts],
     summary="List Stores",
     description="Store Owner sees all stores in their organization with optional filters. Store-assigned staff only sees their assigned store.",
 )
@@ -56,6 +58,17 @@ def list_stores(
         None,
         description="Filter by warehouse location (true) or retail outlet (false)",
     ),
+    page: Optional[int] = Query(
+        None,
+        ge=1,
+        description="Optional page number",
+    ),
+    page_size: Optional[int] = Query(
+        None,
+        ge=1,
+        le=100,
+        description="Optional items per page",
+    ),
     user: User = Depends(
         require_permission("stores:read")
     ),
@@ -63,12 +76,14 @@ def list_stores(
         get_store_service
     ),
 ):
-    return service.list_stores(
+    return service.list_stores_with_counts(
         tenant_id=user.tenant_id,
         store_id=user.store_id,
         include_inactive=include_inactive,
         search=search,
         is_warehouse=is_warehouse,
+        page=page,
+        page_size=page_size,
     )
 
 

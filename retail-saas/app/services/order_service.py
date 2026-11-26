@@ -647,6 +647,54 @@ class OrderService:
             limit=page_size,
         )
 
+    def list_orders_with_counts(
+        self,
+        tenant_id: int,
+        store_id: int | None = None,
+        status: str | None = None,
+        customer_id: int | None = None,
+        order_type: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        search: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages
+        items = self.list_orders(
+            tenant_id=tenant_id,
+            store_id=store_id,
+            status=status,
+            customer_id=customer_id,
+            order_type=order_type,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
+            page=page,
+            page_size=page_size,
+        )
+        total = self.repo.count_orders(
+            tenant_id=tenant_id,
+            store_id=store_id,
+            status=status,
+            customer_id=customer_id,
+            order_type=order_type,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
+        )
+        counts = self.repo.get_order_counts(tenant_id=tenant_id, store_id=store_id)
+        return {
+            "success": True,
+            "message": "Orders retrieved successfully" if items else "No orders found",
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": compute_total_pages(total, page_size),
+            "counts": counts,
+        }
+
     def update_order(
         self,
         tenant_id: int,

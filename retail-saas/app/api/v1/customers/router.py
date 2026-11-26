@@ -9,7 +9,9 @@ from app.core.database import get_db
 from app.core.pdf_utils import render_pdf_or_preview
 from app.core.security import require_permission
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.customer import (
+    CustomerCounts,
     CustomerCreate,
     CustomerResponse,
     CustomerStatsResponse,
@@ -60,6 +62,7 @@ from app.schemas.customer import (
 )
 from app.services.customer_service import (
     fetch_customers,
+    fetch_customers_with_counts,
     fetch_customer_stats,
     CustomerService,
 )
@@ -68,7 +71,7 @@ from app.services.order_service import OrderService
 router = APIRouter(prefix="/customers", tags=["customers"])
 
 
-@router.get("", response_model=list[CustomerResponse])
+@router.get("", response_model=ListWithCountsResponse[CustomerResponse, CustomerCounts])
 def list_customers(
     name: Optional[str] = Query(None, min_length=2, max_length=100),
     mobile: Optional[str] = Query(None, pattern=r"^[6-9]\d{9}$"),
@@ -126,7 +129,7 @@ def list_customers(
             raise HTTPException(status_code=422, detail="Invalid segment filter")
         segment = segment_clean
 
-    customers = fetch_customers(
+    result = fetch_customers_with_counts(
         db=db,
         tenant_id=user.tenant_id,
         name=name,
@@ -138,14 +141,14 @@ def list_customers(
         page_size=page_size,
     )
 
-    if (name is not None or search is not None) and not customers:
+    if (name is not None or search is not None) and not result["items"]:
         term = name if name is not None else search
         raise HTTPException(
             status_code=404,
             detail=f"No customer found matching '{term}'"
         )
 
-    return customers
+    return result
 
 
 @router.get("/stats", response_model=CustomerStatsResponse)

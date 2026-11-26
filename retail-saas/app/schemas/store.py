@@ -517,6 +517,16 @@ class StoreStaffMember(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class StoreCounts(BaseModel):
+    """Store outlet summary counts for list view display."""
+
+    total: int = 0
+    active: int = 0
+    inactive: int = 0
+    retail_outlets: int = 0
+    warehouses: int = 0
+
+
 class StoreStaffListResponse(BaseModel):
     store_id: int = Field(..., examples=[2])
     store_name: str = Field(..., examples=["Main Retail Store"])

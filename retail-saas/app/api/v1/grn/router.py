@@ -11,7 +11,9 @@ from app.core.database import get_db
 from app.core.pdf_utils import render_pdf_or_preview
 from app.core.security import require_operational_write, require_permission
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.grn import (
+    GRNCounts,
     GRNCreate,
     GRNDeleteResponse,
     GRNHistoryResponse,
@@ -51,7 +53,7 @@ def create_grn(
 
 @router.get(
     "",
-    response_model=list[GRNResponse],
+    response_model=ListWithCountsResponse[GRNResponse, GRNCounts],
 )
 def list_grn(
     purchase_order_id: Optional[int] = Query(None, description="Filter by purchase order ID"),
@@ -69,7 +71,7 @@ def list_grn(
     user: User = Depends(require_permission("grn:read")),
     db: Session = Depends(get_db),
 ):
-    return GRNService(db).list(
+    return GRNService(db).list_with_counts(
         tenant_id=user.tenant_id,
         purchase_order_id=purchase_order_id,
         warehouse_id=warehouse_id,

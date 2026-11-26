@@ -211,21 +211,23 @@ def test_list_warehouses_filters_and_pagination(tenant_fixture):
     # 1. Search by name
     res_search = client.get(f"/api/v1/warehouses?search={unique_prefix} Alpha", headers=headers)
     assert res_search.status_code == 200
-    items = res_search.json()
+    search_data = res_search.json()
+    items = search_data["items"]
     assert len(items) == 1
     assert (items[0].get("warehouse_name") or items[0].get("name")) == f"{unique_prefix} Alpha Hub"
+    assert search_data["counts"]["total"] >= 2
 
     # 2. Filter by is_active=false
     res_inactive = client.get(f"/api/v1/warehouses?is_active=false&search={unique_prefix}", headers=headers)
     assert res_inactive.status_code == 200
-    items_in = res_inactive.json()
+    items_in = res_inactive.json()["items"]
     assert len(items_in) == 1
     assert items_in[0]["code"] == f"{unique_prefix}-02"
 
     # 3. Pagination
     res_page = client.get(f"/api/v1/warehouses?search={unique_prefix}&page=1&page_size=1", headers=headers)
     assert res_page.status_code == 200
-    assert len(res_page.json()) == 1
+    assert len(res_page.json()["items"]) == 1
 
 
 def test_get_warehouse_details(tenant_fixture):

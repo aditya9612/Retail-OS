@@ -352,10 +352,30 @@ class ReviewService:
             page_size=page_size,
         )
 
+        from app.models.review import Review
+        from app.schemas.review import ReviewCounts
+        from app.utils.pagination import compute_total_pages, count_by_status
+
+        extra = [Review.is_deleted.is_(False)]
+        if product_id is not None:
+            extra.append(Review.product_id == product_id)
+        if store_id is not None:
+            extra.append(Review.store_id == store_id)
+        counts_dict = count_by_status(
+            self.db,
+            Review,
+            tenant_id,
+            Review.status,
+            statuses=("approved", "pending", "rejected", "hidden"),
+            extra_filters=extra,
+        )
+
         return ReviewListResponse(
             total=total,
             page=page,
             page_size=page_size,
+            total_pages=compute_total_pages(total, page_size),
+            counts=ReviewCounts(**counts_dict),
             items=[ReviewResponse.model_validate(r) for r in items],
         )
 

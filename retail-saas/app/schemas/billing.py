@@ -633,6 +633,35 @@ class VoiceBillingTenderResponse(BaseModel):
     change_due: Decimal
 
 
+class InvoiceCounts(BaseModel):
+    """Invoice status summary counts for list view display."""
+
+    total: int = 0
+    paid: int = 0
+    unpaid: int = 0
+    partial: int = 0
+    cancelled: int = 0
+
+
+class CreditNoteCounts(BaseModel):
+    """Credit note status summary counts for list view display."""
+
+    total: int = 0
+    issued: int = 0
+    partially_redeemed: int = 0
+    redeemed: int = 0
+    expired: int = 0
+
+
+class RefundCounts(BaseModel):
+    """Refund status summary counts for list view display."""
+
+    total: int = 0
+    pending: int = 0
+    approved: int = 0
+    rejected: int = 0
+
+
 class VoiceBillingResponse(BaseModel):
     recognized_command: str
     items_added: list[VoiceBillingItemResponse]

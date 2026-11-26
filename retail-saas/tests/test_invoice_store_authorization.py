@@ -339,7 +339,7 @@ def test_store_scoped_search_auto_filters_to_assigned_store(store_security_fixtu
         headers=ctx["cashier1_headers"],
     )
     assert res.status_code == 200
-    invoices = res.json()
+    invoices = res.json()["items"]
     # Must only contain Store 1 invoices
     for inv in invoices:
         assert inv["store_id"] == ctx["store1_id"]
@@ -457,7 +457,7 @@ def test_tenant_wide_owner_can_access_both_stores(store_security_fixture):
         headers=ctx["owner_headers"],
     )
     assert s1_search.status_code == 200
-    for inv in s1_search.json():
+    for inv in s1_search.json()["items"]:
         assert inv["store_id"] == ctx["store1_id"]
 
     # Owner can search Store 2 specifically
@@ -466,7 +466,7 @@ def test_tenant_wide_owner_can_access_both_stores(store_security_fixture):
         headers=ctx["owner_headers"],
     )
     assert s2_search.status_code == 200
-    for inv in s2_search.json():
+    for inv in s2_search.json()["items"]:
         assert inv["store_id"] == ctx["store2_id"]
 
 

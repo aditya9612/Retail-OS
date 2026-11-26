@@ -7,7 +7,9 @@ from app.core.database import get_db
 from app.core.pdf_utils import render_pdf_or_preview
 from app.core.security import require_operational_write, require_permission
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.purchase_order_return import (
+    PurchaseOrderReturnCounts,
     PurchaseOrderReturnCreate,
     PurchaseOrderReturnDeleteResponse,
     PurchaseOrderReturnRejectRequest,
@@ -51,7 +53,7 @@ def create_purchase_order_return(
 
 @router.get(
     "",
-    response_model=list[PurchaseOrderReturnResponse],
+    response_model=ListWithCountsResponse[PurchaseOrderReturnResponse, PurchaseOrderReturnCounts],
 )
 def list_purchase_order_returns(
     response: Response,
@@ -70,8 +72,7 @@ def list_purchase_order_returns(
     ),
     db: Session = Depends(get_db),
 ):
-    service = PurchaseOrderReturnService(db)
-    items = service.list_returns(
+    result = PurchaseOrderReturnService(db).list_returns_with_counts(
         tenant_id=user.tenant_id,
         page=page,
         page_size=page_size,
@@ -84,25 +85,13 @@ def list_purchase_order_returns(
         to_date=to_date,
         search=search,
     )
-    total_count = service.count_returns(
-        tenant_id=user.tenant_id,
-        purchase_order_id=purchase_order_id,
-        supplier_id=supplier_id,
-        store_id=store_id,
-        warehouse_id=warehouse_id,
-        status=status,
-        from_date=from_date,
-        to_date=to_date,
-        search=search,
-    )
-    total_pages = (total_count + page_size - 1) // page_size if page_size else 1
 
-    response.headers["X-Total-Count"] = str(total_count)
-    response.headers["X-Page"] = str(page)
-    response.headers["X-Page-Size"] = str(page_size)
-    response.headers["X-Total-Pages"] = str(total_pages)
+    response.headers["X-Total-Count"] = str(result["total"])
+    response.headers["X-Page"] = str(result["page"])
+    response.headers["X-Page-Size"] = str(result["page_size"])
+    response.headers["X-Total-Pages"] = str(result["total_pages"])
 
-    return items
+    return result
 
 
 @router.get(

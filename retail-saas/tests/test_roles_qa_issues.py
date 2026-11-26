@@ -37,7 +37,7 @@ def test_rohit_pawar_qa_reported_issues():
     # Issue 4 Verification: Cashier role is immediately visible in list_roles
     list_res = client.get("/api/v1/roles", headers=headers)
     assert list_res.status_code == 200
-    roles = list_res.json()
+    roles = list_res.json()["items"]
     role_names = [r["name"] for r in roles]
     assert "cashier" in role_names, "Cashier role MUST be available in list_roles"
     cashier_role = next(r for r in roles if r["name"] == "cashier")
@@ -46,19 +46,19 @@ def test_rohit_pawar_qa_reported_issues():
     # Issue 1 Verification: GET /api/v1/roles accepts number / ID in search
     search_by_id = client.get(f"/api/v1/roles?search={cashier_id}", headers=headers)
     assert search_by_id.status_code == 200
-    id_results = search_by_id.json()
+    id_results = search_by_id.json()["items"]
     assert any(r["id"] == cashier_id for r in id_results), "Search with numeric ID must return matching role"
 
     # Direct role_id filter parameter
     direct_id_filter = client.get(f"/api/v1/roles?role_id={cashier_id}", headers=headers)
     assert direct_id_filter.status_code == 200
-    assert len(direct_id_filter.json()) == 1
-    assert direct_id_filter.json()[0]["id"] == cashier_id
+    assert len(direct_id_filter.json()["items"]) == 1
+    assert direct_id_filter.json()["items"][0]["id"] == cashier_id
 
     # Issue 2 Verification: Exact match filter on name returns exactly 1 response
     exact_name_res = client.get("/api/v1/roles?name=manager", headers=headers)
     assert exact_name_res.status_code == 200
-    exact_list = exact_name_res.json()
+    exact_list = exact_name_res.json()["items"]
     assert len(exact_list) == 1
     assert exact_list[0]["name"] == "manager"
 

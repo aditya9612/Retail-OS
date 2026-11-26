@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.inventory import Inventory
@@ -97,14 +97,12 @@ class ProductRepository:
 
         return None
 
-    def search_products(
+    def _build_search_query(
         self,
         tenant_id: int,
-        query: str,
-        skip: int = 0,
-        limit: int = 20,
-    ) -> List[Product]:
-        q = query.strip()
+        query_str: str,
+    ):
+        q = query_str.strip()
         conditions = [
             Product.name.ilike(f"%{q}%"),
             Product.sku.ilike(f"%{q}%"),
@@ -112,7 +110,6 @@ class ProductRepository:
 
         if q.isdigit():
             conditions.append(Product.barcode.ilike(f"%{q}%"))
-            # Prefix or exact match for HSN code to avoid matching irrelevant codes
             conditions.append(Product.hsn_code.like(f"{q}%"))
         else:
             conditions.append(Product.barcode.ilike(f"%{q}%"))
@@ -133,16 +130,61 @@ class ProductRepository:
                 or_(*conditions),
             )
             .distinct()
+        )
+
+    def search_products(
+        self,
+        tenant_id: int,
+        query: str,
+        skip: int = 0,
+        limit: int = 20,
+    ) -> List[Product]:
+        return (
+            self._build_search_query(tenant_id, query)
             .offset(skip)
             .limit(limit)
             .all()
         )
 
-    def list_products(
+    def search_products_with_meta(
         self,
         tenant_id: int,
+        query: str,
         skip: int = 0,
         limit: int = 20,
+    ) -> Tuple[List[Product], int, dict[str, int]]:
+        q_obj = self._build_search_query(tenant_id, query)
+        total = q_obj.count()
+        items = q_obj.offset(skip).limit(limit).all()
+        counts = self.get_product_counts(tenant_id)
+        return items, total, counts
+
+    def get_product_counts(self, tenant_id: int) -> dict[str, int]:
+        """Return tenant-level product status and stock status counts in one query."""
+        row = (
+            self.db.query(
+                func.count(Product.id).label("total"),
+                func.count(case((Product.is_active.is_(True), 1))).label("active"),
+                func.count(case((Product.is_active.is_(False), 1))).label("inactive"),
+                func.count(case((func.lower(Product.stock_status) == "in_stock", 1))).label("in_stock"),
+                func.count(case((func.lower(Product.stock_status) == "out_of_stock", 1))).label("out_of_stock"),
+                func.count(case((func.lower(Product.stock_status) == "low_stock", 1))).label("low_stock"),
+            )
+            .filter(Product.tenant_id == tenant_id)
+            .one()
+        )
+        return {
+            "total": int(row.total or 0),
+            "active": int(row.active or 0),
+            "inactive": int(row.inactive or 0),
+            "in_stock": int(row.in_stock or 0),
+            "out_of_stock": int(row.out_of_stock or 0),
+            "low_stock": int(row.low_stock or 0),
+        }
+
+    def _build_list_products_query(
+        self,
+        tenant_id: int,
         include_inactive: bool = False,
         category_id: Optional[int] = None,
         brand: Optional[str] = None,
@@ -150,7 +192,7 @@ class ProductRepository:
         min_price: Optional[Decimal] = None,
         max_price: Optional[Decimal] = None,
         sort_by: Optional[str] = None,
-    ) -> List[Product]:
+    ):
         query = (
             self.db.query(Product)
             .options(
@@ -196,12 +238,64 @@ class ProductRepository:
         else:
             query = query.order_by(Product.id.desc())
 
+        return query
+
+    def list_products(
+        self,
+        tenant_id: int,
+        skip: int = 0,
+        limit: int = 20,
+        include_inactive: bool = False,
+        category_id: Optional[int] = None,
+        brand: Optional[str] = None,
+        stock_status: Optional[str] = None,
+        min_price: Optional[Decimal] = None,
+        max_price: Optional[Decimal] = None,
+        sort_by: Optional[str] = None,
+    ) -> List[Product]:
         return (
-            query
+            self._build_list_products_query(
+                tenant_id=tenant_id,
+                include_inactive=include_inactive,
+                category_id=category_id,
+                brand=brand,
+                stock_status=stock_status,
+                min_price=min_price,
+                max_price=max_price,
+                sort_by=sort_by,
+            )
             .offset(skip)
             .limit(limit)
             .all()
         )
+
+    def list_products_with_meta(
+        self,
+        tenant_id: int,
+        skip: int = 0,
+        limit: int = 20,
+        include_inactive: bool = False,
+        category_id: Optional[int] = None,
+        brand: Optional[str] = None,
+        stock_status: Optional[str] = None,
+        min_price: Optional[Decimal] = None,
+        max_price: Optional[Decimal] = None,
+        sort_by: Optional[str] = None,
+    ) -> Tuple[List[Product], int, dict[str, int]]:
+        q_obj = self._build_list_products_query(
+            tenant_id=tenant_id,
+            include_inactive=include_inactive,
+            category_id=category_id,
+            brand=brand,
+            stock_status=stock_status,
+            min_price=min_price,
+            max_price=max_price,
+            sort_by=sort_by,
+        )
+        total = q_obj.count()
+        items = q_obj.offset(skip).limit(limit).all()
+        counts = self.get_product_counts(tenant_id)
+        return items, total, counts
 
     def list_low_stock(
         self,

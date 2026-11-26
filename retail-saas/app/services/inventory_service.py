@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import distinct, func, text
+from sqlalchemy import case, distinct, func, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.exceptions import AppException, NotFoundException
@@ -523,6 +523,99 @@ class InventoryService:
                 "data": [],
             }
         return items
+
+    def get_inventory_counts(
+        self,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+    ) -> dict[str, int]:
+        """Return inventory stock health counts in one query."""
+        threshold_expr = func.coalesce(
+            func.nullif(Inventory.min_stock_level, 0),
+            func.nullif(Inventory.reorder_point, 0),
+            Product.min_stock_alert,
+            5,
+        )
+        query = (
+            self.db.query(
+                func.count(Inventory.id).label("total"),
+                func.count(case((Inventory.quantity <= 0, 1))).label("out_of_stock"),
+                func.count(case(((Inventory.quantity > 0) & (Inventory.quantity <= threshold_expr), 1))).label("low_stock"),
+                func.count(case((Inventory.quantity > threshold_expr, 1))).label("in_stock"),
+            )
+            .join(Product, Inventory.product_id == Product.id)
+            .filter(Inventory.tenant_id == tenant_id)
+        )
+        if store_id is not None:
+            query = query.filter(Inventory.store_id == store_id)
+        row = query.one()
+        return {
+            "total": int(row.total or 0),
+            "in_stock": int(row.in_stock or 0),
+            "low_stock": int(row.low_stock or 0),
+            "out_of_stock": int(row.out_of_stock or 0),
+        }
+
+    def list_inventory_with_counts(
+        self,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+        product_id: Optional[int] = None,
+        category_id: Optional[int] = None,
+        search: Optional[str] = None,
+        low_stock_only: bool = False,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ) -> dict:
+        from app.utils.pagination import paginate_query
+        if store_id is not None:
+            self._get_store(tenant_id, store_id, f"Store with ID {store_id} not found")
+
+        query = (
+            self.db.query(Inventory)
+            .options(joinedload(Inventory.product), joinedload(Inventory.store))
+            .filter(Inventory.tenant_id == tenant_id)
+        )
+        if store_id is not None:
+            query = query.filter(Inventory.store_id == store_id)
+        if product_id is not None:
+            query = query.filter(Inventory.product_id == product_id)
+
+        product_joined = False
+        if category_id is not None or search:
+            query = query.join(Product, Inventory.product_id == Product.id)
+            product_joined = True
+            if category_id is not None:
+                query = query.filter(Product.category_id == category_id)
+            if search:
+                s = f"%{search.strip()}%"
+                query = query.filter(Product.name.ilike(s) | Product.sku.ilike(s))
+
+        if low_stock_only:
+            if not product_joined:
+                query = query.join(Product, Inventory.product_id == Product.id)
+            threshold_expr = func.coalesce(
+                func.nullif(Inventory.min_stock_level, 0),
+                func.nullif(Inventory.reorder_point, 0),
+                Product.min_stock_alert,
+                5,
+            )
+            query = query.filter(Inventory.quantity <= threshold_expr)
+
+        items, total, eff_page, eff_size, total_pages = paginate_query(
+            query, page=page, page_size=page_size
+        )
+        counts = self.get_inventory_counts(tenant_id, store_id=store_id)
+        return {
+            "success": True,
+            "message": "Inventory retrieved successfully" if items else "No inventory found",
+            "items": items,
+            "total": total,
+            "page": eff_page,
+            "page_size": eff_size,
+            "total_pages": total_pages,
+            "counts": counts,
+        }
 
     def get_inventory_by_product(
         self,

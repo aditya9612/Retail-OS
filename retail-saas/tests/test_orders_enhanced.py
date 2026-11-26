@@ -396,11 +396,11 @@ def test_list_orders_filtering_and_search(setup_pos_env):
     # Search by note keyword
     search_resp = client.get("/api/v1/orders?search=gift", headers=headers)
     assert search_resp.status_code == 200
-    results = search_resp.json()
+    results = search_resp.json()["items"]
     assert any(o["id"] == order["id"] for o in results)
 
     # Filter by draft status
     status_resp = client.get("/api/v1/orders?status=draft", headers=headers)
     assert status_resp.status_code == 200
-    assert all(o["status"] == "draft" for o in status_resp.json())
+    assert all(o["status"] == "draft" for o in status_resp.json()["items"])
 

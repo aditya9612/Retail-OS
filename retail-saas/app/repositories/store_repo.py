@@ -1,3 +1,4 @@
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.models.store import Store
@@ -49,6 +50,26 @@ class StoreRepository:
             query = query.filter(Store.is_warehouse == is_warehouse)
 
         return query.order_by(Store.id.asc()).all()
+
+    def get_counts(self, tenant_id: int, store_id: int | None = None) -> dict[str, int]:
+        """Return store status and type counts in a single query."""
+        query = self.db.query(
+            func.count(Store.id).label("total"),
+            func.count(case((Store.is_active.is_(True), 1))).label("active"),
+            func.count(case((Store.is_active.is_(False), 1))).label("inactive"),
+            func.count(case((Store.is_warehouse.is_(False), 1))).label("retail_outlets"),
+            func.count(case((Store.is_warehouse.is_(True), 1))).label("warehouses"),
+        ).filter(Store.tenant_id == tenant_id)
+        if store_id is not None:
+            query = query.filter(Store.id == store_id)
+        row = query.one()
+        return {
+            "total": int(row.total or 0),
+            "active": int(row.active or 0),
+            "inactive": int(row.inactive or 0),
+            "retail_outlets": int(row.retail_outlets or 0),
+            "warehouses": int(row.warehouses or 0),
+        }
 
     def update(self, store: Store) -> Store:
         self.db.commit()

@@ -641,6 +641,16 @@ class ApplyCouponResponse(BaseModel):
     }
 
 
+class CouponCounts(BaseModel):
+    """Coupon status summary counts for list view display."""
+
+    total: int = 0
+    active: int = 0
+    expired: int = 0
+    inactive: int = 0
+    scheduled: int = 0
+
+
 class CouponStatsResponse(BaseModel):
 
     total_coupons: int

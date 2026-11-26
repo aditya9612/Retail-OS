@@ -66,25 +66,25 @@ def test_partial_and_multi_field_search(tenant_fixture):
     # 1. Partial name search
     res1 = client.get("/api/v1/suppliers/search?search=Electronics", headers=headers)
     assert res1.status_code == 200
-    data1 = res1.json()
+    data1 = res1.json()["items"]
     assert any(s["id"] == sup_id for s in data1)
 
     # 2. Search by contact person
     res2 = client.get("/api/v1/suppliers/search?search=Rohan", headers=headers)
     assert res2.status_code == 200
-    data2 = res2.json()
+    data2 = res2.json()["items"]
     assert any(s["id"] == sup_id for s in data2)
 
     # 3. Search by phone number
     res3 = client.get("/api/v1/suppliers/search?search=987654", headers=headers)
     assert res3.status_code == 200
-    data3 = res3.json()
+    data3 = res3.json()["items"]
     assert any(s["id"] == sup_id for s in data3)
 
     # 4. Search by GSTIN
     res4 = client.get("/api/v1/suppliers/search?search=AAPFU09", headers=headers)
     assert res4.status_code == 200
-    data4 = res4.json()
+    data4 = res4.json()["items"]
     assert any(s["id"] == sup_id for s in data4)
 
 
@@ -307,7 +307,7 @@ def test_list_suppliers_pagination_and_filters(tenant_fixture):
     # 1. Filter active only
     act_resp = client.get("/api/v1/suppliers?is_active=true", headers=headers)
     assert act_resp.status_code == 200
-    act_data = act_resp.json()
+    act_data = act_resp.json()["items"]
     assert all(s["is_active"] is True for s in act_data)
     assert any(s["id"] == s1["id"] for s in act_data)
     assert not any(s["id"] == s3["id"] for s in act_data)
@@ -315,20 +315,20 @@ def test_list_suppliers_pagination_and_filters(tenant_fixture):
     # 2. Filter inactive only
     inact_resp = client.get("/api/v1/suppliers?is_active=false", headers=headers)
     assert inact_resp.status_code == 200
-    inact_data = inact_resp.json()
+    inact_data = inact_resp.json()["items"]
     assert any(s["id"] == s3["id"] for s in inact_data)
     assert not any(s["id"] == s1["id"] for s in inact_data)
 
     # 3. Pagination
     page_resp = client.get("/api/v1/suppliers?page=1&page_size=2", headers=headers)
     assert page_resp.status_code == 200
-    page_data = page_resp.json()
+    page_data = page_resp.json()["items"]
     assert len(page_data) == 2
 
     # 4. Search in list
     srch_resp = client.get("/api/v1/suppliers?search=Alpha", headers=headers)
     assert srch_resp.status_code == 200
-    srch_data = srch_resp.json()
+    srch_data = srch_resp.json()["items"]
     assert len(srch_data) >= 1
     assert any(s["name"] == "Alpha Corp" for s in srch_data)
 

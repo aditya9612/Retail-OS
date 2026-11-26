@@ -8,10 +8,12 @@ from app.core.pdf_utils import render_pdf_or_preview
 from app.core.security import require_operational_write, require_permission
 from app.models.user import User
 
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.grn import GRNResponse
 from app.schemas.purchase_order import (
     PurchaseOrderApproveRequest,
     PurchaseOrderCancelRequest,
+    PurchaseOrderCounts,
     PurchaseOrderCreate,
     PurchaseOrderDeleteResponse,
     PurchaseOrderReceive,
@@ -49,7 +51,7 @@ def create_purchase_order(
 
 @router.get(
     "",
-    response_model=list[PurchaseOrderResponse],
+    response_model=ListWithCountsResponse[PurchaseOrderResponse, PurchaseOrderCounts],
 )
 def list_purchase_orders(
     page: int = Query(1, ge=1, description="Page number"),
@@ -67,8 +69,7 @@ def list_purchase_orders(
     user: User = Depends(require_permission("purchase_orders:read")),
     db: Session = Depends(get_db),
 ):
-    service = PurchaseOrderService(db)
-    orders = service.list_purchase_orders(
+    result = PurchaseOrderService(db).list_purchase_orders_with_counts(
         tenant_id=user.tenant_id,
         page=page,
         page_size=page_size,
@@ -84,25 +85,12 @@ def list_purchase_orders(
     )
 
     if response is not None:
-        total = service.count_purchase_orders(
-            tenant_id=user.tenant_id,
-            status=status,
-            supplier_id=supplier_id,
-            store_id=store_id,
-            warehouse_id=warehouse_id,
-            search=search,
-            from_date=from_date,
-            to_date=to_date,
-            delivery_from_date=delivery_from_date,
-            delivery_to_date=delivery_to_date,
-        )
-        total_pages = (total + page_size - 1) // page_size if total > 0 else 1
-        response.headers["X-Total-Count"] = str(total)
-        response.headers["X-Page"] = str(page)
-        response.headers["X-Page-Size"] = str(page_size)
-        response.headers["X-Total-Pages"] = str(total_pages)
+        response.headers["X-Total-Count"] = str(result["total"])
+        response.headers["X-Page"] = str(result["page"])
+        response.headers["X-Page-Size"] = str(result["page_size"])
+        response.headers["X-Total-Pages"] = str(result["total_pages"])
 
-    return orders
+    return result
 
 
 @router.get(

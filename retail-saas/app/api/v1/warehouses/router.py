@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import require_permission
 from app.models.user import User
+from app.schemas.common import BasicStatusCounts, ListWithCountsResponse
 from app.schemas.warehouse import (
     WarehouseCreate,
     WarehouseUpdate,
@@ -44,7 +45,7 @@ def create_warehouse(
 
 @router.get(
     "",
-    response_model=list[WarehouseResponse],
+    response_model=ListWithCountsResponse[WarehouseResponse, BasicStatusCounts],
 )
 def list_warehouses(
     search: Optional[str] = Query(
@@ -76,7 +77,7 @@ def list_warehouses(
     ),
     db: Session = Depends(get_db),
 ):
-    return WarehouseService(db).list(
+    return WarehouseService(db).list_with_counts(
         tenant_id=user.tenant_id,
         search=search,
         is_active=is_active,

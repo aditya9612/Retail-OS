@@ -315,7 +315,7 @@ def test_search_invoices_flexible_status_and_pagination(invoice_test_fixture):
         headers=ctx["cashier1_headers"],
     )
     assert res_paid.status_code == 200
-    paid_items = res_paid.json()
+    paid_items = res_paid.json()["items"]
     assert any(i["id"] == inv["id"] for i in paid_items)
 
     # Search with pagination (page=1, page_size=2)
@@ -324,7 +324,7 @@ def test_search_invoices_flexible_status_and_pagination(invoice_test_fixture):
         headers=ctx["cashier1_headers"],
     )
     assert res_paginated.status_code == 200
-    assert len(res_paginated.json()) <= 2
+    assert len(res_paginated.json()["items"]) <= 2
 
 
 def test_checkout_idempotency_key(invoice_test_fixture):

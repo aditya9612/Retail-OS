@@ -233,7 +233,7 @@ class TestSuperAdminCompleteFlow:
         # Verify Store Owner 1 has multiple stores
         owner1_stores_res = client.get("/api/v1/stores/", headers=owner1_headers)
         assert owner1_stores_res.status_code == 200
-        owner1_store_list = owner1_stores_res.json()
+        owner1_store_list = owner1_stores_res.json()["items"]
         owner1_store_ids = {s["id"] for s in owner1_store_list}
         assert store_branch1_id in owner1_store_ids
         assert store_branch2_id in owner1_store_ids
@@ -255,7 +255,7 @@ class TestSuperAdminCompleteFlow:
         # Store Owner 2 lists their stores
         owner2_stores_res = client.get("/api/v1/stores/", headers=owner2_headers)
         assert owner2_stores_res.status_code == 200
-        owner2_store_ids = {s["id"] for s in owner2_stores_res.json()}
+        owner2_store_ids = {s["id"] for s in owner2_stores_res.json()["items"]}
 
         # Disjoint stores: Owner 1 and Owner 2 cannot see each other's stores
         assert owner1_store_ids.isdisjoint(owner2_store_ids)
@@ -274,7 +274,7 @@ class TestSuperAdminCompleteFlow:
         # Get roles for Tenant 1
         roles_res = client.get("/api/v1/roles", headers=owner1_headers)
         assert roles_res.status_code == 200
-        roles_list = roles_res.json()
+        roles_list = roles_res.json()["items"]
         roles_map = {r["name"].lower(): r["id"] for r in roles_list}
         manager_role_id = roles_map.get("manager")
         staff_role_id = roles_map.get("staff")
@@ -344,7 +344,7 @@ class TestSuperAdminCompleteFlow:
         # List users specifically for Branch 1
         branch1_users_res = client.get(f"/api/v1/users?store_id={store_branch1_id}", headers=owner1_headers)
         assert branch1_users_res.status_code == 200
-        b1_users = branch1_users_res.json()
+        b1_users = branch1_users_res.json()["items"]
         b1_emails = {u["email"] for u in b1_users}
         assert mgr_email in b1_emails
         assert staff_kothrud_email in b1_emails
@@ -365,7 +365,7 @@ class TestSuperAdminCompleteFlow:
         # 7a. Store Manager sees ONLY their assigned store
         mgr_stores = client.get("/api/v1/stores/", headers=mgr_headers)
         assert mgr_stores.status_code == 200
-        mgr_store_list = mgr_stores.json()
+        mgr_store_list = mgr_stores.json()["items"]
         assert len(mgr_store_list) == 1
         assert mgr_store_list[0]["id"] == store_branch1_id
 

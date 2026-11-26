@@ -997,6 +997,22 @@ class POSCheckoutResponse(BaseModel):
     }
 
 
+class OrderCounts(BaseModel):
+    """Order status summary counts for list view display."""
+
+    total: int = 0
+    draft: int = 0
+    pending: int = 0
+    confirmed: int = 0
+    processing: int = 0
+    packed: int = 0
+    dispatched: int = 0
+    out_for_delivery: int = 0
+    delivered: int = 0
+    completed: int = 0
+    cancelled: int = 0
+
+
 class OrderStatsResponse(BaseModel):
     total_orders: int
     total_revenue: Decimal

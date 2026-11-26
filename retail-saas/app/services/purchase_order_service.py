@@ -312,6 +312,60 @@ class PurchaseOrderService:
             delivery_to_date=delivery_to_date,
         )
 
+    def list_purchase_orders_with_counts(
+        self,
+        tenant_id: int,
+        page: int = 1,
+        page_size: int = 20,
+        status: Optional[str] = None,
+        supplier_id: Optional[int] = None,
+        store_id: Optional[int] = None,
+        warehouse_id: Optional[int] = None,
+        search: Optional[str] = None,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
+        delivery_from_date: Optional[date] = None,
+        delivery_to_date: Optional[date] = None,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages
+        items = self.list_purchase_orders(
+            tenant_id=tenant_id,
+            page=page,
+            page_size=page_size,
+            status=status,
+            supplier_id=supplier_id,
+            store_id=store_id,
+            warehouse_id=warehouse_id,
+            search=search,
+            from_date=from_date,
+            to_date=to_date,
+            delivery_from_date=delivery_from_date,
+            delivery_to_date=delivery_to_date,
+        )
+        total = self.count_purchase_orders(
+            tenant_id=tenant_id,
+            status=status,
+            supplier_id=supplier_id,
+            store_id=store_id,
+            warehouse_id=warehouse_id,
+            search=search,
+            from_date=from_date,
+            to_date=to_date,
+            delivery_from_date=delivery_from_date,
+            delivery_to_date=delivery_to_date,
+        )
+        counts = self.repo.get_counts(tenant_id=tenant_id, store_id=store_id)
+        return {
+            "success": True,
+            "message": "Purchase orders retrieved successfully" if items else "No purchase orders found",
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": compute_total_pages(total, page_size),
+            "counts": counts,
+        }
+
     def count_purchase_orders(
         self,
         tenant_id: int,

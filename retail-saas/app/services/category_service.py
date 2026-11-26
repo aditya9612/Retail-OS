@@ -59,7 +59,7 @@ class CategoryService:
         parent_id: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-    ) -> tuple[list[Category], int]:
+    ) -> tuple[list[Category], int, dict[str, int]]:
         items = self.repository.get_all(
             tenant_id=tenant_id,
             search=search,
@@ -76,7 +76,8 @@ class CategoryService:
             root_only=root_only,
             parent_id=parent_id,
         )
-        return items, total
+        counts = self.repository.get_counts(tenant_id=tenant_id)
+        return items, total, counts
 
     def get_category(
         self,

@@ -218,8 +218,18 @@ class ReviewSummaryResponse(BaseModel):
     rating_breakdown: RatingBreakdown
 
 
+class ReviewCounts(BaseModel):
+    total: int = 0
+    approved: int = 0
+    pending: int = 0
+    rejected: int = 0
+    hidden: int = 0
+
+
 class ReviewListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    total_pages: int = 1
+    counts: ReviewCounts = Field(default_factory=ReviewCounts)
     items: list[ReviewResponse]

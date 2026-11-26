@@ -6,8 +6,10 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import get_current_user, require_operational_write, require_permission
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.order import PaymentResponse
 from app.schemas.payment import (
+    PaymentCounts,
     PaymentCreate,
     PaymentGatewayCreate,
     PaymentGatewayResponse,
@@ -47,7 +49,7 @@ def create_payment(
     return service.record_payment(data)
 
 
-@router.get("", response_model=list[PaymentResponse])
+@router.get("", response_model=ListWithCountsResponse[PaymentResponse, PaymentCounts])
 def list_payments(
     user: User = Depends(require_permission("payments:read")),
     order_id: int | None = Query(default=None, gt=0),
@@ -56,7 +58,7 @@ def list_payments(
     store_id: int | None = Query(default=None, gt=0, description="Filter payments by store ID"),
     service: PaymentService = Depends(get_payment_service),
 ):
-    return service.list_payments(
+    return service.list_payments_with_counts(
         order_id=order_id,
         status=status,
         method=payment_method,
@@ -64,7 +66,7 @@ def list_payments(
     )
 
 
-@router.get("/history", response_model=list[PaymentResponse])
+@router.get("/history", response_model=ListWithCountsResponse[PaymentResponse, PaymentCounts])
 def payment_history(
     user: User = Depends(require_permission("payments:read")),
     status: PaymentStatusValue | None = Query(default=None),
@@ -72,7 +74,7 @@ def payment_history(
     store_id: int | None = Query(default=None, gt=0, description="Filter payment history by store ID"),
     service: PaymentService = Depends(get_payment_service),
 ):
-    return service.payment_history(
+    return service.list_payments_with_counts(
         status=status,
         method=payment_method,
         store_id=store_id,

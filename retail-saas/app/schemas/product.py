@@ -1416,6 +1416,17 @@ class ProductBarcodeLabelResponse(BaseModel):
         return float(v) if v is not None else 0.0
 
 
+class ProductCounts(BaseModel):
+    """Product summary counts for list view display."""
+
+    total: int = 0
+    active: int = 0
+    inactive: int = 0
+    in_stock: int = 0
+    out_of_stock: int = 0
+    low_stock: int = 0
+
+
 class GenerateMissingBarcodesResponse(BaseModel):
     success: bool = True
     total_checked: int = Field(..., examples=[25])

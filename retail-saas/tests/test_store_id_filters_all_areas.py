@@ -339,27 +339,27 @@ def test_area2_returns_refunds_credit_notes_store_id_filters():
     # 1. Refunds filtered by store_id
     res_ref_a = client.get(f"/api/v1/refunds?store_id={store_a.id}", headers=headers)
     assert res_ref_a.status_code == 200, res_ref_a.text
-    refs_a = res_ref_a.json()
+    refs_a = res_ref_a.json()["items"]
     assert len(refs_a) == 1
     assert refs_a[0]["invoice_id"] == inv_a.id
 
     # 2. Credit Notes filtered by store_id
     res_cn_a = client.get(f"/api/v1/credit-notes?store_id={store_a.id}", headers=headers)
     assert res_cn_a.status_code == 200, res_cn_a.text
-    cns_a = res_cn_a.json()
+    cns_a = res_cn_a.json()["items"]
     assert len(cns_a) == 1
     assert cns_a[0]["credit_note_no"] == cn_a.credit_note_no
 
     # 3. Order Returns filtered by store_id
     res_ret_a = client.get(f"/api/v1/order-returns?store_id={store_a.id}", headers=headers)
     assert res_ret_a.status_code == 200, res_ret_a.text
-    rets_a = res_ret_a.json()
+    rets_a = res_ret_a.json()["items"]
     assert len(rets_a) == 1
     assert rets_a[0]["order_id"] == order_a.id
 
     res_ret_b = client.get(f"/api/v1/order-returns?store_id={store_b.id}", headers=headers)
     assert res_ret_b.status_code == 200, res_ret_b.text
-    rets_b = res_ret_b.json()
+    rets_b = res_ret_b.json()["items"]
     assert len(rets_b) == 1
     assert rets_b[0]["order_id"] == order_b.id
 
@@ -433,14 +433,14 @@ def test_area3_payment_reports_and_closure_store_id_filters():
     # 1. list_payments with store_id
     res_pmt_a = client.get(f"/api/v1/payments?store_id={store_a.id}", headers=headers)
     assert res_pmt_a.status_code == 200, res_pmt_a.text
-    pmts_a = res_pmt_a.json()
+    pmts_a = res_pmt_a.json()["items"]
     assert len(pmts_a) == 1
     assert pmts_a[0]["order_id"] == order_a.id
 
     # 2. payment_history with store_id
     res_hist_b = client.get(f"/api/v1/payments/history?store_id={store_b.id}", headers=headers)
     assert res_hist_b.status_code == 200, res_hist_b.text
-    pmts_b = res_hist_b.json()
+    pmts_b = res_hist_b.json()["items"]
     assert len(pmts_b) == 1
     assert pmts_b[0]["order_id"] == order_b.id
 

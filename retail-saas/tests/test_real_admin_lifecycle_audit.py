@@ -96,7 +96,9 @@ def test_full_real_admin_lifecycle_and_multistore_audit():
     # Verify both stores appear in store list
     stores_list = client.get("/api/v1/stores/", headers=admin_headers)
     assert stores_list.status_code == 200
-    store_ids = [s["id"] for s in stores_list.json()]
+    stores_body = stores_list.json()
+    assert stores_body["counts"]["total"] >= 2
+    store_ids = [s["id"] for s in stores_body["items"]]
     assert store1_id in store_ids
     assert store2_id in store_ids
 
@@ -172,13 +174,15 @@ def test_full_real_admin_lifecycle_and_multistore_audit():
     # Verify inventory per store
     inv1_resp = client.get(f"/api/v1/inventory?store_id={store1_id}&product_id={product_id}", headers=admin_headers)
     assert inv1_resp.status_code == 200
-    inv1_data = inv1_resp.json()
+    inv1_body = inv1_resp.json()
+    assert inv1_body["counts"]["total"] == 1
+    inv1_data = inv1_body["items"]
     assert len(inv1_data) == 1
     assert float(inv1_data[0]["quantity"]) == 50.0
 
     inv2_resp = client.get(f"/api/v1/inventory?store_id={store2_id}&product_id={product_id}", headers=admin_headers)
     assert inv2_resp.status_code == 200
-    inv2_data = inv2_resp.json()
+    inv2_data = inv2_resp.json()["items"]
     assert len(inv2_data) == 1
     assert float(inv2_data[0]["quantity"]) == 30.0
 
@@ -209,11 +213,11 @@ def test_full_real_admin_lifecycle_and_multistore_audit():
     assert float(sale_data["total_amount"]) > 0
 
     # Check Store 1 inventory: MUST BE EXACTLY 40 (50 - 10)
-    inv1_after = client.get(f"/api/v1/inventory?store_id={store1_id}&product_id={product_id}", headers=admin_headers).json()
+    inv1_after = client.get(f"/api/v1/inventory?store_id={store1_id}&product_id={product_id}", headers=admin_headers).json()["items"]
     assert float(inv1_after[0]["quantity"]) == 40.0, f"Expected 40.0 in Store 1, got {inv1_after[0]['quantity']}"
 
     # Check Store 2 inventory: MUST BE EXACTLY 30 (UNTOUCHED!)
-    inv2_after = client.get(f"/api/v1/inventory?store_id={store2_id}&product_id={product_id}", headers=admin_headers).json()
+    inv2_after = client.get(f"/api/v1/inventory?store_id={store2_id}&product_id={product_id}", headers=admin_headers).json()["items"]
     assert float(inv2_after[0]["quantity"]) == 30.0, f"Store 2 stock was corrupted! Expected 30.0, got {inv2_after[0]['quantity']}"
 
     # --------------------------------------------------------------------------
@@ -237,7 +241,7 @@ def test_full_real_admin_lifecycle_and_multistore_audit():
     )
     assert oversell_resp.status_code in (400, 422), f"Oversell should fail but got: {oversell_resp.status_code}"
     # Verify stock stayed at 40
-    inv1_safe = client.get(f"/api/v1/inventory?store_id={store1_id}&product_id={product_id}", headers=admin_headers).json()
+    inv1_safe = client.get(f"/api/v1/inventory?store_id={store1_id}&product_id={product_id}", headers=admin_headers).json()["items"]
     assert float(inv1_safe[0]["quantity"]) == 40.0
 
     # --------------------------------------------------------------------------
@@ -272,7 +276,7 @@ def test_full_real_admin_lifecycle_and_multistore_audit():
     assert disp_resp.status_code == 200, f"Dispatch failed: {disp_resp.text}"
 
     # Check Store 1 after dispatch: 35
-    inv1_disp = client.get(f"/api/v1/inventory?store_id={store1_id}&product_id={product_id}", headers=admin_headers).json()
+    inv1_disp = client.get(f"/api/v1/inventory?store_id={store1_id}&product_id={product_id}", headers=admin_headers).json()["items"]
     assert float(inv1_disp[0]["quantity"]) == 35.0
 
     # Receive transfer -> adds to destination store (30 + 5 = 35)
@@ -280,7 +284,7 @@ def test_full_real_admin_lifecycle_and_multistore_audit():
     assert rec_resp.status_code == 200, f"Receive failed: {rec_resp.text}"
 
     # Check Store 2 after receive: 35
-    inv2_rec = client.get(f"/api/v1/inventory?store_id={store2_id}&product_id={product_id}", headers=admin_headers).json()
+    inv2_rec = client.get(f"/api/v1/inventory?store_id={store2_id}&product_id={product_id}", headers=admin_headers).json()["items"]
     assert float(inv2_rec[0]["quantity"]) == 35.0
 
     # --------------------------------------------------------------------------
@@ -384,11 +388,11 @@ def test_full_real_admin_lifecycle_and_multistore_audit():
     order_id = order_data["order_id"]
 
     # 4. Verify Stock Deduction in Store 1: (35 - 2 = 33)
-    inv1_online = client.get(f"/api/v1/inventory?store_id={store1_id}&product_id={product_id}", headers=admin_headers).json()
+    inv1_online = client.get(f"/api/v1/inventory?store_id={store1_id}&product_id={product_id}", headers=admin_headers).json()["items"]
     assert float(inv1_online[0]["quantity"]) == 33.0, f"Expected 33 in Store 1 after online order, got {inv1_online[0]['quantity']}"
 
     # Verify Store 2 Stock: STILL 35.0!
-    inv2_online = client.get(f"/api/v1/inventory?store_id={store2_id}&product_id={product_id}", headers=admin_headers).json()
+    inv2_online = client.get(f"/api/v1/inventory?store_id={store2_id}&product_id={product_id}", headers=admin_headers).json()["items"]
     assert float(inv2_online[0]["quantity"]) == 35.0, f"Store 2 stock was corrupted by Store 1 online order!"
 
     # 5. Customer Cancels Order -> Verifies Stock Restores (33 + 2 = 35)
@@ -398,7 +402,7 @@ def test_full_real_admin_lifecycle_and_multistore_audit():
         headers=cust_headers,
     )
     assert can_resp.status_code == 200
-    inv1_restored = client.get(f"/api/v1/inventory?store_id={store1_id}&product_id={product_id}", headers=admin_headers).json()
+    inv1_restored = client.get(f"/api/v1/inventory?store_id={store1_id}&product_id={product_id}", headers=admin_headers).json()["items"]
     assert float(inv1_restored[0]["quantity"]) == 35.0, f"Stock restoration failed after cancellation!"
 
     # --------------------------------------------------------------------------

@@ -1045,20 +1045,22 @@ def test_malformed_json_status_update_returns_422(tenant):
 # ==============================================================================
 
 def test_get_endpoints_no_data_preserves_contract(other_tenant):
-    """A fresh tenant with 0 coupons returns HTTP 404 with structured error message, never empty body or bare null."""
+    """A fresh tenant with 0 coupons returns HTTP 200 with structured wrapper, items=[], and zero counts."""
     resp_list = client.get("/api/v1/coupons", headers=other_tenant["headers"])
-    assert resp_list.status_code == 404
+    assert resp_list.status_code == 200
     data_list = resp_list.json()
-    assert data_list["success"] is False
-    assert "no coupons found" in data_list["message"].lower()
+    assert data_list["success"] is True
+    assert data_list["items"] == []
+    assert data_list["total"] == 0
+    assert data_list["counts"]["total"] == 0
 
     resp_act = client.get("/api/v1/coupons/active", headers=other_tenant["headers"])
-    assert resp_act.status_code == 404
-    assert "no active coupons found" in resp_act.json()["message"].lower()
+    assert resp_act.status_code == 200
+    assert resp_act.json()["items"] == []
 
     resp_exp = client.get("/api/v1/coupons/expired", headers=other_tenant["headers"])
-    assert resp_exp.status_code == 404
-    assert "no expired coupons found" in resp_exp.json()["message"].lower()
+    assert resp_exp.status_code == 200
+    assert resp_exp.json()["items"] == []
 
     # Stats endpoint returns valid 200 with 0 counts
     resp_stats = client.get("/api/v1/coupons/stats", headers=other_tenant["headers"])
@@ -1185,7 +1187,7 @@ def test_end_to_end_coupon_lifecycle(tenant):
     # 2. List
     list_resp = client.get("/api/v1/coupons", headers=tenant["headers"])
     assert list_resp.status_code == 200
-    assert any(c["id"] == coupon_id for c in list_resp.json())
+    assert any(c["id"] == coupon_id for c in list_resp.json()["items"])
 
     # 3. Validate
     val_resp = client.post(

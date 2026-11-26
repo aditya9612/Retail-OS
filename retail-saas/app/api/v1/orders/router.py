@@ -9,7 +9,9 @@ from app.core.database import get_db
 from app.core.exceptions import ForbiddenException
 from app.core.security import is_tenant_wide_authorized, require_operational_write, require_permission
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.order import (
+    OrderCounts,
     OrderThermalMode,
     OrderAddItemsRequest,
     OrderCreate,
@@ -28,7 +30,7 @@ from app.services.order_service import OrderService
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 
-@router.get("", response_model=list[OrderResponse])
+@router.get("", response_model=ListWithCountsResponse[OrderResponse, OrderCounts])
 def list_orders(
     store_id: Optional[int] = Query(None, description="Filter by store ID"),
     status: Optional[str] = Query(None, description="Filter by order status"),
@@ -42,7 +44,7 @@ def list_orders(
     user: User = Depends(require_permission("orders:read")),
     db: Session = Depends(get_db),
 ):
-    return OrderService(db).list_orders(
+    return OrderService(db).list_orders_with_counts(
         tenant_id=user.tenant_id,
         store_id=store_id,
         status=status,

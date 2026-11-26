@@ -350,11 +350,19 @@ class StorefrontProductDetailResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class StorefrontProductCounts(BaseModel):
+    total: int = 0
+    in_stock: int = 0
+    out_of_stock: int = 0
+
+
 class StorefrontProductListResponse(BaseModel):
     items: List[StorefrontProductItem]
     total: int
     page: int
     page_size: int
+    total_pages: int = 1
+    counts: StorefrontProductCounts = Field(default_factory=StorefrontProductCounts)
 
 
 class StorefrontCartItemRequest(BaseModel):
@@ -420,6 +428,18 @@ class StorefrontCheckoutResponse(BaseModel):
     payment_status: str
     message: str
     created_at: datetime
+
+
+class StorefrontOrderCounts(BaseModel):
+    total: int = 0
+    pending: int = 0
+    confirmed: int = 0
+    processing: int = 0
+    packed: int = 0
+    dispatched: int = 0
+    out_for_delivery: int = 0
+    delivered: int = 0
+    cancelled: int = 0
 
 
 class StorefrontOrderSummary(BaseModel):

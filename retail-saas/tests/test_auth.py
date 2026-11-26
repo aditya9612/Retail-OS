@@ -149,7 +149,7 @@ def test_users_crud_and_profile_flow(unique_slug):
     # 1. GET /api/v1/roles
     roles_r = client.get("/api/v1/roles", headers=headers)
     assert roles_r.status_code == 200
-    roles = roles_r.json()
+    roles = roles_r.json()["items"]
     assert len(roles) >= 1
     # Pick a non-admin role if available, or admin
     cashier_role = next((r for r in roles if r["name"] == "cashier"), roles[0])
@@ -189,7 +189,7 @@ def test_users_crud_and_profile_flow(unique_slug):
     # 5. GET /api/v1/users (List users)
     list_r = client.get("/api/v1/users", headers=headers)
     assert list_r.status_code == 200
-    users = list_r.json()
+    users = list_r.json()["items"]
     assert any(u["id"] == staff_id for u in users)
 
     # 6. GET /api/v1/users/{user_id}

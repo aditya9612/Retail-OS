@@ -90,6 +90,20 @@ class GRNRepository:
 
         return query.all()
 
+    def get_counts(self, tenant_id: int, store_id: Optional[int] = None) -> dict[str, int]:
+        """Return GRN counts grouped by status in a single query."""
+        q = self.db.query(GRN.status, func.count(GRN.id)).filter(GRN.tenant_id == tenant_id)
+        if store_id is not None:
+            q = q.filter(GRN.store_id == store_id)
+        rows = q.group_by(GRN.status).all()
+        by_status = {str(s).lower(): int(c) for s, c in rows if s is not None}
+        return {
+            "total": sum(by_status.values()),
+            "pending": by_status.get("pending", 0),
+            "received": by_status.get("received", 0),
+            "rejected": by_status.get("rejected", 0),
+        }
+
     def get_by_id(
         self,
         grn_id: int,

@@ -148,3 +148,26 @@ class UserRepository:
             )
             .count()
         )
+
+    def get_counts(self, tenant_id: int, store_id: Optional[int] = None) -> dict[str, int]:
+        from app.utils.pagination import count_boolean_flag
+        extra = [User.is_deleted.is_(False)]
+        if store_id is not None:
+            extra.append(User.store_id == store_id)
+        return count_boolean_flag(self.db, User, tenant_id, User.is_active, extra_filters=extra)
+
+    def count_filtered(
+        self,
+        tenant_id: int,
+        include_inactive: bool = False,
+        store_id: Optional[int] = None,
+    ) -> int:
+        query = self.db.query(User).filter(
+            User.tenant_id == tenant_id,
+            User.is_deleted.is_(False),
+        )
+        if store_id is not None:
+            query = query.filter(User.store_id == store_id)
+        if not include_inactive:
+            query = query.filter(User.is_active.is_(True))
+        return query.count()

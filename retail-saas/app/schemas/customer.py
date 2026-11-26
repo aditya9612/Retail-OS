@@ -1723,6 +1723,18 @@ class CustomerStatusUpdate(BaseModel):
     ]
 
 
+class CustomerCounts(BaseModel):
+    """Customer summary counts for list view display."""
+
+    total: int = 0
+    active: int = 0
+    inactive: int = 0
+    blocked: int = 0
+    new: int = 0
+    regular: int = 0
+    vip: int = 0
+
+
 class CustomerListResponse(BaseModel):
     success: bool = True
     message: str

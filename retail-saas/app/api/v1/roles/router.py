@@ -7,8 +7,10 @@ from app.core.database import get_db
 from app.core.exceptions import AppException, ForbiddenException
 from app.core.security import require_permission
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.role import (
     PermissionGroup,
+    RoleCounts,
     RoleCreate,
     RoleDeleteResponse,
     RoleDetailResponse,
@@ -47,7 +49,7 @@ def resolve_role_param(
 
 @router.get(
     "",
-    response_model=list[RoleDetailResponse],
+    response_model=ListWithCountsResponse[RoleDetailResponse, RoleCounts],
     summary="List Roles",
     description="Lists all roles for the authenticated tenant, with optional search, exact name match, and system/custom filtering.",
 )
@@ -61,7 +63,7 @@ def list_roles(
     current_user: User = Depends(require_permission("users:read")),
     db: Session = Depends(get_db),
 ):
-    return RoleService(db).list_roles(
+    return RoleService(db).list_roles_with_counts(
         tenant_id=current_user.tenant_id,
         search=search,
         name=name,

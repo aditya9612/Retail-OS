@@ -9,7 +9,9 @@ from app.core.database import get_db
 from app.core.pdf_utils import render_pdf_or_preview
 from app.core.security import require_permission
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.billing import (
+    CreditNoteCounts,
     CreditNoteCreate,
     CreditNoteResponse,
     CreditNoteValidateRequest,
@@ -48,7 +50,7 @@ def create_credit_note(
     )
 
 
-@router.get("", response_model=list[CreditNoteResponse])
+@router.get("", response_model=ListWithCountsResponse[CreditNoteResponse, CreditNoteCounts])
 def list_credit_notes(
     invoice_id: Optional[int] = Query(default=None, gt=0, description="Filter by invoice ID"),
     store_id: Optional[int] = Query(default=None, gt=0, description="Filter credit notes by store ID"),
@@ -65,7 +67,7 @@ def list_credit_notes(
     """
     Lists credit notes with optional filters (store, invoice, credit_note_no, status, customer, date range, pagination).
     """
-    return BillingService(db).list_credit_notes(
+    return BillingService(db).list_credit_notes_with_counts(
         user.tenant_id,
         invoice_id=invoice_id,
         store_id=store_id,

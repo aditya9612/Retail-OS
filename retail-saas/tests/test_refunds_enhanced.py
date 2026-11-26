@@ -225,19 +225,19 @@ def test_list_refunds_filtering_and_pending_approval(refunds_setup):
     client.post(f"/api/v1/refunds/{r2['id']}/approve", headers=headers)
 
     # 1. Filter by status: pending
-    pending_list = client.get("/api/v1/refunds", params={"status": "pending"}, headers=headers).json()
+    pending_list = client.get("/api/v1/refunds", params={"status": "pending"}, headers=headers).json()["items"]
     assert any(r["id"] == r1["id"] for r in pending_list)
     assert not any(r["id"] == r2["id"] for r in pending_list)
 
     # 2. Filter by status: approved
-    approved_list = client.get("/api/v1/refunds", params={"status": "approved"}, headers=headers).json()
+    approved_list = client.get("/api/v1/refunds", params={"status": "approved"}, headers=headers).json()["items"]
     assert any(r["id"] == r2["id"] for r in approved_list)
     assert not any(r["id"] == r1["id"] for r in approved_list)
 
     # 3. Manager pending-approval queue endpoint
     queue_resp = client.get("/api/v1/refunds/pending-approval", headers=headers)
     assert queue_resp.status_code == 200
-    queue = queue_resp.json()
+    queue = queue_resp.json()["items"]
     assert any(r["id"] == r1["id"] for r in queue)
     assert all(r["status"] == "pending" for r in queue)
 

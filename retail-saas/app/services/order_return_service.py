@@ -264,6 +264,61 @@ class OrderReturnService:
         )
 
     @staticmethod
+    def list_returns_with_counts(
+        db: Session,
+        tenant_id: int,
+        skip: int = 0,
+        limit: int = 20,
+        store_id: Optional[int] = None,
+        status: Optional[str] = None,
+        customer_id: Optional[int] = None,
+        order_id: Optional[int] = None,
+        search: Optional[str] = None,
+    ) -> dict:
+        from app.models.order_return import OrderReturn
+        from app.utils.pagination import compute_total_pages, count_by_status
+        items = OrderReturnService.list_returns(
+            db=db,
+            tenant_id=tenant_id,
+            skip=skip,
+            limit=limit,
+            store_id=store_id,
+            status=status,
+            customer_id=customer_id,
+            order_id=order_id,
+            search=search,
+        )
+        total = OrderReturnService.count_returns(
+            db=db,
+            tenant_id=tenant_id,
+            store_id=store_id,
+            status=status,
+            customer_id=customer_id,
+            order_id=order_id,
+            search=search,
+        )
+        counts = count_by_status(
+            db,
+            OrderReturn,
+            tenant_id,
+            OrderReturn.status,
+            statuses=("requested", "approved", "completed", "rejected"),
+            extra_filters=[Order.store_id == store_id] if store_id is not None else None,
+            joins=[(Order, OrderReturn.order_id == Order.id)] if store_id is not None else None,
+        )
+        page = (skip // limit) + 1 if limit > 0 else 1
+        return {
+            "success": True,
+            "message": "Order returns retrieved successfully" if items else "No order returns found",
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": limit,
+            "total_pages": compute_total_pages(total, limit),
+            "counts": counts,
+        }
+
+    @staticmethod
     def count_returns(
         db: Session,
         tenant_id: int,

@@ -4,13 +4,14 @@ from typing import Optional
 from app.core.exceptions import AppException
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 
 from app.models.customer import Customer
 from app.models.order import Order
+from app.utils.pagination import paginate_query
 
 
-def get_filtered_customers(
+def _build_filtered_customers_query(
     db: Session,
     tenant_id: int,
     name: Optional[str] = None,
@@ -18,8 +19,6 @@ def get_filtered_customers(
     segment: Optional[str] = None,
     status: Optional[str] = None,
     search: Optional[str] = None,
-    page: Optional[int] = None,
-    page_size: Optional[int] = None,
 ):
     query = db.query(Customer).filter(Customer.tenant_id == tenant_id)
 
@@ -61,7 +60,29 @@ def get_filtered_customers(
         elif seg_lower == "regular":
             query = query.filter(func.lower(Customer.segment) == "regular")
 
-    query = query.order_by(Customer.id.desc())
+    return query.order_by(Customer.id.desc())
+
+
+def get_filtered_customers(
+    db: Session,
+    tenant_id: int,
+    name: Optional[str] = None,
+    mobile: Optional[str] = None,
+    segment: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    page: Optional[int] = None,
+    page_size: Optional[int] = None,
+):
+    query = _build_filtered_customers_query(
+        db=db,
+        tenant_id=tenant_id,
+        name=name,
+        mobile=mobile,
+        segment=segment,
+        status=status,
+        search=search,
+    )
 
     if page is not None or page_size is not None:
         p = page if (page is not None and page >= 1) else 1
@@ -70,6 +91,59 @@ def get_filtered_customers(
         query = query.offset(skip).limit(ps)
 
     return query.all()
+
+
+def get_customer_counts(db: Session, tenant_id: int) -> dict[str, int]:
+    """Return tenant-level customer status and segment counts in one query."""
+    row = (
+        db.query(
+            func.count(Customer.id).label("total"),
+            func.count(case((Customer.status == "active", 1))).label("active"),
+            func.count(case((Customer.status == "inactive", 1))).label("inactive"),
+            func.count(case((Customer.status == "blocked", 1))).label("blocked"),
+            func.count(case(((Customer.segment == "new") & (Customer.total_spend <= 50000), 1))).label("new"),
+            func.count(case(((Customer.segment == "regular") & (Customer.total_spend <= 50000), 1))).label("regular"),
+            func.count(case((or_(Customer.segment == "vip", Customer.total_spend > 50000), 1))).label("vip"),
+        )
+        .filter(Customer.tenant_id == tenant_id)
+        .one()
+    )
+    return {
+        "total": int(row.total or 0),
+        "active": int(row.active or 0),
+        "inactive": int(row.inactive or 0),
+        "blocked": int(row.blocked or 0),
+        "new": int(row.new or 0),
+        "regular": int(row.regular or 0),
+        "vip": int(row.vip or 0),
+    }
+
+
+def get_filtered_customers_with_counts(
+    db: Session,
+    tenant_id: int,
+    name: Optional[str] = None,
+    mobile: Optional[str] = None,
+    segment: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    page: Optional[int] = None,
+    page_size: Optional[int] = None,
+):
+    query = _build_filtered_customers_query(
+        db=db,
+        tenant_id=tenant_id,
+        name=name,
+        mobile=mobile,
+        segment=segment,
+        status=status,
+        search=search,
+    )
+    items, total, eff_page, eff_size, total_pages = paginate_query(
+        query, page=page, page_size=page_size
+    )
+    counts = get_customer_counts(db, tenant_id)
+    return items, total, eff_page, eff_size, total_pages, counts
 
 
 def delete_customer(db: Session, tenant_id: int, customer_id: int):
@@ -97,39 +171,7 @@ def delete_customer(db: Session, tenant_id: int, customer_id: int):
 
 
 def get_customer_stats(db: Session, tenant_id: int):
-    total_customers = (
-        db.query(func.count(Customer.id))
-        .filter(Customer.tenant_id == tenant_id)
-        .scalar()
-    ) or 0
-
-    active_customers = (
-        db.query(func.count(Customer.id))
-        .filter(
-            Customer.tenant_id == tenant_id,
-            Customer.status == "active"
-        )
-        .scalar()
-    ) or 0
-
-    inactive_customers = (
-        db.query(func.count(Customer.id))
-        .filter(
-            Customer.tenant_id == tenant_id,
-            Customer.status == "inactive"
-        )
-        .scalar()
-    ) or 0
-
-    blocked_customers = (
-        db.query(func.count(Customer.id))
-        .filter(
-            Customer.tenant_id == tenant_id,
-            Customer.status == "blocked"
-        )
-        .scalar()
-    ) or 0
-
+    counts = get_customer_counts(db, tenant_id)
     now = datetime.utcnow()
     start_of_month = datetime(now.year, now.month, 1)
 
@@ -142,38 +184,6 @@ def get_customer_stats(db: Session, tenant_id: int):
         .scalar()
     ) or 0
 
-    vip_customers = (
-        db.query(func.count(Customer.id))
-        .filter(
-            Customer.tenant_id == tenant_id,
-            or_(
-                Customer.segment == "vip",
-                Customer.total_spend > 50000,
-            ),
-        )
-        .scalar()
-    ) or 0
-
-    regular_customers = (
-        db.query(func.count(Customer.id))
-        .filter(
-            Customer.tenant_id == tenant_id,
-            Customer.segment == "regular",
-            Customer.total_spend <= 50000,
-        )
-        .scalar()
-    ) or 0
-
-    new_customers = (
-        db.query(func.count(Customer.id))
-        .filter(
-            Customer.tenant_id == tenant_id,
-            Customer.segment == "new",
-            Customer.total_spend <= 50000,
-        )
-        .scalar()
-    ) or 0
-
     total_revenue = (
         db.query(func.coalesce(func.sum(Order.total_amount), 0))
         .filter(Order.tenant_id == tenant_id)
@@ -181,13 +191,13 @@ def get_customer_stats(db: Session, tenant_id: int):
     ) or 0
 
     return {
-        "total_customers": int(total_customers),
-        "active_customers": int(active_customers),
-        "inactive_customers": int(inactive_customers),
-        "blocked_customers": int(blocked_customers),
-        "new_customers": int(new_customers),
-        "regular_customers": int(regular_customers),
-        "vip_customers": int(vip_customers),
+        "total_customers": counts["total"],
+        "active_customers": counts["active"],
+        "inactive_customers": counts["inactive"],
+        "blocked_customers": counts["blocked"],
+        "new_customers": counts["new"],
+        "regular_customers": counts["regular"],
+        "vip_customers": counts["vip"],
         "new_this_month": int(new_this_month),
         "total_revenue": int(total_revenue),
     }

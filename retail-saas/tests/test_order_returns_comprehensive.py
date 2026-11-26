@@ -606,16 +606,17 @@ def test_list_order_returns_filters():
     # Filter by status
     res_status = client.get("/api/v1/order-returns?status=requested", headers=headers)
     assert res_status.status_code == 200
-    assert any(r["id"] == ret_id for r in res_status.json())
+    assert any(r["id"] == ret_id for r in res_status.json()["items"])
 
     # Filter by search
     res_search = client.get("/api/v1/order-returns?search=UniqueFilterRemark123", headers=headers)
     assert res_search.status_code == 200
-    assert len(res_search.json()) == 1
-    assert res_search.json()[0]["id"] == ret_id
+    search_items = res_search.json()["items"]
+    assert len(search_items) == 1
+    assert search_items[0]["id"] == ret_id
 
     # Filter by customer_id
     res_cust = client.get(f"/api/v1/order-returns?customer_id={customer_id}", headers=headers)
     assert res_cust.status_code == 200
-    assert any(r["id"] == ret_id for r in res_cust.json())
+    assert any(r["id"] == ret_id for r in res_cust.json()["items"])
 

@@ -137,24 +137,28 @@ def test_list_stores_filters():
     client.patch(f"/api/v1/stores/{s3['id']}", json={"is_active": False}, headers=headers)
 
     # By default, list_stores excludes inactive
-    list_active = client.get("/api/v1/stores/", headers=headers).json()
+    list_resp = client.get("/api/v1/stores/", headers=headers).json()
+    assert list_resp["counts"]["total"] >= 3
+    assert list_resp["counts"]["active"] >= 2
+    assert list_resp["counts"]["inactive"] >= 1
+    list_active = list_resp["items"]
     active_ids = [s["id"] for s in list_active]
     assert s1["id"] in active_ids
     assert s2["id"] in active_ids
     assert s3["id"] not in active_ids
 
     # With include_inactive=true, all 3 are returned
-    list_all = client.get("/api/v1/stores/?include_inactive=true", headers=headers).json()
+    list_all = client.get("/api/v1/stores/?include_inactive=true", headers=headers).json()["items"]
     all_ids = [s["id"] for s in list_all]
     assert s3["id"] in all_ids
 
     # Search by city 'pune'
-    search_pune = client.get("/api/v1/stores/?search=pune", headers=headers).json()
+    search_pune = client.get("/api/v1/stores/?search=pune", headers=headers).json()["items"]
     assert len(search_pune) == 1
     assert search_pune[0]["id"] == s2["id"]
 
     # Filter is_warehouse=false (i.e. is_main=True)
-    retail_stores = client.get("/api/v1/stores/?is_warehouse=false", headers=headers).json()
+    retail_stores = client.get("/api/v1/stores/?is_warehouse=false", headers=headers).json()["items"]
     retail_ids = [s["id"] for s in retail_stores]
     assert s1["id"] in retail_ids
     assert s2["id"] not in retail_ids
@@ -233,7 +237,7 @@ def test_store_staff_and_isolation():
     ).json()
 
     # Grant stores:read to manager role for this tenant under zero-trust RBAC
-    roles_list = client.get("/api/v1/roles", headers=headers).json()
+    roles_list = client.get("/api/v1/roles", headers=headers).json()["items"]
     mgr_role_obj = next((r for r in roles_list if r["name"] == "manager"), None)
     if mgr_role_obj:
         client.patch(f"/api/v1/roles/{mgr_role_obj['id']}", json={"permissions": ["stores:read"]}, headers=headers)

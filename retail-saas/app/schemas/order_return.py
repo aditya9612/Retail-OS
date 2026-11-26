@@ -312,6 +312,14 @@ class OrderReturnResponse(BaseModel):
     }
 
 
+class OrderReturnCounts(BaseModel):
+    total: int = 0
+    requested: int = 0
+    approved: int = 0
+    completed: int = 0
+    rejected: int = 0
+
+
 class OrderReturnStatsResponse(BaseModel):
     total_returns: int = 0
     requested_count: int = 0

@@ -28,6 +28,7 @@ from app.models.invoice import Invoice
 from app.models.order import Order
 from app.repositories.customer_repo import (
     get_filtered_customers,
+    get_filtered_customers_with_counts,
     get_customer_stats,
     get_customers_for_export,
     delete_customer as repo_delete_customer,
@@ -64,6 +65,40 @@ def fetch_customers(
         page=page,
         page_size=page_size,
     )
+
+
+def fetch_customers_with_counts(
+    db: Session,
+    tenant_id: int,
+    name: Optional[str] = None,
+    mobile: Optional[str] = None,
+    segment: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    page: Optional[int] = None,
+    page_size: Optional[int] = None,
+):
+    items, total, eff_page, eff_size, total_pages, counts = get_filtered_customers_with_counts(
+        db=db,
+        tenant_id=tenant_id,
+        name=name,
+        mobile=mobile,
+        segment=segment,
+        status=status,
+        search=search,
+        page=page,
+        page_size=page_size,
+    )
+    return {
+        "success": True,
+        "message": "Customers retrieved successfully" if items else "No customers found",
+        "items": items,
+        "total": total,
+        "page": eff_page,
+        "page_size": eff_size,
+        "total_pages": total_pages,
+        "counts": counts,
+    }
 
 
 def fetch_customer_stats(

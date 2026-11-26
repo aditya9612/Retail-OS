@@ -6,11 +6,13 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import get_current_user, require_operational_write, require_permission
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.inventory import (
     BulkInventoryAdjustmentRequest,
     BulkInventoryAdjustmentResponse,
     ExpiryEmptyResponse,
     InventoryAdjustmentRequest,
+    InventoryCounts,
     InventoryDashboardResponse,
     InventoryEmptyResponse,
     InventoryResponse,
@@ -31,23 +33,27 @@ from app.services.inventory_service import InventoryService
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
 
-@router.get("", response_model=Union[list[InventoryResponse], InventoryEmptyResponse])
+@router.get("", response_model=ListWithCountsResponse[InventoryResponse, InventoryCounts])
 def list_inventory(
     store_id: Optional[int] = Query(None, gt=0, description="Optional Store ID filter"),
     product_id: Optional[int] = Query(None, gt=0, description="Optional Product ID filter"),
     category_id: Optional[int] = Query(None, gt=0, description="Optional Category ID filter"),
     search: Optional[str] = Query(None, description="Search by product name or SKU"),
     low_stock_only: bool = Query(False, description="Filter only items at or below low stock threshold"),
+    page: Optional[int] = Query(None, ge=1, description="Optional page number"),
+    page_size: Optional[int] = Query(None, ge=1, le=100, description="Optional items per page"),
     user: User = Depends(require_permission("inventory:read")),
     db: Session = Depends(get_db),
 ):
-    return InventoryService(db).list_inventory(
+    return InventoryService(db).list_inventory_with_counts(
         tenant_id=user.tenant_id,
         store_id=store_id,
         product_id=product_id,
         category_id=category_id,
         search=search,
         low_stock_only=low_stock_only,
+        page=page,
+        page_size=page_size,
     )
 
 

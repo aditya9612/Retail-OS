@@ -317,6 +317,20 @@ class StorefrontService:
             for c in categories
         ]
 
+    def get_categories_with_counts(self, tenant_id: int) -> dict:
+        categories = self.get_categories(tenant_id)
+        total = len(categories)
+        return {
+            "success": True,
+            "message": "Categories retrieved successfully" if categories else "No categories found",
+            "items": categories,
+            "total": total,
+            "page": 1,
+            "page_size": total,
+            "total_pages": 1 if total > 0 else 0,
+            "counts": {"total": total},
+        }
+
     def get_products(
         self,
         tenant_id: int,
@@ -388,11 +402,41 @@ class StorefrontService:
                 )
             )
 
+        from app.utils.pagination import compute_total_pages
+        from app.schemas.storefront import StorefrontProductCounts
+
+        if store_id:
+            all_ids = [r[0] for r in query.with_entities(Product.id).all()]
+            if all_ids:
+                in_stock_count = (
+                    self.db.query(func.count(func.distinct(Inventory.product_id)))
+                    .filter(
+                        Inventory.tenant_id == tenant_id,
+                        Inventory.store_id == store_id,
+                        Inventory.product_id.in_(all_ids),
+                        Inventory.quantity > 0,
+                    )
+                    .scalar()
+                    or 0
+                )
+            else:
+                in_stock_count = 0
+            out_of_stock_count = max(0, total - int(in_stock_count))
+        else:
+            in_stock_count = total
+            out_of_stock_count = 0
+
         return StorefrontProductListResponse(
             items=items,
             total=total,
             page=page,
             page_size=page_size,
+            total_pages=compute_total_pages(total, page_size),
+            counts=StorefrontProductCounts(
+                total=total,
+                in_stock=int(in_stock_count),
+                out_of_stock=int(out_of_stock_count),
+            ),
         )
 
     def get_product_detail(
@@ -809,6 +853,44 @@ class StorefrontService:
             )
             for o in orders
         ]
+
+    def get_my_orders_with_counts(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages
+        all_orders = self.get_my_orders(tenant_id, customer_id)
+        total = len(all_orders)
+        counts_map: dict[str, int] = {}
+        for o in all_orders:
+            st = str(o.status or "").lower()
+            counts_map[st] = counts_map.get(st, 0) + 1
+
+        offset = (page - 1) * page_size
+        paged_items = all_orders[offset : offset + page_size]
+        return {
+            "success": True,
+            "message": "Orders retrieved successfully" if paged_items else "No orders found",
+            "items": paged_items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": compute_total_pages(total, page_size),
+            "counts": {
+                "total": total,
+                "pending": counts_map.get("pending", 0),
+                "confirmed": counts_map.get("confirmed", 0),
+                "processing": counts_map.get("processing", 0),
+                "packed": counts_map.get("packed", 0),
+                "dispatched": counts_map.get("dispatched", 0),
+                "out_for_delivery": counts_map.get("out_for_delivery", 0),
+                "delivered": counts_map.get("delivered", 0),
+                "cancelled": counts_map.get("cancelled", 0),
+            },
+        }
 
     def get_order_details(
         self,

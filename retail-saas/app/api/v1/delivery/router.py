@@ -17,6 +17,7 @@ from app.schemas.delivery import (
     CODReconciliationSummary,
     DeliveryAddressUpdateRequest,
     DeliveryCancelRequest,
+    DeliveryCounts,
     DeliveryCreate,
     DeliveryFailedAttemptRequest,
     DeliveryHistoryItem,
@@ -113,7 +114,8 @@ def list_deliveries(
     ),
     db: Session = Depends(get_db),
 ):
-    deliveries, total = DeliveryService(db).list_deliveries(
+    service = DeliveryService(db)
+    deliveries, total = service.list_deliveries(
         tenant_id=user.tenant_id,
         page=page,
         page_size=page_size,
@@ -127,6 +129,15 @@ def list_deliveries(
         search=search,
         store_id=store_id,
     )
+    stats = service.repo.get_stats(user.tenant_id, store_id=store_id)
+    counts = DeliveryCounts(
+        total=stats["total_deliveries"],
+        pending=stats["pending_deliveries"],
+        assigned=stats["assigned_deliveries"],
+        out_for_delivery=stats["out_for_delivery_deliveries"],
+        delivered=stats["delivered_deliveries"],
+        cancelled=stats["cancelled_deliveries"],
+    )
     if not deliveries:
         return DeliveryListResponse(
             success=True,
@@ -136,6 +147,7 @@ def list_deliveries(
             page=page,
             page_size=page_size,
             total_pages=0 if page is not None else None,
+            counts=counts,
         )
 
     total_pages = ((total + page_size - 1) // page_size) if page_size else 1
@@ -147,6 +159,7 @@ def list_deliveries(
         page=page,
         page_size=page_size,
         total_pages=total_pages if page is not None else None,
+        counts=counts,
     )
 
 

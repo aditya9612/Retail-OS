@@ -14,12 +14,14 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import require_permission
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.coupon import (
     ApplicableCouponsResponse,
     ApplyCouponRequest,
     ApplyCouponResponse,
     BulkGenerateCouponsRequest,
     BulkGenerateCouponsResponse,
+    CouponCounts,
     CouponCreate,
     CouponDeleteResponse,
     CouponRedemptionEmptyResponse,
@@ -42,7 +44,7 @@ router = APIRouter(
 
 @router.get(
     "",
-    response_model=list[CouponResponse],
+    response_model=ListWithCountsResponse[CouponResponse, CouponCounts],
     summary="List all coupons",
 )
 def list_coupons(
@@ -53,7 +55,7 @@ def list_coupons(
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    return CouponService(db).list_coupons(
+    return CouponService(db).list_coupons_with_counts(
         tenant_id=user.tenant_id,
         page=page,
         page_size=page_size,
@@ -81,28 +83,28 @@ def create_coupon(
 
 @router.get(
     "/active",
-    response_model=list[CouponResponse],
+    response_model=ListWithCountsResponse[CouponResponse, CouponCounts],
     summary="Get active coupons",
 )
 def get_active_coupons(
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    return CouponService(db).get_active_coupons(
+    return CouponService(db).get_active_coupons_with_counts(
         tenant_id=user.tenant_id
     )
 
 
 @router.get(
     "/expired",
-    response_model=list[CouponResponse],
+    response_model=ListWithCountsResponse[CouponResponse, CouponCounts],
     summary="Get expired coupons",
 )
 def get_expired_coupons(
     user: User = Depends(require_permission("products:read")),
     db: Session = Depends(get_db),
 ):
-    return CouponService(db).get_expired_coupons(
+    return CouponService(db).get_expired_coupons_with_counts(
         tenant_id=user.tenant_id
     )
 

@@ -281,6 +281,66 @@ class PurchaseOrderReturnService:
             search=search,
         )
 
+    def list_returns_with_counts(
+        self,
+        tenant_id: int,
+        page: int = 1,
+        page_size: int = 20,
+        purchase_order_id: Optional[int] = None,
+        supplier_id: Optional[int] = None,
+        store_id: Optional[int] = None,
+        warehouse_id: Optional[int] = None,
+        status: Optional[str] = None,
+        from_date: Optional[date | datetime] = None,
+        to_date: Optional[date | datetime] = None,
+        search: Optional[str] = None,
+    ) -> dict:
+        from app.models.purchase_order_return import PurchaseOrderReturn
+        from app.utils.pagination import compute_total_pages, count_by_status
+        items = self.list_returns(
+            tenant_id=tenant_id,
+            page=page,
+            page_size=page_size,
+            purchase_order_id=purchase_order_id,
+            supplier_id=supplier_id,
+            store_id=store_id,
+            warehouse_id=warehouse_id,
+            status=status,
+            from_date=from_date,
+            to_date=to_date,
+            search=search,
+        )
+        total = self.count_returns(
+            tenant_id=tenant_id,
+            purchase_order_id=purchase_order_id,
+            supplier_id=supplier_id,
+            store_id=store_id,
+            warehouse_id=warehouse_id,
+            status=status,
+            from_date=from_date,
+            to_date=to_date,
+            search=search,
+        )
+        extra = [PurchaseOrderReturn.store_id == store_id] if store_id is not None else None
+        counts = count_by_status(
+            self.db,
+            PurchaseOrderReturn,
+            tenant_id,
+            PurchaseOrderReturn.status,
+            statuses=("requested", "approved", "completed", "rejected"),
+            extra_filters=extra,
+        )
+        return {
+            "success": True,
+            "message": "Purchase order returns retrieved successfully" if items else "No purchase order returns found",
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": compute_total_pages(total, page_size),
+            "counts": counts,
+        }
+
     def count_returns(
         self,
         tenant_id: int,

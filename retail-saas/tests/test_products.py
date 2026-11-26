@@ -45,7 +45,10 @@ def test_create_and_list_products(auth_headers):
 
     list_resp = client.get("/api/v1/products", headers=auth_headers)
     assert list_resp.status_code == 200
-    assert len(list_resp.json()) >= 1
+    list_body = list_resp.json()
+    assert len(list_body["items"]) >= 1
+    assert list_body["counts"]["total"] >= 1
+    assert list_body["counts"]["active"] >= 1
 
 
 def test_search_products(auth_headers):
@@ -69,8 +72,10 @@ def test_search_products(auth_headers):
         headers=auth_headers,
     )
     assert search_name.status_code == 200
-    items = search_name.json()
+    body = search_name.json()
+    items = body["items"]
     assert isinstance(items, list)
+    assert body["total"] >= 1
     assert any(p["name"] == "Wireless Mouse" for p in items)
 
     # 3. Search by SKU -> 200 with result
@@ -79,7 +84,7 @@ def test_search_products(auth_headers):
         headers=auth_headers,
     )
     assert search_sku.status_code == 200
-    assert any(p["sku"] == "WM-9001" for p in search_sku.json())
+    assert any(p["sku"] == "WM-9001" for p in search_sku.json()["items"])
 
     # 4. Search by barcode -> 200 with result
     search_bc = client.get(
@@ -87,22 +92,24 @@ def test_search_products(auth_headers):
         headers=auth_headers,
     )
     assert search_bc.status_code == 200
-    assert any(p["barcode"] == "8901234567890" for p in search_bc.json())
+    assert any(p["barcode"] == "8901234567890" for p in search_bc.json()["items"])
 
-    # 5. Search zero matches (e.g. 'ca' or 'nonexistent') -> 200 with empty list []
+    # 5. Search zero matches (e.g. 'ca' or 'nonexistent') -> 200 with empty items []
     search_zero = client.get(
         "/api/v1/products/search?search=ca&page=1&page_size=100",
         headers=auth_headers,
     )
     assert search_zero.status_code == 200
-    assert search_zero.json() == []
+    assert search_zero.json()["items"] == []
+    assert search_zero.json()["total"] == 0
 
     search_none = client.get(
         "/api/v1/products/search?search=nonexistent_xyz&page=1&page_size=100",
         headers=auth_headers,
     )
     assert search_none.status_code == 200
-    assert search_none.json() == []
+    assert search_none.json()["items"] == []
+    assert search_none.json()["total"] == 0
 
     # 6. Search validation (< 2 characters) -> 422
     search_short = client.get(

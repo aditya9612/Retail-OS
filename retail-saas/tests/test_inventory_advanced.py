@@ -287,7 +287,7 @@ def test_enhanced_list_and_filters(inv_advanced_context):
     # 1. Filter by store_id
     resp_s1 = client.get(f"/api/v1/inventory?store_id={s1}", headers=headers)
     assert resp_s1.status_code == 200
-    items_s1 = resp_s1.json()
+    items_s1 = resp_s1.json()["items"]
     assert isinstance(items_s1, list)
     assert all(item["store_id"] == s1 for item in items_s1)
 
@@ -300,6 +300,6 @@ def test_enhanced_list_and_filters(inv_advanced_context):
     # 3. Filter by search
     resp_search = client.get("/api/v1/inventory?search=Whole+Milk", headers=headers)
     assert resp_search.status_code == 200
-    search_items = resp_search.json()
+    search_items = resp_search.json()["items"]
     assert len(search_items) >= 1
 

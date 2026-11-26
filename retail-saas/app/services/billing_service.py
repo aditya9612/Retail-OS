@@ -792,6 +792,94 @@ class BillingService:
             .all()
         )
 
+    def _get_invoice_counts(
+        self,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+    ) -> dict[str, int]:
+        from sqlalchemy import case
+        q = self.db.query(
+            func.count(Invoice.id).label("total"),
+            func.count(case((func.lower(Invoice.status) == "paid", 1))).label("paid"),
+            func.count(case((func.lower(Invoice.status).in_(["unpaid", "pending"]), 1))).label("unpaid"),
+            func.count(case((func.lower(Invoice.status) == "partial", 1))).label("partial"),
+            func.count(case((func.lower(Invoice.status) == "cancelled", 1))).label("cancelled"),
+        ).filter(Invoice.tenant_id == tenant_id)
+        if store_id is not None:
+            q = q.filter(Invoice.store_id == store_id)
+        row = q.one()
+        return {
+            "total": int(row.total or 0),
+            "paid": int(row.paid or 0),
+            "unpaid": int(row.unpaid or 0),
+            "partial": int(row.partial or 0),
+            "cancelled": int(row.cancelled or 0),
+        }
+
+    def search_invoices_with_counts(
+        self,
+        tenant_id: int,
+        invoice_number: str | None = None,
+        customer_name: str | None = None,
+        mobile: str | None = None,
+        gstin: str | None = None,
+        payment_status: str | None = None,
+        date_from=None,
+        date_to=None,
+        store_id: int | None = None,
+        user: Optional[User] = None,
+        system_context: bool = False,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages
+        # Re-run with full limit on filtered count by using the base query cleanly:
+        # We fetch page via search_invoices and compute count using same auth/filters
+        items = self.search_invoices(
+            tenant_id=tenant_id,
+            invoice_number=invoice_number,
+            customer_name=customer_name,
+            mobile=mobile,
+            gstin=gstin,
+            payment_status=payment_status,
+            date_from=date_from,
+            date_to=date_to,
+            store_id=store_id,
+            user=user,
+            system_context=system_context,
+            page=page,
+            page_size=page_size,
+        )
+        # Compute exact total for filtered invoices
+        all_filtered = self.search_invoices(
+            tenant_id=tenant_id,
+            invoice_number=invoice_number,
+            customer_name=customer_name,
+            mobile=mobile,
+            gstin=gstin,
+            payment_status=payment_status,
+            date_from=date_from,
+            date_to=date_to,
+            store_id=store_id,
+            user=user,
+            system_context=system_context,
+            page=1,
+            page_size=100000,
+        )
+        total = len(all_filtered)
+        eff_store_id = user.store_id if (user and user.store_id is not None) else store_id
+        counts = self._get_invoice_counts(tenant_id, store_id=eff_store_id)
+        return {
+            "success": True,
+            "message": "Invoices retrieved successfully" if items else "No invoices found",
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": compute_total_pages(total, page_size),
+            "counts": counts,
+        }
+
     def reprint_invoice(
         self,
         tenant_id: int,
@@ -2647,6 +2735,70 @@ class BillingService:
 
         return query.all()
 
+    def list_refunds_with_counts(
+        self,
+        tenant_id: int,
+        invoice_id: int | None = None,
+        store_id: int | None = None,
+        status: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 50,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        user: Optional[User] = None,
+        system_context: bool = False,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages, count_by_status
+        items = self.list_refunds(
+            tenant_id=tenant_id,
+            invoice_id=invoice_id,
+            store_id=store_id,
+            status=status,
+            page=page,
+            page_size=page_size,
+            date_from=date_from,
+            date_to=date_to,
+            user=user,
+            system_context=system_context,
+        )
+        all_filtered = self.list_refunds(
+            tenant_id=tenant_id,
+            invoice_id=invoice_id,
+            store_id=store_id,
+            status=status,
+            page=None,
+            page_size=None,
+            date_from=date_from,
+            date_to=date_to,
+            user=user,
+            system_context=system_context,
+        )
+        total = len(all_filtered)
+        effective_store_id = (
+            user.store_id if (user is not None and user.store_id is not None) else store_id
+        )
+        counts = count_by_status(
+            self.db,
+            Refund,
+            tenant_id,
+            Refund.status,
+            statuses=("pending", "approved", "rejected"),
+            extra_filters=[Invoice.store_id == effective_store_id] if effective_store_id is not None else None,
+            joins=[(Invoice, Refund.invoice_id == Invoice.id)] if effective_store_id is not None else None,
+        )
+        eff_page = page or 1
+        eff_size = page_size or total
+        return {
+            "success": True,
+            "message": "Refunds retrieved successfully" if items else "No refunds found",
+            "items": items,
+            "total": total,
+            "page": eff_page,
+            "page_size": eff_size,
+            "total_pages": compute_total_pages(total, eff_size) if eff_size else (1 if total > 0 else 0),
+            "counts": counts,
+        }
+
     def get_refund_receipt(
         self,
         tenant_id: int,
@@ -3270,6 +3422,76 @@ class BillingService:
             query = query.offset((page - 1) * page_size).limit(page_size)
 
         return query.all()
+
+    def list_credit_notes_with_counts(
+        self,
+        tenant_id: int,
+        invoice_id: int | None = None,
+        store_id: int | None = None,
+        credit_note_no: Optional[str] = None,
+        status: Optional[str] = None,
+        customer_id: Optional[int] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        user: Optional[User] = None,
+        system_context: bool = False,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages, count_by_status
+        items = self.list_credit_notes(
+            tenant_id=tenant_id,
+            invoice_id=invoice_id,
+            store_id=store_id,
+            credit_note_no=credit_note_no,
+            status=status,
+            customer_id=customer_id,
+            date_from=date_from,
+            date_to=date_to,
+            page=page,
+            page_size=page_size,
+            user=user,
+            system_context=system_context,
+        )
+        all_filtered = self.list_credit_notes(
+            tenant_id=tenant_id,
+            invoice_id=invoice_id,
+            store_id=store_id,
+            credit_note_no=credit_note_no,
+            status=status,
+            customer_id=customer_id,
+            date_from=date_from,
+            date_to=date_to,
+            page=None,
+            page_size=None,
+            user=user,
+            system_context=system_context,
+        )
+        total = len(all_filtered)
+        effective_store_id = (
+            user.store_id if (user is not None and user.store_id is not None) else store_id
+        )
+        counts = count_by_status(
+            self.db,
+            CreditNote,
+            tenant_id,
+            CreditNote.status,
+            statuses=("issued", "partially_redeemed", "redeemed", "expired"),
+            extra_filters=[Invoice.store_id == effective_store_id] if effective_store_id is not None else None,
+            joins=[(Invoice, CreditNote.invoice_id == Invoice.id)] if effective_store_id is not None else None,
+        )
+        eff_page = page or 1
+        eff_size = page_size or total
+        return {
+            "success": True,
+            "message": "Credit notes retrieved successfully" if items else "No credit notes found",
+            "items": items,
+            "total": total,
+            "page": eff_page,
+            "page_size": eff_size,
+            "total_pages": compute_total_pages(total, eff_size) if eff_size else (1 if total > 0 else 0),
+            "counts": counts,
+        }
 
     def get_credit_note(
         self,

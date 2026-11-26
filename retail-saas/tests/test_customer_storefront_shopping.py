@@ -175,8 +175,9 @@ def test_storefront_catalog_browsing(customer_auth_headers):
     # 1. Categories
     cat_resp = client.get("/api/v1/storefront/categories", headers=customer_auth_headers)
     assert cat_resp.status_code == 200
-    cats = cat_resp.json()
-    assert isinstance(cats, list)
+    cat_body = cat_resp.json()
+    assert isinstance(cat_body["items"], list)
+    assert cat_body["counts"]["total"] == cat_body["total"]
 
     # 2. Products List
     prod_resp = client.get("/api/v1/storefront/products", headers=customer_auth_headers)
@@ -184,6 +185,8 @@ def test_storefront_catalog_browsing(customer_auth_headers):
     pdata = prod_resp.json()
     assert "items" in pdata
     assert "total" in pdata
+    assert "counts" in pdata
+    assert pdata["counts"]["total"] == pdata["total"]
     assert pdata["total"] >= 1
 
     # 3. Product Search
@@ -284,7 +287,9 @@ def test_storefront_checkout_and_orders(storefront_test_context, customer_auth_h
     # 2. View My Orders list
     orders_resp = client.get("/api/v1/storefront/my-orders", headers=customer_auth_headers)
     assert orders_resp.status_code == 200
-    orders_list = orders_resp.json()
+    orders_body = orders_resp.json()
+    orders_list = orders_body["items"]
+    assert orders_body["counts"]["total"] >= 1
     assert len(orders_list) >= 1
     assert any(o["id"] == order_id for o in orders_list)
 

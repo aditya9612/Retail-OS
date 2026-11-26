@@ -135,6 +135,47 @@ class SupplierService:
 
         return [SupplierResponse.model_validate(s) for s in suppliers]
 
+    def list_suppliers_with_counts(
+        self,
+        tenant_id: int,
+        search: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ) -> dict:
+        from app.utils.pagination import count_boolean_flag, paginate_query
+
+        query = self.db.query(Supplier).filter(Supplier.tenant_id == tenant_id)
+        if is_active is not None:
+            query = query.filter(Supplier.is_active == is_active)
+        if search:
+            clean_search = search.strip()
+            if clean_search:
+                term = f"%{clean_search}%"
+                query = query.filter(
+                    or_(
+                        Supplier.name.ilike(term),
+                        Supplier.phone.ilike(term),
+                        Supplier.contact_person.ilike(term),
+                        Supplier.gstin.ilike(term),
+                    )
+                )
+        query = query.order_by(Supplier.created_at.desc())
+        suppliers, total, eff_page, eff_size, total_pages = paginate_query(
+            query, page=page, page_size=page_size
+        )
+        counts = count_boolean_flag(self.db, Supplier, tenant_id, Supplier.is_active)
+        return {
+            "success": True,
+            "message": "Suppliers retrieved successfully" if suppliers else "No suppliers found",
+            "items": [SupplierResponse.model_validate(s) for s in suppliers],
+            "total": total,
+            "page": eff_page,
+            "page_size": eff_size,
+            "total_pages": total_pages,
+            "counts": counts,
+        }
+
     def get_supplier(
         self,
         tenant_id: int,
@@ -329,6 +370,48 @@ class SupplierService:
             )
 
         return [SupplierResponse.model_validate(s) for s in suppliers]
+
+    def search_suppliers_with_counts(
+        self,
+        tenant_id: int,
+        search: str,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ) -> dict:
+        from app.utils.pagination import count_boolean_flag, paginate_query
+
+        search = search.strip()
+        if not search:
+            raise AppException("Search term cannot be empty")
+
+        term = f"%{search}%"
+        query = (
+            self.db.query(Supplier)
+            .filter(
+                Supplier.tenant_id == tenant_id,
+                or_(
+                    Supplier.name.ilike(term),
+                    Supplier.phone.ilike(term),
+                    Supplier.contact_person.ilike(term),
+                    Supplier.gstin.ilike(term),
+                ),
+            )
+            .order_by(Supplier.name.asc())
+        )
+        suppliers, total, eff_page, eff_size, total_pages = paginate_query(
+            query, page=page, page_size=page_size
+        )
+        counts = count_boolean_flag(self.db, Supplier, tenant_id, Supplier.is_active)
+        return {
+            "success": True,
+            "message": "Suppliers retrieved successfully" if suppliers else "No suppliers found matching the search",
+            "items": [SupplierResponse.model_validate(s) for s in suppliers],
+            "total": total,
+            "page": eff_page,
+            "page_size": eff_size,
+            "total_pages": total_pages,
+            "counts": counts,
+        }
 
     def supplier_stats(
         self,

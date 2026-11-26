@@ -463,3 +463,9 @@ class PermissionGroup(BaseModel):
     module: str
     label: str
     permissions: list[PermissionItem]
+
+
+class RoleCounts(BaseModel):
+    total: int = 0
+    system_roles: int = 0
+    custom_roles: int = 0

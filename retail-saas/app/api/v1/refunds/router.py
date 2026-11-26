@@ -10,7 +10,9 @@ from app.core.exceptions import AppException, NotFoundException
 from app.core.security import require_permission
 from app.models.credit_note import CreditNote
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse
 from app.schemas.billing import (
+    RefundCounts,
     RefundCreate,
     RefundReceiptPdfMode,
     RefundReceiptResponse,
@@ -41,7 +43,7 @@ def create_refund(
     )
 
 
-@router.get("", response_model=list[RefundResponse])
+@router.get("", response_model=ListWithCountsResponse[RefundResponse, RefundCounts])
 def list_refunds(
     invoice_id: Optional[int] = Query(default=None),
     store_id: Optional[int] = Query(default=None, gt=0, description="Filter refunds by store ID"),
@@ -53,7 +55,7 @@ def list_refunds(
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
-    return BillingService(db).list_refunds(
+    return BillingService(db).list_refunds_with_counts(
         user.tenant_id,
         invoice_id=invoice_id,
         store_id=store_id,
@@ -66,7 +68,7 @@ def list_refunds(
     )
 
 
-@router.get("/pending-approval", response_model=list[RefundResponse])
+@router.get("/pending-approval", response_model=ListWithCountsResponse[RefundResponse, RefundCounts])
 def list_pending_refunds(
     store_id: Optional[int] = Query(default=None, gt=0, description="Filter pending refunds by store ID"),
     user: User = Depends(require_permission("billing:refund")),
@@ -75,10 +77,12 @@ def list_pending_refunds(
     """
     Manager queue endpoint to retrieve all refund requests currently awaiting review and approval.
     """
-    return BillingService(db).list_refunds(
+    return BillingService(db).list_refunds_with_counts(
         user.tenant_id,
         store_id=store_id,
         status="pending",
+        page=1,
+        page_size=100,
         user=user,
     )
 

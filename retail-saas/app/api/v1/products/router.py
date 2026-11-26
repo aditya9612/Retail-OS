@@ -26,11 +26,13 @@ from app.core.database import get_db
 from app.core.security import require_operational_write, require_permission
 from app.models.product import ProductImage
 from app.models.user import User
+from app.schemas.common import ListWithCountsResponse, TotalCountOnly
 from app.schemas.product import (
     BarcodeLabelMode,
     GenerateMissingBarcodesResponse,
     ProductBarcodeLabelResponse,
     ProductCatalogSummaryResponse,
+    ProductCounts,
     ProductCreate,
     ProductImageCreate,
     ProductImageResponse,
@@ -49,7 +51,7 @@ router = APIRouter(
 
 @router.get(
     "",
-    response_model=list[ProductResponse],
+    response_model=ListWithCountsResponse[ProductResponse, ProductCounts],
 )
 def list_products(
     page: int = Query(
@@ -96,7 +98,7 @@ def list_products(
     ),
     db: Session = Depends(get_db),
 ):
-    return ProductService(db).list_products(
+    return ProductService(db).list_products_with_counts(
         user.tenant_id,
         page=page,
         page_size=page_size,
@@ -112,7 +114,7 @@ def list_products(
 
 @router.get(
     "/search",
-    response_model=list[ProductResponse],
+    response_model=ListWithCountsResponse[ProductResponse, ProductCounts],
 )
 def search_products(
     search: str = Query(
@@ -143,7 +145,7 @@ def search_products(
             detail="Search query cannot be empty or whitespace",
         )
 
-    return ProductService(db).search_products(
+    return ProductService(db).search_products_with_counts(
         user.tenant_id,
         search,
         page,
@@ -153,7 +155,7 @@ def search_products(
 
 @router.get(
     "/low-stock",
-    response_model=list[ProductLowStockResponse],
+    response_model=ListWithCountsResponse[ProductLowStockResponse, TotalCountOnly],
 )
 def list_low_stock(
     store_id: int = Query(
@@ -189,7 +191,7 @@ def list_low_stock(
                 detail="Days must be an integer between 1 and 365",
             )
 
-    return ProductService(db).list_low_stock(
+    return ProductService(db).list_low_stock_with_counts(
         user.tenant_id,
         store_id,
         threshold,
@@ -198,7 +200,7 @@ def list_low_stock(
 
 @router.get(
     "/expiring-soon",
-    response_model=list[ProductResponse],
+    response_model=ListWithCountsResponse[ProductResponse, TotalCountOnly],
 )
 def list_expiring_soon(
     store_id: int = Query(
@@ -230,7 +232,7 @@ def list_expiring_soon(
     else:
         days_val = 30
 
-    return ProductService(db).list_expiring_soon(
+    return ProductService(db).list_expiring_soon_with_counts(
         user.tenant_id,
         store_id,
         days_val,

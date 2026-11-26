@@ -237,7 +237,7 @@ def test_purchase_order_create_with_invoice_number_and_list(tenant_fixture):
     # 2. List Purchase Orders -> verify invoice_number appears in list items
     list_resp = client.get("/api/v1/purchase-orders", headers=headers)
     assert list_resp.status_code == 200, list_resp.text
-    orders = list_resp.json()
+    orders = list_resp.json()["items"]
     assert isinstance(orders, list)
     matching = [o for o in orders if o["id"] == po_id]
     assert len(matching) == 1
