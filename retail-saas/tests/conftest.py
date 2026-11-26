@@ -8,6 +8,8 @@ import pytest
 os.environ["DATABASE_URL"] = "sqlite:///./test_retail_saas.db"
 os.environ["SECRET_KEY"] = "test-secret-key-for-pytest-only"
 os.environ["AUTH_FIXED_OTP_ENABLED"] = "false"
+os.environ["CELERY_BROKER_URL"] = "memory://"
+os.environ["CELERY_RESULT_BACKEND"] = "cache+memory://"
 
 from app.core.config import get_settings
 
@@ -125,6 +127,7 @@ def fake_redis():
         patch("app.core.security.get_redis", return_value=fake),
         patch("app.services.auth_service.get_redis", return_value=fake),
         patch("app.services.cart_service.get_redis", return_value=fake),
+        patch("app.services.storefront_service.get_redis", return_value=fake),
         patch("app.utils.helpers.get_redis_client", return_value=fake),
         patch("app.utils.helpers.cache_delete_pattern"),
     ):

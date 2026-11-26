@@ -24,6 +24,18 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    broker_connection_retry=False,
+    broker_connection_retry_on_startup=False,
+    broker_connection_max_retries=0,
+    task_publish_retry=False,
+    task_publish_retry_policy={
+        "max_retries": 0,
+    },
+    broker_transport_options={
+        "max_retries": 0,
+        "socket_connect_timeout": 1,
+        "socket_timeout": 1,
+    },
     beat_schedule={
         "saas-subscription-lifecycle-hourly": {
             "task": "process_saas_subscription_lifecycle",

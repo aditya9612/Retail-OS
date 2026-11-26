@@ -1,6 +1,6 @@
 import html
 import io
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 import logging
 import threading
@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 import boto3
-from sqlalchemy import func, text
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func, or_, text
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 logger = logging.getLogger(__name__)
 
@@ -19,14 +19,15 @@ from app.core.security import is_tenant_wide_authorized
 from app.models.credit_note import CreditNote
 from app.models.customer import Customer
 from app.models.document_sequence import DocumentSequence
+from app.models.inventory import Inventory, StockMovement
 from app.models.invoice import Invoice
 from app.models.invoice_item import InvoiceItem
 from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.payment import Payment
 from app.models.product import Product
+from app.models.product_variant import ProductVariant
 from app.models.invoice_item_return import InvoiceItemReturn
-from app.models.inventory import StockMovement
 from app.models.order_item_batch_allocation import OrderItemBatchAllocation
 from app.models.refund import Refund
 from app.models.store import Store
@@ -36,6 +37,9 @@ from app.schemas.billing import (
     CreditNoteThermalMode,
     CreditNoteThermalResponse,
     InvoiceCreate,
+    InvoicePreviewItemResponse,
+    InvoicePreviewRequest,
+    InvoicePreviewResponse,
     InvoiceThermalMode,
     InvoiceThermalResponse,
     RefundThermalMode,
@@ -49,7 +53,7 @@ from app.services.cart_service import CartService
 from app.services.inventory_service import InventoryService
 from app.services.order_service import OrderService
 from app.utils.constants import InvoiceStatus, OrderStatus, PaymentStatus, RefundStatus, StockMovementType
-from app.utils.gst_engine import calculate_line_tax, resolve_gst_rate
+from app.utils.gst_engine import aggregate_taxes, calculate_line_tax, resolve_gst_rate
 from app.utils.pdf_generator import generate_invoice_pdf
 from app.utils.thermal_printer import generate_thermal_payload
 
@@ -213,6 +217,17 @@ class BillingService:
                 .filter(Product.id == order_item.product_id)
                 .first()
             )
+            variant = None
+            variant_id = getattr(order_item, "variant_id", None)
+            if variant_id is not None:
+                variant = (
+                    self.db.query(ProductVariant)
+                    .filter(
+                        ProductVariant.id == variant_id,
+                        ProductVariant.tenant_id == invoice.tenant_id,
+                    )
+                    .first()
+                )
 
             gst_rate = (
                 resolve_gst_rate(self.db, invoice.tenant_id, product)
@@ -231,11 +246,19 @@ class BillingService:
             invoice.items.append(
                 InvoiceItem(
                     product_id=order_item.product_id,
+                    variant_id=variant_id,
+                    product_name=product.name if product else (getattr(order_item, "product_name", "") or "Item"),
+                    sku=(variant.sku if variant else (product.sku if product else "")) or "",
+                    hsn_code=product.hsn_code if product else None,
+                    unit=(product.unit if product else None) or "pcs",
                     quantity=Decimal(str(order_item.quantity)),
                     unit_price=order_item.unit_price,
                     discount_amount=order_item.discount,
                     gst_rate=gst_rate,
                     gst_amount=tax["gst_amount"],
+                    cgst_amount=tax["cgst_amount"],
+                    sgst_amount=tax["sgst_amount"],
+                    igst_amount=tax["igst_amount"],
                     total_amount=tax["total_amount"],
                 )
             )
@@ -334,13 +357,13 @@ class BillingService:
 
         return invoice
 
-    def create_invoice_from_cart(
+    def _resolve_authorized_store(
         self,
         tenant_id: int,
         user_id: int,
-        data: InvoiceCreate,
+        store_id: int,
         user: Optional[User] = None,
-    ) -> Invoice:
+    ) -> User:
         if user is None:
             user = (
                 self.db.query(User)
@@ -351,7 +374,7 @@ class BillingService:
         if not user:
             raise ForbiddenException("Access denied: user context required")
 
-        if user.store_id is not None and data.store_id != user.store_id:
+        if user.store_id is not None and store_id != user.store_id:
             raise ForbiddenException("Access denied: cannot create invoice for another store")
 
         if user.store_id is None:
@@ -360,14 +383,172 @@ class BillingService:
             store = (
                 self.db.query(Store)
                 .filter(
-                    Store.id == data.store_id,
+                    Store.id == store_id,
                     Store.tenant_id == tenant_id,
                     Store.is_active.is_(True),
                 )
                 .first()
             )
             if not store:
-                raise NotFoundException(f"Store {data.store_id} not found")
+                raise NotFoundException(f"Store {store_id} not found")
+
+        return user
+
+    def preview_invoice(
+        self,
+        tenant_id: int,
+        user_id: int,
+        data: InvoicePreviewRequest,
+        user: Optional[User] = None,
+    ) -> InvoicePreviewResponse:
+        """Preview invoice calculations, GST breakdown, and live store stock when product IDs are added."""
+        self._resolve_authorized_store(tenant_id, user_id, data.store_id, user=user)
+
+        order_svc = OrderService(self.db)
+        order_svc._get_store(tenant_id, data.store_id)
+        if data.customer_id is not None:
+            order_svc._get_customer(tenant_id, data.customer_id)
+
+        preview_items: list[InvoicePreviewItemResponse] = []
+        line_taxes: list[dict] = []
+        all_in_stock = True
+
+        for item in data.items:
+            prod = (
+                self.db.query(Product)
+                .filter(
+                    Product.id == item.product_id,
+                    Product.tenant_id == tenant_id,
+                )
+                .first()
+            )
+            if not prod:
+                raise NotFoundException(f"Product ID {item.product_id} not found")
+            if hasattr(prod, "is_active") and not prod.is_active:
+                raise AppException(f"Product {prod.id} is inactive")
+            if getattr(prod, "expiry_date", None) and prod.expiry_date < date.today():
+                raise AppException(f"Product {prod.id} has expired")
+
+            variant = None
+            if item.variant_id is not None:
+                variant = (
+                    self.db.query(ProductVariant)
+                    .filter(
+                        ProductVariant.id == item.variant_id,
+                        ProductVariant.tenant_id == tenant_id,
+                    )
+                    .first()
+                )
+                if not variant:
+                    raise NotFoundException(f"ProductVariant {item.variant_id} not found")
+                if variant.product_id != prod.id:
+                    raise AppException(f"ProductVariant {item.variant_id} does not belong to product {prod.id}")
+                if hasattr(variant, "is_active") and not variant.is_active:
+                    raise AppException(f"ProductVariant {item.variant_id} is inactive")
+
+            if item.unit_price is not None:
+                unit_price = item.unit_price
+            elif variant is not None and variant.selling_price is not None:
+                unit_price = variant.selling_price
+            else:
+                unit_price = getattr(prod, "selling_price", None) or getattr(prod, "price", Decimal("0.00"))
+
+            discount = item.discount or Decimal("0.00")
+            gst_rate = resolve_gst_rate(self.db, tenant_id, prod)
+            try:
+                tax = calculate_line_tax(
+                    Decimal(str(item.quantity)),
+                    unit_price,
+                    discount,
+                    gst_rate,
+                    data.same_state,
+                )
+            except ValueError as exc:
+                raise AppException(str(exc)) from exc
+
+            stock_sum = (
+                self.db.query(func.coalesce(func.sum(Inventory.quantity), Decimal("0.0000")))
+                .filter(
+                    Inventory.tenant_id == tenant_id,
+                    Inventory.store_id == data.store_id,
+                    Inventory.product_id == prod.id,
+                )
+                .scalar()
+            )
+            avail_stock = Decimal(str(stock_sum or Decimal("0.0000")))
+            sufficient = avail_stock >= Decimal(str(item.quantity))
+            if not sufficient:
+                all_in_stock = False
+
+            line_taxes.append(tax)
+            preview_items.append(
+                InvoicePreviewItemResponse(
+                    product_id=prod.id,
+                    variant_id=variant.id if variant else None,
+                    variant_name=variant.variant_name if variant else None,
+                    product_name=prod.name,
+                    sku=(variant.sku if variant else prod.sku) or "",
+                    barcode=(variant.barcode if variant and variant.barcode else prod.barcode),
+                    hsn_code=prod.hsn_code,
+                    unit=getattr(prod, "unit", None) or "pcs",
+                    mrp=getattr(prod, "mrp", Decimal("0.00")) or Decimal("0.00"),
+                    quantity=item.quantity,
+                    unit_price=unit_price,
+                    discount_amount=discount,
+                    taxable_amount=tax["taxable_amount"],
+                    gst_rate=tax["gst_rate"],
+                    gst_amount=tax["gst_amount"],
+                    cgst_amount=tax["cgst_amount"],
+                    sgst_amount=tax["sgst_amount"],
+                    igst_amount=tax["igst_amount"],
+                    total_amount=tax["total_amount"],
+                    available_stock=avail_stock,
+                    is_stock_sufficient=sufficient,
+                )
+            )
+
+        totals = aggregate_taxes(line_taxes)
+        subtotal = totals["subtotal"]
+
+        order_discount = Decimal("0.00")
+        resolved_coupon = None
+        if data.coupon_code:
+            coupon = order_svc._validate_coupon(
+                tenant_id=tenant_id,
+                coupon_code=data.coupon_code,
+                order_amount=subtotal,
+            )
+            order_discount = order_svc._calculate_coupon_discount(coupon, subtotal)
+            resolved_coupon = coupon.code
+        elif data.discount_amount:
+            order_discount = order_svc._calculate_order_discount(subtotal, data.discount_amount)
+
+        grand_total = max(Decimal("0.00"), (totals["grand_total"] - order_discount).quantize(Decimal("0.01")))
+
+        return InvoicePreviewResponse(
+            store_id=data.store_id,
+            customer_id=data.customer_id,
+            same_state=data.same_state,
+            coupon_code=resolved_coupon,
+            subtotal=subtotal,
+            discount_amount=order_discount,
+            gst_amount=totals["gst_amount"],
+            cgst_amount=totals["cgst_amount"],
+            sgst_amount=totals["sgst_amount"],
+            igst_amount=totals["igst_amount"],
+            grand_total=grand_total,
+            all_items_in_stock=all_in_stock,
+            items=preview_items,
+        )
+
+    def create_invoice_from_cart(
+        self,
+        tenant_id: int,
+        user_id: int,
+        data: InvoiceCreate,
+        user: Optional[User] = None,
+    ) -> Invoice:
+        user = self._resolve_authorized_store(tenant_id, user_id, data.store_id, user=user)
 
         # Step 0: Check idempotency key if provided
         idempotency_key = getattr(data, "idempotency_key", None)
@@ -414,23 +595,50 @@ class BillingService:
         if data.items:
             items = []
             for item in data.items:
-                unit_price = item.unit_price
-                if unit_price is None:
-                    prod = (
-                        self.db.query(Product)
+                prod = (
+                    self.db.query(Product)
+                    .filter(
+                        Product.id == item.product_id,
+                        Product.tenant_id == tenant_id,
+                    )
+                    .first()
+                )
+                if not prod:
+                    raise NotFoundException(f"Product ID {item.product_id} not found")
+                if hasattr(prod, "is_active") and not prod.is_active:
+                    raise AppException(f"Product {prod.id} is inactive")
+                if getattr(prod, "expiry_date", None) and prod.expiry_date < date.today():
+                    raise AppException(f"Product {prod.id} has expired")
+
+                variant = None
+                variant_id = getattr(item, "variant_id", None)
+                if variant_id is not None:
+                    variant = (
+                        self.db.query(ProductVariant)
                         .filter(
-                            Product.id == item.product_id,
-                            Product.tenant_id == tenant_id,
+                            ProductVariant.id == variant_id,
+                            ProductVariant.tenant_id == tenant_id,
                         )
                         .first()
                     )
-                    if not prod:
-                        raise NotFoundException(f"Product ID {item.product_id} not found")
-                    unit_price = getattr(prod, "selling_price", None) or getattr(prod, "price", Decimal("0.00"))
+                    if not variant:
+                        raise NotFoundException(f"ProductVariant {variant_id} not found")
+                    if variant.product_id != prod.id:
+                        raise AppException(f"ProductVariant {variant_id} does not belong to product {prod.id}")
+                    if hasattr(variant, "is_active") and not variant.is_active:
+                        raise AppException(f"ProductVariant {variant_id} is inactive")
+
+                unit_price = item.unit_price
+                if unit_price is None:
+                    if variant is not None and variant.selling_price is not None:
+                        unit_price = variant.selling_price
+                    else:
+                        unit_price = getattr(prod, "selling_price", None) or getattr(prod, "price", Decimal("0.00"))
 
                 items.append(
                     OrderItemCreate(
                         product_id=item.product_id,
+                        variant_id=variant_id,
                         quantity=item.quantity,
                         unit_price=unit_price,
                         discount=item.discount or Decimal("0.00"),
@@ -441,8 +649,8 @@ class BillingService:
                 store_id=data.store_id,
                 customer_id=data.customer_id,
                 order_type="pos",
-                discount_amount=Decimal("0.00"),
-                coupon_code=None,
+                discount_amount=getattr(data, "discount_amount", None) or Decimal("0.00"),
+                coupon_code=getattr(data, "coupon_code", None),
                 same_state=data.same_state,
                 items=items,
             )
@@ -460,6 +668,7 @@ class BillingService:
             items = [
                 OrderItemCreate(
                     product_id=item["product_id"],
+                    variant_id=item.get("variant_id"),
                     quantity=int(Decimal(item["quantity"])),
                     unit_price=Decimal(item["unit_price"]),
                     discount=Decimal(item.get("discount", "0")),
@@ -519,6 +728,7 @@ class BillingService:
                         Payment(
                             tenant_id=tenant_id,
                             order_id=order.id,
+                            shift_id=effective_shift_id,
                             customer_id=order.customer_id,
                             payment_method=payment.payment_mode,
                             amount=payment.amount,
@@ -548,6 +758,12 @@ class BillingService:
             # Step 5: Update invoice status and link payments to invoice
             if data.payments:
                 invoice.status = "paid"
+                order.payment_status = "paid"
+                order.payment_method = (
+                    data.payments[0].payment_mode
+                    if len(data.payments) == 1
+                    else "split"
+                )
                 for p_rec in payment_records:
                     p_rec.invoice_id = invoice.id
                     self.db.add(p_rec)
@@ -611,7 +827,17 @@ class BillingService:
                 except Exception:
                     pass
 
-            return invoice
+            return (
+                self.db.query(Invoice)
+                .options(
+                    selectinload(Invoice.items).joinedload(InvoiceItem.product),
+                    selectinload(Invoice.items).joinedload(InvoiceItem.variant_rel),
+                    selectinload(Invoice.payments),
+                )
+                .filter(Invoice.id == invoice.id)
+                .first()
+                or invoice
+            )
 
         except Exception:
             self.db.rollback()
@@ -626,6 +852,11 @@ class BillingService:
     ) -> Invoice:
         invoice = (
             self.db.query(Invoice)
+            .options(
+                selectinload(Invoice.items).joinedload(InvoiceItem.product),
+                selectinload(Invoice.items).joinedload(InvoiceItem.variant_rel),
+                selectinload(Invoice.payments),
+            )
             .filter(
                 Invoice.id == invoice_id,
                 Invoice.tenant_id == tenant_id,
@@ -651,7 +882,7 @@ class BillingService:
 
         return invoice
 
-    def search_invoices(
+    def _build_invoice_list_query(
         self,
         tenant_id: int,
         invoice_number: str | None = None,
@@ -662,14 +893,13 @@ class BillingService:
         date_from=None,
         date_to=None,
         store_id: int | None = None,
+        search: str | None = None,
+        status: str | None = None,
+        customer_id: int | None = None,
         user: Optional[User] = None,
         system_context: bool = False,
-        page: int = 1,
-        page_size: int = 50,
-    ) -> list[Invoice]:
-        query = self.db.query(Invoice).filter(
-            Invoice.tenant_id == tenant_id
-        )
+    ):
+        query = self.db.query(Invoice).filter(Invoice.tenant_id == tenant_id)
 
         effective_store_id = store_id
         if not system_context:
@@ -697,96 +927,140 @@ class BillingService:
 
         if invoice_number:
             query = query.filter(
-                Invoice.invoice_number.ilike(
-                    f"%{invoice_number}%"
-                )
+                Invoice.invoice_number.ilike(f"%{invoice_number}%")
             )
+
+        if status:
+            st_lower = status.strip().lower()
+            if st_lower in ("cancelled", "void"):
+                query = query.filter(func.lower(Invoice.status).in_(["cancelled", "void"]))
+            else:
+                query = query.filter(func.lower(Invoice.status) == st_lower)
 
         if date_from:
-            query = query.filter(
-                Invoice.created_at >= date_from
-            )
+            query = query.filter(Invoice.created_at >= date_from)
 
         if date_to:
-            query = query.filter(
-                Invoice.created_at <= date_to
-            )
+            query = query.filter(Invoice.created_at <= date_to)
 
-        needs_order = (
-            customer_name
-            or mobile
-            or gstin
-            or payment_status
-        )
+        needs_customer = bool(search or customer_name or mobile or gstin)
+        needs_order = bool(needs_customer or customer_id is not None or payment_status)
 
         if needs_order:
-            query = query.join(
-                Order,
-                Invoice.order_id == Order.id,
-            )
+            query = query.outerjoin(Order, Invoice.order_id == Order.id)
 
-        if customer_name or mobile or gstin:
-            query = query.outerjoin(
-                Customer,
-                Order.customer_id == Customer.id,
-            )
+        if customer_id is not None:
+            query = query.filter(Order.customer_id == customer_id)
+
+        if needs_customer:
+            query = query.outerjoin(Customer, Order.customer_id == Customer.id)
+
+            if search:
+                pattern = f"%{search}%"
+                query = query.filter(
+                    or_(
+                        Invoice.invoice_number.ilike(pattern),
+                        Customer.name.ilike(pattern),
+                        Customer.phone.ilike(pattern),
+                        Customer.gstin.ilike(pattern),
+                    )
+                )
 
             if customer_name:
-                query = query.filter(
-                    Customer.name.ilike(
-                        f"%{customer_name}%"
-                    )
-                )
+                query = query.filter(Customer.name.ilike(f"%{customer_name}%"))
 
             if mobile:
-                query = query.filter(
-                    Customer.phone.ilike(
-                        f"%{mobile}%"
-                    )
-                )
+                query = query.filter(Customer.phone.ilike(f"%{mobile}%"))
 
             if gstin:
-                query = query.filter(
-                    Customer.gstin.ilike(
-                        f"%{gstin}%"
-                    )
-                )
+                query = query.filter(Customer.gstin.ilike(f"%{gstin}%"))
 
         if payment_status:
             ps_lower = payment_status.strip().lower()
-            if not needs_order:
-                query = query.join(
-                    Order,
-                    Invoice.order_id == Order.id,
-                )
+            query = query.outerjoin(Payment, Payment.order_id == Order.id)
 
-            query = query.join(
-                Payment,
-                Payment.order_id == Order.id,
-            )
-
-            from sqlalchemy import or_
             if ps_lower in ["paid", "completed", "success"]:
                 query = query.filter(
                     or_(
                         Payment.status.in_(["completed", "success", "paid"]),
-                        Invoice.status == "paid",
+                        func.lower(Invoice.status) == "paid",
+                    )
+                )
+            elif ps_lower == "unpaid":
+                query = query.filter(
+                    or_(
+                        func.lower(Payment.status) == "unpaid",
+                        func.lower(Invoice.status) == "unpaid",
+                        and_(
+                            func.lower(Invoice.status) == "issued",
+                            or_(
+                                Order.payment_status.is_(None),
+                                func.lower(Order.payment_status).in_(["unpaid", "pending"]),
+                            ),
+                        ),
                     )
                 )
             elif ps_lower == "cancelled":
                 query = query.filter(
                     or_(
                         Payment.status == "cancelled",
-                        Invoice.status == "cancelled",
+                        func.lower(Invoice.status).in_(["cancelled", "void"]),
                     )
                 )
             else:
-                query = query.filter(Payment.status == payment_status)
+                query = query.filter(
+                    or_(
+                        func.lower(Payment.status) == ps_lower,
+                        func.lower(Invoice.status) == ps_lower,
+                    )
+                )
 
+        return query, effective_store_id
+
+    def list_invoices(
+        self,
+        tenant_id: int,
+        invoice_number: str | None = None,
+        customer_name: str | None = None,
+        mobile: str | None = None,
+        gstin: str | None = None,
+        payment_status: str | None = None,
+        date_from=None,
+        date_to=None,
+        store_id: int | None = None,
+        search: str | None = None,
+        status: str | None = None,
+        customer_id: int | None = None,
+        user: Optional[User] = None,
+        system_context: bool = False,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> list[Invoice]:
+        base_query, _ = self._build_invoice_list_query(
+            tenant_id=tenant_id,
+            invoice_number=invoice_number,
+            customer_name=customer_name,
+            mobile=mobile,
+            gstin=gstin,
+            payment_status=payment_status,
+            date_from=date_from,
+            date_to=date_to,
+            store_id=store_id,
+            search=search,
+            status=status,
+            customer_id=customer_id,
+            user=user,
+            system_context=system_context,
+        )
         offset = max(0, (page - 1) * page_size)
         return (
-            query.distinct()
-            .order_by(Invoice.created_at.desc())
+            base_query.options(
+                selectinload(Invoice.items).joinedload(InvoiceItem.product),
+                selectinload(Invoice.items).joinedload(InvoiceItem.variant_rel),
+                selectinload(Invoice.payments),
+            )
+            .distinct()
+            .order_by(Invoice.created_at.desc(), Invoice.id.desc())
             .offset(offset)
             .limit(page_size)
             .all()
@@ -801,9 +1075,9 @@ class BillingService:
         q = self.db.query(
             func.count(Invoice.id).label("total"),
             func.count(case((func.lower(Invoice.status) == "paid", 1))).label("paid"),
-            func.count(case((func.lower(Invoice.status).in_(["unpaid", "pending"]), 1))).label("unpaid"),
+            func.count(case((func.lower(Invoice.status).in_(["unpaid", "pending", "issued"]), 1))).label("unpaid"),
             func.count(case((func.lower(Invoice.status) == "partial", 1))).label("partial"),
-            func.count(case((func.lower(Invoice.status) == "cancelled", 1))).label("cancelled"),
+            func.count(case((func.lower(Invoice.status).in_(["cancelled", "void"]), 1))).label("cancelled"),
         ).filter(Invoice.tenant_id == tenant_id)
         if store_id is not None:
             q = q.filter(Invoice.store_id == store_id)
@@ -815,6 +1089,102 @@ class BillingService:
             "partial": int(row.partial or 0),
             "cancelled": int(row.cancelled or 0),
         }
+
+    def list_invoices_with_counts(
+        self,
+        tenant_id: int,
+        invoice_number: str | None = None,
+        customer_name: str | None = None,
+        mobile: str | None = None,
+        gstin: str | None = None,
+        payment_status: str | None = None,
+        date_from=None,
+        date_to=None,
+        store_id: int | None = None,
+        search: str | None = None,
+        status: str | None = None,
+        customer_id: int | None = None,
+        user: Optional[User] = None,
+        system_context: bool = False,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        from app.utils.pagination import compute_total_pages
+        base_query, effective_store_id = self._build_invoice_list_query(
+            tenant_id=tenant_id,
+            invoice_number=invoice_number,
+            customer_name=customer_name,
+            mobile=mobile,
+            gstin=gstin,
+            payment_status=payment_status,
+            date_from=date_from,
+            date_to=date_to,
+            store_id=store_id,
+            search=search,
+            status=status,
+            customer_id=customer_id,
+            user=user,
+            system_context=system_context,
+        )
+        total = int(base_query.with_entities(func.count(func.distinct(Invoice.id))).scalar() or 0)
+        offset = max(0, (page - 1) * page_size)
+        items = (
+            base_query.options(
+                selectinload(Invoice.items).joinedload(InvoiceItem.product),
+                selectinload(Invoice.items).joinedload(InvoiceItem.variant_rel),
+                selectinload(Invoice.payments),
+            )
+            .distinct()
+            .order_by(Invoice.created_at.desc(), Invoice.id.desc())
+            .offset(offset)
+            .limit(page_size)
+            .all()
+        )
+        eff_store_id = user.store_id if (user and user.store_id is not None) else effective_store_id
+        counts = self._get_invoice_counts(tenant_id, store_id=eff_store_id)
+        return {
+            "success": True,
+            "message": "Invoices retrieved successfully" if items else "No invoices found",
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": compute_total_pages(total, page_size),
+            "counts": counts,
+        }
+
+    # Backward-compatible aliases for internal/test callers
+    def search_invoices(
+        self,
+        tenant_id: int,
+        invoice_number: str | None = None,
+        customer_name: str | None = None,
+        mobile: str | None = None,
+        gstin: str | None = None,
+        payment_status: str | None = None,
+        date_from=None,
+        date_to=None,
+        store_id: int | None = None,
+        user: Optional[User] = None,
+        system_context: bool = False,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> list[Invoice]:
+        return self.list_invoices(
+            tenant_id=tenant_id,
+            invoice_number=invoice_number,
+            customer_name=customer_name,
+            mobile=mobile,
+            gstin=gstin,
+            payment_status=payment_status,
+            date_from=date_from,
+            date_to=date_to,
+            store_id=store_id,
+            user=user,
+            system_context=system_context,
+            page=page,
+            page_size=page_size,
+        )
 
     def search_invoices_with_counts(
         self,
@@ -832,10 +1202,7 @@ class BillingService:
         page: int = 1,
         page_size: int = 50,
     ) -> dict:
-        from app.utils.pagination import compute_total_pages
-        # Re-run with full limit on filtered count by using the base query cleanly:
-        # We fetch page via search_invoices and compute count using same auth/filters
-        items = self.search_invoices(
+        return self.list_invoices_with_counts(
             tenant_id=tenant_id,
             invoice_number=invoice_number,
             customer_name=customer_name,
@@ -850,35 +1217,6 @@ class BillingService:
             page=page,
             page_size=page_size,
         )
-        # Compute exact total for filtered invoices
-        all_filtered = self.search_invoices(
-            tenant_id=tenant_id,
-            invoice_number=invoice_number,
-            customer_name=customer_name,
-            mobile=mobile,
-            gstin=gstin,
-            payment_status=payment_status,
-            date_from=date_from,
-            date_to=date_to,
-            store_id=store_id,
-            user=user,
-            system_context=system_context,
-            page=1,
-            page_size=100000,
-        )
-        total = len(all_filtered)
-        eff_store_id = user.store_id if (user and user.store_id is not None) else store_id
-        counts = self._get_invoice_counts(tenant_id, store_id=eff_store_id)
-        return {
-            "success": True,
-            "message": "Invoices retrieved successfully" if items else "No invoices found",
-            "items": items,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": compute_total_pages(total, page_size),
-            "counts": counts,
-        }
 
     def reprint_invoice(
         self,
@@ -4250,6 +4588,11 @@ class BillingService:
 
         invoice = (
             self.db.query(Invoice)
+            .options(
+                selectinload(Invoice.items).joinedload(InvoiceItem.product),
+                selectinload(Invoice.items).joinedload(InvoiceItem.variant_rel),
+                selectinload(Invoice.payments),
+            )
             .filter(
                 Invoice.tenant_id == tenant_id,
                 Invoice.invoice_number == inv_num,

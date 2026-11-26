@@ -177,7 +177,11 @@ class Product(Base, TimestampMixin):
     @property
     def image_url(self) -> str | None:
         if self.images:
-            return self.images[0].image_url
+            primary = next(
+                (img.image_url for img in self.images if getattr(img, "is_primary", False)),
+                None,
+            )
+            return primary or self.images[0].image_url
         return getattr(self, "_image_url", None)
 
     @image_url.setter

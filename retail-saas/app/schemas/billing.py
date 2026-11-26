@@ -466,11 +466,16 @@ class TenderChangeResponse(BaseModel):
 
 class InvoiceItemCreate(BaseModel):
     product_id: int = Field(gt=0, description="Product ID must be positive")
+    variant_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Optional Product Variant ID",
+    )
     quantity: int = Field(gt=0, description="Quantity must be positive")
     unit_price: Optional[Decimal] = Field(
         default=None,
         gt=0,
-        description="Unit price; fetched from product if omitted",
+        description="Unit price; fetched from product/variant if omitted",
     )
     discount: Decimal = Field(
         default=Decimal("0.0"),
@@ -483,6 +488,18 @@ class InvoiceCreate(BaseModel):
     store_id: int = Field(gt=0, description="Store ID must be positive")
     customer_id: Optional[int] = Field(default=None, gt=0)
     same_state: bool = True
+    discount_amount: Decimal = Field(
+        default=Decimal("0.00"),
+        ge=0,
+        le=Decimal("100"),
+        description="Optional overall discount percentage (0 to 100) for direct invoice creation",
+    )
+    coupon_code: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=50,
+        description="Optional coupon code for direct invoice creation",
+    )
     items: Optional[list[InvoiceItemCreate]] = Field(
         default=None,
         max_length=500,
@@ -505,6 +522,55 @@ class InvoiceCreate(BaseModel):
         max_length=100,
         description="Optional idempotency key to prevent duplicate checkouts",
     )
+
+
+class InvoicePreviewRequest(BaseModel):
+    store_id: int = Field(gt=0, description="Store ID must be positive")
+    customer_id: Optional[int] = Field(default=None, gt=0)
+    same_state: bool = True
+    discount_amount: Decimal = Field(default=Decimal("0.00"), ge=0, le=Decimal("100"))
+    coupon_code: Optional[str] = Field(default=None, min_length=3, max_length=50)
+    items: list[InvoiceItemCreate] = Field(min_length=1, max_length=500)
+
+
+class InvoicePreviewItemResponse(BaseModel):
+    product_id: int
+    variant_id: Optional[int] = None
+    variant_name: Optional[str] = None
+    product_name: str
+    sku: str = ""
+    barcode: Optional[str] = None
+    hsn_code: Optional[str] = None
+    unit: str = "pcs"
+    mrp: Decimal = Decimal("0.00")
+    quantity: int
+    unit_price: Decimal
+    discount_amount: Decimal = Decimal("0.00")
+    taxable_amount: Decimal
+    gst_rate: Decimal
+    gst_amount: Decimal
+    cgst_amount: Decimal
+    sgst_amount: Decimal
+    igst_amount: Decimal
+    total_amount: Decimal
+    available_stock: Decimal = Decimal("0.0000")
+    is_stock_sufficient: bool = True
+
+
+class InvoicePreviewResponse(BaseModel):
+    store_id: int
+    customer_id: Optional[int] = None
+    same_state: bool
+    coupon_code: Optional[str] = None
+    subtotal: Decimal
+    discount_amount: Decimal
+    gst_amount: Decimal
+    cgst_amount: Decimal
+    sgst_amount: Decimal
+    igst_amount: Decimal
+    grand_total: Decimal
+    all_items_in_stock: bool
+    items: list[InvoicePreviewItemResponse]
 
 
 class ReturnItemRequest(BaseModel):

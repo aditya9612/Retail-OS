@@ -681,14 +681,58 @@ class OrderResponse(BaseModel):
 class InvoiceItemResponse(BaseModel):
     id: int
     product_id: int
+    variant_id: Optional[int] = None
+    variant_name: Optional[str] = None
+    product_name: str = ""
+    sku: str = ""
+    barcode: Optional[str] = None
+    hsn_code: Optional[str] = None
+    unit: str = "pcs"
     quantity: Decimal
     unit_price: Decimal
     discount_amount: Decimal
     gst_rate: Decimal
     gst_amount: Decimal
+    cgst_amount: Decimal = Decimal("0.00")
+    sgst_amount: Decimal = Decimal("0.00")
+    igst_amount: Decimal = Decimal("0.00")
     total_amount: Decimal
+    returned_quantity: Decimal = Decimal("0.0000")
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def enrich_from_product(cls, value):
+        if isinstance(value, dict):
+            return value
+        product = getattr(value, "product", None)
+        variant_rel = getattr(value, "variant_rel", None)
+        if product is None and variant_rel is None:
+            return value
+
+        data = {
+            "id": value.id,
+            "product_id": value.product_id,
+            "variant_id": getattr(value, "variant_id", None),
+            "variant_name": getattr(value, "variant_name", None) or (getattr(variant_rel, "variant_name", None) if variant_rel else None),
+            "product_name": getattr(value, "product_name", None) or (getattr(product, "name", "") if product else ""),
+            "sku": getattr(value, "sku", None) or (getattr(variant_rel, "sku", None) if variant_rel else None) or (getattr(product, "sku", "") if product else ""),
+            "barcode": getattr(value, "barcode", None) or (getattr(variant_rel, "barcode", None) if variant_rel else None) or (getattr(product, "barcode", None) if product else None),
+            "hsn_code": getattr(value, "hsn_code", None) or (getattr(product, "hsn_code", None) if product else None),
+            "unit": getattr(value, "unit", None) or (getattr(product, "unit", None) if product else None) or "pcs",
+            "quantity": value.quantity,
+            "unit_price": value.unit_price,
+            "discount_amount": value.discount_amount or Decimal("0.00"),
+            "gst_rate": value.gst_rate,
+            "gst_amount": value.gst_amount,
+            "cgst_amount": getattr(value, "cgst_amount", None) or Decimal("0.00"),
+            "sgst_amount": getattr(value, "sgst_amount", None) or Decimal("0.00"),
+            "igst_amount": getattr(value, "igst_amount", None) or Decimal("0.00"),
+            "total_amount": value.total_amount,
+            "returned_quantity": getattr(value, "returned_quantity", None) or Decimal("0.0000"),
+        }
+        return data
 
 
 class PaymentResponse(BaseModel):

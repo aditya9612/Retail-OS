@@ -17,6 +17,8 @@ from app.schemas.billing import (
     InvoiceCounts,
     InvoiceCreate,
     InvoicePdfStatusResponse,
+    InvoicePreviewRequest,
+    InvoicePreviewResponse,
     InvoiceReprintRequest,
     InvoiceThermalMode,
     InvoiceThermalResponse,
@@ -62,8 +64,45 @@ def create_invoice(
     )
 
 
-@router.get("", response_model=ListWithCountsResponse[InvoiceResponse, InvoiceCounts])
-def search_invoices(
+@router.post("/preview", response_model=InvoicePreviewResponse)
+def preview_invoice(
+    payload: InvoicePreviewRequest,
+    user: User = Depends(require_permission("billing:create")),
+    db: Session = Depends(get_db),
+):
+    return BillingService(db).preview_invoice(
+        user.tenant_id,
+        user.id,
+        payload,
+        user=user,
+    )
+
+
+@router.get(
+    "",
+    response_model=ListWithCountsResponse[InvoiceResponse, InvoiceCounts],
+    summary="List Invoices",
+    description=(
+        "Lists tax invoices with pagination, optional search and filters "
+        "(status, payment_status, store_id, customer_id, invoice_number, customer_name, mobile, gstin, date range), "
+        "store-level isolation, and summary counts."
+    ),
+)
+def list_invoices(
+    search: Optional[str] = Query(
+        default=None,
+        min_length=1,
+        max_length=100,
+        description="Search by invoice number, customer name, mobile, or GSTIN",
+    ),
+    status: Optional[
+        Literal["issued", "paid", "unpaid", "partial", "cancelled", "void"]
+    ] = Query(default=None, description="Filter by invoice status"),
+    payment_status: Optional[
+        Literal["paid", "unpaid", "partial", "cancelled", "completed", "pending", "failed"]
+    ] = Query(default=None, description="Filter by payment status"),
+    store_id: Optional[int] = Query(default=None, gt=0, description="Filter by store ID"),
+    customer_id: Optional[int] = Query(default=None, gt=0, description="Filter by customer ID"),
     invoice_number: Optional[str] = Query(
         default=None,
         min_length=1,
@@ -86,17 +125,14 @@ def search_invoices(
         max_length=15,
         pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$",
     ),
-    payment_status: Optional[
-        Literal["paid", "unpaid", "partial", "cancelled", "completed", "pending", "failed"]
-    ] = Query(default=None),
     date_from: Optional[datetime] = Query(default=None),
     date_to: Optional[datetime] = Query(default=None),
-    store_id: Optional[int] = Query(default=None),
     page: int = Query(default=1, ge=1, description="Page number"),
-    page_size: int = Query(default=50, ge=1, le=500, description="Items per page"),
+    page_size: int = Query(default=20, ge=1, le=500, description="Items per page"),
     user: User = Depends(require_permission("billing:read")),
     db: Session = Depends(get_db),
 ):
+    search = search.strip() if search else None
     invoice_number = invoice_number.strip() if invoice_number else None
     customer_name = customer_name.strip() if customer_name else None
     mobile = mobile.strip() if mobile else None
@@ -145,23 +181,6 @@ def search_invoices(
             detail="date_from must be earlier than or equal to date_to",
         )
 
-    if not any(
-        [
-            invoice_number,
-            customer_name,
-            mobile,
-            gstin,
-            payment_status,
-            date_from,
-            date_to,
-            store_id,
-        ]
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail="At least one search parameter is required",
-        )
-
     effective_store_id = store_id
     if user.store_id is not None:
         if store_id is not None and store_id != user.store_id:
@@ -179,16 +198,19 @@ def search_invoices(
         if not store:
             raise NotFoundException(f"Store {store_id} not found")
 
-    return BillingService(db).search_invoices_with_counts(
-        user.tenant_id,
-        invoice_number,
-        customer_name,
-        mobile,
-        gstin,
-        payment_status,
-        date_from,
-        date_to,
-        effective_store_id,
+    return BillingService(db).list_invoices_with_counts(
+        tenant_id=user.tenant_id,
+        invoice_number=invoice_number,
+        customer_name=customer_name,
+        mobile=mobile,
+        gstin=gstin,
+        payment_status=payment_status,
+        date_from=date_from,
+        date_to=date_to,
+        store_id=effective_store_id,
+        search=search,
+        status=status,
+        customer_id=customer_id,
         user=user,
         page=page,
         page_size=page_size,

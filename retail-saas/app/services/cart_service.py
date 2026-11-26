@@ -1,5 +1,6 @@
 import json
 import time
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy.orm import Session
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import AppException, NotFoundException
 from app.core.redis_client import get_redis
 from app.models.product import Product
+from app.models.product_variant import ProductVariant
 from app.services.audit_service import AuditService
 from app.services.coupon_service import CouponService
 from app.utils.gst_engine import aggregate_taxes, calculate_line_tax, resolve_gst_rate
@@ -137,7 +139,38 @@ class CartService:
                 f"Product {product_id} is inactive"
             )
 
+        if getattr(product, "expiry_date", None) and product.expiry_date < date.today():
+            raise AppException(
+                f"Product {product_id} has expired"
+            )
+
         return product
+
+    def _get_variant(
+        self,
+        tenant_id: int,
+        product_id: int,
+        variant_id: int | None,
+    ) -> ProductVariant | None:
+        if variant_id is None:
+            return None
+        variant = (
+            self.db.query(ProductVariant)
+            .filter(
+                ProductVariant.id == variant_id,
+                ProductVariant.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if not variant:
+            raise NotFoundException(f"ProductVariant {variant_id} not found")
+        if variant.product_id != product_id:
+            raise AppException(
+                f"ProductVariant {variant_id} does not belong to product {product_id}"
+            )
+        if hasattr(variant, "is_active") and not variant.is_active:
+            raise AppException(f"ProductVariant {variant_id} is inactive")
+        return variant
 
     def _validate_item_values(
         self,
@@ -177,17 +210,20 @@ class CartService:
             tenant_id,
             int(item["product_id"]),
         )
+        variant_id = item.get("variant_id")
+        variant = self._get_variant(tenant_id, product.id, int(variant_id)) if variant_id is not None else None
 
         quantity = Decimal(str(item["quantity"]))
 
         raw_price = item.get("unit_price")
 
         if raw_price is None or raw_price == "":
-            if product.selling_price is None:
+            base_price = variant.selling_price if (variant is not None and variant.selling_price is not None) else product.selling_price
+            if base_price is None:
                 raise AppException(
                     f"Product {product.id} does not have a valid price"
                 )
-            unit_price = Decimal(str(product.selling_price))
+            unit_price = Decimal(str(base_price))
         else:
             unit_price = Decimal(str(raw_price))
 
@@ -220,9 +256,12 @@ class CartService:
 
         return {
             "product_id": product.id,
+            "variant_id": variant.id if variant else None,
+            "variant_name": variant.variant_name if variant else None,
             "product_name": product.name,
-            "sku": product.sku or "",
+            "sku": (variant.sku if variant else product.sku) or "",
             "hsn_code": product.hsn_code,
+            "unit": getattr(product, "unit", None) or "pcs",
             "quantity": str(quantity),
             "unit_price": str(_money(unit_price)),
             "discount": str(_money(discount)),
@@ -362,6 +401,7 @@ class CartService:
         unit_price: Decimal | None = None,
         discount: Decimal = ZERO,
         same_state: bool = True,
+        variant_id: int | None = None,
     ) -> dict:
         if store_id <= 0:
             raise AppException(
@@ -380,11 +420,17 @@ class CartService:
             tenant_id,
             product_id,
         )
+        variant = self._get_variant(tenant_id, product_id, variant_id)
+        default_price = (
+            variant.selling_price
+            if (variant is not None and variant.selling_price is not None)
+            else product.selling_price
+        )
 
         effective_price = (
             Decimal(str(unit_price))
             if unit_price is not None
-            else Decimal(str(product.selling_price))
+            else Decimal(str(default_price))
         )
 
         self._validate_item_values(
@@ -398,6 +444,7 @@ class CartService:
                 tenant_id,
                 user_id,
                 product_id,
+                variant_id=variant_id,
             )
 
         cart = self._load_cart(
@@ -414,6 +461,7 @@ class CartService:
                 item
                 for item in cart["items"]
                 if int(item["product_id"]) == int(product_id)
+                and item.get("variant_id") == variant_id
             ),
             None,
         )
@@ -459,6 +507,7 @@ class CartService:
             cart["items"].append(
                 {
                     "product_id": product_id,
+                    "variant_id": variant_id,
                     "quantity": str(quantity),
                     "unit_price": (
                         str(effective_price)
@@ -497,6 +546,7 @@ class CartService:
         quantity: Decimal | None = None,
         unit_price: Decimal | None = None,
         discount: Decimal | None = None,
+        variant_id: int | None = None,
     ) -> dict:
         if product_id <= 0:
             raise AppException(
@@ -515,6 +565,7 @@ class CartService:
                 i
                 for i in cart["items"]
                 if int(i["product_id"]) == int(product_id)
+                and (variant_id is None or i.get("variant_id") == variant_id)
             ),
             None,
         )
@@ -528,6 +579,13 @@ class CartService:
             tenant_id,
             product_id,
         )
+        eff_var_id = variant_id if variant_id is not None else item.get("variant_id")
+        variant = self._get_variant(tenant_id, product_id, int(eff_var_id)) if eff_var_id is not None else None
+        fallback_price = (
+            variant.selling_price
+            if (variant is not None and variant.selling_price is not None)
+            else product.selling_price
+        )
 
         current_quantity = Decimal(
             str(item["quantity"])
@@ -536,7 +594,7 @@ class CartService:
         current_price = (
             Decimal(str(item["unit_price"]))
             if item.get("unit_price") is not None
-            else Decimal(str(product.selling_price))
+            else Decimal(str(fallback_price))
         )
 
         current_discount = Decimal(
@@ -597,6 +655,7 @@ class CartService:
         tenant_id: int,
         user_id: int,
         product_id: int,
+        variant_id: int | None = None,
     ) -> dict:
         if product_id <= 0:
             raise AppException(
@@ -615,7 +674,10 @@ class CartService:
         cart["items"] = [
             item
             for item in cart["items"]
-            if int(item["product_id"]) != int(product_id)
+            if not (
+                int(item["product_id"]) == int(product_id)
+                and (variant_id is None or item.get("variant_id") == variant_id)
+            )
         ]
 
         if len(cart["items"]) == original_count:
@@ -908,12 +970,41 @@ class CartService:
             )
             .first()
         )
+        matched_variant_id: int | None = None
+
+        if not product:
+            variant = (
+                self.db.query(ProductVariant)
+                .filter(
+                    ProductVariant.tenant_id == tenant_id,
+                    or_(
+                        ProductVariant.barcode == clean_code,
+                        func.lower(ProductVariant.sku) == clean_code.lower(),
+                    ),
+                )
+                .first()
+            )
+            if variant:
+                if hasattr(variant, "is_active") and not variant.is_active:
+                    raise AppException(f"Product variant '{variant.variant_name}' is inactive")
+                product = (
+                    self.db.query(Product)
+                    .filter(
+                        Product.id == variant.product_id,
+                        Product.tenant_id == tenant_id,
+                    )
+                    .first()
+                )
+                matched_variant_id = variant.id
 
         if not product:
             raise NotFoundException(f"Product with barcode/SKU '{clean_code}' not found")
 
         if hasattr(product, "is_active") and not product.is_active:
             raise AppException(f"Product '{product.name}' is inactive")
+
+        if getattr(product, "expiry_date", None) and product.expiry_date < date.today():
+            raise AppException(f"Product '{product.name}' has expired")
 
         return self.add_item(
             tenant_id=tenant_id,
@@ -924,6 +1015,7 @@ class CartService:
             unit_price=unit_price,
             discount=discount,
             same_state=same_state,
+            variant_id=matched_variant_id,
         )
 
     def validate_stock(

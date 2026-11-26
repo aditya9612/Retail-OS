@@ -254,13 +254,15 @@ class OrderService:
         product: Product,
         item: OrderItemCreate,
         same_state: bool = True,
+        variant: Optional[ProductVariant] = None,
     ) -> OrderItem:
 
-        unit_price = (
-            item.unit_price
-            if item.unit_price is not None
-            else product.selling_price
-        )
+        if item.unit_price is not None:
+            unit_price = item.unit_price
+        elif variant is not None and variant.selling_price is not None:
+            unit_price = variant.selling_price
+        else:
+            unit_price = product.selling_price
 
         gross_amount = (
             unit_price * item.quantity
@@ -495,7 +497,14 @@ class OrderService:
                     f"Product {item_data.product_id} not found"
                 )
 
+            if hasattr(product, "is_active") and not product.is_active:
+                raise AppException(f"Product {product.id} is inactive")
+
+            if getattr(product, "expiry_date", None) and product.expiry_date < date.today():
+                raise AppException(f"Product {product.id} has expired")
+
             variant_id = getattr(item_data, "variant_id", None)
+            variant = None
             if variant_id is not None:
                 variant = (
                     self.db.query(ProductVariant)
@@ -513,12 +522,15 @@ class OrderService:
                     raise AppException(
                         f"ProductVariant {variant_id} does not belong to product {product.id}"
                     )
+                if hasattr(variant, "is_active") and not variant.is_active:
+                    raise AppException(f"ProductVariant {variant_id} is inactive")
 
             order.items.append(
                 self._calculate_item_totals(
                     product,
                     item_data,
                     same_state=same_state,
+                    variant=variant,
                 )
             )
 
@@ -1380,7 +1392,14 @@ class OrderService:
                     if not product:
                         raise NotFoundException(f"Product {item_data.product_id} not found")
 
+                    if hasattr(product, "is_active") and not product.is_active:
+                        raise AppException(f"Product {product.id} is inactive")
+
+                    if getattr(product, "expiry_date", None) and product.expiry_date < date.today():
+                        raise AppException(f"Product {product.id} has expired")
+
                     variant_id = getattr(item_data, "variant_id", None)
+                    variant = None
                     if variant_id is not None:
                         variant = (
                             self.db.query(ProductVariant)
@@ -1392,9 +1411,11 @@ class OrderService:
                         )
                         if not variant or variant.product_id != product.id:
                             raise AppException(f"ProductVariant {variant_id} does not belong to product {product.id}")
+                        if hasattr(variant, "is_active") and not variant.is_active:
+                            raise AppException(f"ProductVariant {variant_id} is inactive")
 
                     order.items.append(
-                        self._calculate_item_totals(product, item_data, same_state=same_state)
+                        self._calculate_item_totals(product, item_data, same_state=same_state, variant=variant)
                     )
 
                 subtotal = sum(
@@ -1488,10 +1509,28 @@ class OrderService:
                     raise AppException(f"Tendered amount ({tendered_amount}) is less than total amount ({order.total_amount})")
                 change_due = (tendered_amount - order.total_amount).quantize(Decimal("0.01"))
 
+                effective_shift_id = None
+                try:
+                    from app.models.pos_shift import POSShift
+                    active_shift = (
+                        self.db.query(POSShift)
+                        .filter(
+                            POSShift.tenant_id == tenant_id,
+                            POSShift.cashier_id == user_id,
+                            POSShift.status == "open",
+                        )
+                        .first()
+                    )
+                    if active_shift:
+                        effective_shift_id = active_shift.id
+                except Exception:
+                    effective_shift_id = None
+
                 from app.models.payment import Payment
                 payment = Payment(
                     tenant_id=tenant_id,
                     order_id=order.id,
+                    shift_id=effective_shift_id,
                     customer_id=order.customer_id,
                     payment_method=data.payment.payment_method,
                     status="completed",
@@ -1527,14 +1566,41 @@ class OrderService:
                     self.db.flush()
 
                     for item in order.items:
+                        item_prod = (
+                            self.db.query(Product)
+                            .filter(Product.id == item.product_id, Product.tenant_id == tenant_id)
+                            .first()
+                        )
+                        item_var = None
+                        if getattr(item, "variant_id", None) is not None:
+                            item_var = (
+                                self.db.query(ProductVariant)
+                                .filter(ProductVariant.id == item.variant_id, ProductVariant.tenant_id == tenant_id)
+                                .first()
+                            )
+                        resolved_gst_rate = getattr(item, "_tax_rate", None)
+                        if resolved_gst_rate is None and item_prod:
+                            from app.utils.gst_engine import resolve_gst_rate
+                            resolved_gst_rate = resolve_gst_rate(self.db, tenant_id, item_prod)
+                        if resolved_gst_rate is None:
+                            resolved_gst_rate = Decimal("0.00")
+
                         inv_item = InvoiceItem(
                             invoice_id=invoice.id,
                             product_id=item.product_id,
+                            variant_id=getattr(item, "variant_id", None),
+                            product_name=item_prod.name if item_prod else (getattr(item, "product_name", "") or "Item"),
+                            sku=(item_var.sku if item_var else (item_prod.sku if item_prod else "")) or "",
+                            hsn_code=item_prod.hsn_code if item_prod else None,
+                            unit=(item_prod.unit if item_prod else None) or "pcs",
                             quantity=Decimal(str(item.quantity)),
                             unit_price=item.unit_price,
                             discount_amount=item.discount_amount,
-                            gst_rate=Decimal("18.00"),
+                            gst_rate=resolved_gst_rate,
                             gst_amount=item.tax_amount,
+                            cgst_amount=getattr(item, "cgst_amount", Decimal("0.00")) or Decimal("0.00"),
+                            sgst_amount=getattr(item, "sgst_amount", Decimal("0.00")) or Decimal("0.00"),
+                            igst_amount=getattr(item, "igst_amount", Decimal("0.00")) or Decimal("0.00"),
                             total_amount=item.total_amount,
                         )
                         self.db.add(inv_item)

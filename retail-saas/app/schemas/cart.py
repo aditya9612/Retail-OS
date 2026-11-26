@@ -14,6 +14,7 @@ VALID_DISCOUNT_TYPES = {
 
 class CartItemCreate(BaseModel):
     product_id: int = Field(gt=0)
+    variant_id: Optional[int] = Field(default=None, gt=0)
     quantity: Decimal = Field(gt=0, max_digits=12, decimal_places=3)
     unit_price: Optional[Decimal] = Field(
         default=None,
@@ -71,6 +72,7 @@ class CartScanRequest(BaseModel):
 
 class CartItemUpdate(BaseModel):
     product_id: int = Field(gt=0)
+    variant_id: Optional[int] = Field(default=None, gt=0)
     quantity: Optional[Decimal] = Field(
         default=None,
         ge=0,
@@ -118,9 +120,12 @@ class CartItemRemove(BaseModel):
 
 class CartItemResponse(BaseModel):
     product_id: int
+    variant_id: Optional[int] = None
+    variant_name: Optional[str] = None
     product_name: str
     sku: str = ""
     hsn_code: Optional[str] = None
+    unit: str = "pcs"
     quantity: Decimal
     unit_price: Decimal
     discount: Decimal

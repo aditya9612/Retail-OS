@@ -245,14 +245,21 @@ def list_expiring_soon(
 )
 def lookup_barcode(
     barcode: str,
+    store_id: Optional[int] = Query(
+        default=None,
+        gt=0,
+        description="Optional store ID to include live available stock",
+    ),
     user: User = Depends(
         require_permission("products:read")
     ),
     db: Session = Depends(get_db),
 ):
+    effective_store_id = store_id if user.store_id is None else user.store_id
     return ProductService(db).get_by_barcode(
         user.tenant_id,
         barcode,
+        store_id=effective_store_id,
     )
 
 
@@ -307,6 +314,15 @@ async def _save_product_image(
 
 
 def _ensure_product_image_record(db: Session, product_id: int, image_url: str, is_primary: bool = True) -> None:
+    if is_primary:
+        (
+            db.query(ProductImage)
+            .filter(
+                ProductImage.product_id == product_id,
+                ProductImage.image_url != image_url,
+            )
+            .update({"is_primary": False}, synchronize_session=False)
+        )
     existing = (
         db.query(ProductImage)
         .filter(
@@ -315,7 +331,11 @@ def _ensure_product_image_record(db: Session, product_id: int, image_url: str, i
         )
         .first()
     )
-    if not existing:
+    if existing:
+        if is_primary and not existing.is_primary:
+            existing.is_primary = True
+        db.commit()
+    else:
         img = ProductImage(
             product_id=product_id,
             image_url=image_url,
@@ -338,22 +358,47 @@ PRODUCT_CREATE_OPENAPI_EXTRA = {
                         "name": {
                             "type": "string",
                             "title": "Product Name",
-                            "description": "Full product name (2 to 255 chars, e.g. Fortune Sunflower Oil 1L)",
+                            "description": "Full product name (2 to 255 chars)",
                         },
                         "sku": {
                             "type": "string",
                             "title": "Product SKU",
-                            "description": "Unique SKU code in uppercase alphanumeric (e.g. OIL-SUN-001)",
+                            "description": "Unique SKU code in uppercase alphanumeric",
                         },
                         "selling_price": {
                             "type": "number",
                             "title": "Selling Price (Rs.)",
                             "description": "Final retail selling price per unit (must be greater than 0)",
                         },
+                        "cost_price": {
+                            "type": "number",
+                            "title": "Cost Price (Rs.)",
+                            "description": "Purchase cost price per unit (used for margin and price override floor)",
+                        },
                         "mrp": {
                             "type": "number",
                             "title": "Maximum Retail Price (MRP Rs.)",
                             "description": "Printed MRP on pack (must be >= Selling Price, or 0 if unpriced)",
+                        },
+                        "store_id": {
+                            "type": "integer",
+                            "title": "Store ID (Optional)",
+                            "description": "Store ID (required if opening_stock > 0)",
+                        },
+                        "opening_stock": {
+                            "type": "integer",
+                            "title": "Opening Stock (Optional)",
+                            "description": "Initial stock quantity to credit into the specified store",
+                        },
+                        "variants": {
+                            "type": "string",
+                            "title": "Product Variants JSON (Optional)",
+                            "description": "Optional JSON array of variants (e.g. [{\"variant_name\":\"500ml Bottle\",\"sku\":\"SKU-500\",\"selling_price\":80,\"cost_price\":62}])",
+                        },
+                        "image_url": {
+                            "type": "string",
+                            "title": "Image URL (Optional)",
+                            "description": "Optional direct image URL if not uploading a binary file",
                         },
                         "category_id": {
                             "type": "integer",
@@ -363,37 +408,39 @@ PRODUCT_CREATE_OPENAPI_EXTRA = {
                         "brand": {
                             "type": "string",
                             "title": "Brand Name",
-                            "description": "Brand / manufacturer name (e.g. Fortune, Nestle, Amul)",
+                            "description": "Brand / manufacturer name",
                         },
                         "barcode": {
                             "type": "string",
                             "title": "Barcode / EAN",
-                            "description": "Product barcode digits (8 to 50 numeric digits, e.g. 8901234567890)",
+                            "description": "Product barcode digits (8 to 50 numeric digits)",
                         },
                         "unit": {
                             "type": "string",
                             "title": "Unit of Measurement",
-                            "description": "Packaging unit (e.g. pcs, kg, g, ltr, ml, box, pack)",
+                            "description": "Packaging unit (defaults to pcs; e.g. pcs, kg, g, ltr, ml, box, pack)",
                         },
                         "hsn_code": {
                             "type": "string",
                             "title": "HSN Code",
-                            "description": "GST HSN code (must be exactly 4, 6, or 8 digits, e.g. 1512)",
+                            "description": "GST HSN code (must be exactly 4, 6, or 8 digits)",
                         },
                         "gst_rate": {
                             "type": "number",
                             "title": "GST Rate (%)",
-                            "description": "Standard Indian GST slab: 0, 5, 12, 18, or 28",
+                            "enum": [0, 5, 12, 18, 28],
+                            "description": "Standard Indian GST slab: 0, 5, 12, 18, or 28 (defaults to 0)",
                         },
                         "min_stock_alert": {
                             "type": "integer",
                             "title": "Low Stock Alert Threshold",
-                            "description": "Alert threshold quantity when inventory gets low (e.g. 5 or 10)",
+                            "description": "Alert threshold quantity when inventory gets low (defaults to 5)",
                         },
                         "stock_status": {
                             "type": "string",
                             "title": "Stock Status",
-                            "description": "Current stock status: in_stock or out_of_stock",
+                            "enum": ["in_stock", "out_of_stock", "low_stock"],
+                            "description": "Current stock status: in_stock, out_of_stock, or low_stock (defaults to in_stock)",
                         },
                         "description": {
                             "type": "string",
@@ -403,28 +450,28 @@ PRODUCT_CREATE_OPENAPI_EXTRA = {
                         "is_active": {
                             "type": "boolean",
                             "title": "Is Active",
-                            "description": "Set to true to make product available for sale, or false to disable",
+                            "description": "Set to true to make product available for sale, or false to disable (defaults to true)",
                         },
                         "track_batch": {
                             "type": "boolean",
                             "title": "Track Batch / Lot",
-                            "description": "Set to true if tracking batch numbers (requires Batch Number)",
+                            "description": "Set to true if tracking batch numbers (requires batch_number)",
                         },
                         "track_expiry": {
                             "type": "boolean",
                             "title": "Track Expiry Date",
-                            "description": "Set to true if product has expiry (requires Expiry Date)",
+                            "description": "Set to true if product has expiry (requires expiry_date)",
                         },
                         "batch_number": {
                             "type": "string",
                             "title": "Batch Number",
-                            "description": "Batch / Lot identifier (required if Track Batch is true, e.g. BATCH-2026-A)",
+                            "description": "Batch / Lot identifier (required when track_batch is true)",
                         },
                         "expiry_date": {
                             "type": "string",
                             "format": "date",
                             "title": "Expiry Date (YYYY-MM-DD)",
-                            "description": "Expiration date YYYY-MM-DD (must be today or a future date)",
+                            "description": "Expiration date YYYY-MM-DD (required when track_expiry is true; today or future date)",
                         },
                         "image": {
                             "type": "string",
@@ -456,10 +503,36 @@ PRODUCT_CREATE_OPENAPI_EXTRA = {
                             "title": "Selling Price (Rs.)",
                             "description": "Final retail selling price per unit (must be greater than 0)",
                         },
+                        "cost_price": {
+                            "type": "number",
+                            "title": "Cost Price (Rs.)",
+                            "description": "Purchase cost price per unit (used for margin and price override floor)",
+                        },
                         "mrp": {
                             "type": "number",
                             "title": "Maximum Retail Price (MRP Rs.)",
                             "description": "Printed MRP on pack (must be >= Selling Price, or 0 if unpriced)",
+                        },
+                        "store_id": {
+                            "type": "integer",
+                            "title": "Store ID (Optional)",
+                            "description": "Store ID for seeding opening stock when opening_stock > 0",
+                        },
+                        "opening_stock": {
+                            "type": "integer",
+                            "title": "Opening Stock (Optional)",
+                            "description": "Initial stock quantity to credit into the specified store",
+                        },
+                        "variants": {
+                            "type": "array",
+                            "title": "Product Variants (Optional)",
+                            "description": "Array of variant objects (e.g. [{\"variant_name\":\"Red M\",\"sku\":\"TSHIRT-RED-M\",\"selling_price\":500}])",
+                            "items": {"type": "object"},
+                        },
+                        "image_url": {
+                            "type": "string",
+                            "title": "Image URL (Optional)",
+                            "description": "Optional direct image URL if not uploading a binary file",
                         },
                         "category_id": {
                             "type": "integer",
@@ -489,17 +562,19 @@ PRODUCT_CREATE_OPENAPI_EXTRA = {
                         "gst_rate": {
                             "type": "number",
                             "title": "GST Rate (%)",
-                            "description": "Standard Indian GST slab: 0, 5, 12, 18, or 28",
+                            "enum": [0, 5, 12, 18, 28],
+                            "description": "Standard Indian GST slab: 0, 5, 12, 18, or 28 (defaults to 0)",
                         },
                         "min_stock_alert": {
                             "type": "integer",
                             "title": "Low Stock Alert Threshold",
-                            "description": "Alert threshold quantity when inventory gets low (e.g. 5 or 10)",
+                            "description": "Alert threshold quantity when inventory gets low (defaults to 5)",
                         },
                         "stock_status": {
                             "type": "string",
                             "title": "Stock Status",
-                            "description": "Current stock status: in_stock or out_of_stock",
+                            "enum": ["in_stock", "out_of_stock", "low_stock"],
+                            "description": "Current stock status: in_stock, out_of_stock, or low_stock (defaults to in_stock)",
                         },
                         "description": {
                             "type": "string",
@@ -576,6 +651,21 @@ def _clean_bool(val: Any, default: bool = False) -> bool:
     return s in ("true", "1", "yes", "t")
 
 
+def _clean_bool_or_raw(val: Any, default: bool = False) -> Any:
+    if val is None:
+        return default
+    if isinstance(val, bool):
+        return val
+    s = str(val).strip().lower()
+    if not s:
+        return default
+    if s in ("true", "1", "yes", "t"):
+        return True
+    if s in ("false", "0", "no", "f"):
+        return False
+    return val
+
+
 def _clean_optional_bool(val: Any) -> Optional[bool]:
     if val is None:
         return None
@@ -609,6 +699,48 @@ def _raise_validation_error(val_err: ValidationError) -> None:
     raise RequestValidationError(errors)
 
 
+def _parse_variants_form_field(form: Any) -> Any:
+    raw_items = [str(v).strip() for v in form.getlist("variants") if str(v).strip()]
+    if not raw_items:
+        return None
+    if len(raw_items) == 1 and raw_items[0].lower() in {"null", "none", "undefined"}:
+        return None
+
+    parsed_list: list[Any] = []
+    for raw in raw_items:
+        if raw.lower() in {"null", "none", "undefined"}:
+            continue
+        try:
+            decoded = json.loads(raw)
+        except Exception as exc:
+            raise RequestValidationError(
+                [
+                    {
+                        "type": "value_error",
+                        "loc": ("variants",),
+                        "msg": "variants must be a valid JSON array of variant objects (e.g. [{\"variant_name\":\"Red M\",\"sku\":\"TSHIRT-RED-M\",\"selling_price\":500}])",
+                        "input": raw,
+                    }
+                ]
+            ) from exc
+        if isinstance(decoded, list):
+            parsed_list.extend(decoded)
+        elif isinstance(decoded, dict):
+            parsed_list.append(decoded)
+        else:
+            raise RequestValidationError(
+                [
+                    {
+                        "type": "value_error",
+                        "loc": ("variants",),
+                        "msg": "variants must decode to a JSON object or array of objects",
+                        "input": raw,
+                    }
+                ]
+            )
+    return parsed_list or None
+
+
 @router.post(
     "",
     response_model=ProductResponse,
@@ -637,7 +769,11 @@ async def create_product(
         except ValidationError as e:
             _raise_validation_error(e)
 
-        product = ProductService(db).create_product(user.tenant_id, create_data)
+        product = ProductService(db).create_product(
+            user.tenant_id,
+            create_data,
+            user_store_id=user.store_id,
+        )
         if product.image_url:
             _ensure_product_image_record(db, product.id, product.image_url)
         return product
@@ -661,13 +797,7 @@ async def create_product(
     raw_img_url = _clean_str(form.get("image_url"))
     final_image_url = uploaded_urls[0] if uploaded_urls else raw_img_url
 
-    parsed_variants = None
-    raw_variants = _clean_str(form.get("variants"))
-    if raw_variants:
-        try:
-            parsed_variants = json.loads(raw_variants)
-        except Exception:
-            parsed_variants = raw_variants
+    parsed_variants = _parse_variants_form_field(form)
 
     payload: Dict[str, Any] = {}
 
@@ -689,9 +819,24 @@ async def create_product(
     if p_val is not None:
         payload["price"] = p_val
 
+    cp_val = _clean_decimal(form.get("cost_price"))
+    if cp_val is not None:
+        payload["cost_price"] = cp_val
+
     mrp_val = _clean_decimal(form.get("mrp"))
     if mrp_val is not None:
         payload["mrp"] = mrp_val
+
+    store_val = _clean_int(form.get("store_id"))
+    if store_val is not None:
+        payload["store_id"] = store_val
+
+    opening_stock_raw = form.get("opening_stock")
+    if opening_stock_raw is None:
+        opening_stock_raw = form.get("initial_stock")
+    opening_stock_val = _clean_int(opening_stock_raw)
+    if opening_stock_val is not None:
+        payload["opening_stock"] = opening_stock_val
 
     # Taxes
     gst_val = _clean_decimal(form.get("gst_rate"))
@@ -737,13 +882,13 @@ async def create_product(
 
     # Booleans
     if "is_active" in form:
-        payload["is_active"] = _clean_bool(form.get("is_active"), default=True)
+        payload["is_active"] = _clean_bool_or_raw(form.get("is_active"), default=True)
 
     if "track_batch" in form:
-        payload["track_batch"] = _clean_bool(form.get("track_batch"), default=False)
+        payload["track_batch"] = _clean_bool_or_raw(form.get("track_batch"), default=False)
 
     if "track_expiry" in form:
-        payload["track_expiry"] = _clean_bool(form.get("track_expiry"), default=False)
+        payload["track_expiry"] = _clean_bool_or_raw(form.get("track_expiry"), default=False)
 
     batch_val = _clean_str(form.get("batch_number"))
     if batch_val is not None:
@@ -764,11 +909,26 @@ async def create_product(
     except ValidationError as e:
         _raise_validation_error(e)
 
-    product = ProductService(db).create_product(user.tenant_id, create_data)
+    product = ProductService(db).create_product(
+        user.tenant_id,
+        create_data,
+        user_store_id=user.store_id,
+    )
+    img_added = False
     for idx, img_url in enumerate(uploaded_urls):
         _ensure_product_image_record(db, product.id, img_url, is_primary=(idx == 0))
+        img_added = True
     if not uploaded_urls and product.image_url:
         _ensure_product_image_record(db, product.id, product.image_url, is_primary=True)
+        img_added = True
+
+    if img_added:
+        effective_store_id = getattr(create_data, "store_id", None) or user.store_id
+        product = ProductService(db).get_product(
+            user.tenant_id,
+            product.id,
+            store_id=effective_store_id,
+        )
     return product
 
 
@@ -815,14 +975,21 @@ def get_catalog_summary(
 )
 def get_product(
     product_id: int,
+    store_id: Optional[int] = Query(
+        default=None,
+        gt=0,
+        description="Optional store ID to include live available stock",
+    ),
     user: User = Depends(
         require_permission("products:read")
     ),
     db: Session = Depends(get_db),
 ):
+    effective_store_id = store_id if user.store_id is None else user.store_id
     return ProductService(db).get_product(
         user.tenant_id,
         product_id,
+        store_id=effective_store_id,
     )
 
 
@@ -850,10 +1017,20 @@ PRODUCT_UPDATE_OPENAPI_EXTRA = {
                             "title": "Selling Price (Rs.)",
                             "description": "Final retail selling price per unit (must be greater than 0)",
                         },
+                        "cost_price": {
+                            "type": "number",
+                            "title": "Cost Price (Rs.)",
+                            "description": "Purchase cost price per unit (used for margin and price override floor)",
+                        },
                         "mrp": {
                             "type": "number",
                             "title": "Maximum Retail Price (MRP Rs.)",
                             "description": "Printed MRP on pack (must be >= Selling Price, or 0 if unpriced)",
+                        },
+                        "image_url": {
+                            "type": "string",
+                            "title": "Image URL (Optional)",
+                            "description": "Optional direct image URL if not uploading a binary file",
                         },
                         "category_id": {
                             "type": "integer",
@@ -878,11 +1055,12 @@ PRODUCT_UPDATE_OPENAPI_EXTRA = {
                         "hsn_code": {
                             "type": "string",
                             "title": "HSN Code",
-                            "description": "4, 6, or 8 digits HSN code (e.g. 15121910)",
+                            "description": "4, 6, or 8 digits HSN code (e.g. 1512)",
                         },
                         "gst_rate": {
                             "type": "number",
                             "title": "GST Rate (%)",
+                            "enum": [0, 5, 12, 18, 28],
                             "description": "Standard Indian GST slab: 0, 5, 12, 18, or 28",
                         },
                         "min_stock_alert": {
@@ -893,7 +1071,8 @@ PRODUCT_UPDATE_OPENAPI_EXTRA = {
                         "stock_status": {
                             "type": "string",
                             "title": "Stock Status",
-                            "description": "Current stock status: in_stock or out_of_stock",
+                            "enum": ["in_stock", "out_of_stock", "low_stock"],
+                            "description": "Current stock status: in_stock, out_of_stock, or low_stock",
                         },
                         "description": {
                             "type": "string",
@@ -955,10 +1134,20 @@ PRODUCT_UPDATE_OPENAPI_EXTRA = {
                             "title": "Selling Price (Rs.)",
                             "description": "Final retail selling price per unit (must be greater than 0)",
                         },
+                        "cost_price": {
+                            "type": "number",
+                            "title": "Cost Price (Rs.)",
+                            "description": "Purchase cost price per unit (used for margin and price override floor)",
+                        },
                         "mrp": {
                             "type": "number",
                             "title": "Maximum Retail Price (MRP Rs.)",
                             "description": "Printed MRP on pack (must be >= Selling Price, or 0 if unpriced)",
+                        },
+                        "image_url": {
+                            "type": "string",
+                            "title": "Image URL (Optional)",
+                            "description": "Optional direct image URL if not uploading a binary file",
                         },
                         "category_id": {
                             "type": "integer",
@@ -988,17 +1177,19 @@ PRODUCT_UPDATE_OPENAPI_EXTRA = {
                         "gst_rate": {
                             "type": "number",
                             "title": "GST Rate (%)",
-                            "description": "Standard Indian GST slab: 0, 5, 12, 18, or 28",
+                            "enum": [0, 5, 12, 18, 28],
+                            "description": "Standard Indian GST slab: 0, 5, 12, 18, or 28 (defaults to 0)",
                         },
                         "min_stock_alert": {
                             "type": "integer",
                             "title": "Low Stock Alert Threshold",
-                            "description": "Alert threshold quantity when inventory gets low (e.g. 5 or 10)",
+                            "description": "Alert threshold quantity when inventory gets low (defaults to 5)",
                         },
                         "stock_status": {
                             "type": "string",
                             "title": "Stock Status",
-                            "description": "Current stock status: in_stock or out_of_stock",
+                            "enum": ["in_stock", "out_of_stock", "low_stock"],
+                            "description": "Current stock status: in_stock, out_of_stock, or low_stock (defaults to in_stock)",
                         },
                         "description": {
                             "type": "string",
@@ -1104,6 +1295,14 @@ async def update_product(
     if sp_val is not None:
         payload["selling_price"] = sp_val
 
+    p_val = _clean_decimal(form.get("price"))
+    if p_val is not None:
+        payload["price"] = p_val
+
+    cp_val = _clean_decimal(form.get("cost_price"))
+    if cp_val is not None:
+        payload["cost_price"] = cp_val
+
     mrp_val = _clean_decimal(form.get("mrp"))
     if mrp_val is not None:
         payload["mrp"] = mrp_val
@@ -1132,6 +1331,11 @@ async def update_product(
     if gst_val is not None:
         payload["gst_rate"] = gst_val
         payload["tax_rate"] = gst_val
+    else:
+        tax_val = _clean_decimal(form.get("tax_rate"))
+        if tax_val is not None:
+            payload["tax_rate"] = tax_val
+            payload["gst_rate"] = tax_val
 
     min_stock = _clean_int(form.get("min_stock_alert"))
     if min_stock is not None:
@@ -1183,6 +1387,11 @@ async def update_product(
     )
     if uploaded_url:
         _ensure_product_image_record(db, product.id, uploaded_url)
+        product = ProductService(db).get_product(
+            user.tenant_id,
+            product.id,
+            store_id=user.store_id,
+        )
     return product
 
 

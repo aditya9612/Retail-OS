@@ -8,10 +8,13 @@ from app.core.database import get_db
 from app.core.exceptions import AppException, ConflictException, ForbiddenException, NotFoundException
 from app.core.security import is_tenant_wide_authorized, require_operational_write, require_permission
 from app.models.product import Product
+from app.models.product_variant import ProductVariant
 from app.models.store import Store
 from app.models.user import User
 from app.schemas.billing import (
     InvoiceCreate,
+    InvoicePreviewRequest,
+    InvoicePreviewResponse,
     ReturnItemRequest,
     TenderChangeRequest,
     TenderChangeResponse,
@@ -162,6 +165,7 @@ def _ensure_price_override_allowed(
     tenant_id: int,
     product_id: int,
     unit_price: Decimal | None,
+    variant_id: int | None = None,
 ) -> None:
     if unit_price is None:
         return
@@ -190,7 +194,29 @@ def _ensure_price_override_allowed(
             "Product is inactive"
         )
 
-    if unit_price != product.selling_price:
+    reference_price = product.selling_price
+    if variant_id is not None:
+        variant = (
+            db.query(ProductVariant)
+            .filter(
+                ProductVariant.id == variant_id,
+                ProductVariant.product_id == product_id,
+                ProductVariant.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if not variant:
+            raise AppException(
+                "Product variant not found"
+            )
+        if not variant.is_active:
+            raise AppException(
+                "Product variant is inactive"
+            )
+        if variant.selling_price is not None:
+            reference_price = variant.selling_price
+
+    if unit_price != reference_price:
         permissions = (
             user.role.permissions
             if user.role
@@ -257,6 +283,7 @@ def cart_add_item(
         user.tenant_id,
         payload.product_id,
         payload.unit_price,
+        variant_id=payload.variant_id,
     )
 
     cart = CartService(db).add_item(
@@ -268,6 +295,7 @@ def cart_add_item(
         payload.unit_price,
         payload.discount,
         effective_same_state,
+        variant_id=payload.variant_id,
     )
 
     return _to_cart_response(cart)
@@ -341,6 +369,7 @@ def cart_update_item(
             user.tenant_id,
             user.id,
             payload.product_id,
+            variant_id=payload.variant_id,
         )
         return _to_cart_response(cart)
 
@@ -350,6 +379,7 @@ def cart_update_item(
         user.tenant_id,
         payload.product_id,
         payload.unit_price,
+        variant_id=payload.variant_id,
     )
 
     cart = CartService(db).update_item(
@@ -359,6 +389,7 @@ def cart_update_item(
         payload.quantity,
         payload.unit_price,
         payload.discount,
+        variant_id=payload.variant_id,
     )
 
     return _to_cart_response(cart)
@@ -371,6 +402,7 @@ def cart_update_item(
 )
 def cart_remove_item(
     product_id: int = Query(..., gt=0),
+    variant_id: Optional[int] = Query(default=None, gt=0),
     user: User = Depends(
         require_permission("billing:delete")
     ),
@@ -380,6 +412,7 @@ def cart_remove_item(
         user.tenant_id,
         user.id,
         product_id,
+        variant_id=variant_id,
     )
 
     return _to_cart_response(cart)
@@ -559,6 +592,24 @@ def cart_apply_discount(
     )
 
     return _to_cart_response(cart)
+
+
+@router.post(
+    "/preview",
+    response_model=InvoicePreviewResponse,
+)
+def billing_preview(
+    payload: InvoicePreviewRequest,
+    user: User = Depends(require_permission("billing:create")),
+    db: Session = Depends(get_db),
+):
+    """Previews invoice totals, product metadata, GST split, and live store stock before POS checkout."""
+    return BillingService(db).preview_invoice(
+        user.tenant_id,
+        user.id,
+        payload,
+        user=user,
+    )
 
 
 @router.post(

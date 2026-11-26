@@ -292,7 +292,12 @@ class StoreTransferService:
             prev_stock = Decimal("0.0000")
             new_stock = Decimal("0.0000")
 
-            if src_inv:
+            if src_inv is not None:
+                if src_inv.quantity < qty_dec:
+                    raise ValueError(
+                        f"Insufficient stock for product {item.product_id} at source store "
+                        f"(Available: {src_inv.quantity}, Requested: {qty_dec})"
+                    )
                 prev_stock = src_inv.quantity
                 src_inv.quantity -= qty_dec
                 new_stock = src_inv.quantity

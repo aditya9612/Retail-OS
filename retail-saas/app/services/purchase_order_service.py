@@ -26,6 +26,7 @@ from app.repositories.purchase_order_repo import (
 from app.services.document_number_service import DocumentNumberService
 from app.services.inventory_service import InventoryService
 from app.schemas.inventory import StockInRequest
+from app.utils.gst_engine import resolve_gst_rate
 
 from app.schemas.purchase_order import (
     PurchaseOrderApproveRequest,
@@ -244,9 +245,18 @@ class PurchaseOrderService:
                 unit_cost = product.cost_price or Decimal("0.00")
 
             line_cost = Decimal(str(item.quantity)) * unit_cost
-            tax_rate = item.tax_rate if item.tax_rate is not None else Decimal("0.00")
+            if "tax_rate" in item.model_fields_set and item.tax_rate is not None:
+                tax_rate = Decimal(str(item.tax_rate))
+            else:
+                tax_rate = resolve_gst_rate(self.db, tenant_id, product)
             line_tax = (line_cost * tax_rate / Decimal("100.00")).quantize(Decimal("0.01"))
             line_total = line_cost + line_tax
+
+            resolved_hsn = item.hsn_code if item.hsn_code else getattr(product, "hsn_code", None)
+            if "unit_of_measure" in item.model_fields_set and item.unit_of_measure:
+                resolved_uom = item.unit_of_measure
+            else:
+                resolved_uom = getattr(product, "unit", None) or "pcs"
 
             po.items.append(
                 PurchaseOrderItem(
@@ -256,8 +266,8 @@ class PurchaseOrderService:
                     total_cost=line_total,
                     tax_rate=tax_rate,
                     tax_amount=line_tax,
-                    hsn_code=item.hsn_code,
-                    unit_of_measure=item.unit_of_measure or "pcs",
+                    hsn_code=resolved_hsn,
+                    unit_of_measure=resolved_uom,
                 )
             )
 

@@ -5,25 +5,32 @@ import os
 from typing import Any, List, Optional
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictException, NotFoundException
 from app.models.category import Category
+from app.models.inventory import Inventory
 from app.models.product import Product
+from app.models.product_variant import ProductVariant
 from app.models.saas_plan_entitlement import EntitlementDimension
 from app.models.store import Store
 from app.repositories.product_repo import ProductRepository
+from app.schemas.inventory import StockInRequest
 from app.schemas.product import (
     ProductCreate,
     ProductLowStockResponse,
     ProductUpdate,
 )
+from app.schemas.product_variant import ProductVariantCreate
+from app.services.inventory_service import InventoryService
 from app.services.saas_entitlement_service import SaaSEntitlementService
 from app.utils.barcode_generator import (
     generate_barcode_image,
     generate_ean13_barcode,
     generate_thermal_sticker_image,
 )
+from app.utils.gst_engine import resolve_gst_rate
 
 
 class ProductService:
@@ -31,10 +38,37 @@ class ProductService:
         self.db = db
         self.repo = ProductRepository(db)
 
+    def _enrich_product_metadata(
+        self,
+        product: Product,
+        tenant_id: int,
+        store_id: Optional[int] = None,
+    ) -> Product:
+        try:
+            product.effective_gst_rate = resolve_gst_rate(self.db, tenant_id, product)
+        except Exception:
+            product.effective_gst_rate = Decimal(str(getattr(product, "tax_rate", Decimal("0.00")) or Decimal("0.00")))
+
+        if store_id is not None:
+            stock_sum = (
+                self.db.query(func.coalesce(func.sum(Inventory.quantity), Decimal("0.0000")))
+                .filter(
+                    Inventory.tenant_id == tenant_id,
+                    Inventory.store_id == store_id,
+                    Inventory.product_id == product.id,
+                )
+                .scalar()
+            )
+            product.available_stock = Decimal(str(stock_sum or Decimal("0.0000")))
+        else:
+            product.available_stock = None
+        return product
+
     def create_product(
         self,
         tenant_id: int,
         data: ProductCreate,
+        user_store_id: Optional[int] = None,
     ) -> Product:
         sku = data.sku.strip().upper()
         barcode = data.barcode.strip() if data.barcode else None
@@ -146,6 +180,29 @@ class ProductService:
         )
 
         product_data = data.model_dump()
+        store_id = product_data.pop("store_id", None)
+        opening_stock = product_data.pop("opening_stock", None)
+        raw_variants = product_data.pop("variants", None)
+
+        effective_store_id: Optional[int] = None
+        if store_id is not None:
+            store = (
+                self.db.query(Store)
+                .filter(
+                    Store.id == store_id,
+                    Store.tenant_id == tenant_id,
+                    Store.is_active.is_(True),
+                )
+                .first()
+            )
+            if not store:
+                raise NotFoundException(f"Store with ID {store_id} not found or inactive")
+            effective_store_id = store.id
+        elif opening_stock is not None and opening_stock > 0:
+            if user_store_id is not None:
+                effective_store_id = user_store_id
+            else:
+                raise ConflictException("store_id is required when opening_stock is provided")
 
         product_data["sku"] = sku
         product_data["barcode"] = barcode
@@ -157,15 +214,86 @@ class ProductService:
 
         product = self.repo.create(product)
 
-        self.db.commit()
-        self.db.refresh(product)
+        # Persist variants in product_variants table when supplied on product creation
+        if raw_variants is not None:
+            if not isinstance(raw_variants, list):
+                raise ConflictException("variants must be a JSON array of variant objects")
+            seen_variant_skus: set[str] = {sku}
+            seen_variant_barcodes: set[str] = {barcode} if barcode else set()
+            for idx, v_raw in enumerate(raw_variants):
+                try:
+                    v_schema = ProductVariantCreate.model_validate(v_raw)
+                except Exception as exc:
+                    raise ConflictException(f"Invalid variant at index {idx}: {exc}") from exc
 
-        return self.repo.get_by_id(product.id, tenant_id) or product
+                v_sku = v_schema.sku.strip().upper()
+                if v_sku in seen_variant_skus or self.repo.is_sku_taken(v_sku, tenant_id):
+                    raise ConflictException(f"Variant SKU '{v_sku}' already exists")
+                seen_variant_skus.add(v_sku)
+
+                v_barcode = v_schema.barcode.strip() if v_schema.barcode else None
+                if not v_barcode and v_schema.auto_generate_barcode:
+                    for _ in range(10):
+                        cand = generate_ean13_barcode(tenant_id)
+                        if cand not in seen_variant_barcodes and not self.repo.is_barcode_taken(cand, tenant_id):
+                            v_barcode = cand
+                            break
+                if v_barcode:
+                    if v_barcode in seen_variant_barcodes or self.repo.is_barcode_taken(v_barcode, tenant_id):
+                        raise ConflictException(f"Variant barcode '{v_barcode}' already exists")
+                    seen_variant_barcodes.add(v_barcode)
+
+                variant = ProductVariant(
+                    tenant_id=tenant_id,
+                    product_id=product.id,
+                    variant_name=v_schema.variant_name,
+                    sku=v_sku,
+                    barcode=v_barcode,
+                    size=v_schema.size,
+                    color=v_schema.color,
+                    attributes=v_schema.attributes,
+                    selling_price=v_schema.selling_price,
+                    cost_price=v_schema.cost_price,
+                    is_active=v_schema.is_active,
+                )
+                self.db.add(variant)
+            self.db.flush()
+            product._variants = None
+
+        # Seed opening store stock (and batch record if applicable) atomically
+        if opening_stock is not None and opening_stock > 0 and effective_store_id is not None:
+            stock_in_kwargs: dict[str, Any] = {
+                "store_id": effective_store_id,
+                "product_id": product.id,
+                "quantity": opening_stock,
+                "notes": f"Opening stock on product creation ({product.sku})",
+            }
+            if product.batch_number:
+                stock_in_kwargs["batch_number"] = product.batch_number
+            elif product.track_batch:
+                stock_in_kwargs["batch_number"] = f"OPEN-{product.sku[:20]}"
+            if product.expiry_date and product.expiry_date > date.today():
+                stock_in_kwargs["expiry_date"] = product.expiry_date
+            if product.cost_price and product.cost_price >= Decimal("1.00"):
+                stock_in_kwargs["unit_cost"] = product.cost_price
+
+            InventoryService(self.db).stock_in(
+                tenant_id=tenant_id,
+                data=StockInRequest(**stock_in_kwargs),
+                commit=False,
+            )
+
+        self.db.commit()
+        self.db.expire(product)
+
+        loaded = self.repo.get_by_id(product.id, tenant_id) or product
+        return self._enrich_product_metadata(loaded, tenant_id, store_id=effective_store_id)
 
     def get_product(
         self,
         tenant_id: int,
         product_id: int,
+        store_id: Optional[int] = None,
     ) -> Product:
         if product_id <= 0:
             raise NotFoundException(
@@ -182,12 +310,13 @@ class ProductService:
                 "Product not found"
             )
 
-        return product
+        return self._enrich_product_metadata(product, tenant_id, store_id=store_id)
 
     def get_by_barcode(
         self,
         tenant_id: int,
         barcode: str,
+        store_id: Optional[int] = None,
     ) -> Product:
         barcode = barcode.strip()
 
@@ -221,7 +350,7 @@ class ProductService:
                 "Product not found for barcode"
             )
 
-        return product
+        return self._enrich_product_metadata(product, tenant_id, store_id=store_id)
 
     def search_products(
         self,

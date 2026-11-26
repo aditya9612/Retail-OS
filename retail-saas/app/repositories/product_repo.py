@@ -23,6 +23,7 @@ class ProductRepository:
             self.db.query(Product)
             .options(
                 selectinload(Product.images),
+                selectinload(Product.variant_list),
                 joinedload(Product.category),
             )
             .filter(
@@ -61,6 +62,7 @@ class ProductRepository:
             self.db.query(Product)
             .options(
                 selectinload(Product.images),
+                selectinload(Product.variant_list),
                 joinedload(Product.category),
             )
             .filter(
@@ -86,6 +88,7 @@ class ProductRepository:
                 self.db.query(Product)
                 .options(
                     selectinload(Product.images),
+                    selectinload(Product.variant_list),
                     joinedload(Product.category),
                 )
                 .filter(

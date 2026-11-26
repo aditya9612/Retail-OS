@@ -17,6 +17,7 @@ from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.product import Product
 from app.models.store import Store
+from app.utils.gst_engine import calculate_line_tax, resolve_gst_rate
 from app.repositories.storefront_repo import StorefrontRepository
 from app.schemas.storefront import (
     StorefrontAdvancedSettingsResponse,
@@ -506,6 +507,7 @@ class StorefrontService:
 
         cart_items: List[StorefrontCartItemResponse] = []
         subtotal = Decimal("0.00")
+        tax_amount = Decimal("0.00")
         total_items = 0
 
         if raw_items:
@@ -526,6 +528,14 @@ class StorefrontService:
                 qty = int(item_info.get("quantity", 1))
                 price = Decimal(str(product.selling_price))
                 item_total = price * qty
+                gst_rate = resolve_gst_rate(self.db, tenant_id, product)
+                tax_info = calculate_line_tax(
+                    quantity=Decimal(qty),
+                    unit_price=price,
+                    discount=Decimal("0.00"),
+                    gst_rate=gst_rate,
+                    same_state=True,
+                )
 
                 cart_items.append(
                     StorefrontCartItemResponse(
@@ -539,10 +549,9 @@ class StorefrontService:
                     )
                 )
                 subtotal += item_total
+                tax_amount += tax_info["gst_amount"]
                 total_items += qty
 
-        # Estimated Tax (Intra-state GST approximation)
-        tax_amount = (subtotal * Decimal("0.05")).quantize(Decimal("0.01"))
         total_amount = subtotal + tax_amount
 
         return StorefrontCartResponse(
@@ -653,6 +662,7 @@ class StorefrontService:
             raise NotFoundException("Store outlet not available for checkout")
 
         # Validate stock availability in the store before placing order
+        tracked_product_ids = set()
         for item in cart.items:
             inv = (
                 self.db.query(Inventory)
@@ -663,10 +673,12 @@ class StorefrontService:
                 )
                 .first()
             )
-            if inv is not None and inv.quantity < item.quantity:
-                raise AppException(
-                    f"Product '{item.name}' has insufficient stock in {store.name} (Available: {inv.quantity}, Requested: {item.quantity})"
-                )
+            if inv is not None:
+                tracked_product_ids.add(item.product_id)
+                if inv.quantity < item.quantity:
+                    raise AppException(
+                        f"Product '{item.name}' has insufficient stock in {store.name} (Available: {inv.quantity}, Requested: {item.quantity})"
+                    )
 
         # Resolve delivery address
         final_address = payload.delivery_address or customer.address or "Store Pickup Counter"
@@ -690,8 +702,38 @@ class StorefrontService:
         timestamp_str = datetime.utcnow().strftime("%y%m%d%H%M")
         order_number = f"ORD-ONL-{timestamp_str}-{order_uid}"
 
-        # Intra-state tax splitting (half CGST, half SGST)
-        half_tax = (cart.tax_amount / Decimal("2")).quantize(Decimal("0.01"))
+        # Resolve per-product intra-state GST taxes
+        product_rows = (
+            self.db.query(Product)
+            .filter(
+                Product.tenant_id == tenant_id,
+                Product.id.in_([item.product_id for item in cart.items]),
+            )
+            .all()
+        )
+        prod_map = {p.id: p for p in product_rows}
+        line_tax_map = {}
+        order_cgst = Decimal("0.00")
+        order_sgst = Decimal("0.00")
+        order_igst = Decimal("0.00")
+        order_tax = Decimal("0.00")
+        for item in cart.items:
+            prod = prod_map.get(item.product_id)
+            gst_rate = resolve_gst_rate(self.db, tenant_id, prod) if prod else Decimal("0.00")
+            t_info = calculate_line_tax(
+                quantity=Decimal(item.quantity),
+                unit_price=item.unit_price,
+                discount=Decimal("0.00"),
+                gst_rate=gst_rate,
+                same_state=True,
+            )
+            line_tax_map[item.product_id] = t_info
+            order_cgst += t_info["cgst_amount"]
+            order_sgst += t_info["sgst_amount"]
+            order_igst += t_info["igst_amount"]
+            order_tax += t_info["gst_amount"]
+
+        order_total = (cart.subtotal - cart.discount_amount + order_tax).quantize(Decimal("0.01"))
 
         # Create Order
         order = Order(
@@ -703,12 +745,12 @@ class StorefrontService:
             status="pending",
             subtotal=cart.subtotal,
             discount_amount=cart.discount_amount,
-            cgst_amount=half_tax,
-            sgst_amount=half_tax,
-            igst_amount=Decimal("0.00"),
-            tax_amount=cart.tax_amount,
+            cgst_amount=order_cgst,
+            sgst_amount=order_sgst,
+            igst_amount=order_igst,
+            tax_amount=order_tax,
             round_off=Decimal("0.00"),
-            total_amount=cart.total_amount,
+            total_amount=order_total,
             payment_method=payload.payment_method.upper(),
             payment_status="paid" if payload.payment_method == "wallet" else "pending",
             delivery_address=final_address,
@@ -724,7 +766,7 @@ class StorefrontService:
                 wallet_tx = WalletTransaction(
                     wallet_id=wallet_obj.id,
                     transaction_type="DEBIT",
-                    amount=cart.total_amount,
+                    amount=order_total,
                     reference_no=order_number,
                     remarks=f"Payment for online order #{order_number}",
                 )
@@ -734,18 +776,18 @@ class StorefrontService:
 
         # Create OrderItems
         for item in cart.items:
-            half_item_tax = ((item.total_price * Decimal("0.05")) / Decimal("2")).quantize(Decimal("0.01"))
+            t_info = line_tax_map[item.product_id]
             order_item = OrderItem(
                 order_id=order.id,
                 product_id=item.product_id,
                 quantity=item.quantity,
                 unit_price=item.unit_price,
                 discount_amount=Decimal("0.00"),
-                cgst_amount=half_item_tax,
-                sgst_amount=half_item_tax,
-                igst_amount=Decimal("0.00"),
-                tax_amount=half_item_tax * Decimal("2"),
-                total_amount=item.total_price + (half_item_tax * Decimal("2")),
+                cgst_amount=t_info["cgst_amount"],
+                sgst_amount=t_info["sgst_amount"],
+                igst_amount=t_info["igst_amount"],
+                tax_amount=t_info["gst_amount"],
+                total_amount=t_info["total_amount"],
                 notes=f"Online item: {item.name}",
             )
             self.db.add(order_item)
@@ -770,12 +812,14 @@ class StorefrontService:
         except Exception as e:
             logger.warning(f"Delivery/Tracking record creation skipped: {e}")
 
-        # Deduct inventory stock for the store
-        try:
+        # Deduct inventory stock for tracked inventory items in the store
+        if tracked_product_ids:
             from app.schemas.inventory import StockOutRequest
             from app.services.inventory_service import InventoryService
             inv_service = InventoryService(self.db)
             for item in cart.items:
+                if item.product_id not in tracked_product_ids:
+                    continue
                 inv_service.stock_out(
                     tenant_id=tenant_id,
                     data=StockOutRequest(
@@ -786,8 +830,6 @@ class StorefrontService:
                     ),
                     commit=False,
                 )
-        except Exception as e:
-            logger.warning(f"Stock deduction skipped or unmanaged for storefront items: {e}")
 
         # Clear cart upon order creation
         self.clear_cart(tenant_id, customer.id)

@@ -190,7 +190,12 @@ class InventoryService:
             product.cost_price = data.unit_cost
 
         batch = None
-        if data.batch_number:
+        effective_batch_number = data.batch_number
+        if not effective_batch_number and getattr(product, "track_batch", False):
+            sku_token = (getattr(product, "sku", None) or f"PRD{product.id}")[:20]
+            effective_batch_number = getattr(product, "batch_number", None) or f"BATCH-{sku_token}"
+
+        if effective_batch_number:
             from app.models.product_batch import ProductBatch
             batch = (
                 self.db.query(ProductBatch)
@@ -198,7 +203,7 @@ class InventoryService:
                     ProductBatch.tenant_id == tenant_id,
                     ProductBatch.store_id == data.store_id,
                     ProductBatch.product_id == data.product_id,
-                    ProductBatch.batch_number == data.batch_number,
+                    ProductBatch.batch_number == effective_batch_number,
                 )
                 .first()
             )
@@ -207,9 +212,9 @@ class InventoryService:
                     tenant_id=tenant_id,
                     store_id=data.store_id,
                     product_id=data.product_id,
-                    batch_number=data.batch_number,
-                    expiry_date=data.expiry_date,
-                    unit_cost=data.unit_cost or Decimal("0.00"),
+                    batch_number=effective_batch_number,
+                    expiry_date=data.expiry_date or getattr(product, "expiry_date", None),
+                    unit_cost=data.unit_cost or getattr(product, "cost_price", None) or Decimal("0.00"),
                     quantity=data.quantity,
                     remaining_quantity=data.quantity,
                     is_active=True,
@@ -224,7 +229,7 @@ class InventoryService:
                 self.db.flush()
 
             inventory.batch_id = batch.id
-            inventory.batch_number = data.batch_number
+            inventory.batch_number = effective_batch_number
 
         if data.expiry_date:
             inventory.expiry_date = data.expiry_date

@@ -5,6 +5,7 @@ import re
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -566,6 +567,17 @@ class ProductBase(BaseModel):
         },
     )
 
+    cost_price: Decimal = Field(
+        default=Decimal("0.00"),
+        ge=0,
+        le=Decimal("999999.99"),
+        description="Purchase cost price per unit (cannot be negative)",
+        json_schema_extra={
+            "type": "number",
+            "example": 75.00,
+        },
+    )
+
     mrp: Decimal = Field(
         default=Decimal("0.00"),
         ge=0,
@@ -625,7 +637,22 @@ class ProductBase(BaseModel):
         },
     )
 
-    variants: Optional[Any] = None
+    variants: Optional[Any] = Field(
+        default=None,
+        json_schema_extra={
+            "example": [
+                {
+                    "id": 1,
+                    "variant_name": "500ml Bottle",
+                    "sku": "OIL-SUN-500",
+                    "barcode": "8901234567891",
+                    "selling_price": "80.00",
+                    "cost_price": "62.00",
+                    "is_active": True,
+                }
+            ]
+        },
+    )
 
     track_batch: bool = False
 
@@ -647,6 +674,20 @@ class ProductBase(BaseModel):
         max_length=500,
     )
 
+    store_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Optional store ID to seed opening stock when creating the product",
+    )
+
+    opening_stock: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=100000,
+        validation_alias=AliasChoices("opening_stock", "initial_stock"),
+        description="Optional opening stock quantity for the selected store",
+    )
+
     @model_validator(mode="before")
     @classmethod
     def reconcile_prices_and_taxes(
@@ -655,26 +696,26 @@ class ProductBase(BaseModel):
     ) -> Any:
         if isinstance(data, dict):
             if (
-                not data.get("selling_price")
+                data.get("selling_price") is None
                 and data.get("price") is not None
             ):
                 data["selling_price"] = data["price"]
 
             elif (
                 data.get("selling_price") is not None
-                and not data.get("price")
+                and data.get("price") is None
             ):
                 data["price"] = data["selling_price"]
 
             if (
-                not data.get("tax_rate")
+                data.get("tax_rate") is None
                 and data.get("gst_rate") is not None
             ):
                 data["tax_rate"] = data["gst_rate"]
 
             elif (
                 data.get("tax_rate") is not None
-                and not data.get("gst_rate")
+                and data.get("gst_rate") is None
             ):
                 data["gst_rate"] = data["tax_rate"]
 
@@ -746,6 +787,34 @@ class ProductBase(BaseModel):
             "Price",
             gt_zero=False,
         )
+
+    @field_validator(
+        "cost_price",
+        mode="before",
+    )
+    @classmethod
+    def validate_cost_price(
+        cls,
+        v: Any,
+    ) -> Decimal:
+        if v is None:
+            return Decimal("0.00")
+
+        return validate_decimal_amount(
+            v,
+            "Cost price",
+            gt_zero=False,
+        )
+
+    @field_validator("stock_status")
+    @classmethod
+    def validate_stock_status(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("stock_status must be one of: in_stock, out_of_stock, low_stock")
+        cleaned = v.strip().lower()
+        if cleaned not in {"in_stock", "out_of_stock", "low_stock"}:
+            raise ValueError("stock_status must be one of: in_stock, out_of_stock, low_stock")
+        return cleaned
 
     @field_validator(
         "mrp",
@@ -942,6 +1011,16 @@ class ProductUpdate(BaseModel):
         },
     )
 
+    cost_price: Optional[Decimal] = Field(
+        default=None,
+        ge=0,
+        le=Decimal("999999.99"),
+        json_schema_extra={
+            "type": "number",
+            "example": 75.00,
+        },
+    )
+
     mrp: Optional[Decimal] = Field(
         default=None,
         ge=0,
@@ -987,7 +1066,22 @@ class ProductUpdate(BaseModel):
         },
     )
 
-    variants: Optional[Any] = None
+    variants: Optional[Any] = Field(
+        default=None,
+        json_schema_extra={
+            "example": [
+                {
+                    "id": 1,
+                    "variant_name": "500ml Bottle",
+                    "sku": "OIL-SUN-500",
+                    "barcode": "8901234567891",
+                    "selling_price": "80.00",
+                    "cost_price": "62.00",
+                    "is_active": True,
+                }
+            ]
+        },
+    )
 
     track_batch: Optional[bool] = None
 
@@ -1015,26 +1109,26 @@ class ProductUpdate(BaseModel):
     ) -> Any:
         if isinstance(data, dict):
             if (
-                not data.get("selling_price")
+                data.get("selling_price") is None
                 and data.get("price") is not None
             ):
                 data["selling_price"] = data["price"]
 
             elif (
                 data.get("selling_price") is not None
-                and not data.get("price")
+                and data.get("price") is None
             ):
                 data["price"] = data["selling_price"]
 
             if (
-                not data.get("tax_rate")
+                data.get("tax_rate") is None
                 and data.get("gst_rate") is not None
             ):
                 data["tax_rate"] = data["gst_rate"]
 
             elif (
                 data.get("tax_rate") is not None
-                and not data.get("gst_rate")
+                and data.get("gst_rate") is None
             ):
                 data["gst_rate"] = data["tax_rate"]
 
@@ -1124,6 +1218,34 @@ class ProductUpdate(BaseModel):
             "Price",
             gt_zero=False,
         )
+
+    @field_validator(
+        "cost_price",
+        mode="before",
+    )
+    @classmethod
+    def validate_update_cost_price(
+        cls,
+        v: Any,
+    ) -> Optional[Decimal]:
+        if v is None:
+            return None
+
+        return validate_decimal_amount(
+            v,
+            "Cost price",
+            gt_zero=False,
+        )
+
+    @field_validator("stock_status")
+    @classmethod
+    def validate_update_stock_status(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip().lower()
+        if cleaned not in {"in_stock", "out_of_stock", "low_stock"}:
+            raise ValueError("stock_status must be one of: in_stock, out_of_stock, low_stock")
+        return cleaned
 
     @field_validator(
         "mrp",
@@ -1293,13 +1415,30 @@ class ProductResponse(BaseModel):
     stock_status: str = "in_stock"
     unit: str = "pcs"
     price: Decimal
-    variants: Optional[Any] = None
+    variants: Optional[Any] = Field(
+        default=None,
+        json_schema_extra={
+            "example": [
+                {
+                    "id": 1,
+                    "variant_name": "500ml Bottle",
+                    "sku": "OIL-SUN-500",
+                    "barcode": "8901234567891",
+                    "selling_price": "80.00",
+                    "cost_price": "62.00",
+                    "is_active": True,
+                }
+            ]
+        },
+    )
     track_batch: bool = False
     track_expiry: bool = False
     batch_number: Optional[str] = None
     expiry_date: Optional[date] = None
     image_url: Optional[str] = None
     is_active: bool
+    available_stock: Optional[Decimal] = None
+    effective_gst_rate: Optional[Decimal] = None
     created_at: datetime
     updated_at: datetime
     images: list[ProductImageResponse] = Field(
@@ -1340,6 +1479,18 @@ class ProductResponse(BaseModel):
         v: Decimal,
     ) -> float:
         return float(v) if v is not None else 0.0
+
+    @field_serializer(
+        "available_stock",
+        "effective_gst_rate",
+        mode="plain",
+        check_fields=False,
+    )
+    def serialize_optional_decimal(
+        self,
+        v: Optional[Decimal],
+    ) -> Optional[float]:
+        return float(v) if v is not None else None
 
     model_config = ConfigDict(
         from_attributes=True
