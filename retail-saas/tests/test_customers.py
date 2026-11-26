@@ -74,6 +74,7 @@ def create_test_customer(
     email=None,
     address="123 MG Road, Pune",
     birthday="1995-05-15",
+    credit_limit=0.00,
 ):
     if phone is None:
         phone = random_phone()
@@ -82,6 +83,7 @@ def create_test_customer(
         "phone": phone,
         "address": address,
         "birthday": birthday,
+        "credit_limit": credit_limit,
     }
     if email:
         payload["email"] = email
@@ -100,6 +102,7 @@ def test_create_customer_valid(tenant_a):
         "phone": phone,
         "address": "123 MG Road, Pune",
         "birthday": "1995-05-15",
+        "credit_limit": 5000.00,
     }
     resp = client.post("/api/v1/customers", json=payload, headers=headers)
     assert resp.status_code == 201, resp.text
@@ -119,6 +122,7 @@ def test_create_customer_name_validation(tenant_a):
         "email": random_email("name"),
         "address": "123 MG Road, Pune",
         "birthday": "1995-05-15",
+        "credit_limit": 0.00,
     }
 
     # Missing name
@@ -157,6 +161,7 @@ def test_create_customer_phone_validation(tenant_a):
         "email": random_email("amit"),
         "address": "Navrangpura, Ahmedabad",
         "birthday": "1992-08-20",
+        "credit_limit": 0.00,
     }
 
     # Missing phone
@@ -208,17 +213,18 @@ def test_create_customer_address_validation(tenant_a):
         "name": "Suresh Kumar",
         "phone": random_phone(),
         "birthday": "1990-01-01",
+        "credit_limit": 0.00,
     }
 
-    # Missing address accepted (optional per P1 schema)
+    # Erasing/omitting address from JSON rejected (address is required)
     resp = client.post("/api/v1/customers", json=base_payload, headers=headers)
-    assert resp.status_code == 201
-    assert resp.json()["address"] is None
+    assert resp.status_code == 422
+    assert "address" in resp.text.lower()
 
-    # Null address accepted (optional per P1 schema)
+    # Null address rejected
     resp = client.post("/api/v1/customers", json={**base_payload, "phone": random_phone(), "address": None}, headers=headers)
-    assert resp.status_code == 201
-    assert resp.json()["address"] is None
+    assert resp.status_code == 422
+    assert "address" in resp.text.lower()
 
     # Empty address string rejected
     resp = client.post("/api/v1/customers", json={**base_payload, "phone": random_phone(), "address": ""}, headers=headers)
@@ -227,6 +233,28 @@ def test_create_customer_address_validation(tenant_a):
     # Whitespace only address rejected
     resp = client.post("/api/v1/customers", json={**base_payload, "address": "     "}, headers=headers)
     assert resp.status_code == 422
+
+    # 1-character address rejected (e.g. "K")
+    resp_1char = client.post("/api/v1/customers", json={**base_payload, "phone": random_phone(), "address": "K"}, headers=headers)
+    assert resp_1char.status_code == 422, f"Expected 422 for 1-character address, got {resp_1char.status_code}: {resp_1char.text}"
+    assert "address" in resp_1char.text.lower()
+
+    # 2-character address rejected (e.g. "AB")
+    resp_2char = client.post("/api/v1/customers", json={**base_payload, "phone": random_phone(), "address": "AB"}, headers=headers)
+    assert resp_2char.status_code == 422
+
+    # Purely numeric or repeating address rejected
+    resp_num = client.post("/api/v1/customers", json={**base_payload, "phone": random_phone(), "address": "12345"}, headers=headers)
+    assert resp_num.status_code == 422
+
+    resp_rep = client.post("/api/v1/customers", json={**base_payload, "phone": random_phone(), "address": "aaaa"}, headers=headers)
+    assert resp_rep.status_code == 422
+
+    # Purely special characters address rejected (e.g. "!!!", "@#$%", ",,,,", etc.)
+    for bad_spec in ["!!!", "@#$%", ";;;;;;", ",,,,,", "-----", "Pune !!!", "<script>"]:
+        resp_spec = client.post("/api/v1/customers", json={**base_payload, "phone": random_phone(), "address": bad_spec}, headers=headers)
+        assert resp_spec.status_code == 422, f"Expected 422 for special-character address '{bad_spec}', got {resp_spec.status_code}: {resp_spec.text}"
+        assert "address" in resp_spec.text.lower()
 
     # Valid normal address
     resp = client.post(
@@ -243,6 +271,7 @@ def test_create_customer_birthday_validation(tenant_a):
     base_payload = {
         "name": "Pooja Verma",
         "address": "Bandra West, Mumbai",
+        "credit_limit": 0.00,
     }
 
     # 1. Missing / omitted birthday accepted -> 201 + null
@@ -297,6 +326,24 @@ def test_create_customer_birthday_validation(tenant_a):
         headers=headers,
     )
     assert resp_future.status_code == 422
+
+    # 6b. Birthday 226 years ago (e.g. 1800-02-15 from user screenshot) or >120 years in the past rejected -> 422
+    resp_ancient = client.post(
+        "/api/v1/customers",
+        json={**base_payload, "phone": random_phone(), "birthday": "1800-02-15"},
+        headers=headers,
+    )
+    assert resp_ancient.status_code == 422, resp_ancient.text
+    assert "120 years in the past" in resp_ancient.text
+
+    # Birthday 130 years ago rejected -> 422
+    ancient_date = (date.today().replace(year=date.today().year - 130)).isoformat()
+    resp_ancient_130 = client.post(
+        "/api/v1/customers",
+        json={**base_payload, "phone": random_phone(), "birthday": ancient_date},
+        headers=headers,
+    )
+    assert resp_ancient_130.status_code == 422, resp_ancient_130.text
 
     # 7. Valid past birthday accepted -> 201 + date string
     resp_valid = client.post(
@@ -939,13 +986,14 @@ def test_update_customer_validation(tenant_a, tenant_b):
     assert client.put(f"/api/v1/customers/{cust['id']}", json={"gstin": None}, headers=headers_a).status_code == 422
     assert client.put(f"/api/v1/customers/{cust['id']}", json={"gstin": "INVALIDGSTIN123"}, headers=headers_a).status_code == 422
 
-    # 3. Birthday validation: placeholder, invalid, future rejected
+    # 3. Birthday validation: placeholder, invalid, future, or >120 years in past rejected
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
     assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": "string"}, headers=headers_a).status_code == 422
     assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": "15-05-1995"}, headers=headers_a).status_code == 422
     assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": "abc"}, headers=headers_a).status_code == 422
     assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": "1995-99-99"}, headers=headers_a).status_code == 422
     assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": tomorrow}, headers=headers_a).status_code == 422
+    assert client.put(f"/api/v1/customers/{cust['id']}", json={"birthday": "1800-02-15"}, headers=headers_a).status_code == 422
 
     # 4. Birthday optional: omitted leaves existing birthday unchanged
     resp_omit = client.put(f"/api/v1/customers/{cust['id']}", json={"name": "Omit Birthday Name"}, headers=headers_a)
@@ -1172,6 +1220,7 @@ def test_customer_create_valid_names_and_invalid_names(tenant_a):
         "phone": random_phone(),
         "address": "123 Main St, Pune",
         "birthday": "1990-05-15",
+        "credit_limit": 0.00,
     }
 
     # Valid natural names with letters, spaces, hyphens, apostrophes, periods
@@ -1801,7 +1850,7 @@ def test_cross_tenant_same_phone_allowed(tenant_a, tenant_b):
     # Tenant A creates customer with shared_phone
     res_a = client.post(
         "/api/v1/customers",
-        json={"name": "Tenant A Cust", "phone": shared_phone, "address": "123 Street, Pune"},
+        json={"name": "Tenant A Cust", "phone": shared_phone, "address": "123 Street, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_a.status_code == 201, res_a.text
@@ -1810,7 +1859,7 @@ def test_cross_tenant_same_phone_allowed(tenant_a, tenant_b):
     # Tenant B creates customer with same shared_phone -> must succeed
     res_b = client.post(
         "/api/v1/customers",
-        json={"name": "Tenant B Cust", "phone": shared_phone, "address": "456 Avenue, Mumbai"},
+        json={"name": "Tenant B Cust", "phone": shared_phone, "address": "456 Avenue, Mumbai", "credit_limit": 0.00},
         headers=headers_b,
     )
     assert res_b.status_code == 201, res_b.text
@@ -1830,6 +1879,7 @@ def test_cross_tenant_same_email_allowed(tenant_a, tenant_b):
             "phone": random_phone(),
             "email": shared_email,
             "address": "123 Street, Pune",
+            "credit_limit": 0.00,
         },
         headers=headers_a,
     )
@@ -1844,6 +1894,7 @@ def test_cross_tenant_same_email_allowed(tenant_a, tenant_b):
             "phone": random_phone(),
             "email": shared_email,
             "address": "456 Avenue, Mumbai",
+            "credit_limit": 0.00,
         },
         headers=headers_b,
     )
@@ -1857,7 +1908,7 @@ def test_same_tenant_duplicate_phone_rejected(tenant_a):
 
     res_1 = client.post(
         "/api/v1/customers",
-        json={"name": "Customer One", "phone": phone, "address": "123 Street, Pune"},
+        json={"name": "Customer One", "phone": phone, "address": "123 Street, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_1.status_code == 201, res_1.text
@@ -1865,7 +1916,7 @@ def test_same_tenant_duplicate_phone_rejected(tenant_a):
     # Second creation with identical phone in same tenant must return 409 Conflict
     res_2 = client.post(
         "/api/v1/customers",
-        json={"name": "Customer Two", "phone": phone, "address": "789 Road, Pune"},
+        json={"name": "Customer Two", "phone": phone, "address": "789 Road, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_2.status_code == 409
@@ -1878,7 +1929,7 @@ def test_same_tenant_duplicate_email_rejected(tenant_a):
 
     res_1 = client.post(
         "/api/v1/customers",
-        json={"name": "Customer One", "phone": random_phone(), "email": email, "address": "123 Street, Pune"},
+        json={"name": "Customer One", "phone": random_phone(), "email": email, "address": "123 Street, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_1.status_code == 201, res_1.text
@@ -1886,7 +1937,7 @@ def test_same_tenant_duplicate_email_rejected(tenant_a):
     # Second creation with identical email in same tenant must return 409 Conflict
     res_2 = client.post(
         "/api/v1/customers",
-        json={"name": "Customer Two", "phone": random_phone(), "email": email, "address": "789 Road, Pune"},
+        json={"name": "Customer Two", "phone": random_phone(), "email": email, "address": "789 Road, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_2.status_code == 409
@@ -1898,7 +1949,7 @@ def test_same_tenant_multiple_null_emails_allowed(tenant_a):
 
     res_1 = client.post(
         "/api/v1/customers",
-        json={"name": "Customer No Email One", "phone": random_phone(), "email": None, "address": "123 Street, Pune"},
+        json={"name": "Customer No Email One", "phone": random_phone(), "email": None, "address": "123 Street, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_1.status_code == 201, res_1.text
@@ -1906,7 +1957,7 @@ def test_same_tenant_multiple_null_emails_allowed(tenant_a):
 
     res_2 = client.post(
         "/api/v1/customers",
-        json={"name": "Customer No Email Two", "phone": random_phone(), "email": None, "address": "456 Avenue, Pune"},
+        json={"name": "Customer No Email Two", "phone": random_phone(), "email": None, "address": "456 Avenue, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_2.status_code == 201, res_2.text
@@ -1922,7 +1973,7 @@ def test_cross_tenant_update_same_phone_and_email_allowed(tenant_a, tenant_b):
     # Tenant A creates customer with shared_phone and shared_email
     res_a = client.post(
         "/api/v1/customers",
-        json={"name": "Customer Alpha", "phone": shared_phone, "email": shared_email, "address": "123 Street, Pune"},
+        json={"name": "Customer Alpha", "phone": shared_phone, "email": shared_email, "address": "123 Street, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_a.status_code == 201, res_a.text
@@ -1930,7 +1981,7 @@ def test_cross_tenant_update_same_phone_and_email_allowed(tenant_a, tenant_b):
     # Tenant B creates customer with distinct phone and email
     res_b = client.post(
         "/api/v1/customers",
-        json={"name": "Customer Beta", "phone": random_phone(), "email": f"b_{uuid.uuid4().hex[:8]}@example.com", "address": "456 Avenue, Pune"},
+        json={"name": "Customer Beta", "phone": random_phone(), "email": f"b_{uuid.uuid4().hex[:8]}@example.com", "address": "456 Avenue, Pune", "credit_limit": 0.00},
         headers=headers_b,
     )
     assert res_b.status_code == 201, res_b.text
@@ -1954,7 +2005,7 @@ def test_cross_tenant_access_blocked_comprehensive(tenant_a, tenant_b):
     # Tenant A creates customer
     res_a = client.post(
         "/api/v1/customers",
-        json={"name": "Customer Alpha", "phone": random_phone(), "address": "123 Street, Pune"},
+        json={"name": "Customer Alpha", "phone": random_phone(), "address": "123 Street, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_a.status_code == 201
@@ -1996,7 +2047,7 @@ def test_customer_email_case_and_whitespace_normalization(tenant_a):
 
     res_1 = client.post(
         "/api/v1/customers",
-        json={"name": "Customer Normalization", "phone": random_phone(), "email": raw_email, "address": "123 Street, Pune"},
+        json={"name": "Customer Normalization", "phone": random_phone(), "email": raw_email, "address": "123 Street, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_1.status_code == 201, res_1.text
@@ -2005,7 +2056,7 @@ def test_customer_email_case_and_whitespace_normalization(tenant_a):
     # Email starting with or containing uppercase letters must fail with 422
     res_upper = client.post(
         "/api/v1/customers",
-        json={"name": "Customer Uppercase", "phone": random_phone(), "email": "User.Shopper@Example.COM", "address": "123 Street, Pune"},
+        json={"name": "Customer Uppercase", "phone": random_phone(), "email": "User.Shopper@Example.COM", "address": "123 Street, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_upper.status_code == 422
@@ -2014,7 +2065,7 @@ def test_customer_email_case_and_whitespace_normalization(tenant_a):
     # Attempting to register duplicate email in same tenant must fail with 409
     res_2 = client.post(
         "/api/v1/customers",
-        json={"name": "Customer Collide", "phone": random_phone(), "email": normalized_email, "address": "456 Street, Pune"},
+        json={"name": "Customer Collide", "phone": random_phone(), "email": normalized_email, "address": "456 Street, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_2.status_code == 409
@@ -2027,7 +2078,7 @@ def test_customer_phone_representation_regression(tenant_a):
 
     res_1 = client.post(
         "/api/v1/customers",
-        json={"name": "Customer Ten Digit", "phone": phone_10_digit, "address": "123 Street, Pune"},
+        json={"name": "Customer Ten Digit", "phone": phone_10_digit, "address": "123 Street, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_1.status_code == 201, res_1.text
@@ -2035,7 +2086,7 @@ def test_customer_phone_representation_regression(tenant_a):
 
     res_2 = client.post(
         "/api/v1/customers",
-        json={"name": "Customer Plus Ninety", "phone": phone_plus91, "address": "456 Avenue, Pune"},
+        json={"name": "Customer Plus Ninety", "phone": phone_plus91, "address": "456 Avenue, Pune", "credit_limit": 0.00},
         headers=headers_a,
     )
     assert res_2.status_code == 201, res_2.text
@@ -2052,11 +2103,91 @@ def test_create_customer_capital_email_rejected(tenant_a):
             "phone": random_phone(),
             "email": "Prasad.patil.alibag@gmail.com",
             "address": "Alibag, Raigad - 402201",
+            "credit_limit": 0.00,
         },
         headers=headers_a,
     )
     assert res.status_code == 422
     assert "lowercase" in res.text.lower()
+
+
+def test_create_customer_invalid_and_typo_email_rejected(tenant_a):
+    headers_a, _ = tenant_a
+
+    # Test the exact invalid email from user screenshot: chetanahire121@gmail.comm
+    invalid_emails = [
+        "chetanahire121@gmail.comm",    # .comm typo from user issue
+        "chetanahire121@gmail.con",     # .con typo
+        "chetanahire121@gmail.cmo",     # .cmo typo
+        "chetanahire121@gmail.coom",    # .coom typo
+        "chetanahire121@gmaill.com",    # domain spelling typo
+        "chetanahire121@yahoo.comm",    # .comm on yahoo
+        "chetanahire121@yahooo.com",    # yahooo typo
+        "user@store.comm",              # custom store with .comm
+        "user@store.inn",               # .inn typo
+        "user@store.orgg",              # .orgg typo
+        "user@store.nett",              # .nett typo
+        "user..name@store.com",         # consecutive dots in username
+        "user@store..com",              # consecutive dots in domain
+        "user@store",                   # missing TLD extension
+        "user@.com",                    # missing domain name
+        "user@",                        # missing domain completely
+        "@store.com",                   # missing username
+        "string",                       # placeholder string
+        "null",                         # placeholder null
+        "che tan@gmail.com",            # gap in username characters
+        "c h e t a n@gmail.com",        # multiple gaps in characters
+        "chetan @gmail.com",            # space before @
+        "chetan@ gmail.com",            # space after @
+        "chetan@g mail.com",            # gap in domain characters
+        "chetan@gmail. com",            # gap before TLD
+        "chetan@gmail .com",            # gap before dot
+    ]
+
+    for inv_email in invalid_emails:
+        res = client.post(
+            "/api/v1/customers",
+            json={
+                "name": "Chetan Ahire",
+                "phone": random_phone(),
+                "email": inv_email,
+                "address": "Kurandvad, Kolhapur, Maharashtra",
+                "credit_limit": 5000.00,
+            },
+            headers=headers_a,
+        )
+        assert res.status_code == 422, f"Expected 422 for invalid email '{inv_email}', got {res.status_code}: {res.text}"
+
+    # Verify that the correct valid email format is accepted
+    valid_res = client.post(
+        "/api/v1/customers",
+        json={
+            "name": "Chetan Ahire",
+            "phone": random_phone(),
+            "email": "chetanahire121@gmail.com",
+            "address": "Kurandvad, Kolhapur, Maharashtra",
+            "credit_limit": 5000.00,
+        },
+        headers=headers_a,
+    )
+    assert valid_res.status_code == 201, f"Expected 201 for valid email, got {valid_res.status_code}: {valid_res.text}"
+    assert valid_res.json()["email"] == "chetanahire121@gmail.com"
+
+    # Verify that email with leading/trailing space (from screenshot: " chetan@gmail.com")
+    # is cleanly trimmed and saved without spaces in database
+    res_leading_space = client.post(
+        "/api/v1/customers",
+        json={
+            "name": "Chetan Hire",
+            "phone": random_phone(),
+            "email": " chetan@gmail.com",
+            "address": "Kurandvad, Kolhapur, Maharashtra",
+            "credit_limit": 5000.00,
+        },
+        headers=headers_a,
+    )
+    assert res_leading_space.status_code == 201
+    assert res_leading_space.json()["email"] == "chetan@gmail.com"  # Cleanly trimmed, never " chetan@gmail.com"
 
 
 def test_create_customer_serial_and_dummy_phone_rejected(tenant_a):
@@ -2082,6 +2213,7 @@ def test_create_customer_serial_and_dummy_phone_rejected(tenant_a):
                 "phone": p,
                 "email": "ramesh.patil@example.com",
                 "address": "Pen City",
+                "credit_limit": 0.00,
             },
             headers=headers_a,
         )
@@ -2103,6 +2235,7 @@ def test_create_and_update_customer_invalid_boolean_rejected(tenant_a):
                 "email": f"vikas.{random.randint(1000, 9999)}@example.com",
                 "address": "Pimpri, Pune - 411017",
                 "whatsapp_opt_in": val,
+                "credit_limit": 0.00,
             },
             headers=headers_a,
         )
@@ -2118,6 +2251,7 @@ def test_create_and_update_customer_invalid_boolean_rejected(tenant_a):
                 "email": f"vikas.{random.randint(1000, 9999)}@example.com",
                 "address": "Pimpri, Pune - 411017",
                 "sms_opt_in": val,
+                "credit_limit": 0.00,
             },
             headers=headers_a,
         )
@@ -2134,6 +2268,7 @@ def test_create_and_update_customer_invalid_boolean_rejected(tenant_a):
             "address": "Pimpri, Pune - 411017",
             "whatsapp_opt_in": True,
             "sms_opt_in": False,
+            "credit_limit": 0.00,
         },
         headers=headers_a,
     )
@@ -2162,6 +2297,7 @@ def test_create_customer_valid_booleans_accepted(tenant_a):
             "address": "Kothrud, Pune - 411038",
             "whatsapp_opt_in": False,
             "sms_opt_in": True,
+            "credit_limit": 0.00,
         },
         headers=headers_a,
     )
@@ -2169,6 +2305,254 @@ def test_create_customer_valid_booleans_accepted(tenant_a):
     data = res.json()
     assert data["whatsapp_opt_in"] is False
     assert data["sms_opt_in"] is True
+
+
+def test_create_customer_credit_limit_validation(tenant_a):
+    headers_a, _ = tenant_a
+
+    base_payload = {
+        "name": "Credit Test Customer",
+        "phone": random_phone(),
+        "address": "Baner, Pune",
+    }
+
+    # 1. Valid credit limits: 0, 0.00, 5000, "10000.50"
+    for valid_cl in [0, 0.00, "0", "0.00", 5000, "5000.00", 10000.50]:
+        res = client.post(
+            "/api/v1/customers",
+            json={**base_payload, "phone": random_phone(), "credit_limit": valid_cl},
+            headers=headers_a,
+        )
+        assert res.status_code == 201, f"Expected 201 for valid credit_limit '{valid_cl}', got {res.status_code}: {res.text}"
+        data = res.json()
+        assert float(data["credit_limit"]) == float(valid_cl)
+
+    # 2. Missing credit_limit (omitted) rejected with 422
+    missing_req = {**base_payload, "phone": random_phone()}
+    missing_res = client.post("/api/v1/customers", json=missing_req, headers=headers_a)
+    assert missing_res.status_code == 422, f"Expected 422 for missing credit_limit, got {missing_res.status_code}"
+    assert "credit_limit" in missing_res.text
+
+    # 3. Invalid random inputs rejected with 422
+    invalid_credit_limits = [
+        None,
+        "",
+        "   ",
+        "null",
+        "string",
+        "none",
+        "undefined",
+        "test",
+        "dummy",
+        "sample",
+        "placeholder",
+        "nausomd",
+        "n/a",
+        "na",
+        "@@#$%",
+        "!@#$",
+        "ppppp",
+        "-----",
+        "[[[]]]",
+        '>?"{P:><L:"{:.',
+        "12233abc",
+        "HTDFFGHGKGKHK",
+        True,
+        False,
+        -1,
+        -500.00,
+        "-100",
+        10000000,
+    ]
+
+    for bad_cl in invalid_credit_limits:
+        bad_req = {**base_payload, "phone": random_phone(), "credit_limit": bad_cl}
+        bad_res = client.post("/api/v1/customers", json=bad_req, headers=headers_a)
+        assert bad_res.status_code == 422, f"Expected 422 for invalid credit_limit '{bad_cl}', got {bad_res.status_code}: {bad_res.text}"
+
+
+def test_create_customer_outstanding_balance_read_only_and_validation(tenant_a):
+    headers_a, _ = tenant_a
+
+    base_payload = {
+        "name": "Balance Test Customer",
+        "phone": random_phone(),
+        "address": "Aundh, Pune",
+        "credit_limit": 5000.00,
+    }
+
+    # 1. When outstanding_balance is omitted, system directly records 0.00
+    res_omitted = client.post(
+        "/api/v1/customers",
+        json={**base_payload, "phone": random_phone()},
+        headers=headers_a,
+    )
+    assert res_omitted.status_code == 201, res_omitted.text
+    data_omitted = res_omitted.json()
+    assert float(data_omitted["outstanding_balance"]) == 0.0
+
+    # 2. When outstanding_balance is explicitly passed as null, system records 0.00
+    res_null = client.post(
+        "/api/v1/customers",
+        json={**base_payload, "phone": random_phone(), "outstanding_balance": None},
+        headers=headers_a,
+    )
+    assert res_null.status_code == 201, res_null.text
+    data_null = res_null.json()
+    assert float(data_null["outstanding_balance"]) == 0.0
+
+    # 3. When outstanding_balance is explicitly passed as 0 or 0.00, system records 0.00
+    res_zero = client.post(
+        "/api/v1/customers",
+        json={**base_payload, "phone": random_phone(), "outstanding_balance": 0.00},
+        headers=headers_a,
+    )
+    assert res_zero.status_code == 201, res_zero.text
+    assert float(res_zero.json()["outstanding_balance"]) == 0.0
+
+    # 4. Invalid random inputs for outstanding_balance rejected with 422
+    invalid_balances = [
+        "",
+        "   ",
+        "string",
+        "null",
+        "none",
+        "undefined",
+        "test",
+        "dummy",
+        "sample",
+        "placeholder",
+        "nausomd",
+        "n/a",
+        "na",
+        "@@#$%",
+        "!@#$",
+        "ppppp",
+        "-----",
+        "[[[]]]",
+        '>?"{P:><L:"{:.',
+        "12233abc",
+        "HTDFFGHGKGKHK",
+        True,
+        False,
+        -1,
+        -500.00,
+        "-100",
+        10000000,
+    ]
+
+    for bad_bal in invalid_balances:
+        bad_req = {**base_payload, "phone": random_phone(), "outstanding_balance": bad_bal}
+        bad_res = client.post("/api/v1/customers", json=bad_req, headers=headers_a)
+        assert bad_res.status_code == 422, f"Expected 422 for bad outstanding_balance '{bad_bal}', got {bad_res.status_code}: {bad_res.text}"
+
+
+def test_customer_address_district_state_mismatch_blocked(tenant_a):
+    headers_a, _ = tenant_a
+    base_payload = {
+        "name": "Chetan Hire",
+        "email": random_email("chetan"),
+        "birthday": "1998-05-15",
+        "credit_limit": 5000.00,
+        "whatsapp_opt_in": True,
+        "sms_opt_in": True,
+    }
+
+    # 1. User screenshot exact case: Jaisalmer (Rajasthan district) + Maharashtra + GSTIN 27 (Maharashtra)
+    resp_user = client.post(
+        "/api/v1/customers",
+        json={
+            **base_payload,
+            "phone": random_phone(),
+            "address": "Kurandvad, jaisalmer, Maharashtra",
+            "gstin": "27ABCDE1234F3Z8",
+        },
+        headers=headers_a,
+    )
+    assert resp_user.status_code == 422, f"Expected 422, got {resp_user.status_code}: {resp_user.text}"
+    detail_str = str(resp_user.json())
+    assert "District/City 'Jaisalmer' belongs to Rajasthan, but state is specified as 'Maharashtra'" in detail_str
+
+    # 2. District vs State mismatch without GSTIN (e.g. Pune, Rajasthan)
+    resp_pune_raj = client.post(
+        "/api/v1/customers",
+        json={
+            **base_payload,
+            "phone": random_phone(),
+            "address": "123 MG Road, Pune, Rajasthan",
+        },
+        headers=headers_a,
+    )
+    assert resp_pune_raj.status_code == 422, f"Expected 422, got {resp_pune_raj.status_code}: {resp_pune_raj.text}"
+    assert "District/City 'Pune' belongs to Maharashtra, but state is specified as 'Rajasthan'" in str(resp_pune_raj.json())
+
+    # 3. GSTIN state mismatch: Address is Rajasthan (Jaisalmer), but GSTIN is 27 (Maharashtra)
+    resp_gstin_mismatch = client.post(
+        "/api/v1/customers",
+        json={
+            **base_payload,
+            "phone": random_phone(),
+            "address": "Shop 10, Jaisalmer, Rajasthan",
+            "gstin": "27ABCDE1234F3Z8",
+        },
+        headers=headers_a,
+    )
+    assert resp_gstin_mismatch.status_code == 422, f"Expected 422, got {resp_gstin_mismatch.status_code}: {resp_gstin_mismatch.text}"
+    assert "does not match GSTIN state 'Maharashtra'" in str(resp_gstin_mismatch.json())
+
+    # 4. Conflicting multiple states in address
+    resp_multi_state = client.post(
+        "/api/v1/customers",
+        json={
+            **base_payload,
+            "phone": random_phone(),
+            "address": "123 Main Road, Maharashtra, Gujarat",
+        },
+        headers=headers_a,
+    )
+    assert resp_multi_state.status_code == 422, f"Expected 422, got {resp_multi_state.status_code}: {resp_multi_state.text}"
+    assert "conflicting states" in str(resp_multi_state.json())
+
+    # 5. Valid consistent address: Kurandvad, Kolhapur, Maharashtra with GSTIN 27
+    resp_valid = client.post(
+        "/api/v1/customers",
+        json={
+            **base_payload,
+            "phone": random_phone(),
+            "address": "Kurandvad, Kolhapur, Maharashtra",
+            "gstin": "27ABCDE1234F3Z8",
+        },
+        headers=headers_a,
+    )
+    assert resp_valid.status_code == 201, f"Expected 201, got {resp_valid.status_code}: {resp_valid.text}"
+    created_cust = resp_valid.json()
+    assert created_cust["address"] == "Kurandvad, Kolhapur, Maharashtra"
+
+    # 6. Customer update with district-state mismatch rejected with 422
+    resp_update_bad = client.put(
+        f"/api/v1/customers/{created_cust['id']}",
+        json={"address": "Kurandvad, jaisalmer, Maharashtra"},
+        headers=headers_a,
+    )
+    assert resp_update_bad.status_code == 422, f"Expected 422, got {resp_update_bad.status_code}: {resp_update_bad.text}"
+    assert "District/City 'Jaisalmer' belongs to Rajasthan, but state is specified as 'Maharashtra'" in str(resp_update_bad.json())
+
+    # 7. Exact user reported case: Address is Kolhapur (Maharashtra), GSTIN is 29 (Karnataka)
+    resp_kolhapur_karnataka = client.post(
+        "/api/v1/customers",
+        json={
+            **base_payload,
+            "phone": random_phone(),
+            "address": "Kolhapur",
+            "gstin": "29ABCDE1634F3Z8",
+        },
+        headers=headers_a,
+    )
+    assert resp_kolhapur_karnataka.status_code == 422, f"Expected 422, got {resp_kolhapur_karnataka.status_code}: {resp_kolhapur_karnataka.text}"
+    assert "does not match GSTIN state 'Karnataka'" in str(resp_kolhapur_karnataka.json())
+
+
+
 
 
 

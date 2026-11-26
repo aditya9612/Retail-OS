@@ -697,7 +697,7 @@ def test_warehouse_address_112gg_blocked_and_warehouse_name_field(tenant_fixture
     assert alt_data["warehouse_name"] == "Platinum Logistics Hub"
 
     # 4. OpenAPI schema check: field 'name' has title 'Warehouse Name'
-    openapi_res = client.get("/openapi.json")
+    openapi_res = client.get(app.openapi_url or "/api/v1/openapi.json")
     assert openapi_res.status_code == 200
     openapi = openapi_res.json()
     wh_create_props = openapi["components"]["schemas"]["WarehouseCreate"]["properties"]
@@ -723,6 +723,42 @@ def test_warehouse_name_strict_validations(tenant_fixture):
         headers=headers,
     )
     assert res_spec.status_code == 422, res_spec.text
+
+    # 2b. Reject special characters ^ and & in warehouse name (User reported: 'HJGHNFBJKFGHNGJ^&JLKFD')
+    res_user = client.post(
+        "/api/v1/warehouses",
+        json={"warehouse_name": "HJGHNFBJKFGHNGJ^&JLKFD", "code": "WH-USER1"},
+        headers=headers,
+    )
+    assert res_user.status_code == 422, res_user.text
+    assert "special characters" in res_user.text.lower()
+
+    # 2c. Reject other special characters in warehouse name (;, #, &, @, etc.)
+    for bad_name in ["Warehouse #1", "Hub & Depot", "Main @ Depot", "Warehouse; unit"]:
+        res_bad = client.post(
+            "/api/v1/warehouses",
+            json={"warehouse_name": bad_name, "code": f"WH-{uuid.uuid4().hex[:4].upper()}"},
+            headers=headers,
+        )
+        assert res_bad.status_code == 422, f"Expected 422 for name '{bad_name}', got {res_bad.status_code}"
+        assert "special characters" in res_bad.text.lower()
+
+    # 2d. Reject special characters on PATCH /api/v1/warehouses/{id} (Update Warehouse)
+    create_res = client.post(
+        "/api/v1/warehouses",
+        json={"warehouse_name": "Central Hub Pune", "code": "WH-UPD-TEST"},
+        headers=headers,
+    )
+    assert create_res.status_code == 201, create_res.text
+    wh_id = create_res.json()["id"]
+
+    patch_res = client.patch(
+        f"/api/v1/warehouses/{wh_id}",
+        json={"warehouse_name": "HJGHNFBJKFGHNGJ^&JLKFD"},
+        headers=headers,
+    )
+    assert patch_res.status_code == 422, patch_res.text
+    assert "special characters" in patch_res.text.lower()
 
     # 3. Reject repeating characters (e.g. 'ppppp')
     res_rep = client.post(

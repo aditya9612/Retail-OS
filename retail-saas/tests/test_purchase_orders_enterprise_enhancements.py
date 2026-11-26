@@ -276,6 +276,22 @@ def test_po_update_draft_items_and_rejection_of_non_draft_updates(tenant_fixture
     assert patch_blocked.status_code == 409, f"Expected 409 Conflict, got {patch_blocked.status_code}: {patch_blocked.text}"
 
 
+def test_purchase_order_update_schema_has_no_root_tax_rate():
+    """Verify that tax_rate is removed from PurchaseOrderUpdate schema (not in request body of PATCH /purchase-orders/{id})."""
+    from app.schemas.purchase_order import PurchaseOrderUpdate
+    assert "tax_rate" not in PurchaseOrderUpdate.model_fields, "Root tax_rate should not exist in PurchaseOrderUpdate"
+
+    # Verify OpenAPI documentation
+    schema_res = client.get("/api/v1/openapi.json")
+    assert schema_res.status_code == 200
+    openapi = schema_res.json()
+    schemas = openapi.get("components", {}).get("schemas", {})
+    po_update_schema = schemas.get("PurchaseOrderUpdate", {})
+    assert "tax_rate" not in po_update_schema.get("properties", {}), (
+        "tax_rate must not be present in PurchaseOrderUpdate request body schema"
+    )
+
+
 def test_po_approval_cancellation_and_delete_protection(tenant_fixture):
     headers = tenant_fixture["headers"]
     store_id = tenant_fixture["store_id"]
@@ -586,20 +602,20 @@ def test_purchase_order_tax_rate_validation(tenant_fixture):
     assert create_resp.status_code == 201, create_resp.text
     po_id = create_resp.json()["id"]
 
-    # 2. PATCH with invalid tax rates (100, -5, 50, "abc") must be rejected with 422
+    # 2. PATCH with invalid item-level tax rates (100, -5, 50, 99.99) must be rejected with 422
     for bad_rate in [100, -5, 50, 99.99]:
         patch_resp = client.patch(
             f"/api/v1/purchase-orders/{po_id}",
-            json={"tax_rate": bad_rate},
+            json={"items": [{"product_id": p1, "quantity": 2, "unit_cost": 100.00, "tax_rate": bad_rate}]},
             headers=headers,
         )
         assert patch_resp.status_code == 422, f"Expected 422 for tax_rate={bad_rate}, got {patch_resp.status_code}: {patch_resp.text}"
-        assert "tax rate" in patch_resp.text.lower()
+        assert "tax" in patch_resp.text.lower()
 
-    # 3. PATCH with valid tax rate (18%) must succeed and update tax_amount (2 * 100 = 200 * 18% = 36.00)
+    # 3. PATCH with valid item-level tax rate (18%) must succeed and update tax_amount (2 * 100 = 200 * 18% = 36.00)
     patch_valid = client.patch(
         f"/api/v1/purchase-orders/{po_id}",
-        json={"tax_rate": 18.00},
+        json={"items": [{"product_id": p1, "quantity": 2, "unit_cost": 100.00, "tax_rate": 18.00}]},
         headers=headers,
     )
     assert patch_valid.status_code == 200, patch_valid.text

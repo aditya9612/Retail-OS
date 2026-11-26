@@ -3,7 +3,7 @@ from decimal import Decimal
 import re
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 
 DISALLOWED_DAMAGE_REASON_PLACEHOLDERS = {
@@ -27,6 +27,8 @@ DISALLOWED_DAMAGE_REASON_PLACEHOLDERS = {
     "default",
 }
 
+FORBIDDEN_GRN_TEXT_SYMBOLS = {';', '$', '{', '|', '>', '?', '%', '\\', '[', '^', '~', '}', ']', '<', '`'}
+
 
 def validate_damage_reason(value: str | None) -> str | None:
     if value is None:
@@ -38,6 +40,15 @@ def validate_damage_reason(value: str | None) -> str | None:
     v = value.strip()
     if not v:
         return None
+
+    if ";" in v:
+        raise ValueError("Damage reason cannot contain semicolon ';'")
+
+    if any(c in FORBIDDEN_GRN_TEXT_SYMBOLS for c in v):
+        raise ValueError("Damage reason contains invalid special characters")
+
+    if re.search(r"[-+@#*/=_]{2,}", v):
+        raise ValueError("Damage reason cannot contain consecutive repeating symbols")
 
     clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
     if v.lower() in DISALLOWED_DAMAGE_REASON_PLACEHOLDERS or clean_norm in DISALLOWED_DAMAGE_REASON_PLACEHOLDERS:
@@ -67,6 +78,12 @@ def validate_rejection_reason_strict(value: str | None) -> str:
     v = value.strip()
     if not v:
         raise ValueError("Rejection reason cannot be empty or whitespace")
+    if ";" in v:
+        raise ValueError("Rejection reason cannot contain semicolon ';'")
+    if any(c in FORBIDDEN_GRN_TEXT_SYMBOLS for c in v):
+        raise ValueError("Rejection reason contains invalid special characters")
+    if re.search(r"[-+@#*/=_]{2,}", v):
+        raise ValueError("Rejection reason cannot contain consecutive repeating symbols")
     clean_norm = re.sub(r"[^a-zA-Z0-9]", "", v.lower())
     if v.lower() in DISALLOWED_DAMAGE_REASON_PLACEHOLDERS or clean_norm in DISALLOWED_DAMAGE_REASON_PLACEHOLDERS:
         raise ValueError(f"Rejection reason cannot be generic placeholder '{value}'")
@@ -169,6 +186,10 @@ def validate_grn_transporter_name(v: Optional[str]) -> Optional[str]:
     cleaned = v.strip()
     if not cleaned:
         return None
+    if ";" in cleaned:
+        raise ValueError("Transporter name cannot contain semicolon ';'")
+    if any(c in FORBIDDEN_GRN_TEXT_SYMBOLS for c in cleaned):
+        raise ValueError("Transporter name contains invalid special characters")
     lower = cleaned.lower()
     if lower in DISALLOWED_TRANSPORTER_PLACEHOLDERS:
         raise ValueError(f"Transporter name cannot be generic placeholder '{cleaned}'")
@@ -277,6 +298,15 @@ def validate_grn_remarks(value: str | None) -> str | None:
     if not v:
         raise ValueError("Remarks cannot be empty")
 
+    if ";" in v:
+        raise ValueError("Remarks cannot contain semicolon ';'")
+
+    if any(c in FORBIDDEN_GRN_TEXT_SYMBOLS for c in v):
+        raise ValueError("Remarks contains invalid special characters")
+
+    if re.search(r"[-+@#*/=_]{2,}", v):
+        raise ValueError("Remarks cannot contain consecutive repeating symbols")
+
     if v.lower() in DISALLOWED_REMARKS_PLACEHOLDERS:
         raise ValueError("Please provide a valid remarks")
 
@@ -305,13 +335,25 @@ def validate_grn_expiry_date(v: Optional[date]) -> Optional[date]:
     return v
 
 
+def validate_grn_invoice_date(v: Optional[date]) -> Optional[date]:
+    if v is None:
+        return None
+    if v > date.today():
+        raise ValueError("Invoice date cannot be in the future")
+    return v
+
+
 class GRNItemCreate(BaseModel):
     product_id: int = Field(gt=0, description="Product ID must be positive")
     ordered_quantity: Optional[int] = Field(default=None, gt=0, description="Ordered quantity must be greater than 0")
     received_quantity: int = Field(default=1, ge=0, description="Received quantity")
     accepted_quantity: Optional[int] = Field(default=None, ge=0, description="Accepted quantity")
     rejected_quantity: Optional[int] = Field(default=0, ge=0, description="Rejected quantity")
-    damage_reason: Optional[str] = Field(default=None, max_length=255)
+    damage_reason: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        validation_alias=AliasChoices("damage_reason", "reason"),
+    )
     unit_cost: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"))
     batch_number: Optional[str] = Field(default=None, max_length=100)
     expiry_date: Optional[date] = None
@@ -344,6 +386,12 @@ class GRNItemCreate(BaseModel):
             raise ValueError(
                 f"Received quantity ({self.received_quantity}) cannot be greater than ordered quantity ({self.ordered_quantity})"
             )
+        rej_qty = self.rejected_quantity or 0
+        has_reason = bool(self.damage_reason and self.damage_reason.strip())
+        if rej_qty == 0 and has_reason:
+            raise ValueError("Damage reason cannot be provided when rejected quantity is 0")
+        if rej_qty > 0 and not has_reason:
+            raise ValueError("Damage reason is required when rejected quantity is greater than 0")
         return self
 
 
@@ -366,11 +414,20 @@ class GRNCreate(BaseModel):
         cleaned = v.strip()
         if not cleaned:
             return None
+        if ";" in cleaned:
+            raise ValueError("Invoice number cannot contain semicolon ';'")
+        if any(c in FORBIDDEN_GRN_TEXT_SYMBOLS for c in cleaned):
+            raise ValueError("Invoice number contains invalid special characters")
         if cleaned.lower() in {"string", "test", "null", "none", "undefined", "n/a", "na", "unknown", "placeholder", "dummy", "sample"}:
             raise ValueError(f"Invoice number cannot be generic placeholder '{cleaned}'")
         if len(cleaned) < 2 or len(cleaned) > 100:
             raise ValueError("Invoice number must be between 2 and 100 characters")
         return cleaned
+
+    @field_validator("invoice_date")
+    @classmethod
+    def validate_root_invoice_date(cls, v: Optional[date]) -> Optional[date]:
+        return validate_grn_invoice_date(v)
 
     @field_validator("vehicle_number")
     @classmethod
@@ -394,10 +451,115 @@ class GRNCreate(BaseModel):
         return self
 
 
+class GRNItemUpdate(BaseModel):
+    grn_item_id: int = Field(
+        ...,
+        gt=0,
+        validation_alias=AliasChoices("grn_item_id", "id", "item_id"),
+        description="GRN Item ID must be positive",
+    )
+    received_quantity: Optional[int] = Field(default=None, ge=0, description="Received quantity")
+    accepted_quantity: Optional[int] = Field(default=None, ge=0, description="Accepted quantity")
+    rejected_quantity: Optional[int] = Field(default=None, ge=0, description="Rejected quantity")
+    damage_reason: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        validation_alias=AliasChoices("damage_reason", "reason"),
+    )
+    unit_cost: Optional[Decimal] = Field(default=None, ge=Decimal("0.00"))
+    batch_number: Optional[str] = Field(default=None, max_length=100)
+    expiry_date: Optional[date] = None
+    remarks: Optional[str] = Field(default=None, max_length=500)
+
+    @property
+    def id(self) -> int:
+        return self.grn_item_id
+
+    @field_validator("batch_number")
+    @classmethod
+    def validate_item_batch_number(cls, v: Optional[str]) -> Optional[str]:
+        return validate_grn_batch_number(v)
+
+    @field_validator("damage_reason")
+    @classmethod
+    def validate_item_damage_reason(cls, v: str | None) -> str | None:
+        return validate_damage_reason(v)
+
+    @field_validator("remarks")
+    @classmethod
+    def validate_item_remarks(cls, v: str | None) -> str | None:
+        return validate_grn_remarks(v)
+
+    @field_validator("expiry_date")
+    @classmethod
+    def validate_item_expiry_date(cls, v: Optional[date]) -> Optional[date]:
+        return validate_grn_expiry_date(v)
+
+    @model_validator(mode="after")
+    def validate_rejected_and_reason(self) -> "GRNItemUpdate":
+        if self.rejected_quantity is not None:
+            rej_qty = self.rejected_quantity
+            has_reason = bool(self.damage_reason and self.damage_reason.strip())
+            if rej_qty == 0 and has_reason:
+                raise ValueError("Damage reason cannot be provided when rejected quantity is 0")
+            if rej_qty > 0 and not has_reason:
+                raise ValueError("Damage reason is required when rejected quantity is greater than 0")
+        return self
+
+
+class GRNUpdate(BaseModel):
+    invoice_number: Optional[str] = Field(default=None, max_length=100)
+    invoice_date: Optional[date] = None
+    vehicle_number: Optional[str] = Field(default=None, max_length=50)
+    transporter_name: Optional[str] = Field(default=None, max_length=100)
+    warehouse_id: Optional[int] = Field(default=None, gt=0, description="Warehouse ID")
+    store_id: Optional[int] = Field(default=None, gt=0, description="Store ID")
+    remarks: Optional[str] = Field(default=None, max_length=1000)
+    items: Optional[list[GRNItemUpdate]] = Field(default=None)
+
+    @field_validator("invoice_number")
+    @classmethod
+    def validate_root_invoice_number(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            return None
+        if ";" in cleaned:
+            raise ValueError("Invoice number cannot contain semicolon ';'")
+        if any(c in FORBIDDEN_GRN_TEXT_SYMBOLS for c in cleaned):
+            raise ValueError("Invoice number contains invalid special characters")
+        if cleaned.lower() in {"string", "test", "null", "none", "undefined", "n/a", "na", "unknown", "placeholder", "dummy", "sample"}:
+            raise ValueError(f"Invoice number cannot be generic placeholder '{cleaned}'")
+        if len(cleaned) < 2 or len(cleaned) > 100:
+            raise ValueError("Invoice number must be between 2 and 100 characters")
+        return cleaned
+
+    @field_validator("invoice_date")
+    @classmethod
+    def validate_root_invoice_date(cls, v: Optional[date]) -> Optional[date]:
+        return validate_grn_invoice_date(v)
+
+    @field_validator("vehicle_number")
+    @classmethod
+    def validate_root_vehicle_number(cls, v: Optional[str]) -> Optional[str]:
+        return validate_grn_vehicle_number(v)
+
+    @field_validator("transporter_name")
+    @classmethod
+    def validate_root_transporter_name(cls, v: Optional[str]) -> Optional[str]:
+        return validate_grn_transporter_name(v)
+
+    @field_validator("remarks")
+    @classmethod
+    def validate_root_remarks(cls, v: str | None) -> str | None:
+        return validate_grn_remarks(v)
+
+
 class GRNItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    grn_item_id: int = Field(validation_alias=AliasChoices("grn_item_id", "id"))
     product_id: int
     product_name: Optional[str] = None
     product_sku: Optional[str] = None
@@ -405,22 +567,26 @@ class GRNItemResponse(BaseModel):
     received_quantity: int
     accepted_quantity: Optional[int] = None
     rejected_quantity: Optional[int] = 0
-    reason: Optional[str] = None
+    damage_reason: Optional[str] = None
     batch_number: Optional[str] = None
     expiry_date: Optional[date] = None
     unit_cost: Optional[Decimal] = None
     remarks: Optional[str] = None
 
     @property
-    def damage_reason(self) -> Optional[str]:
-        return self.reason
+    def id(self) -> int:
+        return self.grn_item_id
+
+    @property
+    def reason(self) -> Optional[str]:
+        return self.damage_reason
 
     @model_validator(mode="before")
     @classmethod
     def sync_item_reason_fields(cls, data: Any) -> Any:
         if isinstance(data, dict):
-            if "reason" not in data or data.get("reason") is None:
-                data["reason"] = data.get("damage_reason")
+            if "damage_reason" not in data or data.get("damage_reason") is None:
+                data["damage_reason"] = data.get("reason")
         return data
 
 
@@ -476,15 +642,35 @@ class GRNResponse(BaseModel):
                 data["reason"] = data.get("rejection_reason")
         return data
 
+    @model_serializer(mode="wrap")
+    def serialize_model(self, handler):
+        data = handler(self)
+        if isinstance(data, dict) and data.get("reason") is None:
+            data.pop("reason", None)
+        return data
+
 
 class GRNItemQCUpdate(BaseModel):
-    item_id: int = Field(gt=0, description="GRN item ID")
+    grn_item_id: int = Field(
+        ...,
+        gt=0,
+        validation_alias=AliasChoices("grn_item_id", "item_id", "id"),
+        description="GRN item ID (matches 'grn_item_id' in GET /api/v1/grn/{grn_id} response)",
+    )
     accepted_quantity: int = Field(ge=0, description="Quantity accepted into stock")
     rejected_quantity: int = Field(default=0, ge=0, description="Quantity rejected / damaged")
     damage_reason: Optional[str] = Field(default=None, max_length=255)
     batch_number: Optional[str] = Field(default=None, max_length=100)
     expiry_date: Optional[date] = None
     remarks: Optional[str] = Field(default=None, max_length=500)
+
+    @property
+    def item_id(self) -> int:
+        return self.grn_item_id
+
+    @property
+    def id(self) -> int:
+        return self.grn_item_id
 
     @field_validator("batch_number")
     @classmethod
@@ -519,13 +705,7 @@ class GRNItemQCUpdate(BaseModel):
 
 
 class GRNQualityCheckRequest(BaseModel):
-    items: list[GRNItemQCUpdate] = Field(..., min_length=1)
-    remarks: Optional[str] = Field(default=None, max_length=1000)
-
-    @field_validator("remarks")
-    @classmethod
-    def validate_qc_remarks(cls, v: str | None) -> str | None:
-        return validate_grn_remarks(v)
+    items: list[GRNItemQCUpdate] = Field(..., min_length=1, description="List of items for quality check")
 
 
 class GRNRejectRequest(BaseModel):

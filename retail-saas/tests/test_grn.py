@@ -193,6 +193,8 @@ def test_grn_empty_and_junk_remarks_blocked(grn_fixture):
         "\\\\",
         "||",
         "string",
+        "remarks; with semicolon",
+        "test; note",
     ]
     for junk in junk_remarks:
         payload = {
@@ -370,8 +372,12 @@ def test_grn_print_returns_printable_pdf(grn_fixture):
     assert create_resp.status_code == 201, create_resp.text
     grn_id = create_resp.json()["id"]
 
-    # 2. Call print API (default mode is download -> attachment)
-    print_resp = client.get(f"/api/v1/grn/{grn_id}/print", headers=headers)
+    # 2. Verify removed redundant print endpoint returns 404 Not Found
+    removed_print_resp = client.get(f"/api/v1/grn/{grn_id}/print", headers=headers)
+    assert removed_print_resp.status_code == 404
+
+    # 3. Call unified download-pdf API (default format=pdf, mode=download -> attachment)
+    print_resp = client.get(f"/api/v1/grn/{grn_id}/download-pdf", headers=headers)
     assert print_resp.status_code == 200, print_resp.text
     # Verify Content-Type is PDF, NOT JSON!
     assert "application/pdf" in print_resp.headers.get("content-type", "")
@@ -385,8 +391,13 @@ def test_grn_print_returns_printable_pdf(grn_fixture):
     assert print_resp.content.startswith(b"%PDF-")
     assert len(print_resp.content) > 500
 
-    # 3. Test mode=preview (inline)
-    preview_resp = client.get(f"/api/v1/grn/{grn_id}/print?mode=preview", headers=headers)
+    # Verify Header and Footer elements are rendered in the generated PDF
+    assert b"GOODS RECEIVED NOTE" in print_resp.content
+    assert b"INWARD LOGISTICS" in print_resp.content
+    assert b"Page 1 of 1" in print_resp.content
+
+    # 4. Test mode=preview (inline)
+    preview_resp = client.get(f"/api/v1/grn/{grn_id}/download-pdf?mode=preview", headers=headers)
     assert preview_resp.status_code == 200
     assert "inline" in preview_resp.headers.get("content-disposition", "")
     assert preview_resp.content.startswith(b"%PDF-")
@@ -429,7 +440,20 @@ def test_grn_generic_damage_reason_blocked(grn_fixture):
     po_id = grn_fixture["po_id"]
     prod1_id = grn_fixture["prod1_id"]
 
-    bad_damage_reasons = ["string", "damage", "test", "null", "undefined", "n/a", "12345", "----", "aaaa", "defect"]
+    bad_damage_reasons = [
+        "string",
+        "damage",
+        "test",
+        "null",
+        "undefined",
+        "n/a",
+        "12345",
+        "----",
+        "aaaa",
+        "defect",
+        "lkjgojfdgjpfsihgoispodk;mn",
+        "damaged; broken box",
+    ]
     for bad in bad_damage_reasons:
         payload = {
             "purchase_order_id": po_id,
@@ -680,26 +704,9 @@ def test_grn_qc_invalid_remarks_blocked(grn_fixture):
     assert create_res.status_code == 201, create_res.text
     grn = create_res.json()
     grn_id = grn["id"]
-    item_id = grn["items"][0]["id"]
+    item_id = grn["items"][0].get("grn_item_id") or grn["items"][0].get("id")
 
-    # 1. Invalid remarks at root level (e.g. "string", "test", "dummy", "12345", etc.)
-    bad_remarks = ["string", "test", "dummy", "sample", "null", "12345", "aaaa", ""]
-    for bad in bad_remarks:
-        qc_payload = {
-            "items": [
-                {
-                    "item_id": item_id,
-                    "accepted_quantity": 5,
-                    "rejected_quantity": 0,
-                }
-            ],
-            "remarks": bad,
-        }
-        res = client.post(f"/api/v1/grn/{grn_id}/quality-check", json=qc_payload, headers=headers)
-        assert res.status_code == 422, f"Expected 422 for bad root remarks '{bad}', got {res.status_code}: {res.text}"
-        assert "remarks" in res.text.lower()
-
-    # 2. Invalid remarks at item level
+    # 1. Invalid remarks at item level
     for bad in ["string", "test", "dummy", "12345"]:
         qc_payload = {
             "items": [
@@ -710,13 +717,12 @@ def test_grn_qc_invalid_remarks_blocked(grn_fixture):
                     "remarks": bad,
                 }
             ],
-            "remarks": "Valid inspection summary notes",
         }
         res = client.post(f"/api/v1/grn/{grn_id}/quality-check", json=qc_payload, headers=headers)
         assert res.status_code == 422, f"Expected 422 for bad item remarks '{bad}', got {res.status_code}: {res.text}"
         assert "remarks" in res.text.lower()
 
-    # 3. Valid quality check request succeeds
+    # 2. Valid quality check request succeeds without overloading root remarks
     good_qc = {
         "items": [
             {
@@ -728,12 +734,13 @@ def test_grn_qc_invalid_remarks_blocked(grn_fixture):
                 "remarks": "Item passed physical inspection with one seal damaged",
             }
         ],
-        "remarks": "Completed full quality inspection successfully",
     }
     good_res = client.post(f"/api/v1/grn/{grn_id}/quality-check", json=good_qc, headers=headers)
     assert good_res.status_code == 200, good_res.text
     qc_data = good_res.json()
-    assert "Completed full quality inspection successfully" in qc_data["remarks"]
+    # Preserves clean original GRN remarks, does not pollute with \nQC:
+    assert qc_data["remarks"] == grn["remarks"]
+    assert qc_data["items"][0]["remarks"] == "Item passed physical inspection with one seal damaged"
 
 
 def test_grn_qc_invalid_damage_reason_blocked(grn_fixture):
@@ -763,10 +770,10 @@ def test_grn_qc_invalid_damage_reason_blocked(grn_fixture):
     assert create_res.status_code == 201, create_res.text
     grn = create_res.json()
     grn_id = grn["id"]
-    item_id = grn["items"][0]["id"]
+    item_id = grn["items"][0].get("grn_item_id") or grn["items"][0].get("id")
 
     # 1. Generic placeholder damage reasons must be blocked (422)
-    bad_damage_reasons = ["string", "test", "damage", "dummy", "sample", "null", "12345", "aaaa"]
+    bad_damage_reasons = ["string", "test", "damage", "dummy", "sample", "null", "12345", "aaaa", "lkjgojfdgjpfsihgoispodk;mn", "damaged; broken"]
     for bad in bad_damage_reasons:
         qc_payload = {
             "items": [
@@ -846,7 +853,7 @@ def test_grn_qc_expiry_date_equal_or_before_receiving_date_blocked(grn_fixture):
     assert create_res.status_code == 201, create_res.text
     grn = create_res.json()
     grn_id = grn["id"]
-    item_id = grn["items"][0]["id"]
+    item_id = grn["items"][0].get("grn_item_id") or grn["items"][0].get("id")
 
     today_str = date.today().isoformat()
     past_str = (date.today() - timedelta(days=1)).isoformat()
@@ -933,7 +940,7 @@ def test_grn_qc_invalid_batch_number_blocked(grn_fixture):
     assert create_res.status_code == 201, create_res.text
     grn = create_res.json()
     grn_id = grn["id"]
-    item_id = grn["items"][0]["id"]
+    item_id = grn["items"][0].get("grn_item_id") or grn["items"][0].get("id")
 
     # 1. Invalid placeholder batch numbers must be blocked (422)
     bad_batches = ["string", "test", "dummy", "null", "12345", "aaaa", "batch"]
@@ -996,7 +1003,7 @@ def test_grn_qc_received_quantity_without_acceptance_or_rejection_blocked(grn_fi
     assert create_res.status_code == 201, create_res.text
     grn = create_res.json()
     grn_id = grn["id"]
-    item_id = grn["items"][0]["id"]
+    item_id = grn["items"][0].get("grn_item_id") or grn["items"][0].get("id")
 
     # 1. accepted_quantity=0 and rejected_quantity=0 (neither accepted nor rejected) must be blocked (422)
     zero_payload = {
@@ -1075,11 +1082,19 @@ def test_grn_reject_reason_and_damage_reason_consistency(grn_fixture):
     }
     create_res = client.post("/api/v1/grn", json=create_payload, headers=headers)
     assert create_res.status_code == 201, create_res.text
-    grn_id = create_res.json()["id"]
+    created_grn = create_res.json()
+    # When creating a pending GRN, 'reason' is omitted (not showing "reason": null)
+    assert "reason" not in created_grn, f"Pending GRN should not include 'reason' in response, got: {created_grn.get('reason')}"
+    grn_id = created_grn["id"]
+
+    # When fetching a pending GRN, 'reason' is also omitted
+    get_res = client.get(f"/api/v1/grn/{grn_id}", headers=headers)
+    assert get_res.status_code == 200
+    assert "reason" not in get_res.json(), "Pending GRN in GET response should not include 'reason'"
 
     # 2. Rejection with invalid placeholder reason or empty reason must fail with 422
     for bad_r in ["string", "", "   "]:
-        bad_res = client.post(f"/api/v1/grn/{grn_id}/reject", json={"reason": bad_r}, headers=headers)
+        bad_res = client.post(f"/api/v1/grn/{grn_id}/reject", params={"reason": bad_r}, headers=headers)
         assert bad_res.status_code == 422, f"Expected 422 for bad reason '{bad_r}', got {bad_res.status_code}: {bad_res.text}"
 
     # 2b. Rejection via query parameter with invalid or valid reason
@@ -1088,8 +1103,7 @@ def test_grn_reject_reason_and_damage_reason_consistency(grn_fixture):
 
     # 3. Rejection with valid reason must return reason in BOTH root response and items
     expected_reason = "Shipment boxes completely waterlogged and damaged in transit"
-    good_payload = {"reason": expected_reason}
-    res = client.post(f"/api/v1/grn/{grn_id}/reject", json=good_payload, headers=headers)
+    res = client.post(f"/api/v1/grn/{grn_id}/reject", params={"reason": expected_reason}, headers=headers)
     assert res.status_code == 200, res.text
     data = res.json()
 
@@ -1103,17 +1117,39 @@ def test_grn_reject_reason_and_damage_reason_consistency(grn_fixture):
     assert item["received_quantity"] == 10
     assert item["accepted_quantity"] == 0
     assert item["rejected_quantity"] == 10
-    assert item["reason"] == expected_reason
+    assert (item.get("damage_reason") or item.get("reason")) == expected_reason
 
 
 def test_grn_reject_strict_reason_validations(grn_fixture):
     headers = grn_fixture["headers"]
-    grn_id = grn_fixture["grn_id"]
+    po_id = grn_fixture["po_id"]
+    prod1_id = grn_fixture["prod1_id"]
+
+    # Create fresh pending GRN
+    create_res = client.post(
+        "/api/v1/grn",
+        json={
+            "purchase_order_id": po_id,
+            "warehouse_id": grn_fixture["warehouse_id"],
+            "remarks": "GRN for reject strict validation test",
+            "items": [
+                {
+                    "product_id": prod1_id,
+                    "ordered_quantity": 5,
+                    "received_quantity": 5,
+                    "accepted_quantity": 5,
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert create_res.status_code == 201, create_res.text
+    grn_id = create_res.json()["id"]
 
     # 1. Reject purely numeric reason (e.g. '12344')
     res_num = client.post(
         f"/api/v1/grn/{grn_id}/reject",
-        json={"reason": "12344"},
+        params={"reason": "12344"},
         headers=headers,
     )
     assert res_num.status_code == 422, res_num.text
@@ -1121,7 +1157,7 @@ def test_grn_reject_strict_reason_validations(grn_fixture):
     # 2. Reject special characters (e.g. '@#$$')
     res_spec = client.post(
         f"/api/v1/grn/{grn_id}/reject",
-        json={"reason": "@#$$"},
+        params={"reason": "@#$$"},
         headers=headers,
     )
     assert res_spec.status_code == 422, res_spec.text
@@ -1129,7 +1165,7 @@ def test_grn_reject_strict_reason_validations(grn_fixture):
     # 3. Reject repeating characters (e.g. 'ppppp')
     res_rep = client.post(
         f"/api/v1/grn/{grn_id}/reject",
-        json={"reason": "ppppp"},
+        params={"reason": "ppppp"},
         headers=headers,
     )
     assert res_rep.status_code == 422, res_rep.text
@@ -1137,7 +1173,7 @@ def test_grn_reject_strict_reason_validations(grn_fixture):
     # 4. Reject empty string / whitespace
     res_emp = client.post(
         f"/api/v1/grn/{grn_id}/reject",
-        json={"reason": "   "},
+        params={"reason": "   "},
         headers=headers,
     )
     assert res_emp.status_code == 422, res_emp.text
@@ -1145,15 +1181,492 @@ def test_grn_reject_strict_reason_validations(grn_fixture):
     # 5. Reject placeholder string
     res_str = client.post(
         f"/api/v1/grn/{grn_id}/reject",
-        json={"reason": "string"},
+        params={"reason": "string"},
         headers=headers,
     )
     assert res_str.status_code == 422, res_str.text
 
-    # 6. Reject null
+    # 6. Reject null / empty param
     res_null = client.post(
         f"/api/v1/grn/{grn_id}/reject",
-        json={"reason": None},
+        params={"reason": ""},
         headers=headers,
     )
     assert res_null.status_code == 422, res_null.text
+
+    # 7. Reject semicolon in reason
+    res_semi = client.post(
+        f"/api/v1/grn/{grn_id}/reject",
+        params={"reason": "damaged; water leak"},
+        headers=headers,
+    )
+    assert res_semi.status_code == 422, res_semi.text
+    assert "semicolon" in res_semi.text.lower()
+
+    # 8. Exact user reported screenshot case: semicolon in query param (dlgjnlfdnlbkfd;bjhkj)
+    res_user_semi = client.post(
+        f"/api/v1/grn/{grn_id}/reject?reason=dlgjnlfdnlbkfd;bjhkj",
+        headers=headers,
+    )
+    assert res_user_semi.status_code == 422, res_user_semi.text
+    assert "semicolon" in res_user_semi.text.lower()
+
+    # 9. Completely omitted reason (neither query nor body provided) must fail with 422
+    res_none = client.post(
+        f"/api/v1/grn/{grn_id}/reject",
+        headers=headers,
+    )
+    assert res_none.status_code == 422, res_none.text
+    assert "reason" in res_none.text.lower()
+
+    # 10. Verify OpenAPI schema marks reason as required query param and NO requestBody exists
+    schema_res = client.get("/api/v1/openapi.json")
+    assert schema_res.status_code == 200
+    reject_schema = schema_res.json()["paths"]["/api/v1/grn/{grn_id}/reject"]["post"]
+    assert "requestBody" not in reject_schema, "Request body should be removed from Swagger/OpenAPI"
+    params = reject_schema["parameters"]
+    reason_param = next(p for p in params if p["name"] == "reason")
+    assert reason_param["required"] is True
+    assert reason_param["in"] == "query"
+    assert "Rejection reason is required" in reason_param["description"]
+
+
+def test_grn_semicolon_validation_blocked(grn_fixture):
+    """Bug fix: Create GRN API accepting semicolon in damage_reason, remarks, invoice_number, transporter_name"""
+    headers = grn_fixture["headers"]
+    po_id = grn_fixture["po_id"]
+    prod1_id = grn_fixture["prod1_id"]
+    wh_id = grn_fixture["warehouse_id"]
+
+    # 1. Semicolon in damage_reason (Exact payload reported by user: 'lkjgojfdgjpfsihgoispodk;mn')
+    res_dr = client.post(
+        "/api/v1/grn",
+        json={
+            "purchase_order_id": po_id,
+            "warehouse_id": wh_id,
+            "invoice_number": "INV-0025",
+            "invoice_date": "2026-11-23",
+            "vehicle_number": "MH12FT0022",
+            "transporter_name": "Express Logistics",
+            "remarks": "Valid remarks text",
+            "items": [
+                {
+                    "product_id": prod1_id,
+                    "ordered_quantity": 1,
+                    "received_quantity": 1,
+                    "accepted_quantity": 0,
+                    "rejected_quantity": 1,
+                    "damage_reason": "lkjgojfdgjpfsihgoispodk;mn",
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert res_dr.status_code == 422, res_dr.text
+    assert "semicolon" in res_dr.text.lower()
+
+    # 2. Semicolon in remarks
+    res_rem = client.post(
+        "/api/v1/grn",
+        json={
+            "purchase_order_id": po_id,
+            "warehouse_id": wh_id,
+            "remarks": "Inward remarks; with semicolon",
+            "items": [
+                {
+                    "product_id": prod1_id,
+                    "ordered_quantity": 1,
+                    "received_quantity": 1,
+                    "accepted_quantity": 1,
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert res_rem.status_code == 422, res_rem.text
+    assert "semicolon" in res_rem.text.lower()
+
+    # 3. Semicolon in invoice_number
+    res_inv = client.post(
+        "/api/v1/grn",
+        json={
+            "purchase_order_id": po_id,
+            "warehouse_id": wh_id,
+            "invoice_number": "INV;0025",
+            "items": [
+                {
+                    "product_id": prod1_id,
+                    "ordered_quantity": 1,
+                    "received_quantity": 1,
+                    "accepted_quantity": 1,
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert res_inv.status_code == 422, res_inv.text
+    assert "semicolon" in res_inv.text.lower()
+
+    # 4. Semicolon in transporter_name
+    res_tr = client.post(
+        "/api/v1/grn",
+        json={
+            "purchase_order_id": po_id,
+            "warehouse_id": wh_id,
+            "transporter_name": "Express; Logistics",
+            "items": [
+                {
+                    "product_id": prod1_id,
+                    "ordered_quantity": 1,
+                    "received_quantity": 1,
+                    "accepted_quantity": 1,
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert res_tr.status_code == 422, res_tr.text
+    assert "semicolon" in res_tr.text.lower()
+
+
+def test_grn_damage_reason_field_name_and_zero_rejection_validation(grn_fixture):
+    """Bug fix: Option A - damage_reason field matches request in response, reason removed from items, and proper validation applied."""
+    headers = grn_fixture["headers"]
+    po_id = grn_fixture["po_id"]
+    prod1_id = grn_fixture["prod1_id"]
+    wh_id = grn_fixture["warehouse_id"]
+
+    # 1. Block damage_reason when rejected_quantity is 0 (User reported issue)
+    payload_zero_rej = {
+        "purchase_order_id": po_id,
+        "warehouse_id": wh_id,
+        "items": [
+            {
+                "product_id": prod1_id,
+                "ordered_quantity": 1,
+                "received_quantity": 1,
+                "accepted_quantity": 1,
+                "rejected_quantity": 0,
+                "damage_reason": "Broken screen",
+            }
+        ],
+    }
+    res_zero = client.post("/api/v1/grn", json=payload_zero_rej, headers=headers)
+    assert res_zero.status_code == 422, res_zero.text
+    assert "cannot be provided when rejected quantity is 0" in res_zero.text
+
+    # 2. Block missing damage_reason when rejected_quantity > 0
+    payload_missing_reason = {
+        "purchase_order_id": po_id,
+        "warehouse_id": wh_id,
+        "items": [
+            {
+                "product_id": prod1_id,
+                "ordered_quantity": 2,
+                "received_quantity": 2,
+                "accepted_quantity": 1,
+                "rejected_quantity": 1,
+            }
+        ],
+    }
+    res_miss = client.post("/api/v1/grn", json=payload_missing_reason, headers=headers)
+    assert res_miss.status_code == 422, res_miss.text
+    assert "required when rejected quantity is greater than 0" in res_miss.text
+
+    # 3. Valid creation with damage: response items contains damage_reason and NOT reason (Option A)
+    valid_damage_payload = {
+        "purchase_order_id": po_id,
+        "warehouse_id": wh_id,
+        "items": [
+            {
+                "product_id": prod1_id,
+                "ordered_quantity": 3,
+                "received_quantity": 3,
+                "accepted_quantity": 2,
+                "rejected_quantity": 1,
+                "damage_reason": "Carton torn during transit",
+            }
+        ],
+    }
+    res_valid_dmg = client.post("/api/v1/grn", json=valid_damage_payload, headers=headers)
+    assert res_valid_dmg.status_code == 201, res_valid_dmg.text
+    item_dmg = res_valid_dmg.json()["items"][0]
+    assert item_dmg["damage_reason"] == "Carton torn during transit"
+    assert "reason" not in item_dmg
+
+    # 4. Valid creation without damage: response items contains damage_reason: None and NOT reason
+    valid_clean_payload = {
+        "warehouse_id": wh_id,
+        "invoice_number": f"INV-{uuid.uuid4().hex[:6].upper()}",
+        "items": [
+            {
+                "product_id": prod1_id,
+                "ordered_quantity": 2,
+                "received_quantity": 2,
+                "accepted_quantity": 2,
+                "rejected_quantity": 0,
+            }
+        ],
+    }
+    res_clean = client.post("/api/v1/grn", json=valid_clean_payload, headers=headers)
+    assert res_clean.status_code == 201, res_clean.text
+    item_clean = res_clean.json()["items"][0]
+    assert item_clean["damage_reason"] is None
+    assert "reason" not in item_clean
+
+
+def test_update_grn_success_and_validations(grn_fixture):
+    headers = grn_fixture["headers"]
+    wh_id = grn_fixture["warehouse_id"]
+    po_id = grn_fixture["po_id"]
+    prod1_id = grn_fixture["prod1_id"]
+    from datetime import date, timedelta
+
+    # 1. Create a pending GRN
+    inv_num_initial = f"INV-INIT-{uuid.uuid4().hex[:6].upper()}"
+    create_payload = {
+        "warehouse_id": wh_id,
+        "invoice_number": inv_num_initial,
+        "invoice_date": str(date.today() - timedelta(days=2)),
+        "vehicle_number": "MH-12-AB-1234",
+        "transporter_name": "Initial Logistics",
+        "remarks": "Initial pending shipment",
+        "items": [
+            {
+                "product_id": prod1_id,
+                "ordered_quantity": 10,
+                "received_quantity": 8,
+                "accepted_quantity": 8,
+                "rejected_quantity": 0,
+            }
+        ],
+    }
+    create_res = client.post("/api/v1/grn", json=create_payload, headers=headers)
+    assert create_res.status_code == 201, create_res.text
+    grn_data = create_res.json()
+    grn_id = grn_data["id"]
+    item_id = grn_data["items"][0].get("grn_item_id") or grn_data["items"][0].get("id")
+
+    # 2. Update GRN with valid header and item data
+    future_exp = str(date.today() + timedelta(days=365))
+    inv_num_updated = f"INV-UPD-{uuid.uuid4().hex[:6].upper()}"
+    update_payload = {
+        "invoice_number": inv_num_updated,
+        "invoice_date": str(date.today() - timedelta(days=1)),
+        "vehicle_number": "MH-14-XY-9876",
+        "transporter_name": "Updated Logistics Express",
+        "remarks": "Updated shipment details successfully",
+        "items": [
+            {
+                "id": item_id,
+                "received_quantity": 10,
+                "rejected_quantity": 2,
+                "damage_reason": "Box crushed in transit",
+                "batch_number": "BATCH-2026-UPD1",
+                "expiry_date": future_exp,
+                "unit_cost": 175.50,
+            }
+        ],
+    }
+    update_res = client.put(f"/api/v1/grn/{grn_id}", json=update_payload, headers=headers)
+    assert update_res.status_code == 200, update_res.text
+    updated_grn = update_res.json()
+
+    assert updated_grn["invoice_number"] == inv_num_updated
+    assert updated_grn["vehicle_number"] == "MH-14-XY-9876"
+    assert updated_grn["transporter_name"] == "Updated Logistics Express"
+    assert updated_grn["total_received_quantity"] == 10
+    assert updated_grn["total_accepted_quantity"] == 8
+    assert updated_grn["total_rejected_quantity"] == 2
+
+    updated_item = updated_grn["items"][0]
+    assert updated_item["received_quantity"] == 10
+    assert updated_item["accepted_quantity"] == 8
+    assert updated_item["rejected_quantity"] == 2
+    assert updated_item["damage_reason"] == "Box crushed in transit"
+    assert updated_item["batch_number"] == "BATCH-2026-UPD1"
+
+    # Verify GET /api/v1/grn/{grn_id} also reflects updated state
+    get_res = client.get(f"/api/v1/grn/{grn_id}", headers=headers)
+    assert get_res.status_code == 200
+    assert get_res.json()["invoice_number"] == inv_num_updated
+
+    # 3. Validation: Reject invoice_number containing semicolon ';'
+    res_bad_inv = client.put(f"/api/v1/grn/{grn_id}", json={"invoice_number": "INV-123;SELECT"}, headers=headers)
+    assert res_bad_inv.status_code == 422
+    assert "semicolon" in res_bad_inv.text
+
+    # 4. Validation: Reject invoice_number placeholder 'string'
+    res_str_inv = client.put(f"/api/v1/grn/{grn_id}", json={"invoice_number": "string"}, headers=headers)
+    assert res_str_inv.status_code == 422
+    assert "placeholder" in res_str_inv.text
+
+    # 5. Validation: Reject invoice_date in future
+    future_inv_date = str(date.today() + timedelta(days=5))
+    res_fut_inv = client.put(f"/api/v1/grn/{grn_id}", json={"invoice_date": future_inv_date}, headers=headers)
+    assert res_fut_inv.status_code == 422
+    assert "Invoice date cannot be in the future" in res_fut_inv.text
+
+    # 6. Validation: Reject invalid vehicle number
+    res_bad_veh = client.put(f"/api/v1/grn/{grn_id}", json={"vehicle_number": "12345"}, headers=headers)
+    assert res_bad_veh.status_code == 422
+
+    # 7. Validation: Reject transporter name with semicolon
+    res_bad_trans = client.put(f"/api/v1/grn/{grn_id}", json={"transporter_name": "Express;Logistics"}, headers=headers)
+    assert res_bad_trans.status_code == 422
+
+    # 8. Validation: Reject item expiry_date today or in the past
+    res_past_exp = client.put(
+        f"/api/v1/grn/{grn_id}",
+        json={
+            "items": [
+                {
+                    "id": item_id,
+                    "expiry_date": str(date.today()),
+                }
+            ]
+        },
+        headers=headers,
+    )
+    assert res_past_exp.status_code == 422
+    assert "must be in the future" in res_past_exp.text
+
+    # 9. Validation: Reject item rejected_quantity > 0 without damage_reason
+    res_missing_dmg = client.put(
+        f"/api/v1/grn/{grn_id}",
+        json={
+            "items": [
+                {
+                    "id": item_id,
+                    "rejected_quantity": 3,
+                    "damage_reason": None,
+                }
+            ]
+        },
+        headers=headers,
+    )
+    assert res_missing_dmg.status_code == 422
+    assert "Damage reason is required when rejected quantity is greater than 0" in res_missing_dmg.text
+
+    # 10. Validation: Reject item rejected_quantity == 0 with damage_reason
+    res_zero_dmg = client.put(
+        f"/api/v1/grn/{grn_id}",
+        json={
+            "items": [
+                {
+                    "id": item_id,
+                    "rejected_quantity": 0,
+                    "damage_reason": "Carton damaged during transit",
+                }
+            ]
+        },
+        headers=headers,
+    )
+    assert res_zero_dmg.status_code == 422
+    assert "Damage reason cannot be provided when rejected quantity is 0" in res_zero_dmg.text
+
+    # 11. Validation: Item not belonging to GRN returns 404
+    res_wrong_item = client.put(
+        f"/api/v1/grn/{grn_id}",
+        json={
+            "items": [
+                {
+                    "id": 999999,
+                    "received_quantity": 5,
+                }
+            ]
+        },
+        headers=headers,
+    )
+    assert res_wrong_item.status_code == 404
+
+    # 12. Business Rule: Cannot update a GRN that has been received
+    recv_res = client.post(f"/api/v1/grn/{grn_id}/receive", headers=headers)
+    assert recv_res.status_code == 200, recv_res.text
+
+    res_post_recv = client.put(
+        f"/api/v1/grn/{grn_id}",
+        json={"remarks": "Attempting update after receive"},
+        headers=headers,
+    )
+    assert res_post_recv.status_code == 409
+    assert "Cannot update a GRN that has already been received" in res_post_recv.text
+
+
+def test_grn_item_id_clarity_and_qc_mapping(grn_fixture):
+    headers = grn_fixture["headers"]
+    wh_id = grn_fixture["warehouse_id"]
+    prod1_id = grn_fixture["prod1_id"]
+
+    # 1. Create a GRN
+    create_payload = {
+        "warehouse_id": wh_id,
+        "invoice_number": f"INV-QC-{uuid.uuid4().hex[:6].upper()}",
+        "items": [
+            {
+                "product_id": prod1_id,
+                "ordered_quantity": 5,
+                "received_quantity": 5,
+                "accepted_quantity": 5,
+                "rejected_quantity": 0,
+            }
+        ],
+    }
+    create_res = client.post("/api/v1/grn", json=create_payload, headers=headers)
+    assert create_res.status_code == 201, create_res.text
+    grn_body = create_res.json()
+    item_obj = grn_body["items"][0]
+
+    # Verify that items has 'grn_item_id' and does NOT have 'id' (no duplicate id)
+    assert "grn_item_id" in item_obj
+    assert "id" not in item_obj
+    grn_item_id = item_obj["grn_item_id"]
+
+    # 2. Quality Check with explicit 'grn_item_id'
+    qc_payload_1 = {
+        "items": [
+            {
+                "grn_item_id": grn_item_id,
+                "accepted_quantity": 4,
+                "rejected_quantity": 1,
+                "damage_reason": "Damaged packing box during transit",
+            }
+        ]
+    }
+    qc_res_1 = client.post(f"/api/v1/grn/{grn_body['id']}/quality-check", json=qc_payload_1, headers=headers)
+    assert qc_res_1.status_code == 200, qc_res_1.text
+    res_item = qc_res_1.json()["items"][0]
+    assert res_item["grn_item_id"] == grn_item_id
+    assert res_item["accepted_quantity"] == 4
+    assert res_item["rejected_quantity"] == 1
+
+    # 3. Quality Check with legacy 'item_id' (alias compatibility)
+    qc_payload_2 = {
+        "items": [
+            {
+                "item_id": grn_item_id,
+                "accepted_quantity": 5,
+                "rejected_quantity": 0,
+            }
+        ]
+    }
+    qc_res_2 = client.post(f"/api/v1/grn/{grn_body['id']}/quality-check", json=qc_payload_2, headers=headers)
+    assert qc_res_2.status_code == 200, qc_res_2.text
+    assert qc_res_2.json()["items"][0]["accepted_quantity"] == 5
+
+    # 4. Quality Check with product_id fallback
+    qc_payload_3 = {
+        "items": [
+            {
+                "grn_item_id": prod1_id,
+                "accepted_quantity": 3,
+                "rejected_quantity": 2,
+                "damage_reason": "Scratch marks on outer casing",
+            }
+        ]
+    }
+    qc_res_3 = client.post(f"/api/v1/grn/{grn_body['id']}/quality-check", json=qc_payload_3, headers=headers)
+    assert qc_res_3.status_code == 200, qc_res_3.text
+    assert qc_res_3.json()["items"][0]["accepted_quantity"] == 3
+
+

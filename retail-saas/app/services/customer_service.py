@@ -235,7 +235,10 @@ class CustomerService:
                     self.db.commit()
         except Exception:
             # Non-blocking: ensure customer creation succeeds even if user linking encounters soft warning
-            pass
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
 
         return customer
 
@@ -318,6 +321,16 @@ class CustomerService:
             )
             if existing_gstin:
                 raise ConflictException("GSTIN already exists")
+
+        # Validate geo-consistency between updated/existing address and GSTIN
+        effective_address = dump_data.get("address", customer.address)
+        effective_gstin = dump_data.get("gstin", customer.gstin)
+        if effective_address and effective_gstin:
+            from app.schemas.customer import validate_address_geo_consistency
+            try:
+                validate_address_geo_consistency(effective_address, effective_gstin)
+            except ValueError as ve:
+                raise AppException(str(ve), status_code=422)
 
         for key, value in dump_data.items():
             setattr(customer, key, value)

@@ -476,6 +476,130 @@ def test_gst_store_filter(reports_fixture):
     data = resp.json()
     assert data["invoice_count"] == 1
     assert Decimal(str(data["total_tax"])) == Decimal("48.00")
+    assert data["data_found"] is True
+    assert "GST sales register report retrieved successfully" in data["message"]
+
+
+def test_gst_reports_date_format_validation_error_message(reports_fixture):
+    headers = reports_fixture["owner_headers"]
+
+    # 1. Test GET /api/v1/reports/gst/sales with invalid DD-MM-YYYY format from screenshot
+    resp_sales = client.get(
+        "/api/v1/reports/gst/sales?start_date=20-11-2026&end_date=24-12-2026",
+        headers=headers,
+    )
+    assert resp_sales.status_code == 422
+    sales_err = resp_sales.json()
+    assert "YYYY-MM-DD" in sales_err["message"]
+    assert "start_date" in sales_err["message"]
+
+    # 2. Test GET /api/v1/reports/gst/summary with invalid DD-MM-YYYY format from screenshot
+    resp_summary = client.get(
+        "/api/v1/reports/gst/summary?start_date=20-11-2026&end_date=24-12-2026",
+        headers=headers,
+    )
+    assert resp_summary.status_code == 422
+    summary_err = resp_summary.json()
+    assert "YYYY-MM-DD" in summary_err["message"]
+    assert "start_date" in summary_err["message"]
+
+
+def test_gst_reports_empty_data_not_found_message(reports_fixture):
+    headers = reports_fixture["owner_headers"]
+    # Query a future date range where no invoices exist
+    future_start = "2099-01-01"
+    future_end = "2099-01-31"
+
+    # 1. GST Sales Report empty data
+    resp_sales = client.get(
+        f"/api/v1/reports/gst/sales?start_date={future_start}&end_date={future_end}",
+        headers=headers,
+    )
+    assert resp_sales.status_code == 200
+    sales_data = resp_sales.json()
+    assert sales_data["invoice_count"] == 0
+    assert sales_data["data_found"] is False
+    assert "Data not found" in sales_data["message"]
+    assert "No GST sales records found" in sales_data["message"]
+
+    # 2. GST Summary Report empty data
+    resp_summary = client.get(
+        f"/api/v1/reports/gst/summary?start_date={future_start}&end_date={future_end}",
+        headers=headers,
+    )
+    assert resp_summary.status_code == 200
+    summary_data = resp_summary.json()
+    assert summary_data["invoice_count"] == 0
+    assert summary_data["data_found"] is False
+    assert "Data not found" in summary_data["message"]
+    assert "No GST tax summary records found" in summary_data["message"]
+
+    # 3. GST Sales Report (Legacy GET /api/v1/reports/gst) empty data
+    resp_legacy = client.get(
+        f"/api/v1/reports/gst?start_date={future_start}&end_date={future_end}",
+        headers=headers,
+    )
+    assert resp_legacy.status_code == 200
+    legacy_data = resp_legacy.json()
+    assert legacy_data["invoice_count"] == 0
+    assert legacy_data["data_found"] is False
+    assert "Data not found" in legacy_data["message"]
+    assert "No GST sales records found" in legacy_data["message"]
+
+
+def test_gst_report_async_returns_task_id_and_submitted_dates(reports_fixture, monkeypatch):
+    headers = reports_fixture["owner_headers"]
+
+    class MockTask:
+        id = "mock-task-uuid-12345"
+
+    from app.tasks import report_tasks
+    monkeypatch.setattr(report_tasks.generate_gst_report_task, "delay", lambda *args, **kwargs: MockTask())
+
+    # 1. Valid async GST report request returns task_id and submitted start_date, end_date
+    payload = {
+        "start_date": "2026-11-25",
+        "end_date": "2026-11-29",
+    }
+    resp = client.post("/api/v1/reports/gst/async", json=payload, headers=headers)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["task_id"] == "mock-task-uuid-12345"
+    assert data["start_date"] == "2026-11-25"
+    assert data["end_date"] == "2026-11-29"
+    assert data["status"] == "queued"
+    assert data["task_status"] == "queued"
+    assert "queued successfully" in data["message"]
+
+    # 2. Date order validation: start_date > end_date returns 400
+    invalid_payload = {
+        "start_date": "2026-11-30",
+        "end_date": "2026-11-25",
+    }
+    resp_inv = client.post("/api/v1/reports/gst/async", json=invalid_payload, headers=headers)
+    assert resp_inv.status_code == 400
+    detail = resp_inv.json()["detail"]
+    assert "start_date must be before or equal to end_date" in (detail if isinstance(detail, str) else detail.get("message", ""))
+
+    # 3. Valid async GST report request with store_id
+    store1_id = reports_fixture["store1"].id
+    payload_with_store = {
+        "start_date": "2026-11-25",
+        "end_date": "2026-11-29",
+        "store_id": store1_id,
+    }
+    resp_store = client.post("/api/v1/reports/gst/async", json=payload_with_store, headers=headers)
+    assert resp_store.status_code == 200, resp_store.text
+    assert resp_store.json()["store_id"] == store1_id
+
+    # 4. Invalid store_id returns 404
+    payload_bad_store = {
+        "start_date": "2026-11-25",
+        "end_date": "2026-11-29",
+        "store_id": 999999,
+    }
+    resp_bad = client.post("/api/v1/reports/gst/async", json=payload_bad_store, headers=headers)
+    assert resp_bad.status_code == 404
 
 
 # ============================================================================

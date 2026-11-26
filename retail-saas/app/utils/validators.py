@@ -1053,10 +1053,13 @@ def validate_tracking_url(
 
 COMMON_TLD_TYPOS: dict[str, str] = {
     "comm": "com",
+    "commm": "com",
     "coom": "com",
+    "coomm": "com",
     "con": "com",
     "cpm": "com",
     "cmo": "com",
+    "ccom": "com",
     "ocm": "com",
     "xom": "com",
     "som": "com",
@@ -1065,10 +1068,14 @@ COMMON_TLD_TYPOS: dict[str, str] = {
     "bom": "com",
     "comn": "com",
     "inn": "in",
+    "iin": "in",
+    "iinn": "in",
     "ikn": "in",
     "orgg": "org",
+    "orrg": "org",
     "ogr": "org",
     "nett": "net",
+    "neett": "net",
     "nte": "net",
     "eduu": "edu",
     "eud": "edu",
@@ -1077,8 +1084,10 @@ COMMON_TLD_TYPOS: dict[str, str] = {
 
 COMMON_DOMAIN_TYPOS: dict[str, str] = {
     "gmail.comm": "gmail.com",
+    "gmail.commm": "gmail.com",
     "gmail.con": "gmail.com",
     "gmail.coom": "gmail.com",
+    "gmail.coomm": "gmail.com",
     "gmail.cm": "gmail.com",
     "gmail.cpm": "gmail.com",
     "gmail.om": "gmail.com",
@@ -1088,7 +1097,12 @@ COMMON_DOMAIN_TYPOS: dict[str, str] = {
     "gmial.com": "gmail.com",
     "gamil.com": "gmail.com",
     "gmaill.com": "gmail.com",
+    "gmaill.comm": "gmail.com",
+    "gmaill.con": "gmail.com",
+    "gmal.com": "gmail.com",
+    "gmailcom": "gmail.com",
     "yahoo.comm": "yahoo.com",
+    "yahoo.commm": "yahoo.com",
     "yahoo.con": "yahoo.com",
     "yahoo.coom": "yahoo.com",
     "yahoo.cm": "yahoo.com",
@@ -1107,6 +1121,9 @@ COMMON_DOMAIN_TYPOS: dict[str, str] = {
     "icloud.coom": "icloud.com",
     "rediffmail.comm": "rediffmail.com",
     "rediffmail.con": "rediffmail.com",
+    "rediff.comm": "rediff.com",
+    "rediff.con": "rediff.com",
+    "rediff.coom": "rediff.com",
 }
 
 
@@ -1133,6 +1150,9 @@ def validate_email_address(
         if required:
             raise ValueError(f"{field_name} cannot be empty")
         return None
+
+    if " " in v:
+        raise ValueError(f"{field_name} cannot contain spaces")
 
     if v.lower() in ("string", "null", "none", "undefined"):
         raise ValueError(f"{field_name} cannot be placeholder '{value}'")
@@ -1434,6 +1454,9 @@ def validate_website_url(
         if required:
             raise ValueError(f"{field_name} cannot be empty")
         return None
+
+    if " " in v:
+        raise ValueError(f"{field_name} cannot contain spaces")
 
     if v.lower() in ("string", "null", "none", "undefined", "-----", "@#$%%"):
         raise ValueError(f"{field_name} cannot be placeholder '{value}'")
