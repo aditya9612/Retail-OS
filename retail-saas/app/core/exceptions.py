@@ -110,6 +110,15 @@ def _format_pydantic_errors(errors_raw: List[Dict[str, Any]]) -> Dict[str, Any]:
         if clean_field.isdigit():
             clean_field = "body"
         msg = err.get("msg", "Invalid value")
+        err_type = err.get("type", "")
+        if (
+            err_type in ("date_from_datetime_parsing", "date_parsing", "date_type", "date_invalid", "datetime_parsing", "datetime_type")
+            or "valid date" in msg.lower()
+            or "character in year" in msg.lower()
+        ):
+            msg = "Input should be a valid date in YYYY-MM-DD format (e.g. 2026-11-20)"
+            err["msg"] = msg
+
         if err.get("type") == "json_invalid":
             ctx_err = err.get("ctx", {}).get("error")
             if ctx_err:

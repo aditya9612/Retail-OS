@@ -515,7 +515,16 @@ class ReportService:
             for r in rate_rows
         }
 
+        data_found = invoice_count > 0
+        message = (
+            "Data not found: No GST sales records found for the selected date range"
+            if not data_found
+            else "GST sales register report retrieved successfully"
+        )
+
         return {
+            "message": message,
+            "data_found": data_found,
             "start_date": str(start_date),
             "end_date": str(end_date),
             "invoice_count": invoice_count,
@@ -569,7 +578,16 @@ class ReportService:
         input_tax_credit = Decimal("0.00")
         net_tax_liability = total_output_tax - input_tax_credit
 
+        data_found = invoice_count > 0
+        message = (
+            "Data not found: No GST tax summary records found for the selected date range"
+            if not data_found
+            else "GST tax summary report retrieved successfully"
+        )
+
         return {
+            "message": message,
+            "data_found": data_found,
             "start_date": str(start_date),
             "end_date": str(end_date),
             "invoice_count": invoice_count,
@@ -1970,22 +1988,33 @@ class ReportService:
     # LEGACY SERVICE METHODS (PRESERVED UNCHANGED)
     # =========================================================================
 
-    def gst_report(self, tenant_id: int, start_date: date, end_date: date) -> dict:
-        invoices = (
+    def gst_report(
+        self,
+        tenant_id: int,
+        start_date: date,
+        end_date: date,
+        store_id: Optional[int] = None,
+    ) -> dict:
+        inv_query = (
             self.db.query(Invoice)
             .filter(
                 Invoice.tenant_id == tenant_id,
                 Invoice.created_at >= datetime.combine(start_date, datetime.min.time()),
                 Invoice.created_at <= datetime.combine(end_date, datetime.max.time()),
             )
-            .all()
         )
+        if store_id is not None:
+            inv_query = inv_query.join(Order, Invoice.order_id == Order.id).filter(
+                Order.store_id == store_id
+            )
+        invoices = inv_query.all()
         return {
             "invoice_count": len(invoices),
             "total_cgst": float(sum((i.cgst_amount for i in invoices), Decimal("0"))),
             "total_sgst": float(sum((i.sgst_amount for i in invoices), Decimal("0"))),
             "total_igst": float(sum((i.igst_amount for i in invoices), Decimal("0"))),
             "total_amount": float(sum((i.total_amount for i in invoices), Decimal("0"))),
+            "store_id": store_id,
         }
 
     def daily_billing_closure(

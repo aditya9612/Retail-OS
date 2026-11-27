@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.exceptions import AppException
+from app.core.exceptions import AppException, BadRequestException
 from app.core.security import require_permission
 from app.models.user import User
 from app.schemas.report import (
@@ -15,6 +15,7 @@ from app.schemas.report import (
     DailyBillingResponse,
     PaymentSummaryResponse,
     ReportTaskAsyncResponse,
+    GSTReportAsyncResponse,
     CustomerLifetimeValueResponse,
     CustomerOverviewResponse,
     CustomerRetentionResponse,
@@ -46,8 +47,9 @@ class MonthlyReportAsyncRequest(BaseModel):
 
 
 class GSTReportAsyncRequest(BaseModel):
-    start_date: date
-    end_date: date
+    start_date: date = Field(..., description="Start date in YYYY-MM-DD format (e.g. 2026-11-25)")
+    end_date: date = Field(..., description="End date in YYYY-MM-DD format (e.g. 2026-11-29)")
+    store_id: Optional[int] = Field(default=None, description="Optional store ID to filter report by a specific store")
 
 
 # ============================================================================
@@ -124,9 +126,17 @@ def get_sales_report(
     description="Retrieve invoice-level GST sales register including taxable amount, CGST, SGST, IGST, and customer GSTINs.",
 )
 def get_gst_sales(
-    start_date: date = Query(...),
-    end_date: date = Query(...),
-    store_id: Optional[int] = None,
+    start_date: date = Query(
+        ...,
+        description="Start date for GST sales report. Expected date format: YYYY-MM-DD (e.g. 2026-11-20)",
+        openapi_examples={"example": {"summary": "Valid ISO date", "value": "2026-11-20"}},
+    ),
+    end_date: date = Query(
+        ...,
+        description="End date for GST sales report. Expected date format: YYYY-MM-DD (e.g. 2026-12-24)",
+        openapi_examples={"example": {"summary": "Valid ISO date", "value": "2026-12-24"}},
+    ),
+    store_id: Optional[int] = Query(None, description="Optional store ID to filter report"),
     user: User = Depends(require_permission("reports:read")),
     db: Session = Depends(get_db),
 ):
@@ -146,9 +156,17 @@ def get_gst_sales(
     description="Retrieve aggregated GST summary grouped by tax rate tier (0%, 5%, 12%, 18%, 28%) with CGST, SGST, and IGST breakdowns.",
 )
 def get_gst_summary(
-    start_date: date = Query(...),
-    end_date: date = Query(...),
-    store_id: Optional[int] = None,
+    start_date: date = Query(
+        ...,
+        description="Start date for GST tax summary. Expected date format: YYYY-MM-DD (e.g. 2026-11-20)",
+        openapi_examples={"example": {"summary": "Valid ISO date", "value": "2026-11-20"}},
+    ),
+    end_date: date = Query(
+        ...,
+        description="End date for GST tax summary. Expected date format: YYYY-MM-DD (e.g. 2026-12-24)",
+        openapi_examples={"example": {"summary": "Valid ISO date", "value": "2026-12-24"}},
+    ),
+    store_id: Optional[int] = Query(None, description="Optional store ID to filter report"),
     user: User = Depends(require_permission("reports:read")),
     db: Session = Depends(get_db),
 ):
@@ -480,9 +498,17 @@ def legacy_monthly_sales(
     description="Legacy endpoint returning GST sales report.",
 )
 def legacy_gst_report(
-    start_date: date = Query(...),
-    end_date: date = Query(...),
-    store_id: Optional[int] = None,
+    start_date: date = Query(
+        ...,
+        description="Start date for GST sales report. Expected date format: YYYY-MM-DD (e.g. 2026-11-25)",
+        openapi_examples={"example": {"summary": "Valid ISO date", "value": "2026-11-25"}},
+    ),
+    end_date: date = Query(
+        ...,
+        description="End date for GST sales report. Expected date format: YYYY-MM-DD (e.g. 2026-11-29)",
+        openapi_examples={"example": {"summary": "Valid ISO date", "value": "2026-11-29"}},
+    ),
+    store_id: Optional[int] = Query(None, description="Optional store ID to filter report"),
     user: User = Depends(require_permission("reports:read")),
     db: Session = Depends(get_db),
 ):
@@ -539,12 +565,17 @@ def monthly_report_async(
     user: User = Depends(require_permission("reports:read")),
 ):
     task = generate_monthly_report_task.delay(user.tenant_id, data.year, data.month)
-    return {"task_id": task.id}
+    return {
+        "task_id": task.id,
+        "status": "queued",
+        "task_status": "queued",
+        "message": "Monthly sales report generation task queued successfully",
+    }
 
 
 @router.post(
     "/gst/async",
-    response_model=ReportTaskAsyncResponse,
+    response_model=GSTReportAsyncResponse,
     tags=["GST Reports"],
     summary="Generate GST Report Asynchronously",
     description="Enqueues background task for generating comprehensive GST sales register.",
@@ -552,8 +583,27 @@ def monthly_report_async(
 def gst_report_async(
     data: GSTReportAsyncRequest,
     user: User = Depends(require_permission("reports:read")),
+    db: Session = Depends(get_db),
 ):
-    task = generate_gst_report_task.delay(
-        user.tenant_id, data.start_date.isoformat(), data.end_date.isoformat()
+    if data.start_date > data.end_date:
+        raise BadRequestException("start_date must be before or equal to end_date")
+
+    tenant_id, resolved_store_id = ReportService(db)._resolve_tenant_and_store(
+        user, data.store_id
     )
-    return {"task_id": task.id}
+
+    task = generate_gst_report_task.delay(
+        tenant_id,
+        data.start_date.isoformat(),
+        data.end_date.isoformat(),
+        resolved_store_id,
+    )
+    return {
+        "task_id": task.id,
+        "status": "queued",
+        "task_status": "queued",
+        "message": "GST report generation task queued successfully",
+        "start_date": str(data.start_date),
+        "end_date": str(data.end_date),
+        "store_id": resolved_store_id,
+    }

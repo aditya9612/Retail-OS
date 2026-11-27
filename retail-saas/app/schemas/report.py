@@ -69,6 +69,14 @@ class YearlySalesResponse(BaseModel):
 # ============================================================================
 
 class GSTSalesResponse(BaseModel):
+    message: Optional[str] = Field(
+        default=None,
+        description="Informative message about data status (e.g. Data not found message when no sales exist)"
+    )
+    data_found: bool = Field(
+        default=True,
+        description="Indicates whether report data was found for the given criteria"
+    )
     start_date: str
     end_date: str
     invoice_count: int
@@ -83,6 +91,14 @@ class GSTSalesResponse(BaseModel):
 
 
 class GSTSummaryResponse(BaseModel):
+    message: Optional[str] = Field(
+        default=None,
+        description="Informative message about data status (e.g. Data not found message when no sales exist)"
+    )
+    data_found: bool = Field(
+        default=True,
+        description="Indicates whether summary data was found for the given criteria"
+    )
     start_date: str
     end_date: str
     invoice_count: int
@@ -286,6 +302,15 @@ class PaymentSummaryResponse(BaseModel):
 
 class ReportTaskAsyncResponse(BaseModel):
     task_id: str
+    status: str = Field(default="queued", description="Initial status of the asynchronous task (e.g. queued, pending)")
+    task_status: str = Field(default="queued", description="Explicit task status representation")
+    message: Optional[str] = Field(default=None, description="Informative status message")
+
+
+class GSTReportAsyncResponse(ReportTaskAsyncResponse):
+    start_date: str = Field(..., description="Submitted report start date in YYYY-MM-DD format")
+    end_date: str = Field(..., description="Submitted report end date in YYYY-MM-DD format")
+    store_id: Optional[int] = Field(default=None, description="Optional store ID filter applied to report")
 
 
 # ============================================================================

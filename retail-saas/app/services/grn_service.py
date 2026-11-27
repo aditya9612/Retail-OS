@@ -18,10 +18,55 @@ from app.models.purchase_order import PurchaseOrder
 from app.models.store import Store
 from app.models.warehouse import Warehouse
 from app.repositories.grn_repo import GRNRepository
-from app.schemas.grn import GRNCreate, GRNQualityCheckRequest
+from app.schemas.grn import GRNCreate, GRNQualityCheckRequest, GRNUpdate
 from app.schemas.inventory import StockInRequest
 from app.services.inventory_service import InventoryService
 from app.utils.constants import StockMovementType
+
+
+class GRNNumberedCanvas(canvas.Canvas):
+    """
+    Two-pass ReportLab canvas that dynamically counts total pages
+    and renders a standardized, professional fixed footer across every page.
+    """
+    def __init__(self, *args, **kwargs):
+        kwargs["pageCompression"] = 0
+        super().__init__(*args, **kwargs)
+        self._saved_page_states = []
+        self.footer_left = "This is a computer-generated Goods Receipt Note (GRN) | Retail-OS Inward Logistics"
+        self.printed_at = ""
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        num_pages = len(self._saved_page_states)
+        for state in self._saved_page_states:
+            self.__dict__.update(state)
+            self._draw_page_footer(num_pages)
+            super().showPage()
+        super().save()
+
+    def _draw_page_footer(self, page_count: int):
+        self.saveState()
+        margin_left = 15 * mm
+        margin_right = A4[0] - 15 * mm
+
+        # Bottom divider rule above footer
+        self.setStrokeColorRGB(0.8, 0.84, 0.88)
+        self.setLineWidth(0.6)
+        self.line(margin_left, 14 * mm, margin_right, 14 * mm)
+
+        # Footer text
+        self.setFont("Helvetica", 7.5)
+        self.setFillColorRGB(0.4, 0.45, 0.55)
+        self.drawString(margin_left, 9 * mm, self.footer_left)
+        page_info = f"Page {self._pageNumber} of {page_count}"
+        if self.printed_at:
+            page_info += f" | Printed: {self.printed_at}"
+        self.drawRightString(margin_right, 9 * mm, page_info)
+        self.restoreState()
 
 
 class GRNService:
@@ -599,10 +644,15 @@ class GRNService:
             raise ConflictException("Quality inspection can only be performed on pending GRNs")
 
         item_map = {item.id: item for item in grn.items}
+        product_map = {item.product_id: item for item in grn.items}
         for qc_item in data.items:
-            if qc_item.item_id not in item_map:
-                raise NotFoundException(f"Item #{qc_item.item_id} does not belong to this GRN")
-            item = item_map[qc_item.item_id]
+            target_id = getattr(qc_item, "grn_item_id", None) or getattr(qc_item, "item_id", None) or getattr(qc_item, "id", None)
+            if target_id in item_map:
+                item = item_map[target_id]
+            elif target_id in product_map:
+                item = product_map[target_id]
+            else:
+                raise NotFoundException(f"Item #{target_id} does not belong to this GRN")
 
             total_inspected = qc_item.accepted_quantity + qc_item.rejected_quantity
             if item.received_quantity > 0 and total_inspected == 0:
@@ -635,8 +685,114 @@ class GRNService:
             if qc_item.remarks:
                 item.remarks = qc_item.remarks
 
-        if data.remarks:
-            grn.remarks = f"{grn.remarks}\nQC: {data.remarks}" if grn.remarks else f"QC: {data.remarks}"
+        return self.repo.update(grn)
+
+    def update(
+        self,
+        tenant_id: int,
+        grn_id: int,
+        data: GRNUpdate,
+        user_id: Optional[int] = None,
+    ) -> GRN:
+        grn = self.get(
+            tenant_id=tenant_id,
+            grn_id=grn_id,
+        )
+
+        if grn.status in ("received", "rejected"):
+            raise ConflictException(f"Cannot update a GRN that has already been {grn.status}")
+
+        if data.warehouse_id is not None:
+            warehouse = (
+                self.db.query(Warehouse)
+                .filter(Warehouse.id == data.warehouse_id, Warehouse.tenant_id == tenant_id)
+                .first()
+            )
+            if not warehouse:
+                raise NotFoundException(f"Warehouse #{data.warehouse_id} not found")
+            grn.warehouse_id = data.warehouse_id
+
+        if data.store_id is not None:
+            store = (
+                self.db.query(Store)
+                .filter(Store.id == data.store_id, Store.tenant_id == tenant_id)
+                .first()
+            )
+            if not store:
+                raise NotFoundException(f"Store #{data.store_id} not found")
+            grn.store_id = data.store_id
+
+        if data.invoice_number is not None:
+            existing_inv = (
+                self.db.query(GRN)
+                .filter(
+                    GRN.tenant_id == tenant_id,
+                    GRN.invoice_number == data.invoice_number,
+                    GRN.id != grn_id,
+                )
+                .first()
+            )
+            if existing_inv:
+                raise ConflictException(f"Invoice number '{data.invoice_number}' is already used by another GRN ({existing_inv.grn_number})")
+            grn.invoice_number = data.invoice_number
+
+        if data.invoice_date is not None:
+            grn.invoice_date = data.invoice_date
+
+        if data.vehicle_number is not None:
+            grn.vehicle_number = data.vehicle_number
+
+        if data.transporter_name is not None:
+            grn.transporter_name = data.transporter_name
+
+        if data.remarks is not None:
+            grn.remarks = data.remarks
+
+        if data.items:
+            item_map = {item.id: item for item in grn.items}
+            for item_data in data.items:
+                if item_data.id not in item_map:
+                    raise NotFoundException(f"Item #{item_data.id} does not belong to this GRN")
+
+                item = item_map[item_data.id]
+
+                if item_data.received_quantity is not None:
+                    if item.ordered_quantity and item.ordered_quantity > 0 and item_data.received_quantity > item.ordered_quantity:
+                        raise BadRequestException(
+                            f"Item #{item.id}: Received quantity ({item_data.received_quantity}) cannot be greater than ordered quantity ({item.ordered_quantity})"
+                        )
+                    item.received_quantity = item_data.received_quantity
+
+                if item_data.rejected_quantity is not None:
+                    rec_qty = item.received_quantity
+                    if item_data.rejected_quantity > rec_qty:
+                        raise BadRequestException(
+                            f"Item #{item.id}: Rejected quantity ({item_data.rejected_quantity}) cannot exceed received quantity ({rec_qty})"
+                        )
+                    item.rejected_quantity = item_data.rejected_quantity
+                    if item_data.damage_reason is not None:
+                        item.damage_reason = item_data.damage_reason
+                    elif item_data.rejected_quantity == 0:
+                        item.damage_reason = None
+
+                if item_data.accepted_quantity is not None:
+                    item.accepted_quantity = item_data.accepted_quantity
+                elif item_data.rejected_quantity is not None or item_data.received_quantity is not None:
+                    rej = item.rejected_quantity or 0
+                    rec = item.received_quantity or 0
+                    item.accepted_quantity = max(0, rec - rej)
+
+                if item_data.unit_cost is not None:
+                    item.unit_cost = item_data.unit_cost
+
+                if item_data.batch_number is not None:
+                    item.batch_number = item_data.batch_number
+
+                if item_data.expiry_date is not None:
+                    item.expiry_date = item_data.expiry_date
+
+                if item_data.remarks is not None:
+                    item.remarks = item_data.remarks
 
         return self.repo.update(grn)
 
@@ -706,340 +862,6 @@ class GRNService:
             "rejection_reason": grn.rejection_reason,
             "timeline": timeline,
         }
-
-    def generate_pdf(
-        self,
-        tenant_id: int,
-        grn_id: int,
-    ) -> bytes:
-        import io
-        from reportlab.lib import colors
-        from reportlab.lib.pagesizes import A4
-        from reportlab.pdfgen import canvas
-        from app.models.product import Product
-        from app.models.purchase_order import PurchaseOrder
-        from app.models.warehouse import Warehouse
-        from app.services.document_settings_service import DocumentSettingsService
-
-        grn = self.get(tenant_id=tenant_id, grn_id=grn_id)
-
-        branding = DocumentSettingsService(self.repo.db).resolve_branding(
-            tenant_id=tenant_id,
-        )
-
-        warehouse = None
-        if grn.warehouse_id:
-            warehouse = (
-                self.repo.db.query(Warehouse)
-                .filter(Warehouse.id == grn.warehouse_id, Warehouse.tenant_id == tenant_id)
-                .first()
-            )
-
-        po = None
-        supplier = None
-        if grn.purchase_order_id:
-            po = (
-                self.repo.db.query(PurchaseOrder)
-                .filter(PurchaseOrder.id == grn.purchase_order_id, PurchaseOrder.tenant_id == tenant_id)
-                .first()
-            )
-            if po and po.supplier:
-                supplier = po.supplier
-
-        items_data = []
-        for item in grn.items:
-            product = (
-                self.repo.db.query(Product)
-                .filter(Product.id == item.product_id, Product.tenant_id == tenant_id)
-                .first()
-            )
-            product_name = product.name if product else f"Product #{item.product_id}"
-            sku = product.sku if product and product.sku else "-"
-            diff = item.received_quantity - item.ordered_quantity
-            if diff == 0:
-                diff_status = "Exact"
-            elif diff < 0:
-                diff_status = f"Short ({abs(diff)})"
-            else:
-                diff_status = f"Excess (+{diff})"
-
-            items_data.append({
-                "product_name": product_name,
-                "sku": sku,
-                "ordered_quantity": item.ordered_quantity,
-                "received_quantity": item.received_quantity,
-                "diff_status": diff_status,
-                "remarks": item.remarks or "",
-            })
-
-        buffer = io.BytesIO()
-        c = canvas.Canvas(buffer, pagesize=A4, pageCompression=0)
-        width, height = A4
-        margin = 36.0
-        usable_width = width - 2 * margin
-        y = height - margin
-
-        primary_color = colors.HexColor("#0F766E")   # Professional Teal
-        header_dark = colors.HexColor("#134E4A")
-        box_bg = colors.HexColor("#F0FDFA")         # Light teal tint
-        border_color = colors.HexColor("#CBD5E1")
-        text_dark = colors.HexColor("#0F172A")
-        text_muted = colors.HexColor("#64748B")
-
-        # 1. Top Header: Store / Business info
-        biz_name = branding.business_name or "Retail Store"
-        c.setFont("Helvetica-Bold", 16)
-        c.setFillColor(primary_color)
-        c.drawString(margin, y, biz_name[:50])
-        y -= 16
-
-        c.setFont("Helvetica", 9)
-        c.setFillColor(text_dark)
-        if branding.address:
-            c.drawString(margin, y, branding.address[:75])
-            y -= 13
-
-        contact_parts = []
-        if branding.phone:
-            contact_parts.append(f"Phone: {branding.phone}")
-        if branding.email:
-            contact_parts.append(f"Email: {branding.email}")
-        if contact_parts:
-            c.setFont("Helvetica", 8.5)
-            c.setFillColor(text_muted)
-            c.drawString(margin, y, " | ".join(contact_parts)[:90])
-            y -= 13
-
-        if branding.show_gstin and branding.gstin:
-            c.setFont("Helvetica-Bold", 8.5)
-            c.setFillColor(primary_color)
-            c.drawString(margin, y, f"GSTIN: {branding.gstin}")
-            y -= 15
-
-        y -= 6
-
-        # 2. Document Title Banner
-        banner_h = 24.0
-        c.setFillColor(primary_color)
-        c.rect(margin, y - banner_h, usable_width, banner_h, fill=1, stroke=0)
-        c.setFont("Helvetica-Bold", 12)
-        c.setFillColor(colors.white)
-        c.drawCentredString(width / 2.0, y - banner_h + 7, "GOODS RECEIPT NOTE (GRN)")
-        y -= (banner_h + 12)
-
-        # 3. Metadata Bar (Box)
-        meta_h = 44.0
-        c.setFillColor(box_bg)
-        c.setStrokeColor(border_color)
-        c.rect(margin, y - meta_h, usable_width, meta_h, fill=1, stroke=1)
-
-        c.setFillColor(text_dark)
-        c.setFont("Helvetica-Bold", 9)
-        c.drawString(margin + 10, y - 14, f"GRN No: {grn.grn_number}")
-
-        c.setFont("Helvetica", 8.5)
-        created_str = grn.created_at.strftime("%d-%m-%Y %H:%M") if hasattr(grn.created_at, "strftime") else str(grn.created_at)[:16]
-        c.drawString(margin + 10, y - 30, f"Created At: {created_str}")
-
-        po_num = po.order_number if po else (f"PO #{grn.purchase_order_id}" if grn.purchase_order_id else "Direct (No PO)")
-        c.drawString(margin + 200, y - 14, f"PO Ref: {po_num}")
-
-        recv_str = grn.received_at.strftime("%d-%m-%Y %H:%M") if grn.received_at and hasattr(grn.received_at, "strftime") else (str(grn.received_at)[:16] if grn.received_at else "Pending")
-        c.drawString(margin + 200, y - 30, f"Received At: {recv_str}")
-
-        # Status badge
-        status_raw = (grn.status or "PENDING").upper()
-        if status_raw == "RECEIVED":
-            badge_color = colors.HexColor("#15803D")
-        elif status_raw == "REJECTED":
-            badge_color = colors.HexColor("#DC2626")
-        else:
-            badge_color = colors.HexColor("#D97706")
-
-        badge_w, badge_h = 80.0, 20.0
-        badge_x = width - margin - badge_w - 10
-        badge_y = y - 32.0
-        c.setFillColor(badge_color)
-        c.rect(badge_x, badge_y, badge_w, badge_h, fill=1, stroke=0)
-        c.setFillColor(colors.white)
-        c.setFont("Helvetica-Bold", 8.5)
-        c.drawCentredString(badge_x + badge_w / 2.0, badge_y + 6.0, status_raw)
-
-        y -= (meta_h + 12)
-
-        # 4. Warehouse & Supplier Cards
-        card_w = (usable_width - 12.0) / 2.0
-        card_h = 58.0
-
-        # Warehouse card (left)
-        c.setFillColor(colors.HexColor("#FAFAFA"))
-        c.setStrokeColor(border_color)
-        c.rect(margin, y - card_h, card_w, card_h, fill=1, stroke=1)
-        c.setFillColor(header_dark)
-        c.setFont("Helvetica-Bold", 8.5)
-        c.drawString(margin + 8, y - 14, "RECEIVING WAREHOUSE / LOCATION")
-        c.setFillColor(text_dark)
-        c.setFont("Helvetica", 8)
-        wh_name = f"{warehouse.name} ({warehouse.code})" if warehouse and warehouse.code else (warehouse.name if warehouse else "Main Facility")
-        c.drawString(margin + 8, y - 27, wh_name[:36])
-        wh_addr = warehouse.address if warehouse and warehouse.address else "Central Warehouse Storage"
-        c.drawString(margin + 8, y - 39, wh_addr[:40])
-        wh_status = f"Status: {'Active' if not warehouse or warehouse.is_active else 'Inactive'}"
-        c.drawString(margin + 8, y - 50, wh_status)
-
-        # Supplier card (right)
-        card2_x = margin + card_w + 12.0
-        c.setFillColor(colors.HexColor("#FAFAFA"))
-        c.setStrokeColor(border_color)
-        c.rect(card2_x, y - card_h, card_w, card_h, fill=1, stroke=1)
-        c.setFillColor(header_dark)
-        c.setFont("Helvetica-Bold", 8.5)
-        c.drawString(card2_x + 8, y - 14, "SUPPLIER / VENDOR DETAILS")
-        c.setFillColor(text_dark)
-        c.setFont("Helvetica", 8)
-        supp_name = supplier.name if supplier else "Direct Procurement / Stock-In"
-        c.drawString(card2_x + 8, y - 27, supp_name[:36])
-        supp_contact = f"Contact: {supplier.contact_person}" if supplier and supplier.contact_person else "-"
-        c.drawString(card2_x + 8, y - 39, supp_contact[:40])
-        supp_phone = f"Phone: {supplier.phone}" if supplier and supplier.phone else "-"
-        c.drawString(card2_x + 8, y - 50, supp_phone[:40])
-
-        y -= (card_h + 14)
-
-        # 5. Items Table
-        col_w = [25.0, 210.0, 70.0, 70.0, 148.27]
-        th_h = 20.0
-        c.setFillColor(primary_color)
-        c.rect(margin, y - th_h, usable_width, th_h, fill=1, stroke=0)
-        c.setFillColor(colors.white)
-        c.setFont("Helvetica-Bold", 8.5)
-
-        x_curr = margin
-        c.drawString(x_curr + 4, y - 14, "#")
-        x_curr += col_w[0]
-        c.drawString(x_curr + 4, y - 14, "Product Description & SKU")
-        x_curr += col_w[1]
-        c.drawRightString(x_curr + col_w[2] - 8, y - 14, "Ordered Qty")
-        x_curr += col_w[2]
-        c.drawRightString(x_curr + col_w[3] - 8, y - 14, "Received Qty")
-        x_curr += col_w[3]
-        c.drawString(x_curr + 4, y - 14, "Variance / Remarks")
-
-        y -= th_h
-
-        # Table rows
-        row_h = 20.0
-        c.setFont("Helvetica", 8)
-        for idx, itm in enumerate(items_data):
-            bg = colors.white if idx % 2 == 0 else colors.HexColor("#F8FAFC")
-            c.setFillColor(bg)
-            c.rect(margin, y - row_h, usable_width, row_h, fill=1, stroke=0)
-
-            c.setStrokeColor(colors.HexColor("#E2E8F0"))
-            c.setLineWidth(0.5)
-            c.line(margin, y - row_h, margin + usable_width, y - row_h)
-
-            c.setFillColor(text_dark)
-            x_curr = margin
-            c.drawString(x_curr + 6, y - 13, str(idx + 1))
-            x_curr += col_w[0]
-
-            item_title = itm["product_name"]
-            if itm["sku"] and itm["sku"] != "-":
-                item_title += f" ({itm['sku']})"
-            c.drawString(x_curr + 4, y - 13, item_title[:45])
-            x_curr += col_w[1]
-
-            c.drawRightString(x_curr + col_w[2] - 8, y - 13, str(itm["ordered_quantity"]))
-            x_curr += col_w[2]
-
-            c.drawRightString(x_curr + col_w[3] - 8, y - 13, str(itm["received_quantity"]))
-            x_curr += col_w[3]
-
-            rem_text = itm["diff_status"]
-            if itm["remarks"]:
-                rem_text += f" - {itm['remarks']}"
-            c.drawString(x_curr + 4, y - 13, rem_text[:30])
-
-            y -= row_h
-
-        # Total summary row
-        total_ordered = sum(i["ordered_quantity"] for i in items_data)
-        total_received = sum(i["received_quantity"] for i in items_data)
-
-        tot_h = 22.0
-        c.setFillColor(colors.HexColor("#F1F5F9"))
-        c.rect(margin, y - tot_h, usable_width, tot_h, fill=1, stroke=0)
-        c.setStrokeColor(border_color)
-        c.line(margin, y - tot_h, margin + usable_width, y - tot_h)
-
-        c.setFillColor(text_dark)
-        c.setFont("Helvetica-Bold", 8.5)
-        c.drawString(margin + col_w[0] + 4, y - 15, "TOTAL")
-        c.drawRightString(margin + col_w[0] + col_w[1] + col_w[2] - 8, y - 15, str(total_ordered))
-        c.drawRightString(margin + col_w[0] + col_w[1] + col_w[2] + col_w[3] - 8, y - 15, str(total_received))
-
-        y -= (tot_h + 16)
-
-        # 6. Remarks / Special Instructions Box if any
-        if grn.remarks:
-            c.setFillColor(box_bg)
-            c.setStrokeColor(border_color)
-            rem_h = 32.0
-            c.rect(margin, y - rem_h, usable_width, rem_h, fill=1, stroke=1)
-            c.setFillColor(header_dark)
-            c.setFont("Helvetica-Bold", 8)
-            c.drawString(margin + 8, y - 12, "GRN NOTES / REMARKS:")
-            c.setFillColor(text_dark)
-            c.setFont("Helvetica", 8)
-            c.drawString(margin + 8, y - 24, grn.remarks[:90])
-            y -= (rem_h + 20)
-        else:
-            y -= 10
-
-        # 7. Signature Blocks
-        sig_y = max(y - 20, 90.0)
-        sig_col_w = usable_width / 3.0
-
-        c.setStrokeColor(colors.HexColor("#94A3B8"))
-        c.setLineWidth(0.8)
-
-        # Line 1: Received By
-        c.line(margin + 10, sig_y, margin + sig_col_w - 20, sig_y)
-        c.setFont("Helvetica-Bold", 8)
-        c.setFillColor(text_dark)
-        c.drawCentredString(margin + (sig_col_w / 2.0), sig_y - 12, "STORE IN-CHARGE")
-        c.setFont("Helvetica", 7)
-        c.setFillColor(text_muted)
-        c.drawCentredString(margin + (sig_col_w / 2.0), sig_y - 22, "(Goods Received By)")
-
-        # Line 2: Quality Checked
-        c.line(margin + sig_col_w + 10, sig_y, margin + 2 * sig_col_w - 20, sig_y)
-        c.setFont("Helvetica-Bold", 8)
-        c.setFillColor(text_dark)
-        c.drawCentredString(margin + 1.5 * sig_col_w, sig_y - 12, "QUALITY VERIFIED")
-        c.setFont("Helvetica", 7)
-        c.setFillColor(text_muted)
-        c.drawCentredString(margin + 1.5 * sig_col_w, sig_y - 22, "(Inspection & Count Check)")
-
-        # Line 3: Authorized Signatory
-        c.line(margin + 2 * sig_col_w + 10, sig_y, margin + 3 * sig_col_w - 10, sig_y)
-        c.setFont("Helvetica-Bold", 8)
-        c.setFillColor(text_dark)
-        c.drawCentredString(margin + 2.5 * sig_col_w, sig_y - 12, "AUTHORIZED SIGNATORY")
-        c.setFont("Helvetica", 7)
-        c.setFillColor(text_muted)
-        c.drawCentredString(margin + 2.5 * sig_col_w, sig_y - 22, f"For {biz_name[:25]}")
-
-        # 8. Bottom Footer
-        c.setFont("Helvetica", 7)
-        c.setFillColor(text_muted)
-        c.drawString(margin, 25.0, "This is a computer-generated Goods Receipt Note (GRN) from Retail-OS.")
-        c.drawRightString(width - margin, 25.0, "Page 1 of 1")
-
-        c.save()
-        buffer.seek(0)
-        return buffer.getvalue()
 
     def print_grn(
         self,
@@ -1236,115 +1058,193 @@ class GRNService:
     ) -> bytes:
         grn = self.get(tenant_id, grn_id)
 
-        buffer = io.BytesIO()
-        c = canvas.Canvas(buffer, pagesize=A4)
-        width, height = A4
+        from app.services.document_settings_service import DocumentSettingsService
+        branding = None
+        try:
+            branding = DocumentSettingsService(self.db).resolve_branding(
+                tenant_id=tenant_id,
+                store_id=grn.store_id,
+            )
+        except Exception:
+            branding = None
 
+        buffer = io.BytesIO()
+        c = GRNNumberedCanvas(buffer, pagesize=A4)
+        if branding and branding.footer_text:
+            c.footer_left = f"{branding.footer_text} | Retail-OS Inward Logistics"
+        c.printed_at = datetime.now().strftime("%d-%m-%Y %H:%M")
+
+        width, height = A4
         margin_left = 15 * mm
         margin_right = width - 15 * mm
-        y = height - 20 * mm
+        y = height - 15 * mm
 
-        # Header Title
-        c.setFont("Helvetica-Bold", 16)
-        c.setFillColorRGB(0.0, 0.3, 0.7)
+        # ---------------------------------------------------------
+        # 1. Organization / Company Header
+        # ---------------------------------------------------------
+        biz_name = (
+            (branding.business_name if branding and branding.business_name else None)
+            or grn.store_name
+            or "Retail-OS Store"
+        )
+        c.setFont("Helvetica-Bold", 14)
+        c.setFillColorRGB(0.06, 0.46, 0.43)  # #0F766E
+        c.drawString(margin_left, y, str(biz_name)[:50])
+
+        c.setFont("Helvetica-Bold", 8.5)
+        c.setFillColorRGB(0.38, 0.44, 0.52)
+        c.drawRightString(margin_right, y, "INWARD LOGISTICS & RECEIVING")
+        y -= 4.5 * mm
+
+        if branding and branding.address:
+            c.setFont("Helvetica", 8)
+            c.setFillColorRGB(0.25, 0.3, 0.35)
+            c.drawString(margin_left, y, str(branding.address)[:90])
+            y -= 3.8 * mm
+
+        contact_parts = []
+        if branding and branding.phone:
+            contact_parts.append(f"Phone: {branding.phone}")
+        if branding and branding.email:
+            contact_parts.append(f"Email: {branding.email}")
+        if branding and getattr(branding, "website", None):
+            contact_parts.append(f"Web: {branding.website}")
+
+        if contact_parts:
+            c.setFont("Helvetica", 7.5)
+            c.setFillColorRGB(0.4, 0.45, 0.5)
+            c.drawString(margin_left, y, " | ".join(contact_parts)[:95])
+            y -= 3.8 * mm
+
+        if branding and branding.show_gstin and branding.gstin:
+            c.setFont("Helvetica-Bold", 8)
+            c.setFillColorRGB(0.06, 0.46, 0.43)
+            c.drawString(margin_left, y, f"GSTIN: {branding.gstin}")
+            y -= 3.8 * mm
+
+        # Divider line under company header
+        y -= 1.5 * mm
+        c.setStrokeColorRGB(0.8, 0.84, 0.88)
+        c.setLineWidth(1)
+        c.line(margin_left, y, margin_right, y)
+        y -= 5 * mm
+
+        # ---------------------------------------------------------
+        # 2. Document Title & Status Section
+        # ---------------------------------------------------------
+        c.setFont("Helvetica-Bold", 14)
+        c.setFillColorRGB(0.0, 0.34, 0.7)  # #0056B3
         c.drawString(margin_left, y, "GOODS RECEIVED NOTE (GRN)")
 
         # Status badge
-        c.setFont("Helvetica-Bold", 10)
-        status_text = grn.status.upper()
+        c.setFont("Helvetica-Bold", 9.5)
+        status_text = (grn.status or "PENDING").upper()
         if grn.status == "received":
-            c.setFillColorRGB(0.1, 0.6, 0.2)
+            c.setFillColorRGB(0.09, 0.64, 0.29)  # Green #16A34A
         elif grn.status == "rejected":
-            c.setFillColorRGB(0.8, 0.1, 0.1)
+            c.setFillColorRGB(0.86, 0.15, 0.15)  # Red #DC2626
         else:
-            c.setFillColorRGB(0.8, 0.6, 0.0)
+            c.setFillColorRGB(0.85, 0.47, 0.02)  # Amber #D97706
         c.drawRightString(margin_right, y, f"STATUS: {status_text}")
 
-        # Subheader
-        y -= 6 * mm
-        c.setFillColorRGB(0.2, 0.2, 0.2)
-        c.setFont("Helvetica", 9)
+        # Subheader: GRN Number & Date
+        y -= 5 * mm
+        c.setFillColorRGB(0.2, 0.25, 0.3)
+        c.setFont("Helvetica-Bold", 8.5)
         c.drawString(margin_left, y, f"GRN Number: {grn.grn_number}")
         date_str = grn.created_at.strftime("%d-%m-%Y %H:%M") if grn.created_at else ""
+        c.setFont("Helvetica", 8.5)
         c.drawRightString(margin_right, y, f"Date: {date_str}")
 
         # Horizontal separator line
-        y -= 4 * mm
-        c.setStrokeColorRGB(0.8, 0.8, 0.8)
-        c.setLineWidth(1)
+        y -= 3.5 * mm
+        c.setStrokeColorRGB(0.88, 0.9, 0.93)
+        c.setLineWidth(0.75)
         c.line(margin_left, y, margin_right, y)
 
-        # Meta grid
-        y -= 7 * mm
-        c.setFont("Helvetica-Bold", 9)
-        c.setFillColorRGB(0.1, 0.1, 0.1)
+        # ---------------------------------------------------------
+        # 3. Meta Grid
+        # ---------------------------------------------------------
+        y -= 5.5 * mm
+        c.setFont("Helvetica-Bold", 8.5)
+        c.setFillColorRGB(0.15, 0.2, 0.25)
         c.drawString(margin_left, y, "Supplier / Vendor:")
         c.drawString(margin_left + 95 * mm, y, "Destination Location:")
 
-        y -= 4 * mm
-        c.setFont("Helvetica", 8.5)
-        c.setFillColorRGB(0.3, 0.3, 0.3)
-        c.drawString(margin_left, y, str(grn.supplier_name or "Direct Inward"))
+        y -= 3.8 * mm
+        c.setFont("Helvetica", 8)
+        c.setFillColorRGB(0.3, 0.35, 0.4)
+        c.drawString(margin_left, y, str(grn.supplier_name or "Direct Inward")[:45])
         dest = grn.warehouse_name or grn.store_name or "Main Storage"
-        c.drawString(margin_left + 95 * mm, y, str(dest))
+        c.drawString(margin_left + 95 * mm, y, str(dest)[:45])
 
-        y -= 5 * mm
-        c.setFont("Helvetica-Bold", 9)
-        c.setFillColorRGB(0.1, 0.1, 0.1)
+        y -= 4.5 * mm
+        c.setFont("Helvetica-Bold", 8.5)
+        c.setFillColorRGB(0.15, 0.2, 0.25)
         c.drawString(margin_left, y, "PO Number / Invoice:")
         c.drawString(margin_left + 95 * mm, y, "Transporter / Vehicle:")
 
-        y -= 4 * mm
-        c.setFont("Helvetica", 8.5)
-        c.setFillColorRGB(0.3, 0.3, 0.3)
+        y -= 3.8 * mm
+        c.setFont("Helvetica", 8)
+        c.setFillColorRGB(0.3, 0.35, 0.4)
         po_info = f"PO: {grn.purchase_order_number or 'N/A'}"
         if grn.invoice_number:
             po_info += f" | Inv: {grn.invoice_number}"
-        c.drawString(margin_left, y, po_info)
+        c.drawString(margin_left, y, po_info[:48])
         trans_info = f"{grn.transporter_name or 'N/A'}"
         if grn.vehicle_number:
             trans_info += f" [{grn.vehicle_number}]"
-        c.drawString(margin_left + 95 * mm, y, trans_info)
+        c.drawString(margin_left + 95 * mm, y, trans_info[:48])
 
-        y -= 5 * mm
-        c.setFont("Helvetica-Bold", 9)
-        c.setFillColorRGB(0.1, 0.1, 0.1)
+        y -= 4.5 * mm
+        c.setFont("Helvetica-Bold", 8.5)
+        c.setFillColorRGB(0.15, 0.2, 0.25)
         c.drawString(margin_left, y, "Received By:")
-        y -= 4 * mm
-        c.setFont("Helvetica", 8.5)
-        c.setFillColorRGB(0.3, 0.3, 0.3)
-        c.drawString(margin_left, y, str(grn.received_by_name or "Pending Verification"))
+        c.drawString(margin_left + 95 * mm, y, "Receipt Time:")
 
-        # Separator line
-        y -= 6 * mm
-        c.setStrokeColorRGB(0.8, 0.8, 0.8)
+        y -= 3.8 * mm
+        c.setFont("Helvetica", 8)
+        c.setFillColorRGB(0.3, 0.35, 0.4)
+        c.drawString(margin_left, y, str(grn.received_by_name or "Pending Verification"))
+        rcv_str = grn.received_at.strftime("%d-%m-%Y %H:%M") if grn.received_at else (date_str or "Pending")
+        c.drawString(margin_left + 95 * mm, y, rcv_str)
+
+        # Separator line before table
+        y -= 5 * mm
+        c.setStrokeColorRGB(0.85, 0.88, 0.92)
         c.line(margin_left, y, margin_right, y)
 
-        # Table Header
-        y -= 6 * mm
-        c.setFillColorRGB(0.95, 0.96, 0.98)
-        c.rect(margin_left, y - 2 * mm, margin_right - margin_left, 7 * mm, fill=1, stroke=0)
+        # ---------------------------------------------------------
+        # 4. Table Header & Items
+        # ---------------------------------------------------------
+        def draw_table_header(curr_y: float) -> float:
+            c.setFillColorRGB(0.95, 0.96, 0.98)
+            c.rect(margin_left, curr_y - 2 * mm, margin_right - margin_left, 7 * mm, fill=1, stroke=0)
+            c.setFont("Helvetica-Bold", 8)
+            c.setFillColorRGB(0.15, 0.2, 0.25)
+            c.drawString(margin_left + 2 * mm, curr_y, "#")
+            c.drawString(margin_left + 8 * mm, curr_y, "Product / SKU")
+            c.drawString(margin_left + 65 * mm, curr_y, "Batch")
+            c.drawString(margin_left + 95 * mm, curr_y, "Expiry")
+            c.drawRightString(margin_left + 120 * mm, curr_y, "Ordered")
+            c.drawRightString(margin_left + 138 * mm, curr_y, "Accepted")
+            c.drawRightString(margin_left + 155 * mm, curr_y, "Rejected")
+            c.drawRightString(margin_right - 2 * mm, curr_y, "Cost (INR)")
+            return curr_y - 6 * mm
 
-        c.setFont("Helvetica-Bold", 8)
-        c.setFillColorRGB(0.1, 0.1, 0.1)
-        c.drawString(margin_left + 2 * mm, y, "#")
-        c.drawString(margin_left + 8 * mm, y, "Product / SKU")
-        c.drawString(margin_left + 65 * mm, y, "Batch")
-        c.drawString(margin_left + 95 * mm, y, "Expiry")
-        c.drawRightString(margin_left + 120 * mm, y, "Ordered")
-        c.drawRightString(margin_left + 138 * mm, y, "Accepted")
-        c.drawRightString(margin_left + 155 * mm, y, "Rejected")
-        c.drawRightString(margin_right - 2 * mm, y, "Cost (INR)")
-
         y -= 6 * mm
+        y = draw_table_header(y)
+
         c.setFont("Helvetica", 8)
-        c.setFillColorRGB(0.2, 0.2, 0.2)
+        c.setFillColorRGB(0.2, 0.25, 0.3)
 
         for idx, item in enumerate(grn.items, start=1):
-            if y < 35 * mm:
+            if y < 45 * mm:
                 c.showPage()
                 y = height - 20 * mm
+                y = draw_table_header(y)
                 c.setFont("Helvetica", 8)
+                c.setFillColorRGB(0.2, 0.25, 0.3)
 
             c.drawString(margin_left + 2 * mm, y, str(idx))
             p_desc = f"{item.product_name or 'Product'} ({item.product_sku or ''})"[:32]
@@ -1366,15 +1266,22 @@ class GRNService:
         c.line(margin_left, y, margin_right, y)
         y -= 5 * mm
         c.setFont("Helvetica-Bold", 8.5)
+        c.setFillColorRGB(0.1, 0.15, 0.2)
         c.drawString(margin_left + 8 * mm, y, "TOTALS:")
         c.drawRightString(margin_left + 120 * mm, y, str(grn.total_ordered_quantity))
         c.drawRightString(margin_left + 138 * mm, y, str(grn.total_accepted_quantity))
         c.drawRightString(margin_left + 155 * mm, y, str(grn.total_rejected_quantity))
         c.drawRightString(margin_right - 2 * mm, y, f"INR {grn.total_cost_value:.2f}")
 
-        # Signatures
-        sig_y = max(y - 25 * mm, 25 * mm)
-        c.setStrokeColorRGB(0.3, 0.3, 0.3)
+        # ---------------------------------------------------------
+        # 5. Signatures Block
+        # ---------------------------------------------------------
+        if y < 40 * mm:
+            c.showPage()
+            y = height - 30 * mm
+
+        sig_y = max(y - 20 * mm, 28 * mm)
+        c.setStrokeColorRGB(0.35, 0.4, 0.45)
         c.setLineWidth(0.5)
 
         box_width = 45 * mm
@@ -1383,11 +1290,12 @@ class GRNService:
         c.line(margin_right - box_width, sig_y, margin_right, sig_y)
 
         c.setFont("Helvetica", 7.5)
-        c.setFillColorRGB(0.2, 0.2, 0.2)
+        c.setFillColorRGB(0.25, 0.3, 0.35)
         c.drawCentredString(margin_left + box_width / 2, sig_y - 4 * mm, "Driver / Carrier Signature")
         c.drawCentredString(margin_left + 65 * mm + box_width / 2, sig_y - 4 * mm, "QC Inspector Signature")
         c.drawCentredString(margin_right - box_width / 2, sig_y - 4 * mm, "Warehouse Incharge Signature")
 
+        c.showPage()
         c.save()
         buffer.seek(0)
         return buffer.getvalue()

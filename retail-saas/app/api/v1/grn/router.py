@@ -15,11 +15,11 @@ from app.schemas.grn import (
     GRNCreate,
     GRNDeleteResponse,
     GRNHistoryResponse,
-    GRNPrintResponse,
     GRNQualityCheckRequest,
     GRNRejectRequest,
     GRNResponse,
     GRNStatsResponse,
+    GRNUpdate,
     validate_damage_reason, validate_rejection_reason_strict,
 )
 from app.services.grn_service import GRNService
@@ -137,6 +137,25 @@ def get_grn(
     )
 
 
+@router.put(
+    "/{grn_id}",
+    response_model=GRNResponse,
+    dependencies=[Depends(require_operational_write)],
+)
+def update_grn(
+    grn_id: int,
+    data: GRNUpdate,
+    user: User = Depends(require_permission("grn:create")),
+    db: Session = Depends(get_db),
+):
+    return GRNService(db).update(
+        tenant_id=user.tenant_id,
+        grn_id=grn_id,
+        data=data,
+        user_id=user.id,
+    )
+
+
 @router.post(
     "/{grn_id}/quality-check",
     response_model=GRNResponse,
@@ -176,31 +195,33 @@ def receive_grn(
     "/{grn_id}/reject",
     response_model=GRNResponse,
     dependencies=[Depends(require_operational_write)],
+    summary="Reject GRN",
+    description="Rejects a Goods Received Note with a mandatory rejection reason provided in the query parameter.",
 )
 def reject_grn(
     grn_id: int,
-    data: Optional[GRNRejectRequest] = None,
-    reason: Optional[str] = Query(None, description="Optional rejection reason in query"),
+    reason: str = Query(
+        ...,
+        min_length=3,
+        max_length=1000,
+        description="Rejection reason is required to reject a Goods Received Note (GRN)",
+        openapi_examples={"example": {"summary": "Valid rejection reason", "value": "Shipment boxes completely waterlogged and damaged in transit"}},
+    ),
     user: User = Depends(require_permission("grn:create")),
     db: Session = Depends(get_db),
 ):
-    if reason is not None:
-        cleaned_q = reason.strip()
-        if not cleaned_q:
-            raise AppException("Rejection reason cannot be empty or whitespace", status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
-        try:
-            validate_rejection_reason_strict(cleaned_q)
-        except ValueError as e:
-            raise AppException(str(e), status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
-        rejection_reason = cleaned_q
-    elif data and data.reason:
-        rejection_reason = data.reason
-    else:
-        raise AppException("Rejection reason is required", status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
+    cleaned_q = reason.strip()
+    if not cleaned_q:
+        raise AppException("Rejection reason cannot be empty or whitespace", status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
+    try:
+        validate_rejection_reason_strict(cleaned_q)
+    except ValueError as e:
+        raise AppException(str(e), status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
     return GRNService(db).reject(
         tenant_id=user.tenant_id,
         grn_id=grn_id,
-        reason=rejection_reason,
+        reason=cleaned_q,
         user_id=user.id,
     )
 
@@ -233,42 +254,6 @@ def grn_history(
     return GRNService(db).history(
         tenant_id=user.tenant_id,
         grn_id=grn_id,
-    )
-
-
-@router.get(
-    "/{grn_id}/print",
-    summary="Download or Preview Goods Receipt Note (GRN) PDF",
-    description="Rendered Goods Receipt Note (GRN) printable PDF document. Delivery mode can be `download` (attachment) or `preview` (inline).",
-    responses={
-        200: {
-            "content": {"application/pdf": {}},
-            "description": "Rendered Goods Receipt Note (GRN) printable PDF document.",
-        }
-    },
-)
-def print_grn(
-    grn_id: int,
-    mode: Literal["download", "preview"] = Query(default="download"),
-    user: User = Depends(
-        require_permission("grn:read")
-    ),
-    db: Session = Depends(get_db),
-):
-    service = GRNService(db)
-    grn = service.get(
-        tenant_id=user.tenant_id,
-        grn_id=grn_id,
-    )
-    pdf_bytes = service.generate_pdf(
-        tenant_id=user.tenant_id,
-        grn_id=grn_id,
-    )
-
-    return render_pdf_or_preview(
-        pdf_content=pdf_bytes,
-        filename_base=grn.grn_number,
-        mode=mode,
     )
 
 

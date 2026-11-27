@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Optional
 
 from app.core.database import SessionLocal
 from app.services.report_service import ReportService
@@ -16,10 +17,20 @@ def generate_monthly_report_task(tenant_id: int, year: int, month: int) -> dict:
 
 
 @celery_app.task(name="generate_gst_report")
-def generate_gst_report_task(tenant_id: int, start_date: str, end_date: str) -> dict:
+def generate_gst_report_task(
+    tenant_id: int,
+    start_date: str,
+    end_date: str,
+    store_id: Optional[int] = None,
+) -> dict:
     db = SessionLocal()
     try:
         service = ReportService(db)
-        return service.gst_report(tenant_id, date.fromisoformat(start_date), date.fromisoformat(end_date))
+        return service.gst_report(
+            tenant_id,
+            date.fromisoformat(start_date),
+            date.fromisoformat(end_date),
+            store_id=store_id,
+        )
     finally:
         db.close()

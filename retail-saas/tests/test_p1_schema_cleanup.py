@@ -30,25 +30,33 @@ def test_dead_schemas_are_removed():
     assert not hasattr(order_schema, "PaymentCreate"), "PaymentCreate should be removed from order.py"
 
 
-def test_customer_create_optional_address():
-    """CustomerCreate.address is optional, but still validated if provided."""
-    # 1. Address omitted / None
-    c1 = CustomerCreate(name="Rajesh Kumar", phone="9876543210")
-    assert c1.address is None
+def test_customer_create_mandatory_address():
+    """CustomerCreate.address is mandatory and validated."""
+    # 1. Address omitted / None raises ValidationError
+    with pytest.raises(ValidationError):
+        CustomerCreate(name="Rajesh Kumar", phone="9876543210")
 
-    c2 = CustomerCreate(name="Rajesh Kumar", phone="9876543210", address=None)
-    assert c2.address is None
+    with pytest.raises(ValidationError):
+        CustomerCreate(name="Rajesh Kumar", phone="9876543210", address=None)
 
     # 2. Valid address
-    c3 = CustomerCreate(name="Rajesh Kumar", phone="9876543210", address="123 MG Road, Pune, Maharashtra 411001")
+    c3 = CustomerCreate(
+        name="Rajesh Kumar",
+        phone="9152934180",
+        address="123 MG Road, Pune, Maharashtra 411001",
+        credit_limit=Decimal("0.00"),
+    )
     assert c3.address == "123 MG Road, Pune, Maharashtra 411001"
 
-    # 3. Invalid address when provided (empty or placeholder)
+    # 3. Invalid address when provided (empty or placeholder or numeric)
     with pytest.raises(ValidationError):
         CustomerCreate(name="Rajesh Kumar", phone="9876543210", address="   ")
 
     with pytest.raises(ValidationError):
         CustomerCreate(name="Rajesh Kumar", phone="9876543210", address="string")
+
+    with pytest.raises(ValidationError):
+        CustomerCreate(name="Rajesh Kumar", phone="9876543210", address="12345")
 
 
 def test_store_expense_create_optional_description():
