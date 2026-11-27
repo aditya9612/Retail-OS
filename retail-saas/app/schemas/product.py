@@ -41,6 +41,18 @@ PLACEHOLDER_VALUES = {
     "temp",
     "n/a",
     "na",
+    "dummy",
+    "product",
+    "item",
+    "test product",
+    "dummy product",
+    "unknown",
+    "placeholder",
+    "asdf",
+    "qwerty",
+    "foo",
+    "bar",
+    "untitled",
 }
 
 
@@ -76,18 +88,14 @@ def validate_product_name(v: str) -> str:
             "Product name cannot consist only of numbers"
         )
 
-    if not any(c.isalpha() for c in v):
+    if sum(c.isalpha() for c in v) < 2:
         raise ValueError(
-            "Product name must contain at least one letter"
+            "Product name must contain at least 2 letters"
         )
 
-    if re.search(
-        r"<\s*script|javascript\s*:|onload\s*=",
-        v,
-        re.IGNORECASE,
-    ):
+    if re.search(r"<[^>]+>", v):
         raise ValueError(
-            "Product name contains invalid script content"
+            "Product name cannot contain HTML or script tags"
         )
 
     return v
@@ -400,9 +408,9 @@ def validate_decimal_amount(
                 f"{field_name} must be a valid decimal number represented as a string"
             )
         # Apply same validation logic as for numeric types
-        if gt_zero and d <= Decimal("0.00"):
+        if gt_zero and d < Decimal("0.01"):
             raise ValueError(
-                f"{field_name} must be greater than 0"
+                f"{field_name} must be at least 0.01"
             )
         if not gt_zero and d < Decimal("0.00"):
             raise ValueError(
@@ -411,6 +419,10 @@ def validate_decimal_amount(
         if d > max_value:
             raise ValueError(
                 f"{field_name} cannot exceed {max_value}"
+            )
+        if d.as_tuple().exponent < -2:
+            raise ValueError(
+                f"{field_name} cannot have more than 2 decimal places"
             )
         return d
 
@@ -431,9 +443,9 @@ def validate_decimal_amount(
         )
 
     if gt_zero:
-        if d <= Decimal("0.00"):
+        if d < Decimal("0.01"):
             raise ValueError(
-                f"{field_name} must be greater than 0"
+                f"{field_name} must be at least 0.01"
             )
     else:
         if d < Decimal("0.00"):
@@ -444,6 +456,11 @@ def validate_decimal_amount(
     if d > max_value:
         raise ValueError(
             f"{field_name} cannot exceed {max_value}"
+        )
+
+    if d.as_tuple().exponent < -2:
+        raise ValueError(
+            f"{field_name} cannot have more than 2 decimal places"
         )
 
     return d
@@ -558,9 +575,9 @@ class ProductBase(BaseModel):
     )
 
     selling_price: Decimal = Field(
-        gt=0,
+        ge=Decimal("0.01"),
         le=Decimal("999999.99"),
-        description="Selling price must be greater than 0",
+        description="Selling price must be at least 0.01 with at most 2 decimal places",
         json_schema_extra={
             "type": "number",
             "example": 99.99,
@@ -1583,3 +1600,13 @@ class GenerateMissingBarcodesResponse(BaseModel):
     total_checked: int = Field(..., examples=[25])
     updated_count: int = Field(..., examples=[12])
     message: str = Field(..., examples=["Successfully generated barcodes for 12 products"])
+
+
+class BarcodeBatchItem(BaseModel):
+    product_id: int = Field(gt=0, description="Product ID to generate barcode labels for")
+    quantity: int = Field(default=1, ge=1, le=500, description="Number of sticker copies to print")
+
+
+class BarcodeBatchPrintRequest(BaseModel):
+    items: list[BarcodeBatchItem] = Field(..., min_length=1, max_length=100)
+    store_id: Optional[int] = Field(default=None, gt=0, description="Optional store ID for label branding")

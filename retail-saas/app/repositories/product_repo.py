@@ -195,6 +195,7 @@ class ProductRepository:
         min_price: Optional[Decimal] = None,
         max_price: Optional[Decimal] = None,
         sort_by: Optional[str] = None,
+        search: Optional[str] = None,
     ):
         query = (
             self.db.query(Product)
@@ -212,6 +213,18 @@ class ProductRepository:
                 Product.is_active.is_(True),
                 or_(Product.expiry_date.is_(None), Product.expiry_date >= today),
             )
+
+        if search and search.strip():
+            s = search.strip()
+            search_conditions = [
+                Product.name.ilike(f"%{s}%"),
+                Product.sku.ilike(f"%{s}%"),
+                Product.barcode.ilike(f"%{s}%"),
+                Product.brand.ilike(f"%{s}%"),
+            ]
+            if s.isdigit():
+                search_conditions.append(Product.hsn_code.like(f"{s}%"))
+            query = query.filter(or_(*search_conditions))
 
         if category_id is not None:
             query = query.filter(Product.category_id == category_id)
@@ -255,6 +268,7 @@ class ProductRepository:
         min_price: Optional[Decimal] = None,
         max_price: Optional[Decimal] = None,
         sort_by: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> List[Product]:
         return (
             self._build_list_products_query(
@@ -266,6 +280,7 @@ class ProductRepository:
                 min_price=min_price,
                 max_price=max_price,
                 sort_by=sort_by,
+                search=search,
             )
             .offset(skip)
             .limit(limit)
@@ -284,6 +299,7 @@ class ProductRepository:
         min_price: Optional[Decimal] = None,
         max_price: Optional[Decimal] = None,
         sort_by: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> Tuple[List[Product], int, dict[str, int]]:
         q_obj = self._build_list_products_query(
             tenant_id=tenant_id,
@@ -294,6 +310,7 @@ class ProductRepository:
             min_price=min_price,
             max_price=max_price,
             sort_by=sort_by,
+            search=search,
         )
         total = q_obj.count()
         items = q_obj.offset(skip).limit(limit).all()

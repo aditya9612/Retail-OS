@@ -377,6 +377,16 @@ def ensure_schema_compatibility() -> None:
                 except Exception as exc:
                     logger.warning("Could not add order_items.variant_id: %s", exc)
 
+            if "variant" not in existing_cols["order_items"]:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text("ALTER TABLE `order_items` ADD COLUMN `variant` VARCHAR(100) NULL")
+                        )
+                    existing_cols["order_items"].add("variant")
+                except Exception as exc:
+                    logger.warning("Could not add order_items.variant: %s", exc)
+
         if "storefront_settings" in existing_cols:
             sf_cols = existing_cols["storefront_settings"]
             if "maintenance_mode" in sf_cols and "is_maintenance_mode" not in sf_cols:

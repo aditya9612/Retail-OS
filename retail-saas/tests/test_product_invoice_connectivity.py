@@ -520,7 +520,13 @@ def test_list_invoices_api_without_required_search_and_filters():
     cust_phone = f"9876{int(uid[:6], 16) % 1000000:06d}"
     cust_resp = client.post(
         "/api/v1/customers",
-        json={"name": "Aarav Deshmukh", "phone": cust_phone, "email": f"aarav-{uid}@test.com"},
+        json={
+            "name": "Aarav Deshmukh",
+            "phone": cust_phone,
+            "email": f"aarav-{uid}@test.com",
+            "address": "Pune, Maharashtra",
+            "credit_limit": 1000,
+        },
         headers=headers,
     )
     assert cust_resp.status_code == 201, cust_resp.text

@@ -78,6 +78,26 @@ def validate_transaction_id(value: str) -> str:
     if value.lstrip("0") == "":
         raise ValueError("Transaction ID cannot be zero")
 
+    if value.lower() in {
+        "string",
+        "test",
+        "dummy",
+        "sample",
+        "null",
+        "none",
+        "txn",
+        "transaction",
+        "1234",
+        "12345",
+        "123456",
+        "ordinary",
+        "order_id",
+    }:
+        raise ValueError(f"Transaction ID cannot be placeholder '{value}'")
+
+    if len(value) < 4:
+        raise ValueError("Transaction ID must be at least 4 characters")
+
     if not TRANSACTION_ID_PATTERN.fullmatch(value):
         raise ValueError(
             "Transaction ID may contain only letters, numbers, hyphens and underscores"
@@ -166,6 +186,16 @@ class PaymentCreate(BaseModel):
             if self.transaction_id is None:
                 raise ValueError(
                     "Transaction ID is required for non-cash payments"
+                )
+
+            tx_upper = self.transaction_id.strip().upper()
+            if self.payment_method == "upi" and tx_upper.startswith("CASH"):
+                raise ValueError(
+                    "Transaction ID for UPI payment cannot start with 'CASH'"
+                )
+            if self.payment_method == "card" and tx_upper.startswith("CASH"):
+                raise ValueError(
+                    "Transaction ID for Card payment cannot start with 'CASH'"
                 )
 
         return self

@@ -88,6 +88,14 @@ class PaymentService:
                 detail="Transaction ID is required for non-cash payments",
             )
 
+        if data.payment_method == "upi" and data.transaction_id:
+            tx_clean = data.transaction_id.strip()
+            if tx_clean.upper().startswith("CASH"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="UPI payment transaction ID cannot start with 'CASH'",
+                )
+
         if data.transaction_id:
             existing = get_payment_by_transaction_id(
                 self.db,
@@ -103,11 +111,33 @@ class PaymentService:
 
         order_total = Decimal(str(order.total_amount))
 
-        if data.amount > order_total:
+        # Check existing completed payments on this order
+        from sqlalchemy import func
+        completed_amount = (
+            self.db.query(func.coalesce(func.sum(Payment.amount), Decimal("0.00")))
+            .filter(
+                Payment.tenant_id == self.tenant_id,
+                Payment.order_id == data.order_id,
+                Payment.status.in_(["completed", "success"]),
+            )
+            .scalar()
+        )
+        completed_amount = Decimal(str(completed_amount or "0.00"))
+        remaining_balance = order_total - completed_amount
+
+        if remaining_balance <= Decimal("0.00"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Payment amount cannot exceed order total",
+                detail="Order has already been fully paid",
             )
+
+        if data.amount > remaining_balance:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Payment amount ({data.amount}) cannot exceed remaining order balance ({remaining_balance})",
+            )
+
+        payment_timestamp = datetime.now()
 
         payment = Payment(
             tenant_id=self.tenant_id,
@@ -116,8 +146,14 @@ class PaymentService:
             status="completed",
             amount=data.amount,
             transaction_id=data.transaction_id,
-            paid_at=datetime.utcnow(),
+            paid_at=payment_timestamp,
+            created_at=payment_timestamp,
         )
+
+        if completed_amount + data.amount >= order_total:
+            order.payment_status = "paid"
+        else:
+            order.payment_status = "partial"
 
         self.db.add(payment)
 

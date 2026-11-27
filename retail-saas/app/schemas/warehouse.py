@@ -31,6 +31,8 @@ DISALLOWED_WAREHOUSE_PLACEHOLDERS = {
     "random",
 }
 
+FORBIDDEN_WAREHOUSE_NAME_SYMBOLS = set(r"^&@#$%*!~`+={}|[]\\:;\"'<>?/_")
+
 
 def validate_warehouse_name(value: str | None, required: bool = True) -> str | None:
     if value is None:
@@ -44,6 +46,15 @@ def validate_warehouse_name(value: str | None, required: bool = True) -> str | N
     v = value.strip()
     if not v:
         raise ValueError("Warehouse name cannot be empty")
+
+    if any(c in FORBIDDEN_WAREHOUSE_NAME_SYMBOLS for c in v):
+        raise ValueError("Warehouse name contains invalid special characters")
+
+    if not re.fullmatch(r"^[A-Za-z0-9][A-Za-z0-9\s\-.]*$", v):
+        raise ValueError("Warehouse name contains invalid special characters")
+
+    if re.search(r"[-.]{2,}", v):
+        raise ValueError("Warehouse name cannot contain consecutive symbols")
 
     if v.lower() in DISALLOWED_WAREHOUSE_PLACEHOLDERS:
         raise ValueError("Please provide a valid warehouse name")

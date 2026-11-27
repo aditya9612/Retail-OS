@@ -24,6 +24,7 @@ class OrderItem(Base, TimestampMixin):
         nullable=True,
         index=True,
     )
+    _variant_col: Mapped[Optional[str]] = mapped_column("variant", String(100), nullable=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
@@ -58,7 +59,11 @@ class OrderItem(Base, TimestampMixin):
         self._sku = kwargs.pop("sku", None)
         self._variant = kwargs.pop("variant", None)
         self._tax_rate = kwargs.pop("tax_rate", None)
+        if "_variant_col" not in kwargs and self._variant is not None:
+            kwargs["_variant_col"] = self._variant
         super().__init__(**kwargs)
+        if self._variant is not None and not getattr(self, "_variant_col", None):
+            self._variant_col = self._variant
 
     @property
     def discount(self) -> Decimal:
@@ -105,10 +110,29 @@ class OrderItem(Base, TimestampMixin):
 
     @property
     def variant(self) -> Optional[str]:
-        return getattr(self, "_variant", None)
+        if getattr(self, "_variant_col", None):
+            return self._variant_col
+        if getattr(self, "_variant", None):
+            return self._variant
+        if getattr(self, "variant_rel", None) and getattr(self.variant_rel, "variant_name", None):
+            return self.variant_rel.variant_name
+        if getattr(self, "variant_id", None) is not None:
+            try:
+                from sqlalchemy.orm import object_session
+                session = object_session(self)
+                if session:
+                    from app.models.product_variant import ProductVariant
+                    pv = session.query(ProductVariant.variant_name).filter(ProductVariant.id == self.variant_id).first()
+                    if pv and pv[0]:
+                        self._variant = pv[0]
+                        return pv[0]
+            except Exception:
+                pass
+        return None
 
     @variant.setter
     def variant(self, val: Optional[str]) -> None:
+        self._variant_col = val
         self._variant = val
 
     @property

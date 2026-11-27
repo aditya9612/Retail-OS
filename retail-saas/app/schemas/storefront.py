@@ -1,5 +1,5 @@
 from typing import Any, Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 # ============================================================
@@ -524,6 +524,12 @@ class StorefrontCustomerProfileUpdate(BaseModel):
     email: Optional[EmailStr] = Field(None, description="Email Address")
     address: Optional[str] = Field(None, max_length=500, description="Delivery Address")
     birthday: Optional[date] = Field(None, description="Date of birth")
+
+    @field_validator("birthday")
+    @classmethod
+    def validate_profile_birthday(cls, v: Optional[date]) -> Optional[date]:
+        from app.schemas.customer import validate_birthday
+        return validate_birthday(v)
 
 
 class StorefrontFeedbackRequest(BaseModel):

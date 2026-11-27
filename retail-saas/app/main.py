@@ -358,6 +358,15 @@ def custom_openapi():
             if param.get("name") == "is_active":
                 param["required"] = True
 
+    # Ensure GRN rejection reason is documented as required in OpenAPI/Swagger and no requestBody is present
+    grn_reject_op = app.openapi_schema.get("paths", {}).get("/api/v1/grn/{grn_id}/reject", {}).get("post", {})
+    if "requestBody" in grn_reject_op:
+        del grn_reject_op["requestBody"]
+    for param in grn_reject_op.get("parameters", []):
+        if param.get("name") == "reason":
+            param["required"] = True
+            param["description"] = "Rejection reason is required to reject a Goods Received Note (GRN)"
+
     return app.openapi_schema
 
 

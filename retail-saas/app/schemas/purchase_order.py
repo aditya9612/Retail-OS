@@ -164,6 +164,8 @@ class PurchaseOrderItemCreate(BaseModel):
 
 
 
+
+
 def validate_po_notes(value: Optional[str], field_name: str = "Notes") -> Optional[str]:
     if value is None:
         return None
@@ -406,13 +408,6 @@ class PurchaseOrderUpdate(BaseModel):
         ge=Decimal("0.00"),
     )
 
-    tax_rate: Optional[Decimal] = Field(
-        default=None,
-        ge=Decimal("0.00"),
-        le=Decimal("100.00"),
-        description="Optional updated tax rate percentage for purchase order items",
-    )
-
     items: Optional[list[PurchaseOrderItemCreate]] = Field(
         default=None,
         description="Optional updated list of items (allowed for draft purchase orders)",
@@ -433,10 +428,7 @@ class PurchaseOrderUpdate(BaseModel):
     def validate_delivery_date(cls, value: Optional[datetime]) -> Optional[datetime]:
         return validate_po_delivery_date(value)
 
-    @field_validator("tax_rate")
-    @classmethod
-    def validate_tax_rate(cls, value: Optional[Decimal]) -> Optional[Decimal]:
-        return validate_po_tax_rate(value)
+
 
     @model_validator(mode="after")
     def validate_discount_not_exceed_subtotal(self):

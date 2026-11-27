@@ -323,7 +323,7 @@ def test_grn_double_receive_and_reject_conflicts(tenant_a):
     assert r2.status_code == 409, f"Expected 409, got {r2.status_code}: {r2.text}"
 
     # 3. Attempting to reject an already-received GRN must return 409 Conflict
-    r3 = client.post(f"/api/v1/grn/{grn_id}/reject", headers=headers)
+    r3 = client.post(f"/api/v1/grn/{grn_id}/reject", params={"reason": "Damaged goods in shipment"}, headers=headers)
     assert r3.status_code == 409
 
     # 4. Attempting to delete an already-received GRN must return 409 Conflict
@@ -545,7 +545,7 @@ def test_grn_quality_inspection_qc(tenant_a):
     )
     grn = create_resp.json()
     grn_id = grn["id"]
-    item_id = grn["items"][0]["id"]
+    item_id = grn["items"][0].get("grn_item_id") or grn["items"][0].get("id")
 
     # Perform Quality Inspection: 26 accepted, 4 rejected (broken/damaged)
     qc_payload = {
@@ -558,7 +558,6 @@ def test_grn_quality_inspection_qc(tenant_a):
                 "remarks": "QC Inspector stamp verified",
             }
         ],
-        "remarks": "Partial damage reported to vendor",
     }
     qc_resp = client.post(f"/api/v1/grn/{grn_id}/quality-check", json=qc_payload, headers=headers)
     assert qc_resp.status_code == 200, qc_resp.text
@@ -695,7 +694,7 @@ def test_grn_reject_with_reason_and_history_timeline(tenant_a):
     # Reject with custom reason
     reject_resp = client.post(
         f"/api/v1/grn/{grn_id}/reject",
-        json={"reason": "Wrong product specifications received from supplier"},
+        params={"reason": "Wrong product specifications received from supplier"},
         headers=headers,
     )
     assert reject_resp.status_code == 200, reject_resp.text

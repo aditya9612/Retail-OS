@@ -28,6 +28,8 @@ from app.models.product import ProductImage
 from app.models.user import User
 from app.schemas.common import ListWithCountsResponse, TotalCountOnly
 from app.schemas.product import (
+    BarcodeBatchItem,
+    BarcodeBatchPrintRequest,
     BarcodeLabelMode,
     GenerateMissingBarcodesResponse,
     ProductBarcodeLabelResponse,
@@ -52,6 +54,8 @@ router = APIRouter(
 @router.get(
     "",
     response_model=ListWithCountsResponse[ProductResponse, ProductCounts],
+    summary="List Products",
+    description="List and filter products with search, pagination, category, price, and stock status filters.",
 )
 def list_products(
     page: int = Query(
@@ -62,6 +66,10 @@ def list_products(
         default=20,
         gt=0,
         le=100,
+    ),
+    search: Optional[str] = Query(
+        default=None,
+        description="Search products by name, SKU, barcode, or brand",
     ),
     include_inactive: bool = Query(
         default=False,
@@ -109,12 +117,16 @@ def list_products(
         min_price=min_price,
         max_price=max_price,
         sort_by=sort_by,
+        search=search,
     )
 
 
 @router.get(
     "/search",
     response_model=ListWithCountsResponse[ProductResponse, ProductCounts],
+    deprecated=True,
+    summary="Search Products (Deprecated: use GET /api/v1/products?search=...)",
+    description="Legacy search endpoint. Please use GET /api/v1/products with the ?search= parameter.",
 )
 def search_products(
     search: str = Query(
@@ -156,12 +168,14 @@ def search_products(
 @router.get(
     "/low-stock",
     response_model=ListWithCountsResponse[ProductLowStockResponse, TotalCountOnly],
+    summary="List Low Stock Products",
+    description="List products below low-stock threshold. store_id is optional and defaults to user's assigned store.",
 )
 def list_low_stock(
-    store_id: int = Query(
-        ...,
+    store_id: Optional[int] = Query(
+        default=None,
         gt=0,
-        description="Active store ID belonging to the current tenant",
+        description="Active store ID belonging to the current tenant (optional, defaults to assigned store)",
     ),
     threshold: int = Query(
         default=10,
@@ -191,9 +205,11 @@ def list_low_stock(
                 detail="Days must be an integer between 1 and 365",
             )
 
+    target_store_id = store_id or user.store_id
+
     return ProductService(db).list_low_stock_with_counts(
         user.tenant_id,
-        store_id,
+        target_store_id,
         threshold,
     )
 
@@ -1230,12 +1246,19 @@ PRODUCT_UPDATE_OPENAPI_EXTRA = {
 }
 
 
-@router.patch(
+@router.put(
     "/{product_id}",
     response_model=ProductResponse,
     summary="Update Product",
     description="Updates a product. Supports both multipart/form-data (with direct image file upload) and application/json.",
     openapi_extra=PRODUCT_UPDATE_OPENAPI_EXTRA,
+    dependencies=[Depends(require_operational_write)],
+)
+@router.patch(
+    "/{product_id}",
+    response_model=ProductResponse,
+    summary="Update Product (Deprecated)",
+    include_in_schema=False,
     dependencies=[Depends(require_operational_write)],
 )
 async def update_product(
@@ -1625,6 +1648,60 @@ def get_barcode_label(
 </html>"""
         return HTMLResponse(content=html)
     return label
+
+
+@router.get(
+    "/{product_id}/barcode/download",
+    summary="Download Product Barcode",
+    description="Directly downloads the product's barcode as a PNG image file.",
+)
+def download_product_barcode(
+    product_id: int,
+    user: User = Depends(require_permission("products:read")),
+    db: Session = Depends(get_db),
+):
+    product = ProductService(db).get_product(user.tenant_id, product_id)
+    if not product.barcode:
+        product = ProductService(db).generate_barcode_for_product(user.tenant_id, product_id)
+
+    image_bytes = ProductService(db).get_barcode_image(user.tenant_id, product_id)
+    return Response(
+        content=image_bytes,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f'attachment; filename="barcode-{product.barcode}.png"'
+        },
+    )
+
+
+@router.get(
+    "/{product_id}/label/download",
+    summary="Download Product Label Sticker",
+    description="Directly downloads the 50x25mm thermal sticker label as a PNG image file.",
+)
+def download_product_label(
+    product_id: int,
+    store_id: Optional[int] = Query(default=None, gt=0),
+    user: User = Depends(require_permission("products:read")),
+    db: Session = Depends(get_db),
+):
+    product = ProductService(db).get_product(user.tenant_id, product_id)
+    if not product.barcode:
+        product = ProductService(db).generate_barcode_for_product(user.tenant_id, product_id)
+
+    sticker_bytes = ProductService(db).get_barcode_sticker_image(
+        user.tenant_id, product_id, store_id=store_id
+    )
+    return Response(
+        content=sticker_bytes,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f'attachment; filename="label-sticker-{product.barcode}.png"'
+        },
+    )
+
+
+
 
 
 @router.post(

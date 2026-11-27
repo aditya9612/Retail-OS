@@ -1,11 +1,11 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from io import BytesIO
 from importlib import import_module
 from typing import Optional, Union
 import uuid
 
-from sqlalchemy import extract, func
+from sqlalchemy import extract, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.core.exceptions import (
@@ -270,7 +270,10 @@ class CustomerService:
                     self.db.commit()
         except Exception:
             # Non-blocking: ensure customer creation succeeds even if user linking encounters soft warning
-            pass
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
 
         return customer
 
@@ -353,6 +356,16 @@ class CustomerService:
             )
             if existing_gstin:
                 raise ConflictException("GSTIN already exists")
+
+        # Validate geo-consistency between updated/existing address and GSTIN
+        effective_address = dump_data.get("address", customer.address)
+        effective_gstin = dump_data.get("gstin", customer.gstin)
+        if effective_address and effective_gstin:
+            from app.schemas.customer import validate_address_geo_consistency
+            try:
+                validate_address_geo_consistency(effective_address, effective_gstin)
+            except ValueError as ve:
+                raise AppException(str(ve), status_code=422)
 
         for key, value in dump_data.items():
             setattr(customer, key, value)
@@ -822,6 +835,214 @@ class CustomerService:
                 "data": [],
             }
         return history
+
+    def get_loyalty_stats(self, tenant_id: int) -> dict:
+        now = datetime.now(timezone.utc)
+        start_of_week = now - timedelta(days=now.weekday())
+        start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        # 1. Active loyalty members
+        active_members = (
+            self.db.query(func.count(Customer.id))
+            .filter(
+                Customer.tenant_id == tenant_id,
+                Customer.status == "active",
+                Customer.loyalty_points > 0,
+            )
+            .scalar() or 0
+        )
+
+        # 2. New members this week
+        new_members_this_week = (
+            self.db.query(func.count(Customer.id))
+            .filter(
+                Customer.tenant_id == tenant_id,
+                Customer.status == "active",
+                Customer.loyalty_points > 0,
+                Customer.created_at >= start_of_week,
+            )
+            .scalar() or 0
+        )
+
+        # 3. Points in circulation & liability
+        points_in_circulation = (
+            self.db.query(func.coalesce(func.sum(Customer.loyalty_points), 0))
+            .filter(
+                Customer.tenant_id == tenant_id,
+                Customer.status == "active",
+            )
+            .scalar() or 0
+        )
+        points_liability = (Decimal(str(points_in_circulation)) * Decimal("0.10")).quantize(Decimal("0.01"))
+
+        # 4. Points redeemed this month
+        points_redeemed_this_month = (
+            self.db.query(func.coalesce(func.sum(LoyaltyPoint.points_redeemed), 0))
+            .join(Customer, Customer.id == LoyaltyPoint.customer_id)
+            .filter(
+                Customer.tenant_id == tenant_id,
+                LoyaltyPoint.created_at >= start_of_month,
+            )
+            .scalar() or 0
+        )
+        amount_saved = (Decimal(str(points_redeemed_this_month)) * Decimal("0.10")).quantize(Decimal("0.01"))
+
+        # 5. Average spend per member bill
+        avg_spend_member = (
+            self.db.query(func.coalesce(func.avg(Invoice.total_amount), Decimal("0.00")))
+            .join(Order, Order.id == Invoice.order_id)
+            .join(Customer, Customer.id == Order.customer_id)
+            .filter(
+                Invoice.tenant_id == tenant_id,
+                Customer.loyalty_points > 0,
+            )
+            .scalar() or Decimal("0.00")
+        )
+
+        avg_spend_non_member = (
+            self.db.query(func.coalesce(func.avg(Invoice.total_amount), Decimal("0.00")))
+            .outerjoin(Order, Order.id == Invoice.order_id)
+            .outerjoin(Customer, Customer.id == Order.customer_id)
+            .filter(
+                Invoice.tenant_id == tenant_id,
+                or_(Order.customer_id.is_(None), Customer.loyalty_points == 0),
+            )
+            .scalar() or Decimal("0.00")
+        )
+
+        multiplier = Decimal("1.0")
+        if avg_spend_non_member and Decimal(str(avg_spend_non_member)) > Decimal("0.00") and Decimal(str(avg_spend_member)) > Decimal("0.00"):
+            multiplier = (Decimal(str(avg_spend_member)) / Decimal(str(avg_spend_non_member))).quantize(Decimal("0.1"))
+
+        return {
+            "active_members": int(active_members),
+            "new_members_this_week": int(new_members_this_week),
+            "points_in_circulation": int(points_in_circulation),
+            "points_liability_amount": points_liability,
+            "points_redeemed_this_month": int(points_redeemed_this_month),
+            "amount_saved_this_month": amount_saved,
+            "avg_spend_per_member_bill": Decimal(str(avg_spend_member)).quantize(Decimal("0.01")),
+            "member_spend_multiplier": multiplier,
+        }
+
+    def list_loyalty_customers(
+        self,
+        tenant_id: int,
+        page: int = 1,
+        page_size: int = 20,
+        search: Optional[str] = None,
+        min_points: Optional[int] = None,
+    ) -> dict:
+        query = self.db.query(Customer).filter(
+            Customer.tenant_id == tenant_id,
+            Customer.status == "active",
+        )
+
+        if min_points is not None:
+            query = query.filter(Customer.loyalty_points >= min_points)
+
+        if search:
+            clean_search = search.strip()
+            query = query.filter(
+                or_(
+                    Customer.name.ilike(f"%{clean_search}%"),
+                    Customer.phone.ilike(f"%{clean_search}%"),
+                    Customer.email.ilike(f"%{clean_search}%"),
+                )
+            )
+
+        total = query.count()
+        customers = (
+            query.order_by(Customer.loyalty_points.desc(), Customer.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+        items = []
+        for c in customers:
+            pts = c.loyalty_points or 0
+            if pts >= 5000:
+                tier = "Platinum Tier"
+            elif pts >= 1000:
+                tier = "Gold Tier"
+            else:
+                tier = "Silver Tier"
+
+            items.append({
+                "customer_id": c.id,
+                "customer_name": c.name,
+                "phone": c.phone,
+                "email": c.email,
+                "loyalty_points": pts,
+                "tier": tier,
+                "created_at": c.created_at,
+                "updated_at": c.updated_at,
+            })
+
+        return {
+            "success": True,
+            "message": "Loyalty customers retrieved successfully",
+            "data": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    def update_loyalty_points(
+        self,
+        tenant_id: int,
+        customer_id: int,
+        new_points: int,
+        reason: str,
+    ) -> LoyaltyPoint:
+        customer = self.get_customer(tenant_id, customer_id)
+        old_balance = customer.loyalty_points or 0
+        diff = new_points - old_balance
+
+        customer.loyalty_points = new_points
+
+        points_earned = diff if diff > 0 else 0
+        points_redeemed = -diff if diff < 0 else 0
+
+        loyalty_entry = LoyaltyPoint(
+            customer_id=customer_id,
+            points_earned=points_earned,
+            points_redeemed=points_redeemed,
+            balance_points=new_points,
+            reason=reason,
+        )
+
+        self.db.add(loyalty_entry)
+        self.db.commit()
+        self.db.refresh(loyalty_entry)
+        return loyalty_entry
+
+    def delete_loyalty_points(
+        self,
+        tenant_id: int,
+        customer_id: int,
+    ) -> dict:
+        customer = self.get_customer(tenant_id, customer_id)
+        old_balance = customer.loyalty_points or 0
+
+        customer.loyalty_points = 0
+
+        if old_balance > 0:
+            reset_entry = LoyaltyPoint(
+                customer_id=customer_id,
+                points_earned=0,
+                points_redeemed=old_balance,
+                balance_points=0,
+                reason="Loyalty points balance reset by administrator",
+            )
+            self.db.add(reset_entry)
+
+        self.db.commit()
+        return {
+            "customer_id": customer_id,
+            "loyalty_points": 0,
+        }
 
     def send_communication(
         self,
